@@ -1,0 +1,77 @@
+{
+  "name": "@mcp-write-safety/writecheck",
+  "version": "0.1.0",
+  "description": "Conformance CLI for the MCP Write-Safety Requirements (MWS): tests your own MCP server, in a test environment, against the requirements. No model, no account, no telemetry.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mws",
+    "write-safety",
+    "conformance",
+    "testing",
+    "cli",
+    "agents"
+  ],
+  "homepage": "https://isokron.ai/mws",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isokron-ai/mcp-write-safety.git",
+    "directory": "packages/writecheck"
+  },
+  "bugs": {
+    "url": "https://github.com/isokron-ai/mcp-write-safety/issues"
+  },
+  "author": "IsoKron (Stormhaven Enterprises LLC) (https://isokron.ai)",
+  "contributors": [
+    "Joshua Bryan"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "mcp-writecheck": "dist/src/cli/main.js"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./register": {
+      "types": "./dist/src/gate/register.d.ts",
+      "import": "./dist/src/gate/register.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "schema",
+    "examples",
+    "LICENSE",
+    "CHANGELOG.md",
+    "README.md",
+    "EXTRACTED-FROM.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 'dist/test/**/*.test.js'",
+    "test:unit": "npm run build && node --test 'dist/test/unit/*.test.js'",
+    "test:regression": "npm run build && node --test --test-concurrency=1 'dist/test/regression/*.test.js'",
+    "clean": "rm -rf dist",
+    "demo": "node dist/src/cli/main.js demo",
+    "prepack": "mkdir -p examples && cp ../../examples/tiny-tracker/writecheck.yaml examples/tiny-tracker.yaml && npm run clean && npm run build"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

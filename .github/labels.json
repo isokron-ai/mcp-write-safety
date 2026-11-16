@@ -1,0 +1,92 @@
+[
+  {
+    "name": "comment-0.9",
+    "color": "1d76db",
+    "description": "Comment on MWS 0.9 (comment window 16 November to 16 December 2026)"
+  },
+  {
+    "name": "area:upd",
+    "color": "c5def5",
+    "description": "Update semantics (section 9.1, MWS-UPD-n)"
+  },
+  {
+    "name": "area:conc",
+    "color": "c5def5",
+    "description": "Concurrency and preconditions (section 9.2, MWS-CONC-n)"
+  },
+  {
+    "name": "area:tgt",
+    "color": "c5def5",
+    "description": "Targeting (section 9.3, MWS-TGT-n)"
+  },
+  {
+    "name": "area:res",
+    "color": "c5def5",
+    "description": "Truthful results (section 9.4, MWS-RES-n)"
+  },
+  {
+    "name": "area:atom",
+    "color": "c5def5",
+    "description": "Multi-step and multi-item writes (section 9.5, MWS-ATOM-n)"
+  },
+  {
+    "name": "area:retry",
+    "color": "c5def5",
+    "description": "Retries and replays (section 9.6, MWS-RETRY-n)"
+  },
+  {
+    "name": "area:in",
+    "color": "c5def5",
+    "description": "Inputs (section 9.7, MWS-IN-n)"
+  },
+  {
+    "name": "area:cfg",
+    "color": "c5def5",
+    "description": "Safety settings (section 9.8, MWS-CFG-n)"
+  },
+  {
+    "name": "area:ann",
+    "color": "c5def5",
+    "description": "Annotations (section 9.9, MWS-ANN-n)"
+  },
+  {
+    "name": "area:sec",
+    "color": "c5def5",
+    "description": "Credentials in results (section 9.10, MWS-SEC-n)"
+  },
+  {
+    "name": "disposition:accepted",
+    "color": "0e8a16",
+    "description": "Disposition: the text changes as the comment asks"
+  },
+  {
+    "name": "disposition:accepted-with-changes",
+    "color": "5ab552",
+    "description": "Disposition: the text changes, not in the way the comment proposed"
+  },
+  {
+    "name": "disposition:declined",
+    "color": "b60205",
+    "description": "Disposition: the text does not change; the reasons are recorded"
+  },
+  {
+    "name": "disposition:deferred",
+    "color": "fbca04",
+    "description": "Disposition: deferred to 1.0; decided while 1.0 is prepared"
+  },
+  {
+    "name": "disposition:duplicate",
+    "color": "cfd3d7",
+    "description": "Disposition: the same point was made in an earlier comment"
+  },
+  {
+    "name": "disposition:answered",
+    "color": "bfdadc",
+    "description": "Disposition: answered, no change to the text"
+  },
+  {
+    "name": "triage:needs-reply",
+    "color": "d93f0b",
+    "description": "Waiting for a reply from the steward"
+  }
+]

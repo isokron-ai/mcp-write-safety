@@ -1,0 +1,97 @@
+# Publishes the npm packages of this repository when a release tag is pushed:
+#   writecheck-v<version>    packages/writecheck      @mcp-write-safety/writecheck
+#   tiny-tracker-v<version>  examples/tiny-tracker    @mcp-write-safety/tiny-tracker
+#
+# npm trusted publishing (OIDC): no npm token is stored anywhere. npm accepts the publish only from this
+# repository, this workflow file (release-npm.yml) and the environment named npm, as registered on npm for
+# each package (Settings > Trusted Publisher > GitHub Actions: isokron-ai / mcp-write-safety /
+# release-npm.yml / npm). The npm environment requires a reviewer's approval before the publish job runs.
+# Provenance is attached because the repository and the packages are public.
+#
+# The tag must match the package's package.json version; a prerelease version is refused here (publish it
+# by hand with --tag). Requirements (npm docs): npm CLI 11.5.1 or later, Node 22.14.0 or later.
+
+name: release-npm
+
+on:
+  push:
+    tags: ["writecheck-v*", "tiny-tracker-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75   # the CLI suite takes about 30 minutes on a laptop
+    outputs:
+      dir: ${{ steps.pkg.outputs.dir }}
+      name: ${{ steps.pkg.outputs.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - id: pkg
+        name: The tag names a package and matches its version, which is not on npm yet
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            writecheck-v*)   dir=packages/writecheck;   prefix=writecheck-v ;;
+            tiny-tracker-v*) dir=examples/tiny-tracker; prefix=tiny-tracker-v ;;
+            *) echo "::error::unknown release tag $TAG"; exit 1 ;;
+          esac
+          name="$(node -p "require('./$dir/package.json').name")"
+          version="$(node -p "require('./$dir/package.json').version")"
+          [ "$TAG" = "$prefix$version" ] || { echo "::error::tag $TAG does not match $name $version (expected $prefix$version)"; exit 1; }
+          case "$version" in *-*) echo "::error::prerelease $version: publish it by hand with --tag"; exit 1 ;; esac
+          if npm view "$name@$version" version >/dev/null 2>&1; then echo "::error::$name@$version is already on npm"; exit 1; fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: Build tiny-tracker (the CLI's self-test runs against it)
+        working-directory: examples/tiny-tracker
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Tests
+        working-directory: ${{ steps.pkg.outputs.dir }}
+        env:
+          TINY_TRACKER_DIR: ${{ github.workspace }}/examples/tiny-tracker
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Dry run (what would be published)
+        working-directory: ${{ steps.pkg.outputs.dir }}
+        run: npm publish --dry-run --access public
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # the npm Trusted Publisher entries name this environment; it also holds the owner's approval
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/${{ needs.check.outputs.name }}
+    permissions:
+      contents: read
+      id-token: write   # the OIDC token npm exchanges for a short-lived publish credential (and signs provenance with)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # no registry-url: setup-node would write an .npmrc with a placeholder token
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: npm 11
+        run: npm install -g npm@^11.5.1 --no-audit --no-fund --loglevel=error && npm --version
+      - name: Build and publish
+        working-directory: ${{ needs.check.outputs.dir }}
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm publish --provenance --access public

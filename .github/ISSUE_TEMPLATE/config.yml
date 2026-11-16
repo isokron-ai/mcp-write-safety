@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Comment by email (no GitHub account)
+    url: https://isokron.ai/mws#comment
+    about: Send your comment to comments@isokron.ai. We copy each emailed comment into a public issue, with your permission, and record its disposition.
+  - name: Security reports
+    url: https://github.com/isokron-ai/mcp-write-safety/security/advisories/new
+    about: Report a vulnerability in the test suite or the sample server privately, not as an issue. A vulnerability in someone else's server goes to that project.

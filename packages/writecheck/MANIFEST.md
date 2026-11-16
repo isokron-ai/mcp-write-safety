@@ -1,0 +1,220 @@
+# Manifest reference
+
+The manifest is the declaration the MWS spec asks for (spec section 8.1): what the server offers, how to reach a test environment, and what the tester may create, change and delete there. It is YAML. Every key is listed here; an unknown key is refused with the list of allowed ones. `examples/tiny-tracker/writecheck.yaml` is a complete manifest that uses almost every block.
+
+Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a fresh value carrying the run prefix (`mwsc-<run>-…`); `{{prefix}}` is the run prefix; `{{id}}` the object's id; `{{object.<path>}}` a value from the object as last read; `{{version}}` the version read; `{{scope}}` the run's own container; `{{?name}}` sends the argument only when it has a value. A value that is exactly one placeholder keeps its type (a list stays a list).
+
+## Top level
+
+| Key | Required | Meaning |
+|---|---|---|
+| `mws` | yes | `"0.9"` |
+| `prefix` | no | The first part of every name the run gives its objects (`<prefix>-<run>-…`): two to eight lowercase letters or digits; default `mwsc` |
+| `server` | yes | How to reach or start the server (below) |
+| `target` | yes | The test environment, and the guard that confirms it (below) |
+| `resources` | yes | One block per kind of object the tester works with (below) |
+| `limits` | no | Budgets and repetition counts (below) |
+| `backend` | no | `gate`: the backend interposer for proxy-assisted tests (below) |
+| `settings` | no | Start-up settings for the launch checks (MWS-CFG-1 to CFG-4) |
+| `secrets` | no | Extra values and URL parameters the credential scan looks for (MWS-SEC-1) |
+| `canaries` | no | Read-only calls before and after the run, whose results must not change |
+| `calls` | no | Arguments for other tools, called on scratch objects by the annotation checks and the read-only check |
+| `review` | no | Answers to review-only clauses, written before the run (recorded as `self-attested`) |
+| `patterns` | no | How the tester decides what a result says (spec 7.3, rule 11); below |
+| `outcome_field` | no | A structured outcome field in the result: `{ path, applied, not_applied, unknown }` (below) |
+| `results` | no | `{ shape, tools: { <tool>: { shape } } }`: a result shape adopted by name and version (spec 7.3, rule 11; draft Annex B-9). Known: `write-result/0.1`. A tool's own entry overrides the top level; `shape: null` adopts none for it. An unknown name or version is refused at load. See [results](#results) |
+| `async_operations` | no | Tools whose operation the backend completes asynchronously (spec NF-19, Annex E): a result that says "accepted" or "pending" is then not read as a report of success. For any other tool it is |
+
+## server
+
+| Key | Meaning |
+|---|---|
+| `stdio` | Command line of a stdio server the tester starts, e.g. `[node, ./server.js]` |
+| `url` | A streamable HTTP server someone else started (the launch checks and the gate need a server the tester starts) |
+| `launch` | `{ command, url_from, ready_timeout_ms }`: an HTTP server the tester starts; its URL is read from the first stdout line (`url_from`: the JSON key holding it) |
+| `protocol` | `auto` (2026-07-28 if the server offers it, else 2025-11-25), or one of the two |
+| `env_passthrough` | Variables passed from the tester's environment; their values are secrets: redacted everywhere and looked for in results |
+| `env_public` | Variables passed through without redaction |
+| `env` | Fixed values for the server's environment |
+| `headers_env` | HTTP headers whose value comes from a variable: `{ Header: { env, prefix } }` |
+| `cwd` | Working directory of a started server, relative to the manifest |
+| `processes` | `separate` or `shared`: whether the second connection of a concurrency test is a second server process |
+| `restart` | `{ stop: graceful \| kill }` (Annex E): the declaration's means to stop and start the server, for MWS-RETRY-2 step (e) and its crash form. The tester stops a server process it started for the step (`graceful`: closing stdin first for stdio, then SIGTERM; `kill`: SIGKILL) and starts it again with its own command and the same environment; a graceful stop after which the process did not exit by itself, and was killed, is recorded as a kill. Needs `stdio` or `launch`. Without it, both steps are `not tested` |
+
+## target
+
+| Key | Meaning |
+|---|---|
+| `environment` | `test`; the tester refuses anything else |
+| `confirm` | The name a person types (or passes as `--confirm-target`) before a run |
+| `guard` | `{ tool, args, path, pattern, read_only }`: a read whose result at `path` must match `pattern`, or the run stops before any write. The tool must declare `readOnlyHint: true`; for a server that annotates no tool, `read_only: true` declares that it only reads (a tool that declares `readOnlyHint: false` or `destructiveHint: true` is refused either way). For a server whose only tool is a dispatcher (PostHog's `cli` mode, `exec`), `read_only_call: true` declares that this exact call (arguments written out in full, no templates) only reads: the guard then rests on the operator's declaration, which the results say; before any other write the same call is made three times and must answer identically, and the canaries and every declared list that needs no object must read the same before the first call and after the third; any error or difference refuses the run. Each of the three calls counts against `write_budget` and is recorded in the ledger and the results. Between checks the run asks `tools/list`, never the declared call. `plan` warns when the run would refuse the guard |
+| `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
+| `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
+
+## limits
+
+| Key | Default | Meaning |
+|---|---|---|
+| `write_budget` | 500 | Writes a run may make; the plan states how many it will make at most |
+| `writes_per_second` | 5 | Pace of writes |
+| `pairs` | 40 | Simultaneous pairs per concurrency test; 30 overlapped pairs are needed before `not observed` (spec 8.2, rule 6) |
+| `stale_reps` | 3 | Repetitions of each forced stale write |
+| `gate_reps` | 2 | Repetitions of each held-request schedule |
+| `timeout_ms` | 30000 | Per call |
+| `max_fuzz_cases` | 200 | Schema probes per tool; a list cut at this limit gives `not tested`, never `held` |
+
+## backend.gate
+
+Exactly one route. `rewrite_env: VAR`: the tester starts a loopback forwarder and gives the server its URL in `VAR` in place of the real backend URL. `node_import: true`: a Node server loads the in-process hook (every record obtained this way says so). `hold_timeout_ms` (default 5000): how long a request is held at most.
+
+## settings
+
+| Key | Meaning |
+|---|---|
+| `read_only` | `{ env, on, valid, empty_distinct }`: the read-only setting, the value that turns it on, the values the server accepts, and whether empty differs from unset (MWS-CFG-1, CFG-3). `valid` is a map `{ <value>: restrict \| permit }` saying whether each value restricts or permits writes (spec Annex E): a probe that is a valid value that permits writes is not sent; one that restricts writes is sent. The earlier list form says neither, so its values are not sent |
+| `tool_filters` | A list of `{ env, kind: deny \| allow, separator }`: a deny-list (MWS-CFG-2) or an allow-list (MWS-CFG-4) of tool names |
+| `per_request` | A list of `{ name, kind: read_only \| deny \| allow }`: settings applied with a request rather than at start; reported `not tested` in this preview |
+
+## secrets
+
+| Key | Meaning |
+|---|---|
+| `canaries_env` | Variables holding planted values that must never appear in a result (names only; never values). Place a canary only in a credential store or a credential-typed field of the backend, never in ordinary content a caller stores, such as a ticket body (spec R7-7, NF-25): a faithful read tool returns such content |
+| `token_params` | URL query parameters that carry a token or a signature |
+| `issuing_tools` | Tools that exist to issue a credential or a signed link (spec NF-16); a token URL in their results is noted, not judged. A credential the server itself uses is never excepted |
+
+## canaries
+
+A list of `{ name, tool, args, path, ignore }`: a read-only call made before and after the run; the value at `path` (minus `ignore`) must be unchanged.
+
+## calls
+
+`{ tool_name: { resource, args } }`: arguments for a tool the annotation checks call on a scratch object of `resource` (MWS-ANN-1 to ANN-3, ANN-5). The read-only check (MWS-CFG-3) uses them too: it calls every declared write tool, listed or not, and a write tool with no call of its own (for example one named only under `failures`) leaves MWS-CFG-3 `not tested`; its record names the tool and this key.
+
+## review
+
+`by` (who answers), and one rule per review-only clause, a regular expression applied to the captured text: `conflict_says_not_applied` (MWS-CONC-4), `conflict_says_reread` (MWS-CONC-6), `stale_writes_disclosed` (MWS-CONC-5, over the tool description), `rejection_gives_reason` (MWS-IN-4); and `answers: { <question id>: { answer, note } }` for questions answered one by one (`mcp-writecheck review` lists the ids).
+
+## patterns
+
+Spec 7.3, rule 11: where a procedure asks what a result says, the tester decides it by patterns stated in the declaration, and the record quotes the text relied on and says which pattern decided it. Each key is a regular expression, applied case-insensitively to the result's content (for MWS-RETRY-2, to the text and the string values of the structured content, never to field names). A key left out uses the default printed here, which is then part of the declaration as used (the results list the patterns in effect). A default is a convenience and decides nothing on its own (gate-2 re-run on 378f32f, note 19): where a verdict of `held` or `violated` would turn on a default pattern alone, matching or not matching, the record is `not tested`, quoting the text, giving the default's reading as a note, and naming the key to declare; only a declared pattern (or a person's reading) decides it. `violated` needs a positive match of a declared pattern that means a violation (for MWS-RES-2's second clause, a declared `not_applied` that matches while a change stayed, with nothing, declared or default, reading the outcome as unknown); declared patterns that simply fail to match other wording decide nothing, and the record is `not tested`, "needs reading", quoting the text. `held` needs a declared `applied` or `outcome_unknown` that matches.
+
+Structured signals are read before any pattern, and the record names the source. A signal counts only where the server returns it as a structured field (owner's decision on review item S1; R11-1): the result's structured content (or a whole-JSON answer), at its top level or in its `error` object, or the JSON-RPC error code. A status, a Kubernetes message or an SDK validation string in free text decides nothing. MWS-CONC-2 counts a refusal as a conflict on a 409 or 412 in such a field, a Kubernetes `Status` object with reason `Conflict`, a conflict code (`conflict`, `version_conflict`, `precondition_failed`, …) or `conflict: true`; in the version-left-out run a 428 or a `precondition_required` code also counts as row 1. A stale write answered without an error that shows the conflict only in words is `not tested`, "needs reading", unless `patterns.conflict` is declared. MWS-IN-1 to IN-4 (R10-3) know an error refuses the probed value by JSON-RPC -32602 as its code or a validation code in the structured content, before the argument's name or `refused_value` is looked for. MWS-CFG-4: an error from `tools/list` that names, as a whole word, the exact misspelled tool the tester put in the allow-list refuses the list (`held`); any other error needs reading (`patterns.no_tools` reads a "no tool is enabled" error).
+
+| Key | What it recognizes | Used by | Default |
+|---|---|---|---|
+| `not_applied` | the write failed, or nothing was changed | MWS-RES-2 (a result without `isError: true` whose content says the write failed: the third clause), and an error's statement that the write failed outside the lost-answer trial. In the lost-answer trial only where `write_failed` is not declared (a manifest written for f573a24 keeps its reading). | `failed`, `could not`, `unable to`, `was not applied`, `nothing was changed`, `rolled back`, and similar |
+| `write_failed` | an error that says the write failed or was not applied | MWS-RES-2, the lost-answer trial only: with the outcome open, such an error is the kind stated-failure, beside an adopted shape too (rule 11, R14-5). Its own key, so that `not_applied` need not be narrowed to keep a truthful success ("nothing was deleted") out of the third clause. | `failed`, `could not apply`, `was not written`, `not applied`, `nothing was written`, `rolled back`, and similar |
+| `repeat_invited` | an error that invites the caller to send the call again without a read first and without the key or version the call carried | MWS-RES-2, the lost-answer trial only: the kind retry-invited, whatever an adopted shape's `repeat` says (B-9, "Text"; rule 11, R14-5). Write it so that it does not match a repeat after a read or with the key ("read T-1 before retrying"). A match decides on its own; `retry_invited` (below) is read with the tester's checks for a named read, key or version. | `please retry`, `you can try again`, `send the call again`, `retry now`, and similar |
+| `not_used` | an argument said not to be used | MWS-IN-2 | `not used`, `unused`, `ignored`, `had no effect`, `dropped`, and similar |
+| `outcome_unknown` | the outcome is said to be unknown | MWS-RES-2, MWS-RETRY-2 | `not known whether`, `may have succeeded`, `could not confirm whether`, `cannot tell if`, `could not confirm the update`, `unable to verify that the change took effect`: about whether the write was applied, not any check that could not be made (`could not verify the webhook URL` is not one) |
+| `in_progress` | a call said to be still in progress | MWS-RETRY-2 | `still in progress`, `already in progress`, `being processed` |
+| `replay` | a replay of an earlier call | MWS-RETRY-2 step (b), only where the declaration names no replay indicator | `replayed`, `already applied`, `duplicate request`; not a negated form (`not a replay`, `replayed: false`) |
+| `repeat_refused` | a refusal because the call repeats an earlier call or key | MWS-RETRY-2 step (b) (`violated` for a new key) | `duplicate request`, `request already received`, `key was already used`, `repeats an earlier call`, and similar |
+| `unavailable` | a refusal that says nothing about the write itself: a rate limit, an unavailable backend, try again later (an answer that also says the outcome is unknown is not one) | MWS-RETRY-2 (the step is `not tested`) | `rate limited`, `too many requests`, `429`, `try again later`, `service unavailable`, `bad gateway`, `gateway timeout`, `502`/`503`/`504`, `timed out`, `upstream`, `could not be reached`, `connection refused`, and similar |
+| `earlier_failed` | the answer says the earlier call with this key failed, or did not apply the write | MWS-RETRY-2 step (e) and its crash form (a trial of MWS-RES-2, second clause, where the write is still in effect) | `the earlier call with this key failed`, `the previous request did not apply`, `the first call was not applied`, and similar |
+| `accepted` | an operation said to be accepted or pending | NF-19 (with `async_operations`) | `accepted`, `pending`, `queued`, `scheduled` |
+| `applied` | a change reported as made or still in effect, read in a clause that names the field, its new value or the object | MWS-RES-2 second clause, MWS-ATOM-1, MWS-RETRY-2 (an error that identifies the applied change) | the tester's built-in reading: `applied`, `written`, `saved`, `created`, `updated`, `remains applied`, outside a clause that negates it or reports a failure |
+| `no_tools` | an error from `tools/list` given because no tool is enabled (not a refusal of the list) | MWS-CFG-4 | `no tools enabled`, `no tool available`, `nothing is enabled` |
+| `retry_invited` | an invitation to repeat the same write ("try again", "please retry", "you can retry") | MWS-RES-2, the lost-answer trial (kind `retry-invited`, where the error names neither a read, nor the key, nor the version the call carried) | `try again`, `please retry`, `you can retry`, `resend the request`, and similar |
+| `version_required` | a refusal of a write sent without a version, because a version or an explicit override is needed | MWS-CONC-2, the version-left-out run (a refusal that names the version argument or the override by name decides without it) | `conflict`, `changed since`, `version required`, `needs the expected version`, and similar |
+| `conflict` | a write answered without an error that says it was refused because of a concurrency control (read only where no structured signal shows it) | MWS-CONC-2 row 1 and MWS-CONC-4 (a refused conflict returned as an ordinary result) | `conflict`, `changed since`, `nothing was written`, and similar |
+| `refused_value` | an error that refuses the probed value itself, where it does not name the argument | MWS-IN-1 to MWS-IN-4 (R10-3: an error that neither names the argument nor matches this, sent twice, is one the tester cannot tell: no verdict and no `held`) | `invalid`, `must be`, `is required`, `not allowed`, `out of range`, and similar |
+
+The exact default expressions are in `src/checks/says.ts`; the structured signals are in `src/checks/signals.ts`.
+
+## outcome_field
+
+A field in the result's structured content (or the text parsed as JSON) that states the write's outcome. Where the declaration names one and the result carries one of the listed values at `path`, the field decides what the result says about the outcome before any pattern is read, and the record quotes the field. A value that is not listed decides nothing.
+
+| Key | Meaning |
+|---|---|
+| `path` | The path in the structured content, such as `written` or `outcome.state` |
+| `applied` | The value, or list of values, that means the write was applied |
+| `not_applied` | The value(s) that mean it was not applied |
+| `unknown` | The value(s) that mean the outcome is not known |
+
+At least one of the three is needed, and a value may mean only one outcome. Used by MWS-RES-2 (second clause: `applied` or `unknown` is `held`, `not_applied` while a change stayed is `violated`; third clause: a success whose field says `not_applied`), MWS-ATOM-1 (`not_applied` while a part stayed) and MWS-RETRY-2 (whether an error identifies the applied change, or says the outcome is not known).
+
+## results
+
+Spec 7.3, rule 11 lets a published result shape, adopted by name and version, decide what a result says; Annex B-9 describes one for write tools, `write-result/0.1`. With `results: { shape: write-result/0.1 }` (at the top level, or per tool under `results.tools`; `null` opts a tool out), a result of an adopting tool that carries the shape is read from its members, and the record quotes each member relied on and says "decided by the adopted result shape write-result/0.1".
+
+- **Where it is read:** `structuredContent.mws`; where the result carries no structuredContent, a text block whose whole text is a JSON object with an `mws` member. Only `write-result/0.1` is read: before 1.0 another 0.x, like another MAJOR, is read as no shape.
+- **Member by member:** a member whose value does not have B-9's form decides nothing and is quoted as an observation; the other members are still read, also where `outcome` is missing or malformed (so a missing `outcome` cannot hide `repeat: "yes"`). Members B-9 does not define are ignored as members. A `read_with.tool` the server does not list, or one that cannot be checked because no tool list is at hand (a recheck without `catalog.json`), decides nothing.
+- **Identifiers and versions** are a string or an integer within ±(2^53−1), compared with the read-back as strings.
+- **Patterns read the sentence:** for a tool that adopts the shape and a result that carries one, a text block whose whole text parses as JSON equal to `structuredContent`, and a JSON block that carries the shape, are kept out of the text the checks read (the result's text is kept whole otherwise); in `structuredContent.mws` the patterns read only its free words (`message`, an item's `message`, an `argument_errors` entry's `message`, `conflict.held_by`, a code B-9 does not reserve, members it does not define). The tool's own output beside `mws` is read as before.
+- **The mirror** is recognised by JSON equality, not by bytes: the block's whole text is parsed and compared with `structuredContent` as a JSON value, so member order, white space, number form and string escapes do not count. Mirror `structuredContent` whole (`JSON.stringify(structuredContent)`). A JSON block that carries `mws` but is not the mirror is not read by the patterns either (its member names and fixed values are not sentences), so put free words in `message`.
+- **What the call carried:** for the updates it builds (the held-request, read-back and receipt trials), the tester records whether the call carried the idempotency key and the version, from the arguments it rendered: the version argument with a value, a `{{version}}` anywhere in the template rendered with a value, or the version at the declared read path of the object a whole-object write sends; the key as this tool's declared idempotency argument. `repeat: "same_key"` or `"same_version"` on a call known to carry neither is read as `yes`. Where the tester cannot tell (a whole-object body without the version at the read path, a tool with no declared key, or a call it did not build), it records nothing, and the shape gives neither `held` nor `violated` from that repeat.
+- **Beside `outcome_field`:** a declared outcome field is read as before; where both are given they are two structured statements, each read on its own.
+- **Disagreement (rule 11, R14-5):** the shape and the sentence are read on their own; a forbidden statement in either gives the verdict, and a true one in the other does not repair it. In the lost-answer trial of MWS-RES-2, a sentence that says the write failed (declared `patterns.write_failed`, else `patterns.not_applied`) beside `outcome: unknown` is the kind stated-failure, a sentence that invites a repeat (declared `patterns.repeat_invited`) is the kind retry-invited whatever `repeat` says, and `outcome: not_applied` beside a sentence that says the outcome is not known is violated too. The sentence is read under the same positive-match rule as without the shape; the shape never makes a text-side `violated` or `held`, and a text-side reading never masks a violation the shape gives.
+
+What it decides:
+
+| Requirement | Members |
+|---|---|
+| MWS-RES-1 | `outcome`: the success claim is `applied`, and `accepted` for a tool not listed in `async_operations`; for a listed one `accepted` is NF-19. `not_applied`, `partial` or `unknown` without `isError` is not a success claim (it goes to MWS-RES-2). |
+| MWS-RES-2 | First and third clauses: `outcome` without `isError`. Second clause: `unknown` says the outcome is not known; with `repeat: "yes"`, as given or as read, it is the kind retry-invited (`read_first` with neither a listed `read_with` nor `object.id` is read as `yes`; `same_key` / `same_version` where the trial recorded that the call carried none is read as `yes`). No `held` where `repeat` cannot be checked: `same_key` / `same_version` where the tester does not know whether the call carried one, `same_version` on a call that carried one (the follow-through is not built), `read_first` named only by the object in the text. `not_applied` with a change in effect is violated. Under `applied`, `changed` (JSON Pointers, parent and child both ways) or the object names each change; under `partial`, `changed` or an applied item. |
+| MWS-RES-4 | `object.id`, `object.version` and `changed` against the read-back. `""` names no field of an update. A nested create counts its parent's `object.parent.id`. |
+| MWS-ATOM-1 | `items` (by `index`, the position in the list the call sent, where the trial recorded it, else by `id`) and `applied_count` (compared only where the tester can count every object the call matched: in a container it created, or where the call's arguments name only the trial's own items by `{{ids}}` or by the `{{batch}}` marker given to them alone). An unlisted item is applied under `applied_count`, takes the top-level outcome where that is `applied` or `not_applied`, and is otherwise not stated. `multi[].report` should name the server's own list of applied items, not `mws.items`. |
+| MWS-CONC-6 | `conflict.current_version` and `current_state` (minus `omitted`), compared with the second writer's field as read back; without that field the shape decides nothing. `repeat: "read_first"` is cited for the reader of the review-only re-read clause and never answers it. `checked_by` is read, not yet used. |
+| MWS-CONC-2, CONC-4 | `code: conflict` marks a conflict, and `code: version_required` the refusal of a write sent without a version: structured signals, read before any pattern. `locked` (a control that is not a version) is not one. |
+| MWS-RETRY-2 | `outcome` and `items` / `changed` for "says the outcome is unknown" and "identifies the applied change"; `replayed: true` on a new key in step (b); `code: unavailable` or `not_permitted` is a refusal that says nothing about the write (the step is not forced); `code: idempotency_key_reused` is a refusal of the key reused in step (c), not of the arguments; on a keyed repeat `outcome: not_applied` says the earlier call did not apply the write (step (e) and its crash form: the MWS-RES-2 cross-record), and `key_not_known` does not. |
+
+What it never decides: whether a write is in effect. A result that says `applied` while the read-back shows nothing is `violated` under MWS-RES-1, as the same words in text would be. Not built yet: `code: in_progress` in step (d), `argument` / `argument_errors` for MWS-IN-4, `code: locked` for MWS-CONC-1, and the RES-2 follow-through for `repeat: "same_version"`.
+
+## idempotency
+
+A write tool that accepts an idempotency key (MWS-RETRY-2). Each step of the test uses a write whose repeat leaves a trace the tester reads before the first call and after each answer, with a fresh key and a fresh `{{marker}}` of its own: for a create, the objects that carry the marker, found through the resource's `list` block (so `args` must contain `{{marker}}`, in the argument `list.name` shows); for an update, the version of a scratch object the tester creates. The records are: steps (a), (b) and (c) together; step (d), simultaneous pairs, until 30 have overlapped or `limits.pairs` have been sent; the proxy-assisted step (needs `backend.gate`); step (e), a restart (needs `server.restart`); its crash form (needs both). An object the trace finds by the marker that no answer named is added to the ledger and cleaned up.
+
+| Key | Meaning |
+|---|---|
+| `tool` | The tool that takes the key (default: `create.tool`) |
+| `args` | Its arguments (default: `create.args`); `{{marker}}` for a create; for an update, `{{id}}` is the scratch object |
+| `key` | `{ arg }` (a tool argument) or `{ meta }` (a `_meta` field): where the key goes |
+| `id` | Where the answer gives the created object's id (default: `create.id`) |
+| `replay_marker`, `replay_text` | The replay indicator, a result field that is true or a text: guidance, not required. Where one is declared, step (b) decides "answered as a replay" by it, and the `replay` pattern is not used |
+| `kind` | `create` (default) or `update`. `append` is accepted and is `not tested` (not built in this preview) |
+| `version_steps` | `true` (Annex E): the backend changes the resource's version (`version.read`) on every write it applies, even one that leaves the values as they were, and on nothing else, in steps that can be counted, and the tool makes no backend write to the object except one per application. Only with it does an update leave a trace: without it, steps (a), (d), (e), the crash form and the proxy-assisted step are `not tested` for an update tool (steps (b) and (c) still run) |
+| `vary` | The argument step (c) changes, with its type kept (default: the argument that carries the marker). It must be one whose changed value the tool would apply under a fresh key: for a create with a caller-chosen name, the name itself |
+| `own_checks` | `[name, version, content]` (Annex E): checks the tool, or its backend, makes whatever the key. In step (b) a refusal by one that applies (a name the caller chose that now exists, a version the first call consumed, duplicate content) is a refusal on its own merits. Without the declaration such a refusal is `not tested`, never `violated` |
+| `backend_key` | `true` or `false` (Annex E): the backend offers an idempotency key that answers a repeat with the result of the first request, or a lookup of a write by its key, that the tool could use. With `true`, a repeat that applies nothing and does not give the outcome is `violated` in the proxy-assisted step, step (e) and its crash form; otherwise it is `held` with a note ("outcome not established", "key record not kept"), and where the key is not given the record says that the declaration is silent |
+| `key_record_survives` | `{ graceful, kill }`, each `true` or `false` (Annex E): whether the tool's key record survives a restart after that kind of stop. With `true` for the kind of stop used, step (e)'s repeat that applies nothing is `violated`; without it, `held` with the note "key record not kept", and the record says the declaration is silent |
+| `key_lifetime` | `{ ms, quote }`: how long a key is remembered, as the tool's description states it (quoted). Where it is shorter than the time between the first answer and the repeat in step (e), the step is `not tested` (how long a key is remembered is not tested) |
+
+## resources
+
+Each resource is one kind of object. Only `name` and `read` are required; every other block unlocks the requirements in the README's table of optional blocks, and without it they are `not tested` with the reason.
+
+| Key | Meaning |
+|---|---|
+| `name` | The resource's name in the results (`<name>:<tool>`) |
+| `vars` | Extra template values |
+| `create` | `{ tool, args, id, id_regex, name_path }`: how the tester makes its own object; `id` is where the id is in the result |
+| `read` | `{ tool, args, object, items, match, ignore, settle_ms }`: how to read one object; `ignore` lists fields that change on their own (timestamps); the bystander inventory leaves them out of the listed form too. An answer to a read by id that does not carry the id is the object only where it holds a value at one of the paths the declaration names (a field, `create.name_path`, `version.read`, `key.vary.path`); otherwise (an empty list, a count) it is not the object. A read that gives the same answer as for an id that does not exist (`missing_id`, or one the tester makes from the run prefix) shows the object is gone |
+| `update` | `{ tool, mode, args, cases, override, apply }`: the update tool. `mode`: `field_patch`, `full_replace`, `command` or `composite`. `args` carries `{{field}}` and `{{value}}`. `cases`: extra MWS-RES-1 cases `{ name, args, expect }`. `override`: one of the declared arguments that is an explicit override the declared call sets (such as `overwrite: true`); MWS-CONC-1, which asks for a call with default arguments, is then `not tested` (spec NF-7). `apply: true`: the tool sends an apply with field ownership (spec section 4); MWS-CONC-2 is then `not tested` until the spec says how it applies |
+| `fields` | Two independent fields: `{ path, arg, values: [a, b], empty, invalid, skip, control_key }`. Pick first values that are not the field's default. `control_key`: the key `{{field}}` stands for in `control.patch` (default: `path`), for a platform API that names the field otherwise than the read (Strapi: `summary`, read at `data.summary`) |
+| `restorable` | The arguments of the update tool that the tester may send with a value other than the base call's and then put back, each affecting only the object under test and undone through that tool (spec Annex E, R15-4): `[priority, description]`, `{ arg, path }` where the read shows the field under another path, and `{ arg, call_only: true }` for an argument that acts on that call alone (an override such as `force`, a `dry_run`), put back by sending the base call without it. Warning: an argument marked `call_only` is never checked by read-back, so one that changes stored state is left changed without a word; use `call_only` only for an argument that acts on that call alone. Every argument must be listed here explicitly, declared `fields` included: the tester does not infer that a change can be undone. Any other listed argument must be shown by the read, or its counterpart is not sent. Allowed only on a resource whose update tool names the object by `{{id}}` or `{{object}}` and is not also a delete, selector, multi-item or list-edit tool of any resource (refused at load). MWS-IN-1, IN-4 and IN-6 on an update tool need each argument the probes reach to be listed: an MWS-IN-4 counterpart control that would send any other argument with a value other than the base call's (or, for a whole-object write, leave out one it sends) is not sent, so its probe is not judged and those records are not held. For a listed argument the tester reads the object before the probe, sends the counterpart, puts the object back through the same tool with the base call's other arguments (whether or not the counterpart's outcome is known), and reads it back (leaving out `read.ignore` and `server_managed`). Where the object does not read as it was, or the put-back fails or has an unknown outcome, the record names the object and the argument for clean-up, the probe is not judged, no further MWS-IN probe, control or IN-5 value is sent to that tool for the rest of the run (other checks and the launch checks can still reach it), no record of that tool's MWS-IN-1 to IN-7 is held, and the object is used in no later test (a fixture so affected is reported as not put back). Leave out an argument whose change cannot be undone (a lock, an archive flag, a provenance switch). The version argument is no exception: where the base call sends it (`version.arg` declared, as `{{version}}` or `{{?version}}` in `update.args`), it is never probed; where it does not (a precondition such as `expected_version` that the declaration does not name as `version.arg`), its probes are sent like any other, and they are judged only if it is listed, typically as `{ arg: expected_version, call_only: true }` (it acts on that call alone, so the put-back is the base call without it). Read tools are not affected |
+| `version` | `{ read, arg, optional, override }`: where the version is read, the argument that takes it, whether the update works without it, and the explicit override argument (such as `force`) that the tool needs where the version is left out. With `optional`, MWS-CONC-2 runs a second time with the version left out (and no override) for a whole-object update tool and for the delete tool; a field-patch tool gets no second run (spec NF-12). The override is sent to the update and delete tools wherever their version is left out |
+| `delete` | `{ tool, args }`; with `{{version}}` in `args`, the delete gets the stale-write test |
+| `archive` | `{ tool, args }`: the cleanup call for `cleanup: archive` |
+| `list` | `{ tool, args, items, id, name, ignore, next }`: a list that finds the run's objects by name; `ignore`: fields of the listed form that change by themselves (an age, the time of the listing), left out by the bystander inventory; `next: { path, arg }`: how to ask for the next page (the value at `path` in an answer, sent as the argument `arg`, until an answer has none). Every list the tester reads is read to the end where `next` is given; a cursor cannot show that its pages are complete, so where a list read this way leaves out an object an earlier listing showed that still reads back by id, the bystander inventory through it is partial for the rest of the run; without it, an answer that shows a further page (a cursor, a `more` flag, a total above the count) makes the MWS-RETRY-2 trace partial (no verdict from it), the bystander inventory partial, and the clean-up sweep unable to prove an object absent. Clean-up sweeps it by the run prefix for a create with an unknown outcome; a resource without one is swept through the `list` of another resource with the same create tool, no scope and the same `vars`, whose `name` is this resource's `create.name_path`. A sweep whose answer has no list at `items` leaves the entry open |
+| `cleanup` | `delete`, `control_delete`, `archive`, `ephemeral` or `leave` |
+| `fixture` | `{ id, name, name_path }`: a pre-made object instead of a create; its two fields are put back afterwards |
+| `control` | The platform's own API for the control arm: `base` or `base_env`, `auth` (`bearer_env`, or `header` with `env` and `prefix`), and HTTP templates `read`, `patch`, `write`, `delete`, `create` (`{ http: [METHOD, path], body, headers }`) |
+| `missing_id` | An id that does not exist (error answers for the credential scan) |
+| `key` | `{ arg, vary: { arg, path }, class: { as, quote } }`: the caller chooses the object's key (MWS-TGT-3; MWS-ANN-2 for a create). `class` (R10-1): for a create tool that does not call itself a create, upsert or apply (run, start, launch, deploy, install, clone), whether it is put among the creates (`as: create`) or the upserts and applies (`as: upsert`, then MWS-TGT-3 is not applicable), with `quote`, words of its name or description relied on; without it such a tool's MWS-TGT-3 is `not tested` |
+| `scope` | `{ resource, arg, default, list }`: the container argument (MWS-TGT-1); `list` takes `ignore` as the `list` block does. The bystander inventory lists the scopes through the scope resource's `list` block (or a read through a list); without one it lists only `default`, and every record says so |
+| `selector` | `{ tool, args, forms, narrow, send_empty_forms }`: a delete or bulk tool with a selector, and selector forms to try without opting in (MWS-TGT-2). **Destructive by design**: the forms and the MWS-TGT-1 call that gates them are sent only with `send_empty_forms: true` (default false): the operator's statement that every object the server's identity can change in the backend is disposable and that nothing else writes there during the test (spec 7.3, rule 1, R10-5); in this mode every check and each resource's setup is also bracketed by the bystander inventory, and an inventory that cannot be taken blocks `held` (in either mode every resource whose objects outside the tester's own can be listed is bracketed, and a loss seen anywhere in the run leaves no earlier record that made calls `held`); otherwise MWS-TGT-2 is `not tested` with that reason. `narrow`: arguments that, added to `args`, limit the call to the objects named with `{{marker}}`; each value must be a string carrying `{{marker}}`, and each key an argument the tool's input schema declares (else the call is not sent). With both, MWS-TGT-1 is run for the selector tool (an object of one name in the named, the other and the default scope; the tool naming the first scope), and the forms are sent only where that MWS-TGT-1 is `held` with the call taking effect in the named scope only (spec 7.3, rule 1). Before and after every targeting call the tester lists every object it can list outside its own (each scope the scope resource lists, the default scope, the scopes themselves); an object is the tester's own only when the run's ledger holds its id. Around a selector call every such object is also read back by id, before and after (a list can lag behind a delete). Gone means a read by id says so; an object missing from every listing that cannot be read by id is reported as missing, not gone; a field that changes by itself (`read.ignore`, the list's `ignore`, a time or an age, a value that differs between two listings with no call between) is not a change. Every loss is listed in the record (`numbers.bystanders_lost`) and at the top of report.md and stdout, and that record is never `held` (a selector call that removed one is `violated`). The inventory is only as complete as the server's lists: each record says what it listed (`numbers.bystander_inventory`, report.md "What the bystander inventory covered"), a selector record on a partial inventory (scopes that cannot be listed, an answer that shows a further page) is `not tested`, and a `held` record says the objects outside the tester's own were "not seen to be lost" |
+| `multi` | A list of `{ tool, args, effect, invalid_id, report }`: tools that change several items in one call (MWS-ATOM-1, ATOM-2) |
+| `list_edit` | `{ tool, args, list, element: { id, name }, address: { by_id, by_position }, effect, insert }` (`by_id` and `by_position` may be paths into the arguments, such as `ops[0].row_id`, writesafe T4): a tool that edits one element of a list (MWS-UPD-2); `insert` is the second writer, which sets the list to `{{names_inserted}}` |
+| `creates` | A list of `{ name, tool, args, find, idempotency }`: create tools (MWS-RES-3, RES-4, RETRY-1) |
+| `idempotency` | `{ tool, args, key: { arg } \| { meta }, id, replay_marker, replay_text, kind, version_steps, vary, own_checks, backend_key, key_record_survives, key_lifetime }`: a write tool that accepts an idempotency key (MWS-RETRY-2); see [idempotency](#idempotency) |
+| `failures` | A list of `{ name, tool, args }`: calls the backend will refuse (MWS-RES-2) |
+| `jobs` | A list of `{ name, calls }`: round trips measured for Annex A-1 (never judged) |
+| `versioned` | A list of `{ tool, args }` whose `args` carry `{{version}}`: other tools that get the stale-write test (MWS-CONC-2, CONC-4, CONC-6) |
+| `no_version_check` | Tools for which the backend has no version check (MWS-CONC-2 is `not applicable`; MWS-CONC-5 asks about the description) |
+| `input_required` | A list of `{ tool, args, answers, client_capabilities, effect }`: a tool that answers `input_required` (revision 2026-07-28) and the `inputResponses` to send on the retry (MWS-RETRY-3). `client_capabilities` defaults to `{ elicitation: { form: {} } }`. `effect` (`{ path, value }`) is what the write puts into effect; a change before the retry that is not the effect may be staged state, and is not judged |
+| `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5) |
+| `fixed_constraints` | A list of `{ arg, pattern, reason }` (R10-8): refusals of the update tool that rest on a fixed constraint; MWS-IN-5 is `violated` only for a refusal whose text matches one, otherwise each refusal is listed, "seen, not judged", and the verdict is `not observed` |
+| `server_managed` | A list of fields the server sets itself (a timestamp, a revision). A field that `read.ignore` or a list's `ignore` names and that the tool under test can set (from its input schema) is warned in the plan and the report, and refused for a selector tool in opt-in mode, unless it is listed here: an ignored field must not hide a bystander change |

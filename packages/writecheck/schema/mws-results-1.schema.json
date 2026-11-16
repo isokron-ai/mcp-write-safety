@@ -1,0 +1,522 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mws.invalid/schema/mws-results-1.schema.json",
+  "title": "mcp-writecheck results (mws-results/1)",
+  "description": "One record per requirement per write path per scenario. There is deliberately no aggregate field (no total, percentage, score or passed flag), and no additional top-level property is allowed, so a wrapper cannot add one and still validate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "scope",
+    "suite",
+    "spec",
+    "run",
+    "target",
+    "manifest",
+    "plan",
+    "results",
+    "not_built",
+    "measurements",
+    "leftovers",
+    "cleanup",
+    "observations",
+    "evidence",
+    "safety"
+  ],
+  "properties": {
+    "format": {
+      "const": "mws-results/1"
+    },
+    "scope": {
+      "type": "string",
+      "description": "The first line of every report: what was tested and what was not."
+    },
+    "suite": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "id",
+        "prefix",
+        "started",
+        "ended",
+        "status",
+        "stopped_reason",
+        "writes",
+        "processes_started"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "started": {
+          "type": "string"
+        },
+        "ended": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "stopped"
+          ]
+        },
+        "stopped_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writes": {
+          "type": "integer"
+        },
+        "processes_started": {
+          "type": "integer"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "confirm",
+        "environment",
+        "server",
+        "catalog_fingerprint",
+        "guard"
+      ],
+      "properties": {
+        "confirm": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        },
+        "catalog_fingerprint": {
+          "type": "string"
+        },
+        "guard": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "mcp": {
+          "type": "object",
+          "description": "Spec 5.3: the MCP protocol revision and the transport used, and the client capabilities and extensions the tester declared; with the requests for input the server made during calls and what the tester answered (7.3, rule 10), and the patterns that decided what a result says (7.3, rule 11).",
+          "required": [
+            "revision",
+            "transport",
+            "client_capabilities",
+            "per_call_capabilities",
+            "extensions",
+            "input_requests",
+            "patterns"
+          ],
+          "properties": {
+            "revision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transport": {
+              "enum": [
+                "stdio",
+                "streamable HTTP"
+              ]
+            },
+            "client_capabilities": {
+              "type": "object"
+            },
+            "per_call_capabilities": {
+              "type": "array"
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "input_requests": {
+              "type": "array"
+            },
+            "patterns": {
+              "type": "object"
+            },
+            "result_shapes": {
+              "type": "object",
+              "description": "Spec 7.3, rule 11: the result shape the declaration adopts by name and version (shape: the top level; tools: per tool, null for none).",
+              "properties": {
+                "shape": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tools": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "required": [
+        "hash"
+      ],
+      "properties": {
+        "hash": {
+          "type": "string"
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement",
+          "level",
+          "write_path",
+          "scenario",
+          "verdict",
+          "reason",
+          "numbers",
+          "steps",
+          "notes",
+          "attribution"
+        ],
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+$"
+          },
+          "level": {
+            "enum": [
+              "MUST",
+              "SHOULD"
+            ]
+          },
+          "write_path": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resource",
+              "tool",
+              "arm"
+            ],
+            "properties": {
+              "resource": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "arm": {
+                "const": "mcp"
+              }
+            }
+          },
+          "scenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          },
+          "verdict": {
+            "enum": [
+              "violated",
+              "platform",
+              "held",
+              "not observed",
+              "not tested",
+              "not applicable",
+              "self-attested"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "numbers": {
+            "type": "object"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attribution": {
+            "enum": [
+              "server",
+              "platform",
+              "unresolved",
+              null
+            ],
+            "description": "Spec 8.2 rule 3: for a requirement that lists platform, every violated or platform record carries server, platform or unresolved; null otherwise. A violated record is never quoted without it."
+          }
+        }
+      }
+    },
+    "not_built": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "requirement",
+          "verdict",
+          "reason"
+        ],
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "not tested",
+              "not applicable"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "measurements": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Annex A: measured, never judged."
+    },
+    "leftovers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "resource",
+          "id",
+          "name",
+          "how",
+          "reason"
+        ]
+      }
+    },
+    "cleanup": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "check",
+          "version",
+          "resource",
+          "data"
+        ]
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "capture",
+        "checksums",
+        "signature"
+      ],
+      "properties": {
+        "capture": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "checksums": {
+          "const": "SHA256SUMS"
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "description": "What the seat belts saw: the untouched-state canaries before and after the run, fixtures put back to their original values, how backend traffic was routed (the gate), the protocol spoken, and the run this one repeats. None of these is a verdict.",
+      "required": [
+        "canaries",
+        "fixtures_restored",
+        "gate",
+        "protocol",
+        "rerun_of"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "canaries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "tool",
+              "unchanged"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "unchanged": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "fixtures_restored": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "resource",
+              "restored"
+            ],
+            "properties": {
+              "resource": {
+                "type": "string"
+              },
+              "restored": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "gate": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "route",
+            "description"
+          ],
+          "properties": {
+            "route": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        },
+        "protocol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rerun_of": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Warnings about the declaration that bear on what the run can see, such as an ignored field the tool under test can set."
+        },
+        "run_losses": {
+          "type": "array",
+          "description": "Bystander losses found outside any check's records (a failed set-up, or after the last check: resets, global checks, fixture restore, clean-up). Any entry makes the run stopped.",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

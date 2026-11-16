@@ -1,0 +1,61 @@
+{
+  "name": "@mcp-write-safety/tiny-tracker",
+  "version": "0.1.0",
+  "description": "Teaching MCP server for the MCP Write-Safety Requirements: a correct build and a build with one named defect per requirement.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mws",
+    "write-safety",
+    "example",
+    "test-server",
+    "conformance"
+  ],
+  "homepage": "https://isokron.ai/mws",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isokron-ai/mcp-write-safety.git",
+    "directory": "examples/tiny-tracker"
+  },
+  "bugs": {
+    "url": "https://github.com/isokron-ai/mcp-write-safety/issues"
+  },
+  "author": "IsoKron (Stormhaven Enterprises LLC) (https://isokron.ai)",
+  "contributors": [
+    "Joshua Bryan"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "bin": {
+    "tiny-tracker": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "writecheck.yaml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/cli.js all",
+    "test": "npm run build && node --test --test-concurrency=1 dist/test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "prepack": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

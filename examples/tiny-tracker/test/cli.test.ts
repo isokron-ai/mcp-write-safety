@@ -1,0 +1,114 @@
+// Launch tests against the built command line: what an operator sees.
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { connectClient } from "./support/stack.js";
+
+const CLI = fileURLToPath(new URL("../src/cli.js", import.meta.url));
+
+interface Run {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Runs the CLI; if it prints its URL line, hands it to `whileUp`, then stops it. */
+function run(args: string[], env: Record<string, string> = {}, whileUp?: (out: any) => Promise<void>): Promise<Run> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI, ...args], { env: { PATH: process.env.PATH ?? "", ...env } });
+    let stdout = "";
+    let stderr = "";
+    let started = false;
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.stdout.on("data", (d) => {
+      stdout += d;
+      if (!started && stdout.includes("\n")) {
+        started = true;
+        const line = JSON.parse(stdout.split("\n")[0]);
+        (whileUp ? whileUp(line) : Promise.resolve()).then(() => child.kill("SIGTERM"), (e) => { child.kill("SIGKILL"); reject(e); });
+      }
+    });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
+    child.on("exit", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+  });
+}
+
+describe("tiny-tracker command line", () => {
+  it("all: starts backend and server on loopback, serves 16 tools, stops on SIGTERM", async () => {
+    const r = await run(["all"], {}, async (out) => {
+      assert.match(out.mcp, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+      assert.match(out.backend, /^http:\/\/127\.0\.0\.1:\d+$/);
+      const mcp = await connectClient(out.mcp, "2026-07-28");
+      assert.equal((await mcp.tools()).length, 16);
+      await mcp.close();
+    });
+    assert.equal(r.code, 0);
+    assert.doesNotMatch(r.stderr, /BROKEN BUILD/);
+  });
+
+  it("an unrecognized read-only value stops the server (exit 2)", async () => {
+    const r = await run(["all", "--read-only", "enabled"]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /not recognized/);
+    assert.equal(r.stdout, "");
+  });
+
+  it("an unknown tool in the allow-list stops the server (exit 2)", async () => {
+    const r = await run(["all", "--tools", "get_ticket,update_tikcet"]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /unknown tools: update_tikcet/);
+  });
+
+  it("an unknown defect name stops the server (exit 2)", async () => {
+    const r = await run(["all", "--defect", "no-such-defect"]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /unknown defect/);
+  });
+
+  it("a build with defects prints a banner and names its defects", async () => {
+    const r = await run(["all", "--defect", "read-merge-put", "--defect", "MWS-RETRY-2"], {}, async (out) => {
+      assert.deepEqual(out.defects, ["read-merge-put", "idempotency-key-dropped", "retry-without-key", "key-store-in-memory", "idempotency-key-ignores-args"]);
+    });
+    assert.equal(r.code, 0);
+    assert.match(r.stderr, /BROKEN BUILD/);
+  });
+
+  it("a variant is named in the output; an unknown one stops the server", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-variant-"));
+    try {
+      await run(["all"], { TRACKER_VARIANTS: "key-store-honest", TRACKER_KEY_JOURNAL: join(dir, "keys") }, async (out) => {
+        assert.deepEqual(out.variants, ["key-store-honest"]);
+        assert.deepEqual(out.defects, []);
+      });
+      const bad = await run(["all"], { TRACKER_VARIANTS: "nope" });
+      assert.equal(bad.code, 2);
+      assert.match(bad.stderr, /unknown variant/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a build with defects refuses a backend that is not on loopback", async () => {
+    const r = await run(["server", "--defect", "read-merge-put", "--backend-url", "http://tracker.example.com"],
+      { TRACKER_BACKEND_TOKEN: "x" });
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /127\.0\.0\.1 or localhost/);
+  });
+});
+
+it("package name: @mcp-write-safety/tiny-tracker, command tiny-tracker, published publicly; the README gives the npx command", async () => {
+  const { readFileSync } = await import("node:fs");
+  const pj = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { name: string; bin: Record<string, string>; private?: boolean; publishConfig?: { access?: string }; files?: string[] };
+  assert.equal(pj.name, "@mcp-write-safety/tiny-tracker");
+  assert.deepEqual(Object.keys(pj.bin), ["tiny-tracker"]);
+  assert.equal(pj.private, undefined);
+  assert.equal(pj.publishConfig?.access, "public");
+  assert.ok(pj.files?.includes("dist/src") && pj.files.includes("writecheck.yaml"));
+  const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+  assert.ok(readme.includes("npx -y @mcp-write-safety/tiny-tracker") && !/not published/i.test(readme));
+});
