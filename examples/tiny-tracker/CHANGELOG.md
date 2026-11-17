@@ -39,6 +39,15 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - Six fixture defects, each needing its features: `digest-of-current-state`, `replay-digest-mismatch`, `digest-not-canonical`, `lookup-wrong-record`, `lookup-unscoped` (backend) and `lookup-reexecutes` (MCP layer, MWS-ANN-1).
 - Compatibility rules CMP-20 (`lookup` needs `execution-records`) and CMP-21 (`principals` runs where the backend runs).
 
+### Stream B
+- `ledger` feature: an append-only execution ledger, one of the store's commit sinks, written below every MCP-layer defect. It records every write, replay and refusal with its principal, run and operation tags and request fingerprint, a write whose journal append failed (`journal-unavailable`), a run reset (from the reset's own commit), and the fixture's own start, fault arming and firing and run allocation. A ledger that cannot append stops the store (503). Read at `GET /ledger` (filters, paging, JSONL) and in `GET /export` with the evidence token, for one principal (`?principal=`, required when more than one is configured). Needs `evidence` and `strict-input`.
+- `faults` feature: faults armed on the control listener (`POST /_fixture/faults`), never on the command line. Backend points fire through the backend fault hooks and MCP points through the MCP result hook. This version arms `mcp/after-backend-reply/drop`, which holds the MCP answer after the backend committed (the lost response, server-side), selected by tool, run, operation, nth and count; when the hold ends the true answer is sent. Every arming and firing is a ledger entry. Needs the ledger and `--fixture-control`.
+- CMP-7 now refuses a fault armed at start only without the faults feature or for a point this build cannot arm (it used to refuse every fault).
+- The build descriptor's `fixture_api` is `fixture-api/1`: the control API arms faults and resets runs.
+- `POST /_fixture/runs/:id/reset` removes one principal's run's objects and key records as one commit through the commit path, recorded in the ledger from that commit; run allocation is recorded too, and runs are allocated only for configured principals.
+- `GET /executions`, `GET /executions/:id` and `GET /operations/:key` serve execution and operation records in the evidence namespace when their features are on; otherwise they answer 501 and name the feature.
+- Caps: 100000 ledger entries per process, 32 armed faults, 16 held answers, a 10-minute hold, 32 control connections and a 10-second request timeout on the control listener.
+
 ## 0.1.0 (16 Nov 2026) for MWS 0.9
 
 First published version. Follows the MCP Write-Safety Requirements 0.9 (37 requirements).
