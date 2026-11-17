@@ -177,14 +177,16 @@ jobs:
           token="$(openssl rand -hex 24)"
           docker run -d --name tt -p 127.0.0.1:47310:47310 -e TRACKER_MCP_TOKEN="$token" tiny-tracker:ci
           trap 'docker logs tt; docker rm -f tt >/dev/null' EXIT
-          for _ in $(seq 1 50); do docker logs tt 2>/dev/null | grep -q '"mcp"' && break; sleep 0.2; done
+          for _ in $(seq 1 50); do docker logs tt > logs.txt 2>/dev/null; grep -q '"mcp"' logs.txt && break; sleep 0.2; done
           body='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
           hdr=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
           none="$(curl -s -o /dev/null -w '%{http_code}' "${hdr[@]}" -d "$body" http://127.0.0.1:47310/mcp)"
           good="$(curl -s -o /dev/null -w '%{http_code}' "${hdr[@]}" -H "authorization: Bearer $token" -d "$body" http://127.0.0.1:47310/mcp)"
           echo "without token: $none, with token: $good"
-          [ "$none" = "401" ] && [ "$good" = "200" ]
-          ! docker logs tt 2>&1 | grep -qF "$token"
+          [ "$none" = "401" ]
+          [ "$good" = "200" ]
+          docker logs tt > logs.txt 2>&1
+          if grep -qF -- "$token" logs.txt; then echo "::error::the MCP token appears in the logs"; exit 1; fi
       - name: The evidence listener answers only with the evidence token
         run: |
           mcp="$(openssl rand -hex 24)"
@@ -193,13 +195,16 @@ jobs:
             -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
             tiny-tracker:ci all --port 47310 --features evidence,strict-input,execution-records,lookup,principals,ledger
           trap 'docker logs tt-ev; docker rm -f tt-ev >/dev/null' EXIT
-          for _ in $(seq 1 50); do docker logs tt-ev 2>/dev/null | grep -q '"evidence_listener"' && break; sleep 0.2; done
+          for _ in $(seq 1 50); do docker logs tt-ev > logs.txt 2>/dev/null; grep -q '"evidence_listener"' logs.txt && break; sleep 0.2; done
           none="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47312/build)"
           good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
           api="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/tickets)"
           echo "evidence without token: $none, with: $good, API path: $api"
-          [ "$none" = "404" ] && [ "$good" = "200" ] && [ "$api" = "404" ]
-          ! docker logs tt-ev 2>&1 | grep -qF -e "$ev" -e "$mcp"
+          [ "$none" = "404" ]
+          [ "$good" = "200" ]
+          [ "$api" = "404" ]
+          docker logs tt-ev > logs.txt 2>&1
+          if grep -qF -e "$ev" -e "$mcp" logs.txt; then echo "::error::a token appears in the logs"; exit 1; fi
       - name: A defect build serves evidence behind the evidence token with no opt-in; outside container mode it is refused (R23 retired)
         run: |
           mcp="$(openssl rand -hex 24)"
@@ -223,11 +228,15 @@ jobs:
             -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
             tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put
           trap 'docker logs tt-r23; docker rm -f tt-r23 >/dev/null' EXIT
-          for _ in $(seq 1 50); do docker logs tt-r23 2>/dev/null | grep -q '"evidence_listener"' && break; sleep 0.2; done
+          for _ in $(seq 1 50); do docker logs tt-r23 > logs.txt 2>/dev/null; grep -q '"evidence_listener"' logs.txt && break; sleep 0.2; done
           none="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47312/build)"
           good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
           echo "defect build, evidence without token: $none, with: $good"
-          [ "$none" = "404" ] && [ "$good" = "200" ]
+          [ "$none" = "404" ]
+          [ "$good" = "200" ]
+          if grep -qF -e "$ev" -e "$mcp" err.txt; then echo "::error::a token appears in the refusal"; exit 1; fi
+          docker logs tt-r23 > logs.txt 2>&1
+          if grep -qF -e "$ev" -e "$mcp" logs.txt; then echo "::error::a token appears in the logs"; exit 1; fi
       - name: A durable server restarted on its reused /data replays a keyed write (pid 1 both times)
         run: |
           token="$(openssl rand -hex 24)"
@@ -236,7 +245,7 @@ jobs:
           docker run -d --name tt-dur -p 127.0.0.1:47310:47310 -v tt-data:/data -e TRACKER_MCP_TOKEN="$token" \
             tiny-tracker:ci all --port 47310 --features durable,strict-input --data-dir /data
           trap 'docker logs tt-dur; docker rm -f tt-dur >/dev/null; docker volume rm tt-data >/dev/null' EXIT
-          up() { for _ in $(seq 1 50); do [ "$(docker logs tt-dur 2>/dev/null | grep -c '"mcp"')" -ge "$1" ] && return 0; sleep 0.2; done; return 1; }
+          up() { for _ in $(seq 1 50); do docker logs tt-dur > logs.txt 2>/dev/null; [ "$(grep -c '"mcp"' logs.txt)" -ge "$1" ] && return 0; sleep 0.2; done; return 1; }
           call() {
             local url=http://127.0.0.1:47310/mcp sid
             local hdr=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H "authorization: Bearer $token")
@@ -250,16 +259,17 @@ jobs:
           up 1
           first="$(call)"
           echo "first: $first"
-          echo "$first" | grep -q 'replayed\\":false'
+          grep -q 'replayed\\":false' <<< "$first"
           docker kill tt-dur >/dev/null
           docker start tt-dur >/dev/null
           up 2
           second="$(call)"
           echo "second: $second"
-          echo "$second" | grep -q 'replayed\\":true'
-          echo "$second" | grep -q 'T-1'
-          docker logs tt-dur 2>&1 | grep -q "taking over a stale data-dir lease"
-          ! docker logs tt-dur 2>&1 | grep -qF "$token"
+          grep -q 'replayed\\":true' <<< "$second"
+          grep -q 'T-1' <<< "$second"
+          docker logs tt-dur > logs.txt 2>&1
+          grep -q "taking over a stale data-dir lease" logs.txt
+          if grep -qF -- "$token" logs.txt; then echo "::error::the MCP token appears in the logs"; exit 1; fi
       - name: The image runs as an unprivileged user with a 0700 data dir
         run: |
           [ "$(docker run --rm --entrypoint id tiny-tracker:ci -u)" != "0" ]
