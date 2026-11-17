@@ -141,13 +141,27 @@ export function prepareDataDir(dir: string, platform: string = process.platform)
 /** Data dirs held by a live Journal in this process (a second writer in the same process is refused too). */
 const HELD = new Set<string>();
 
-function alive(pid: number): boolean {
+/**
+ * Whether a lock holder still runs. A killed process that its parent has not reaped yet (a zombie: a supervised child
+ * the supervisor is about to restart) still answers kill(pid, 0), but it holds nothing: on Linux its state in
+ * /proc/<pid>/stat is Z (or X), and its lock is stale (stream E's note: the supervisor restarts the backend child on
+ * the same --data-dir).
+ */
+export function alive(pid: number, procRoot = "/proc"): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === "EPERM";
   }
+  try {
+    const stat = readFileSync(join(procRoot, String(pid), "stat"), "utf8");
+    // pid (comm) state ...: comm may hold spaces and parentheses, so the state follows the last ")".
+    const state = stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
+    if (state === "Z" || state === "X") return false;
+  } catch {
+    // No /proc (macOS, Windows) or the process just went: kill(pid, 0) decides.
+  }
+  return true;
 }
 
 /**
@@ -161,7 +175,8 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = openSync(path, "wx", 0o600);
-      writeSync(fd, JSON.stringify({ pid: process.pid, started_at: wallNow().toISOString() }));
+      // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
+      writeSync(fd, JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString() }));
       fsyncSync(fd);
       closeSync(fd);
       HELD.add(real);

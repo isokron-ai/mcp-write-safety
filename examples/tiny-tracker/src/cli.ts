@@ -236,6 +236,8 @@ async function main(): Promise<void> {
         variants: layout === "backend" ? null : variantNames,
         env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN, tokenDir, clock,
         ...(principals ? { principals } : {}), // stream A
+        // 0.3.0 integration: the descriptor's durability block (part of build_hash: it is what the build is).
+        durability: features.includes("durable") ? { mode: "journal", journal_format: "journal-format/1" } : { mode: "memory", journal_format: null },
       });
     } catch (e) {
       if (e instanceof layer.TokenError) fail(e.message);
@@ -284,6 +286,9 @@ async function main(): Promise<void> {
   const runsServer = (mode === "all" || mode === "server") && child?.role !== "backend";
   if (runsBackend) {
     if (!env.TRACKER_BACKEND_TOKEN) fail("TRACKER_BACKEND_TOKEN is required");
+    // 0.3.0 integration (seams v2.1): the run registry goes to the journal before the backend opens it, and so before
+    // the control listener can allocate: run-alloc lines are restored at load, and each new run is journalled.
+    if (durability && fixture) durability.runs = fixture.runs;
     try {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
@@ -317,6 +322,11 @@ async function main(): Promise<void> {
     if (backendDefects.length) out.backend_defects = backendDefects;
     // ---- stream D: the state line names the data dir and the journal head ----
     if (backend.durability?.journal) out.journal = { data_dir: values["data-dir"], head: backend.durability.journal.head() };
+    // 0.3.0 integration: GET /build reads the journal head live.
+    if (fixture && backend.durability?.journal) {
+      const journal = backend.durability.journal;
+      fixture.descriptor.journalHead = () => journal.head();
+    }
     // ---- end stream D ----
   }
   if (runsServer) {
