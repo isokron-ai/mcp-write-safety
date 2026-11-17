@@ -101,6 +101,11 @@ const EXPECT: Record<string, string[]> = {
   'read-only-by-annotation': ['MWS-CFG-3'],
   'unknown-tools-ignored': ['MWS-CFG-4'],
   'comment-marked-read-only': ['MWS-ANN-1'],
+  // tiny-tracker 0.2.0 (default profile, feature lookup): get_operation is annotated readOnlyHint: true and, on a key
+  // with no record, creates a ticket (its requirement is MWS-ANN-1, which tiny-tracker's own self-test shows). The
+  // shipped manifest (examples/tiny-tracker/writecheck.yaml) declares no call for get_operation, so this suite does
+  // not call it and finds nothing: the expectation records that.
+  'lookup-reexecutes': [],
   'add-label-replaces-list': ['MWS-ANN-2', 'MWS-ANN-5'],
   'create-marked-idempotent': ['MWS-ANN-3'],
   'missing-annotations': ['MWS-ANN-4'],
