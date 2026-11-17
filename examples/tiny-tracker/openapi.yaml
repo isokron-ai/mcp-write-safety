@@ -659,7 +659,8 @@ paths:
       description: |
         Arms a fault point (feature `faults`), `process/position/action`. Built: `mcp/after-backend-reply/drop` (the
         MCP answer is held after the backend committed: the lost response, server-side) and the crash points
-        `backend/before-commit/crash`, `backend/after-commit/crash`, `mcp/after-backend-reply/crash`. A crash point
+        `backend/before-commit/crash`, `backend/after-commit/crash`, `mcp/after-backend-reply/crash` and
+        `backend/after-effect-before-key/crash` (keyed writes, with `durable`). A crash point
         takes no selector but `{"once": true}` and needs `--supervise` (409 `needs_supervise` in one process). Every
         arming and firing is a ledger entry. At most 32 armed faults.
       security: [{ controlToken: [] }]
@@ -1010,7 +1011,7 @@ components:
       properties:
         id: { type: string, description: process/position/action }
         process: { type: string, enum: [mcp, backend] }
-        position: { type: string, enum: [before-commit, after-commit, after-backend-reply] }
+        position: { type: string, enum: [before-commit, after-commit, after-backend-reply, after-effect-before-key] }
         action: { type: string, enum: [drop, close, crash, delay, error] }
         since: { type: [string, "null"] }
         note: { type: string }
