@@ -19,7 +19,11 @@
 // committed file byte for byte (review T5).
 //
 //   node expected/generate.mjs --builds expected/builds-0.2.0.json --out expected/0.2.0.json --table expected/0.2.0.md
-//        [--contract-dir DIR] [--writecheck PATH/TO/mcp-writecheck/cli.js] [--repeat N] [--only LABEL]... [--check]
+//        [--contract-dir DIR] [--writecheck PATH/TO/mcp-writecheck/cli.js] [--repeat N] [--only LABEL]... [--check] [--progress]
+//
+// 0.4.0: a build may carry `env` (e.g. TRACKER_VARIANTS) and `{DATA_DIR}` in its arguments; with the durable feature
+// the generator restarts the build on the same data dir for FX-DUR-1 (fx-check --durability-plant / -verify) and gives
+// fx-check the data dir for FX-DUR-2. The 0.4.0 build list is selected by expected/select-0.4.0.mjs.
 //
 // Needs a build (npm run build). Starts every process on 127.0.0.1 with port 0; tokens are generated for each start
 // and never written to any output.
@@ -39,10 +43,17 @@ const PACKAGE = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
 const token = (name) => `${name}-${randomBytes(20).toString("hex")}`;
 
-/** Starts one build; resolves with its state line, its tokens, and a stop function. */
-export function startBuild(args, extraEnv = {}) {
-  const tokens = { backend: token("gen-backend"), evidence: token("gen-evidence"), control: token("gen-control"), second: token("gen-second") };
-  const work = mkdtempSync(join(tmpdir(), "tt-expected-"));
+/**
+ * Starts one build; resolves with its state line, its tokens, and a stop function. `{DATA_DIR}` in the arguments is a
+ * data dir in the build's own temporary folder (the row keeps the placeholder, so nothing machine-specific is written).
+ * `reuse` (a run from before) starts the same build again on the same folder and tokens: a restart.
+ */
+export function startBuild(args, extraEnv = {}, reuse = undefined) {
+  const tokens = reuse?.tokens ?? { backend: token("gen-backend"), evidence: token("gen-evidence"), control: token("gen-control"), second: token("gen-second") };
+  const work = reuse?.work ?? mkdtempSync(join(tmpdir(), "tt-expected-"));
+  const dataDir = join(work, "data");
+  args = args.map((a) => a.replaceAll("{DATA_DIR}", dataDir));
+  extraEnv = Object.fromEntries(Object.entries(extraEnv).map(([k, v]) => [k, String(v).replaceAll("{WORK}", work)]));
   const env = { PATH: process.env.PATH ?? "", TRACKER_BACKEND_TOKEN: tokens.backend, TRACKER_EVIDENCE_TOKEN: tokens.evidence, TRACKER_CONTROL_TOKEN: tokens.control, ...extraEnv };
   if (args.flatMap((a) => a.split(",")).includes("principals")) {
     // Two principals: the default one (the MCP server's backend token) and a second for FX-LOOK-3.
@@ -61,7 +72,9 @@ export function startBuild(args, extraEnv = {}) {
       if (out.includes("\n")) {
         clearTimeout(timer);
         const state = JSON.parse(out.split("\n")[0]);
-        resolveStart({ state, tokens, env, stop: () => new Promise((r) => { child.once("exit", () => { rmSync(work, { recursive: true, force: true }); r(); }); child.kill("SIGTERM"); }) });
+        resolveStart({ state, tokens, env, work, dataDir,
+          // keep: leave the folder (data dir, principals file) for a restart with `reuse`.
+          stop: (keep = false) => new Promise((r) => { child.once("exit", () => { if (!keep) rmSync(work, { recursive: true, force: true }); r(); }); child.kill("SIGTERM"); }) });
       }
     });
     child.on("exit", (code) => { clearTimeout(timer); if (!out.includes("\n")) reject(new Error(`tiny-tracker all ${args.join(" ")} exited ${code}: ${err.trim()}`)); });
@@ -74,10 +87,45 @@ async function buildHash(state, tokens) {
   return (await res.json()).build_hash;
 }
 
-async function fixtureAnswers(state, tokens) {
+async function fixtureAnswers(state, tokens, extra = {}) {
   const { fxCheck } = await import(pathToFileURL(join(ROOT, "dist", "src", "fx-check.js")).href);
-  const report = await fxCheck({ backend: state.backend, mcp: state.mcp, control: state.control, tokens, probe: true });
-  return Object.fromEntries(report.findings.map((f) => [f.id, f.verdict]));
+  // The drop probe (FX-FLT-1) waits 1 s for an answer that is held until the hold ends: enough on loopback.
+  const report = await fxCheck({ backend: state.backend, mcp: state.mcp, control: state.control, tokens, probe: true, dropWaitMs: 1000, ...extra });
+  return { answers: Object.fromEntries(report.findings.map((f) => [f.id, f.verdict])), plant: report.plant };
+}
+
+/**
+ * The fixture answers of one start. With the durable feature (a `{DATA_DIR}` build) it is two starts on the same data
+ * dir: fx-check with the data dir (FX-DUR-2) and a durability plant, a restart, then fx-check --durability-verify for
+ * FX-DUR-1 (its answer replaces the plant's "not checked").
+ */
+async function fixtureRun(b) {
+  const durable = b.args.some((a) => a.includes("{DATA_DIR}"));
+  const run = await startBuild(b.args, b.env ?? {});
+  let hash;
+  let answers;
+  let kept = false;
+  try {
+    hash = await buildHash(run.state, run.tokens);
+    if (b.fixture === false) return { hash, answers: {} };
+    const first = await fixtureAnswers(run.state, run.tokens, durable ? { dataDir: run.dataDir, durability: { plant: true } } : {});
+    answers = first.answers;
+    if (durable && first.plant) {
+      await run.stop(true);
+      kept = true;
+      const again = await startBuild(b.args, b.env ?? {}, run);
+      try {
+        if ((await buildHash(again.state, again.tokens)) !== hash) throw new Error(`${b.label}: build_hash changed across the restart`);
+        const verify = await fixtureAnswers(again.state, again.tokens, { durability: { verify: first.plant } });
+        answers["FX-DUR-1"] = verify.answers["FX-DUR-1"];
+      } finally {
+        await again.stop();
+      }
+    }
+  } finally {
+    if (!kept) await run.stop();
+  }
+  return { hash, answers };
 }
 
 function contractAnswers(state, tokens, env, contractDir) {
@@ -127,17 +175,13 @@ export async function generate(o) {
     const fixture = {};
     const contract = {};
     for (let i = 0; i < (o.repeat ?? 1); i++) {
-      const run = await startBuild(b.args);
-      try {
-        const h = await buildHash(run.state, run.tokens);
-        if (hash !== undefined && h !== hash) throw new Error(`${b.label}: build_hash changed between runs (${hash}, ${h})`);
-        hash = h;
-        if (b.fixture !== false) for (const [id, v] of Object.entries(await fixtureAnswers(run.state, run.tokens))) (fixture[id] ??= new Set()).add(v);
-      } finally {
-        await run.stop();
-      }
+      const r = await fixtureRun(b);
+      if (hash !== undefined && r.hash !== hash) throw new Error(`${b.label}: build_hash changed between runs (${hash}, ${r.hash})`);
+      hash = r.hash;
+      for (const [id, v] of Object.entries(r.answers)) (fixture[id] ??= new Set()).add(v);
+      o.progress?.(b.label, i);
       if (b.contract && o.contractDir) {
-        const again = await startBuild(b.args);
+        const again = await startBuild(b.args, b.env ?? {});
         try {
           if ((await buildHash(again.state, again.tokens)) !== hash) throw new Error(`${b.label}: build_hash changed between runs`);
           for (const [id, v] of Object.entries(contractAnswers(again.state, again.tokens, again.env, o.contractDir))) (contract[id] ??= new Set()).add(v);
@@ -146,7 +190,7 @@ export async function generate(o) {
         }
       }
     }
-    const row = { build_hash: hash, label: b.label, start: ["tiny-tracker", "all", ...b.args] };
+    const row = { build_hash: hash, label: b.label, start: [...Object.entries(b.env ?? {}).map(([k, v]) => `${k}=${v}`), "tiny-tracker", "all", ...b.args] }; // placeholders kept
     if (b.writecheck && o.writecheck) {
       const wc = { version: undefined, answers: {} };
       for (let i = 0; i < (o.repeat ?? 1); i++) {
@@ -199,14 +243,17 @@ export function table(doc) {
 async function main() {
   const { values } = parseArgs({ options: {
     builds: { type: "string" }, out: { type: "string" }, table: { type: "string" }, "contract-dir": { type: "string" },
-    writecheck: { type: "string" }, repeat: { type: "string" }, only: { type: "string", multiple: true }, check: { type: "boolean" },
+    writecheck: { type: "string" }, repeat: { type: "string" }, only: { type: "string", multiple: true }, check: { type: "boolean" }, progress: { type: "boolean" },
   } });
   if (!values.builds || !values.out) { process.stderr.write("usage: generate.mjs --builds FILE --out FILE [--table FILE] [--contract-dir DIR] [--writecheck CLI] [--repeat N] [--only LABEL]... [--check]\n"); return 2; }
   if (!existsSync(CLI)) { process.stderr.write("generate.mjs: build first (npm run build)\n"); return 2; }
-  const doc = await generate({ builds: values.builds, contractDir: values["contract-dir"], writecheck: values.writecheck, repeat: Number(values.repeat ?? 1), only: values.only });
+  let done = 0;
+  const progress = values.progress ? (label, i) => { if (i === Number(values.repeat ?? 1) - 1) process.stderr.write(`[${++done}] ${label}\n`); } : undefined;
+  const doc = await generate({ builds: values.builds, contractDir: values["contract-dir"], writecheck: values.writecheck, repeat: Number(values.repeat ?? 1), only: values.only, progress });
   const text = `${JSON.stringify(doc, null, 2)}\n`;
   const check = spawnSync("python3", ["-I", join(ROOT, "verify", "python", "check_schemas.py"), "--instance", "expected"], { input: text, encoding: "utf8" });
-  if (check.status !== 0 && check.status !== 3) { process.stderr.write(`generate.mjs: the output does not validate against expected-1: ${check.stdout}${check.stderr}\n`); return 1; }
+  // No python3 (Windows runners) or no jsonschema (exit 3): the schema check is skipped, as the schema tests skip.
+  if (!check.error && check.status !== 0 && check.status !== 3) { process.stderr.write(`generate.mjs: the output does not validate against expected-1: ${check.stdout}${check.stderr}\n`); return 1; }
   if (values.check) {
     const same = existsSync(values.out) && readFileSync(values.out, "utf8") === text;
     process.stdout.write(same ? `${values.out}: reproduced byte for byte\n` : `${values.out}: differs from a fresh generation\n`);

@@ -10,15 +10,24 @@
 // --out, keeps every run's bytes for upload. Exit 1 on any difference.
 //
 // Generators registered now:
-//   surface   the 0.1 surface transcript of this tree (the recorder behind
-//             test/surface.test.ts): ten configurations, 214 calls.
-// To register another (the expected/ generator, at integration): add an
-// entry to GENERATORS that returns the exact bytes it would write.
+//   surface          the 0.1 surface transcript of this tree (the recorder behind
+//                    test/surface.test.ts): ten configurations, 214 calls.
+//   select-0.4.0     the 0.4.0 build selection (expected/select-0.4.0.mjs): the
+//                    pairwise matrix's build list, as it would be written.
+//   expected-sample  the known-answer generator (expected/generate.mjs, stream C)
+//                    over a fixed sample of the 0.4.0 matrix: the four correct
+//                    builds and every 40th row (17 builds, four of them durable
+//                    with a restart), fixture answers only. The whole matrix is
+//                    regenerated and compared with expected/0.4.0.json by
+//                    `generate.mjs --check` (the known-answers-matrix CI job).
+// To register another: add an entry to GENERATORS that returns the exact
+// bytes it would write.
 
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { canonicalize } from "../src/digest.js";
 import { recordSurface } from "./support/surface.js";
 
@@ -30,11 +39,40 @@ export interface Generator {
   generate(run: number): Promise<Buffer>;
 }
 
+const EXPECTED = (p: string) => pathToFileURL(fileURLToPath(new URL(`../../expected/${p}`, import.meta.url))).href;
+
+/** The rows of the 0.4.0 matrix the sample generator runs: the seeds (correct builds) and every 40th row. */
+export function sampleRows<T extends { why?: string; label: string }>(builds: T[]): T[] {
+  return builds.filter((b, i) => /correct build$/.test(b.label) || i % 40 === 0);
+}
+
 export const GENERATORS: Generator[] = [
   {
     name: "surface",
     // OS-assigned ports (portBase 0); ports are masked in the transcript.
     generate: async () => Buffer.from(canonicalize(await recordSurface({ cli: CLI, portBase: 0 }) as never), "utf8"),
+  },
+  {
+    name: "select-0.4.0",
+    generate: async () => {
+      const { select } = await import(EXPECTED("select-0.4.0.mjs"));
+      return Buffer.from(`${JSON.stringify(await select(), null, 2)}\n`, "utf8");
+    },
+  },
+  {
+    name: "expected-sample",
+    generate: async () => {
+      const { generate } = await import(EXPECTED("generate.mjs"));
+      const list = JSON.parse(readFileSync(fileURLToPath(new URL("../../expected/builds-0.4.0.json", import.meta.url)), "utf8"));
+      const dir = mkdtempSync(join(tmpdir(), "tt-repro-"));
+      try {
+        const file = join(dir, "builds.json");
+        writeFileSync(file, JSON.stringify({ ...list, builds: sampleRows(list.builds) }));
+        return Buffer.from(`${JSON.stringify(await generate({ builds: file, repeat: 1 }), null, 2)}\n`, "utf8");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
   },
 ];
 
