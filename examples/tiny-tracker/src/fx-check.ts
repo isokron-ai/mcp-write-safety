@@ -607,22 +607,8 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
         { key: p.key, boot_before: p.boot_id, boot_after: bootNow });
     }
   } else if (o.durability?.plant && wants("FX-DUR-1")) {
-    if (!o.tokens.backend || o.probe !== true) set("FX-DUR-1", "not checked", "the plant is a write: needs --probe and a backend token");
-    else {
-      const key = newKey();
-      const body = { title: `fx-check durability plant ${key}`, project: "inbox" };
-      // No run tag: the probe run is reset at the end, and a reset would remove what the restart must show.
-      const r = await request(`${base}/tickets`, {
-        method: "POST", headers: { authorization: `Bearer ${o.tokens.backend}`, "content-type": "application/json", [HEADERS.operation]: opTag(), "idempotency-key": key },
-        body: JSON.stringify(body),
-      });
-      if (r.status !== 201) set("FX-DUR-1", "not checked", `the plant create answered ${r.status}`);
-      else {
-        report.plant = { fx_check_plant: "fx-check-plant/1", build_hash: d.build_hash, boot_id: d.process?.boot_id, principal, key,
-          request: { path: "/tickets", body }, status: r.status, execution_id: r.headers.get("tiny-tracker-execution"), canonical: canonicalize(r.body ?? null) };
-        set("FX-DUR-1", "not checked", `planted ${key}; restart the stack on the same data dir and run --durability-verify with the plant`, { key });
-      }
-    }
+    // Planted after FX-KEY-1 below: that check moves the fixture clock by almost the whole retention, and with durable
+    // the offset survives the restart, so a key planted before the move would reach the verify nearly expired.
   } else if (wants("FX-DUR-1")) set("FX-DUR-1", "not checked", "needs a restart: plant with --durability-plant FILE, restart the stack, then --durability-verify FILE");
 
   // ---- FX-DUR-2: the effect and its key record are one journal line (the data dir's files, read only) ----
@@ -686,6 +672,27 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
           ? `${advance} ms after the write (stated retention ${stated} ms) the keyed repeat was still answered as a replay`
           : `${advance} ms after the write, inside the stated retention of ${stated} ms, the keyed repeat answered ${again.status}${again.body?.error ? ` ${again.body.error}` : ""}, not a replay`,
           { key, advance_ms: advance, retention_ms: stated });
+      }
+    }
+  }
+
+  // ---- FX-DUR-1, the plant: after FX-KEY-1's clock move, so the planted key is fresh at the restart (0.4.0: the
+  // journal keeps the clock's offset across it) and only durability is measured ----
+  if (!o.durability?.verify && o.durability?.plant && wants("FX-DUR-1")) {
+    if (!o.tokens.backend || o.probe !== true) set("FX-DUR-1", "not checked", "the plant is a write: needs --probe and a backend token");
+    else {
+      const key = newKey();
+      const body = { title: `fx-check durability plant ${key}`, project: "inbox" };
+      // No run tag: the probe run is reset at the end, and a reset would remove what the restart must show.
+      const r = await request(`${base}/tickets`, {
+        method: "POST", headers: { authorization: `Bearer ${o.tokens.backend}`, "content-type": "application/json", [HEADERS.operation]: opTag(), "idempotency-key": key },
+        body: JSON.stringify(body),
+      });
+      if (r.status !== 201) set("FX-DUR-1", "not checked", `the plant create answered ${r.status}`);
+      else {
+        report.plant = { fx_check_plant: "fx-check-plant/1", build_hash: d.build_hash, boot_id: d.process?.boot_id, principal, key,
+          request: { path: "/tickets", body }, status: r.status, execution_id: r.headers.get("tiny-tracker-execution"), canonical: canonicalize(r.body ?? null) };
+        set("FX-DUR-1", "not checked", `planted ${key}; restart the stack on the same data dir and run --durability-verify with the plant`, { key });
       }
     }
   }
