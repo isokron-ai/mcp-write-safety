@@ -13,10 +13,10 @@ import { executionId } from "../records.js";
 import type { Clock } from "../clock.js";
 import { defaultPrincipals, principalFor, type Principal } from "../principals.js";
 import { HEADERS, TAG_PATTERN } from "../fixture-properties.js";
-import { applyBackendDefects } from "./defects/index.js";
+import { applyBackendDefects, BACKEND_DEFECTS } from "./defects/index.js";
 import { correctInputRules, type InputRules } from "./input.js";
 // ---- stream D: durability (import) ----
-import { openDurability, type Durability, type DurabilityOptions } from "./durability.js";
+import { DURABILITY_DEFECTS, openDurability, type Durability, type DurabilityOptions } from "./durability.js";
 // ---- end stream D ----
 
 export interface BackendOptions {
@@ -234,6 +234,18 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       replayObservers: executions ? [(tx) => executions!.onCommit(tx)] : [],
     }) : undefined;
   if (durable) ops.keyRecord = durable.seam;
+  // 0.4.0 integration (found by the known-answer matrix): the durable seam above replaced the keyRecord seam after the
+  // backend defects were applied, so a defect that replaces keyRecord (replay-digest-mismatch) was silently gone under
+  // durable, inflight or retention. It is applied again, over the durable seam. The seam is a class instance under
+  // inflight: its methods are bound into a plain object first, so a defect's spread keeps begin and abort.
+  if (durable) {
+    const keyDefects = (options.defects ?? []).filter((name) => !(DURABILITY_DEFECTS as readonly string[]).includes(name)
+      && BACKEND_DEFECTS.find((d) => d.name === name)?.seams.includes("keyRecord"));
+    if (keyDefects.length) {
+      ops.keyRecord = bindSeam(durable.seam);
+      applyBackendDefects(keyDefects, ops, features);
+    }
+  }
   // ---- end stream D ----
   store.keyRecords = ops.keyRecord;
   store.runOwner = options.runOwner;
@@ -649,4 +661,17 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       durable?.close(); // stream D
     },
   };
+}
+
+/** A seam's methods (own and inherited), bound to it, in a plain object a defect can spread without losing any. */
+function bindSeam<T extends object>(seam: T): T {
+  const out: Record<string, unknown> = {};
+  for (let o: object | null = seam; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const name of Object.getOwnPropertyNames(o)) {
+      if (name === "constructor" || name in out) continue;
+      const v = (seam as Record<string, unknown>)[name];
+      out[name] = typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(seam) : v;
+    }
+  }
+  return out as T;
 }

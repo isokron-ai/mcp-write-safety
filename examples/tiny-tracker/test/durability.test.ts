@@ -299,6 +299,46 @@ describe("the data dir and its lock (G13, X5)", () => {
   });
 });
 
+describe("replay-digest-mismatch under the 0.3.0 key records (found by the 0.4.0 matrix; cherry-picked from f065c6b)", () => {
+  for (const durable of [false, true]) {
+    it(`the defect still re-renders a replay with ${durable ? "durable" : "inflight and retention"} on, and the key states still work`, async () => {
+      const t = tempDir("rdm");
+      const features = ["execution-records", "strict-input", "inflight", "retention", ...(durable ? ["durable"] : [])];
+      let release!: () => void;
+      let reached!: () => void;
+      const arrived = new Promise<void>((r) => { reached = r; });
+      const gate = new Promise<void>((r) => { release = r; });
+      let hold = false;
+      const backend = await startBackend({
+        token: TOKEN, port: 0, clock: movableClock(), features, defects: ["replay-digest-mismatch"],
+        faults: { beforeCommit: async () => { if (hold) { hold = false; reached(); await gate; } } },
+        durability: { features, ...(durable ? { dataDir: t.dataDir } : {}), log: () => {} },
+      });
+      try {
+        const api = new (await import("./support/stack.js")).Rest(backend.url, TOKEN);
+        const body = { project: "inbox", title: "a" };
+        const first = await api.send("POST", "/tickets", body, keyed("rdm-key-000001"));
+        const again = await api.send("POST", "/tickets", body, keyed("rdm-key-000001"));
+        assert.equal(again.headers.get("idempotent-replayed"), "true");
+        assert.equal(again.body.ticket.id, first.body.ticket.id, "the same write");
+        // Before the fix the durable key records replaced the defect: the replay's bytes were the first answer's.
+        assert.notEqual(again.body.ticket.updated_at, first.body.ticket.updated_at, "the defect: the replay is re-rendered");
+        // begin and abort survive the defect's wrapping: a same-key call while the first is pending is in_progress.
+        hold = true;
+        const held = api.send("POST", "/tickets", { project: "inbox", title: "b" }, keyed("rdm-key-000002"));
+        await arrived;
+        const second = await api.send("POST", "/tickets", { project: "inbox", title: "b" }, keyed("rdm-key-000002"));
+        release();
+        assert.deepEqual([second.status, second.body.error], [409, "in_progress"]);
+        assert.equal((await held).status, 201);
+      } finally {
+        await backend.close();
+        t.cleanup();
+      }
+    });
+  }
+});
+
 describe("the flush limit on macOS (G2 fold-in 13)", () => {
   it("a durable start on darwin states that fsync is not F_FULLFSYNC (crash-safe, not power-cut-safe); other platforms say nothing", async () => {
     assert.match(flushLimit("darwin")!, /not F_FULLFSYNC.*survives a process crash, not a power cut/);
