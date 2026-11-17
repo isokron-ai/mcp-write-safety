@@ -19,7 +19,7 @@
 // committed file byte for byte (review T5).
 //
 //   node expected/generate.mjs --builds expected/builds-0.2.0.json --out expected/0.2.0.json --table expected/0.2.0.md
-//        [--contract-dir DIR] [--writecheck PATH/TO/mcp-writecheck/cli.js] [--repeat N] [--only LABEL]... [--check] [--progress]
+//        [--contract-dir DIR] [--writecheck PATH/TO/mcp-writecheck/cli.js] [--repeat N] [--only LABEL]... [--check] [--progress] [--jobs N]
 //
 // 0.4.0: a build may carry `env` (e.g. TRACKER_VARIANTS) and `{DATA_DIR}` in its arguments; with the durable feature
 // the generator restarts the build on the same data dir for FX-DUR-1 (fx-check --durability-plant / -verify) and gives
@@ -128,8 +128,23 @@ async function fixtureRun(b) {
   return { hash, answers };
 }
 
-function contractAnswers(state, tokens, env, contractDir) {
-  const cfg = spawnSync("python3", ["-I", join(ROOT, "harness", "adapter_config.py"), "--no-build"], { input: JSON.stringify(state), encoding: "utf8", env });
+/** spawnSync's shape, without blocking the event loop (other builds run beside this one with --jobs). */
+function run(cmd, args, opts = {}) {
+  return new Promise((resolveRun) => {
+    const child = spawn(cmd, args, { env: opts.env, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.stderr.on("data", (d) => { stderr += d; });
+    const timer = opts.timeout ? setTimeout(() => child.kill("SIGKILL"), opts.timeout) : undefined;
+    child.on("error", (error) => { clearTimeout(timer); resolveRun({ status: null, stdout, stderr, error }); });
+    child.on("close", (status) => { clearTimeout(timer); resolveRun({ status, stdout, stderr }); });
+    child.stdin.end(opts.input ?? "");
+  });
+}
+
+async function contractAnswers(state, tokens, env, contractDir) {
+  const cfg = await run("python3", ["-I", join(ROOT, "harness", "adapter_config.py"), "--no-build"], { input: JSON.stringify(state), env });
   if (cfg.status !== 0) throw new Error(`adapter_config.py: ${cfg.stderr}`);
   const config = JSON.parse(cfg.stdout);
   config.adapter_config.drop_timeout_s = 2;
@@ -137,7 +152,7 @@ function contractAnswers(state, tokens, env, contractDir) {
   try {
     const path = join(work, "config.json");
     writeFileSync(path, JSON.stringify(config));
-    const r = spawnSync("python3", ["-I", join(ROOT, "harness", "selfcheck.py"), "--config", path, "--driver", contractDir], { encoding: "utf8", env: { ...env, TRACKER_EVIDENCE_TOKEN: tokens.evidence, TRACKER_CONTROL_TOKEN: tokens.control, TRACKER_BACKEND_TOKEN: tokens.backend }, timeout: 600000 });
+    const r = await run("python3", ["-I", join(ROOT, "harness", "selfcheck.py"), "--config", path, "--driver", contractDir], { env: { ...env, TRACKER_EVIDENCE_TOKEN: tokens.evidence, TRACKER_CONTROL_TOKEN: tokens.control, TRACKER_BACKEND_TOKEN: tokens.backend }, timeout: 600000 });
     if (r.status !== 0) throw new Error(`selfcheck.py --driver: ${r.stderr}`);
     const out = JSON.parse(r.stdout);
     if (!out.driver.commit_matches_pin) throw new Error(`the contract checkout is at ${out.driver.commit}, not the pinned ${PIN.contract.commit}`);
@@ -169,8 +184,10 @@ export async function generate(o) {
   const list = JSON.parse(readFileSync(o.builds, "utf8"));
   const builds = [];
   const writecheck = [];
-  for (const b of list.builds) {
-    if (o.only?.length && !o.only.includes(b.label)) continue;
+  // --jobs N: builds run N at a time (each on its own ports, tokens and folder); the output is sorted, so it does not
+  // depend on the order they finish in.
+  const todo = list.builds.filter((b) => !(o.only?.length && !o.only.includes(b.label)));
+  const one = async (b) => {
     let hash;
     const fixture = {};
     const contract = {};
@@ -184,7 +201,7 @@ export async function generate(o) {
         const again = await startBuild(b.args, b.env ?? {});
         try {
           if ((await buildHash(again.state, again.tokens)) !== hash) throw new Error(`${b.label}: build_hash changed between runs`);
-          for (const [id, v] of Object.entries(contractAnswers(again.state, again.tokens, again.env, o.contractDir))) (contract[id] ??= new Set()).add(v);
+          for (const [id, v] of Object.entries(await contractAnswers(again.state, again.tokens, again.env, o.contractDir))) (contract[id] ??= new Set()).add(v);
         } finally {
           await again.stop();
         }
@@ -213,7 +230,11 @@ export async function generate(o) {
     }
     if (Object.keys(fixture).length) row.fixture = sortKeys(Object.fromEntries(Object.entries(fixture).map(([k, s]) => [k, sortedSet(s)])));
     builds.push(row);
-  }
+  };
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(o.jobs ?? 1, todo.length)) }, async () => {
+    while (next < todo.length) await one(todo[next++]);
+  }));
   builds.sort((a, b) => a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
   writecheck.sort((a, b) => a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
   // expected/1 allows additional top-level members: the writecheck rows sit beside the builds, not in them.
@@ -243,13 +264,13 @@ export function table(doc) {
 async function main() {
   const { values } = parseArgs({ options: {
     builds: { type: "string" }, out: { type: "string" }, table: { type: "string" }, "contract-dir": { type: "string" },
-    writecheck: { type: "string" }, repeat: { type: "string" }, only: { type: "string", multiple: true }, check: { type: "boolean" }, progress: { type: "boolean" },
+    writecheck: { type: "string" }, repeat: { type: "string" }, only: { type: "string", multiple: true }, check: { type: "boolean" }, progress: { type: "boolean" }, jobs: { type: "string" },
   } });
   if (!values.builds || !values.out) { process.stderr.write("usage: generate.mjs --builds FILE --out FILE [--table FILE] [--contract-dir DIR] [--writecheck CLI] [--repeat N] [--only LABEL]... [--check]\n"); return 2; }
   if (!existsSync(CLI)) { process.stderr.write("generate.mjs: build first (npm run build)\n"); return 2; }
   let done = 0;
   const progress = values.progress ? (label, i) => { if (i === Number(values.repeat ?? 1) - 1) process.stderr.write(`[${++done}] ${label}\n`); } : undefined;
-  const doc = await generate({ builds: values.builds, contractDir: values["contract-dir"], writecheck: values.writecheck, repeat: Number(values.repeat ?? 1), only: values.only, progress });
+  const doc = await generate({ builds: values.builds, contractDir: values["contract-dir"], writecheck: values.writecheck, repeat: Number(values.repeat ?? 1), only: values.only, progress, jobs: Number(values.jobs ?? 1) });
   const text = `${JSON.stringify(doc, null, 2)}\n`;
   const check = spawnSync("python3", ["-I", join(ROOT, "verify", "python", "check_schemas.py"), "--instance", "expected"], { input: text, encoding: "utf8" });
   // No python3 (Windows runners) or no jsonschema (exit 3): the schema check is skipped, as the schema tests skip.
