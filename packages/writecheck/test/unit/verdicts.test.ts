@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { annotationVerdicts, namedBy } from '../../src/checks/annotations.js';
-import { identifiesChange, saysUnknown } from '../../src/checks/types.js';
+import { brief, identifiesChange, saysUnknown } from '../../src/checks/types.js';
 import { usePatterns } from '../../src/checks/says.js';
 import { versionLeftOutRuns } from '../../src/checks/stale.js';
 import { parseStructured } from '../../src/core/util.js';
@@ -238,6 +238,21 @@ test('CONC-3: an answer that showed a conflict while its own change took effect 
   } finally {
     usePatterns(null);
   }
+});
+
+test('CONC-3 held request: a structured conflict in a large answer survives the clip of brief() (review item 5)', () => {
+  const res = M().resources[0]!;
+  const big = 'x'.repeat(6000);
+  const raw = (step: string, data: unknown) => ({ step, ok: true, isError: false, rpc_error: null, text: 'done', data, timed_out: false, transport_error: null, tool: 'ticket_update' });
+  const conflicting = brief(raw('h', { conflict: true, error: { code: 409, detail: big }, object: { body: big } }));
+  assert.equal((conflicting.data as Record<string, unknown>)['clipped'], true, 'the data was clipped');
+  assert.equal((conflicting.data as Record<string, unknown>)['conflict'], true, 'the signal member is kept');
+  assert.deepEqual((conflicting.data as Record<string, unknown>)['error'], { code: 409 }, 'the error object keeps its short scalars only');
+  const plain = brief(raw('o', { object: { body: big } }));
+  const trials = [0, 1, 2, 3].map((i) => ({ schedule: (i % 2 ? 'hold B, run A' : 'hold A, run B') as 'hold A, run B' | 'hold B, run A', held: { seq: i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: conflicting, other: plain, kept: { holder: false, other: true }, steps: [] }));
+  const r = gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+  assert.equal(r.verdict, 'held', 'the clipped answer still shows the conflict by its structured field');
+  assert.equal(r.numbers['conflict_shown'], 4);
 });
 
 test('recount re-derives the counters from recorded repetitions', () => {
