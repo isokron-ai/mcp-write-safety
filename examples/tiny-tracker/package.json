@@ -1,6 +1,6 @@
 {
   "name": "@mcp-write-safety/tiny-tracker",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Teaching MCP server for the MCP Write-Safety Requirements: a correct build and a build with one named defect per requirement.",
   "keywords": [
     "mcp",

@@ -2,30 +2,9 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
-## 0.2.0 (unreleased) for MWS 0.9
+## 0.3.0 (unreleased) for MWS 0.9
 
-The first shared-fixture release: evidence, execution records, lookup, principals, the execution ledger and server-side faults. `--profile 0.1` keeps the surface of the published 0.1.0, checked call for call against a transcript captured from its tarball; the default profile's changes are listed below.
-
-### Added
-- `--profile 0.1`: exactly the surface of the published 0.1.0, kept in every later release. `--profile default` is what runs when none is named.
-- `--features` (`TRACKER_FEATURES`): strict feature switches; a name not built in this version stops the process (exit 2) and says which release builds it. Built now: `strict-input` (the backend checks idempotency keys itself and refuses strings that are not well-formed Unicode) and `evidence` (a stub: the read-only evidence namespace with `GET /build`, the build descriptor and its two hashes, mirrored in the MCP instructions and every result's `_meta`; run and operation tags from request `_meta` stamped on every backend request).
-- `--fixture-control`: a separate, hardened loopback control listener with its own token (run ids; clock and fault tables, read-only for now).
-- Tokens for the evidence namespace and the control listener are read from the environment or a 0600 file, never from the command line, and never printed.
-- A compatibility table: illegal combinations of profile, features, defects, variants, faults and process layout stop the process (exit 2).
-- Defects carry a `requires` list; `--defect all` means every defect valid for the active features. The backend has its own defect registry (seams, banner, refusal rules), and a computed defect placement map.
-- `--token-dir`: a 0700 folder where evidence and control tokens are generated (0600) when not supplied; only its path is printed.
-- Each write's committed transaction carries its complete post-state (objects, deletes, id counters, owners, applied-write entries), its request body and reply headers, the boot id and one record-clock time used for every stored time. A re-sent If-Match write that was already applied is reported as a replay, not a second commit. A journal failure is reported to the ledger. Backend fault hooks (before and after the commit section) and a run reset through the commit path.
-- Seams v2.1: key records answer in a fixed order (completed, pending as 409 `in_progress`, fenced as 409 `key_fenced`, expired as 410 `key_expired`), and every keyed answer reaches the ledger. A run reset fences its run's pending keys, so a write in flight during the reset never lands after it. Run ids are random; with the control listener on, a run tag that was never allocated is refused. A generated token file is written whole before it appears.
-- Integration (0.2.0): a tagged write that waited before its commit section while its run was reset is refused 409 `run_reset` and applies nothing; any internal error answer is recorded in the ledger as a refusal (500 `internal`); the MCP layer reports 409 `in_progress` as outcome `unknown` (repeat with the same key), not as nothing written. Fenced keys never expire (owner decision). The evidence route `GET /executions/:id` takes `?principal=` optionally; `fx-check` is a second command of the package.
-- The backend's single commit path (validate, journal, apply, ledger, reply), an injected clock for every timestamp, typed backend seams, principals with key records scoped by principal, and frozen record field names (`docs/INTERFACES.md`).
-- RFC 8785 canonical bytes and domain-tagged SHA-256 digests, with cross-language vectors (`vectors/digest-1.json`) and a standard-library Python verifier (`verify/python`).
-- `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).
-
-### Stream C
-- `harness/`: the lost-response contract adapter 0.2.0 (`harness/adapters/tiny_tracker.py`), pinned to the contract at `92bf1ba`. It counts effects from the execution ledger, drops the lost response server-side (`mcp/after-backend-reply/drop`), serves exactly one digest (`result_digest`), recomputes it with the domain tag, and recovers by key alone through `get_operation`. A3's key-only verdict is labelled self-attested until the driver compares recovered digests. `harness/adapter_config.py` prints a config for a running build; `harness/selfcheck.py` exercises the adapter, or runs the driver itself.
-- `fx-check` (`src/fx-check.ts`): checks a running fixture's FX- properties through its evidence API and answers each one held, violated, not checked or not applicable. Read-only by default; `--probe` writes probe tickets in a run of its own and resets it.
-- `expected/generate.mjs`: generates known-answer files keyed by `build_hash`, by running each build; `expected/builds-0.2.0.json` lists the 0.2.0 builds.
-- `verify/python/tt_recount.py`: recounts executions and objects from the export, the ledger, the execution records and (from 0.3.0) the journal, independently of tiny-tracker.
+Durability: a journal (`durable`, opt-in with `--data-dir`), in-flight key records (`inflight`) and a stated key retention (`retention`), both on in the default profile; the fixture clock, supervised restarts and crash fault points. `--profile 0.1` keeps the surface of the published 0.1.0.
 
 ### Stream D (0.3.0 durability)
 - Feature `durable` with `--data-dir`: a JSONL journal of committed post-state (`journal-format/1`: `jseq` and an RFC 8785 checksum on every line, the seed in the header), flushed before every answer and replayed with no clock read; a torn last line is dropped, any other bad line stops the start; a pid lock allows one writer per data dir; the data dir is private (0700).
@@ -52,6 +31,31 @@ The first shared-fixture release: evidence, execution records, lookup, principal
 - The default profile also turns on `inflight` and `retention` (owner decision 1, after the 0.3.0 gate). A same-key call while the first is being applied answers `in_progress` (outcome `unknown`, repeat with the same key); every key-accepting tool's description ends with the retention sentence ("A key is remembered for 7 days; …"); keys are kept 7 days with tombstones (`--key-expiry refuse`); `--defect all` includes `in-progress-reported-not-applied` and `settle-miss-reported-not-applied`. `durable` stays named: it needs `--data-dir`. The default build's `build_hash` changes with its feature set.
 - `tiny-tracker server` is not refused for the default's `inflight` and `retention` (CMP-54 refuses them only when named), and `--key-retention` given to `server` sets the retention its tools state.
 - `key-store-durable` and `settle-by-client-reference` turn a default-only `inflight` off as well as `lookup` (CMP-53); the state line names both in `features_off`. `settle-by-lookup` runs with the default's `inflight`, without naming it.
+
+## 0.2.0 (unreleased) for MWS 0.9
+
+The first shared-fixture release: evidence, execution records, lookup, principals, the execution ledger and server-side faults. `--profile 0.1` keeps the surface of the published 0.1.0, checked call for call against a transcript captured from its tarball; the default profile's changes are listed below.
+
+### Added
+- `--profile 0.1`: exactly the surface of the published 0.1.0, kept in every later release. `--profile default` is what runs when none is named.
+- `--features` (`TRACKER_FEATURES`): strict feature switches; a name not built in this version stops the process (exit 2) and says which release builds it. Built now: `strict-input` (the backend checks idempotency keys itself and refuses strings that are not well-formed Unicode) and `evidence` (a stub: the read-only evidence namespace with `GET /build`, the build descriptor and its two hashes, mirrored in the MCP instructions and every result's `_meta`; run and operation tags from request `_meta` stamped on every backend request).
+- `--fixture-control`: a separate, hardened loopback control listener with its own token (run ids; clock and fault tables, read-only for now).
+- Tokens for the evidence namespace and the control listener are read from the environment or a 0600 file, never from the command line, and never printed.
+- A compatibility table: illegal combinations of profile, features, defects, variants, faults and process layout stop the process (exit 2).
+- Defects carry a `requires` list; `--defect all` means every defect valid for the active features. The backend has its own defect registry (seams, banner, refusal rules), and a computed defect placement map.
+- `--token-dir`: a 0700 folder where evidence and control tokens are generated (0600) when not supplied; only its path is printed.
+- Each write's committed transaction carries its complete post-state (objects, deletes, id counters, owners, applied-write entries), its request body and reply headers, the boot id and one record-clock time used for every stored time. A re-sent If-Match write that was already applied is reported as a replay, not a second commit. A journal failure is reported to the ledger. Backend fault hooks (before and after the commit section) and a run reset through the commit path.
+- Seams v2.1: key records answer in a fixed order (completed, pending as 409 `in_progress`, fenced as 409 `key_fenced`, expired as 410 `key_expired`), and every keyed answer reaches the ledger. A run reset fences its run's pending keys, so a write in flight during the reset never lands after it. Run ids are random; with the control listener on, a run tag that was never allocated is refused. A generated token file is written whole before it appears.
+- Integration (0.2.0): a tagged write that waited before its commit section while its run was reset is refused 409 `run_reset` and applies nothing; any internal error answer is recorded in the ledger as a refusal (500 `internal`); the MCP layer reports 409 `in_progress` as outcome `unknown` (repeat with the same key), not as nothing written. Fenced keys never expire (owner decision). The evidence route `GET /executions/:id` takes `?principal=` optionally; `fx-check` is a second command of the package.
+- The backend's single commit path (validate, journal, apply, ledger, reply), an injected clock for every timestamp, typed backend seams, principals with key records scoped by principal, and frozen record field names (`docs/INTERFACES.md`).
+- RFC 8785 canonical bytes and domain-tagged SHA-256 digests, with cross-language vectors (`vectors/digest-1.json`) and a standard-library Python verifier (`verify/python`).
+- `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).
+
+### Stream C
+- `harness/`: the lost-response contract adapter 0.2.0 (`harness/adapters/tiny_tracker.py`), pinned to the contract at `92bf1ba`. It counts effects from the execution ledger, drops the lost response server-side (`mcp/after-backend-reply/drop`), serves exactly one digest (`result_digest`), recomputes it with the domain tag, and recovers by key alone through `get_operation`. A3's key-only verdict is labelled self-attested until the driver compares recovered digests. `harness/adapter_config.py` prints a config for a running build; `harness/selfcheck.py` exercises the adapter, or runs the driver itself.
+- `fx-check` (`src/fx-check.ts`): checks a running fixture's FX- properties through its evidence API and answers each one held, violated, not checked or not applicable. Read-only by default; `--probe` writes probe tickets in a run of its own and resets it.
+- `expected/generate.mjs`: generates known-answer files keyed by `build_hash`, by running each build; `expected/builds-0.2.0.json` lists the 0.2.0 builds.
+- `verify/python/tt_recount.py`: recounts executions and objects from the export, the ledger, the execution records and (from 0.3.0) the journal, independently of tiny-tracker.
 
 ### Changed in the default profile (ships with 0.2.0; `--profile 0.1` keeps the 0.1.0 behaviour except where noted)
 - The default profile turns on `execution-records`, `lookup` and `principals` (owner decision 1). `tools/list` gains `get_operation` and `get_execution` (18 tools), every committed write's answer carries `Tiny-Tracker-Execution`, and `--defect all` includes `lookup-reexecutes`; every other text and structured result is the 0.1.0 one. `TRACKER_VARIANTS=key-store-honest` turns `lookup` off for that build (lookup cannot see the keys the variant keeps; owner decision, 16 Nov 2026): the state line carries `features_off`, a notice goes to stderr, and the build descriptor and `build_hash` follow the features the build runs. A `lookup` named with `--features` or `TRACKER_FEATURES` alongside the variant is refused (CMP-5, exit 2). Under `--profile 0.1` the variant runs as in 0.1.0.
