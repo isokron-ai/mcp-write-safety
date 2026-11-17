@@ -72,6 +72,14 @@ export class StdioClient implements McpClient {
   private readonly pending = new Map<string, { step: string; resolve: (o: { message: Obj | null; transport_error: string | null }) => void }>();
   private readonly timedOut = new Map<string, string>();
   private exited = false;
+  /** Whether the tester sent this server SIGTERM or SIGKILL; written on its `exit` event in the capture. */
+  private stopSent = false;
+  // why: an exit by SIGKILL that the tester did not send is, most often, the kernel's out-of-memory killer; the capture tells the two apart.
+  private signal(how: 'term' | 'kill'): void {
+    this.stopSent = true;
+    if (how === 'term') this.sup?.term();
+    else this.sup?.kill();
+  }
   private closed: Promise<void> = Promise.resolve();
   readonly proc: Record<string, unknown> = { pid: null, supervisor_pid: null, exit_code: null, signal: null, terminated_by: null, stdin_error: null, spawn_error: null, server_requests: 0, stdout_nonjson: 0 };
 
@@ -117,7 +125,7 @@ export class StdioClient implements McpClient {
     });
     this.closed = new Promise<void>((r) =>
       child.once('close', (code, signal) => {
-        this.t.write({ label: this.label, step: null, dir: 'event', channel: 'process', event: 'exit', exit_code: code, signal });
+        this.t.write({ label: this.label, step: null, dir: 'event', channel: 'process', event: 'exit', exit_code: code, signal, stop_sent: this.stopSent });
         this.ended(`the server exited (${code ?? signal ?? '?'}) before answering`);
         r();
       }),
@@ -226,10 +234,10 @@ export class StdioClient implements McpClient {
       const waited = await Promise.race([this.closed.then(() => true), sleep(this.o.stop_timeout_ms).then(() => false)]);
       if (!waited) {
         this.proc['terminated_by'] = 'SIGTERM';
-        this.sup?.term();
+        this.signal('term');
         if (!(await Promise.race([this.closed.then(() => true), sleep(2_500).then(() => false)]))) {
           this.proc['terminated_by'] = 'SIGKILL';
-          this.sup?.kill();
+          this.signal('kill');
         }
       }
     }
@@ -240,14 +248,14 @@ export class StdioClient implements McpClient {
   /** Kill the server's process group at once, without waiting (crash path). */
   killNow(): void {
     if (!this.child || this.exited) return;
-    this.sup?.kill();
+    this.signal('kill');
   }
 
   /** SIGKILL the server's process group and wait for it to go (a restart by a kill, MWS-RETRY-2 step (e)). */
   async kill(): Promise<Record<string, unknown>> {
     if (this.child && !this.exited) {
       this.proc['terminated_by'] = 'SIGKILL';
-      this.sup?.kill();
+      this.signal('kill');
       await Promise.race([this.closed, sleep(5_000)]);
     }
     return { ...this.proc, started: !!this.child };
@@ -509,6 +517,14 @@ export class LaunchedServer {
   private stderrLines: string[] = [];
   private outcome: Promise<LaunchOutcome> | null = null;
   private exited = false;
+  /** Whether the tester sent this server SIGTERM or SIGKILL; written on its `exit` event in the capture. */
+  private stopSent = false;
+  // why: an exit by SIGKILL that the tester did not send is, most often, the kernel's out-of-memory killer; the capture tells the two apart.
+  private signal(how: 'term' | 'kill'): void {
+    this.stopSent = true;
+    if (how === 'term') this.sup?.term();
+    else this.sup?.kill();
+  }
   private exitCode: number | null = null;
   private closed: Promise<void> = Promise.resolve();
 
@@ -532,7 +548,7 @@ export class LaunchedServer {
       child.once('close', (code, signal) => {
         this.exited = true;
         this.exitCode = code;
-        this.t.write({ label: this.label, step: null, dir: 'event', channel: 'process', event: 'exit', exit_code: code, signal });
+        this.t.write({ label: this.label, step: null, dir: 'event', channel: 'process', event: 'exit', exit_code: code, signal, stop_sent: this.stopSent });
         r();
       }),
     );
@@ -588,9 +604,9 @@ export class LaunchedServer {
   /** SIGTERM the server's group, then SIGKILL; waits for the process to go. Says how it ended (a graceful stop that needed SIGKILL is a kill). */
   async stop(): Promise<'not_running' | 'SIGTERM' | 'SIGKILL'> {
     if (!this.sup || this.exited) return 'not_running';
-    this.sup.term();
+    this.signal('term');
     if (!(await Promise.race([this.closed.then(() => true), sleep(3_000).then(() => false)]))) {
-      this.sup.kill();
+      this.signal('kill');
       await Promise.race([this.closed, sleep(2_000)]);
       return 'SIGKILL';
     }
@@ -600,11 +616,11 @@ export class LaunchedServer {
   /** SIGKILL the server's group and wait for it to go. */
   async kill(): Promise<void> {
     if (!this.sup || this.exited) return;
-    this.sup.kill();
+    this.signal('kill');
     await Promise.race([this.closed, sleep(5_000)]);
   }
 
   killNow(): void {
-    if (!this.exited) this.sup?.kill();
+    if (!this.exited) this.signal('kill');
   }
 }
