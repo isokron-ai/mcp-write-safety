@@ -130,13 +130,20 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
       if (!features.inflight || method !== "POST" || parts.length !== 3 || parts[0] !== "operations" || parts[2] !== "fence") return undefined;
       const key = parts[1];
       if (!KEY_PATTERN.test(key)) return { status: 400, body: { error: "bad_idempotency_key", message: "the key must be 8 to 128 characters from A-Z a-z 0-9 . _ : -" } };
-      const write = (body as { fence?: unknown } | null | undefined)?.fence !== false;
+      // G2 fold-in 2: under the forget policy a missing record may be a forgotten applied write, so a miss is never
+      // fenced (nobody can tell the two apart; the outcome stays open). CMP-55 refuses settle-by-lookup with forget
+      // where it sees both; this covers a backend started apart from its MCP server.
+      const forgets = features.retention && keys.policy === "forget";
+      const write = (body as { fence?: unknown } | null | undefined)?.fence !== false && !forgets;
       let s;
       try {
         s = keys.fence({ principal }, key, run, write);
       } catch (e) {
         // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed.
         return { status: 503, body: { error: "journal_unavailable", message: `the fence could not be recorded: ${(e as Error).message}; nothing was fenced` } };
+      }
+      if (!s && forgets) {
+        return { status: 404, body: { error: "no_record", key, state: "unknown", fenced: false, message: "no record of this key now; under the forget key-expiry policy it may have been forgotten, so the key was not fenced and the outcome stays open" } };
       }
       if (!s) return { status: 404, body: { error: "no_record", key, state: "none", message: "no record of this key now" } };
       switch (s.state) {

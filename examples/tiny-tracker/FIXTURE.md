@@ -231,6 +231,7 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-52 | Two key variants at once (`key-store-honest`, `key-store-durable`, `settle-by-lookup`, `settle-by-client-reference`) |
 | CMP-53 | `key-store-durable` or `settle-by-client-reference` with a named `lookup` or `inflight` (they stand for a backend with no idempotency key). As with CMP-5, a `lookup` that comes only from the default profile is turned off for the build, not refused |
 | CMP-54 | `durable`, `inflight` or `retention` in `tiny-tracker server` (backend features) |
+| CMP-55 | The `settle-by-lookup` variant with `--key-expiry forget`, or with the `key-expires-early` backend defect: a missing record may then be a forgotten applied write, and the fence would close it as never applied. A backend under `forget` started apart from its MCP server never fences a miss: the fence route answers 404 `state: "unknown"`, `fenced: false`, and the outcome stays open (G2 fold-in 2) |
 | CMP-60 | `clock` without `--fixture-control` (the fixture clock moves only through the control listener) |
 | CMP-61, CMP-62 | `--supervise` under profile 0.1, or outside `tiny-tracker all` |
 | CMP-63 | A crash fault point without `--supervise`: in one process a crash stops both layers and nothing restarts them. On the control listener the same arming is refused 409 `needs_supervise` |

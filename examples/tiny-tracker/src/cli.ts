@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   }
   const refusals = checkCompat({
     layout, profile, features: named, defects: mcpDefects, backendDefects, variants: variantNames, faults: faultArgs.map((f) => f.point),
-    fixtureControl, dataDir: values["data-dir"], supervise,
+    fixtureControl, dataDir: values["data-dir"], supervise, keyExpiry: values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY,
   });
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;

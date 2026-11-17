@@ -315,6 +315,38 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     }
   });
 
+  it("CMP-55 (G2 fold-in 2): settle-by-lookup is refused with --key-expiry forget and with key-expires-early; a forget backend never fences a miss", async () => {
+    const sbl = { ...base, variants: ["settle-by-lookup"], features: ["inflight", "retention"] };
+    assert.deepEqual(checkCompat(sbl), []);
+    assert.deepEqual(checkCompat({ ...sbl, keyExpiry: "refuse" }), []);
+    assert.match(checkCompat({ ...sbl, keyExpiry: "forget" }).join(), /settle-by-lookup variant needs the refuse key-expiry policy/);
+    assert.match(checkCompat({ ...sbl, backendDefects: ["key-expires-early"] }).join(), /does not run with the key-expires-early backend defect/);
+    assert.deepEqual(checkCompat({ ...base, features: ["inflight", "retention"], keyExpiry: "forget" }), [], "forget alone is fine");
+    const r = await runCli(["all", "--features", "inflight,retention", "--key-expiry", "forget", "--port", "0", "--backend-port", "0"],
+      { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000", TRACKER_VARIANTS: "settle-by-lookup" });
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /needs the refuse key-expiry policy/);
+    assert.equal(r.stdout, "", "nothing started");
+    // The backend side: under forget, an applied write whose record was forgotten is not fenced, and the answer says the
+    // outcome is open (before the fix the fence answered "fenced" while GET /tickets/T-1 answered 200).
+    const clock = movableClock();
+    const backend = await startBackend({ token: TOKEN, port: 0, clock, features: ["inflight", "retention"], durability: { features: ["inflight", "retention"], policy: "forget" } });
+    try {
+      const rest = new Rest(backend.url, TOKEN);
+      assert.equal((await rest.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "forget-fence-0001" })).status, 201);
+      clock.advance(8 * DAY_MS);
+      const f = await rest.send("POST", "/operations/forget-fence-0001/fence", {});
+      assert.equal(f.status, 404);
+      assert.deepEqual([f.body.state, f.body.fenced], ["unknown", false]);
+      assert.equal((await rest.send("GET", "/tickets/T-1")).status, 200, "the write exists");
+      const again = await rest.send("POST", "/operations/forget-fence-0001/fence", {});
+      assert.equal(again.body.state, "unknown", "still not fenced");
+      assert.equal(backend.durability!.keys.counts().fenced, 0);
+    } finally {
+      await backend.close();
+    }
+  });
+
   it("CMP-50: durable needs strict-input, refused at start with a clear message (seams v2.1)", async () => {
     assert.match(checkCompat({ ...base, features: ["durable"], dataDir: "/x" }).join(), /durable feature needs strict-input/);
     assert.deepEqual(checkCompat({ ...base, features: ["durable", "strict-input"], dataDir: "/x" }), []);

@@ -28,6 +28,8 @@ export interface Combination {
   dataDir?: string;
   /** `tiny-tracker all --supervise` (0.3.0): the backend and the MCP server as two restartable children. */
   supervise?: boolean;
+  /** --key-expiry or TRACKER_KEY_EXPIRY as given (0.3.0, feature retention): refuse (the default) or forget. */
+  keyExpiry?: string;
 }
 
 /**
@@ -236,6 +238,18 @@ const KEY_VARIANTS = ["key-store-honest", "key-store-durable", "settle-by-lookup
     id: "CMP-53", post01: false,
     check: (c) => (has(c.variants, "key-store-durable") || has(c.variants, "settle-by-client-reference")) && (has(c.features, "lookup") || has(c.features, "inflight"))
       ? "the key-store-durable and settle-by-client-reference variants stand for a backend with no idempotency key; do not combine them with the backend key features (lookup, inflight)" : undefined,
+  },
+  {
+    // G2 fold-in 2: settle-by-lookup reads a miss behind the fence as "never applied". Under the forget policy, or with a
+    // retention cut short by the key-expires-early defect, a miss may be a forgotten record of an applied write: the
+    // fence would close a key whose write exists, and the variant would say not_applied. No defect names that pair.
+    id: "CMP-55", post01: false,
+    check: (c) => {
+      if (!has(c.variants, "settle-by-lookup")) return undefined;
+      if (c.keyExpiry === "forget") return "the settle-by-lookup variant needs the refuse key-expiry policy: under forget a missing record may be a forgotten applied write, and the lookup would report it not applied (drop --key-expiry forget)";
+      if (has(c.backendDefects, "key-expires-early")) return "the settle-by-lookup variant does not run with the key-expires-early backend defect: a record that expired early would be settled as a miss";
+      return undefined;
+    },
   },
 );
 // ---- end stream D ----
