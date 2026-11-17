@@ -57,6 +57,12 @@ export function retentionSentence(retentionMs: number = DEFAULT_RETENTION_MS): s
   return `A key is remembered for ${describeRetention(retentionMs)}; repeat the same intended write with the same key.`;
 }
 
+/**
+ * The sentence instead, when the retention is not known (follow-up F2): a `tiny-tracker server` whose backend states
+ * none and that was given none. It names no duration, so no reader takes a default for the backend's.
+ */
+export const UNKNOWN_RETENTION_SENTENCE = "This server does not know how long its backend remembers a key (the backend did not state its key retention); repeat the same intended write with the same key.";
+
 /** "7 days", "1 day", "90 seconds", "250 ms". */
 export function describeRetention(ms: number): string {
   const units: Array<[number, string]> = [[DAY_MS, "day"], [3_600_000, "hour"], [60_000, "minute"], [1000, "second"]];

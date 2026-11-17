@@ -426,12 +426,13 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     }
   });
 
-  it("0.3.0 default flip: inflight and retention run with no feature named; `server` states the retention it is given", async () => {
+  it("0.3.0 default flip: inflight and retention run with no feature named; `server` states the retention it is given or \"not known\"", async () => {
     const env: Record<string, string> = { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" };
     const statement = async (mode: "all" | "server", args: string[]) => {
       let text = "";
       const extra = mode === "all" ? ["--backend-port", "0"] : [];
-      // `server` lists its tools without calling its backend, so the backend URL is never contacted.
+      // Nothing listens on port 9 (discard): the backend states no retention (follow-up F2), and `server` lists its tools
+      // without calling its backend.
       const r = await runCli([mode, ...args, "--port", "0", ...extra], mode === "server" ? { ...env, TRACKER_BACKEND_URL: "http://127.0.0.1:9" } : env, async (state) => {
         const mcp = await connectClient(state.mcp, "2026-07-28");
         try {
@@ -444,13 +445,86 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
       return text;
     };
     assert.match(await statement("all", []), /A key is remembered for 7 days;/);
-    assert.match(await statement("server", []), /A key is remembered for 7 days;/);
+    // Follow-up F2: with no backend to read and no --key-retention, the tools say the retention is not known, not 7 days.
+    const unknown = await statement("server", []);
+    assert.match(unknown, /does not know how long its backend remembers a key/);
+    assert.doesNotMatch(unknown, /remembered for \d/);
     assert.match(await statement("server", ["--key-retention", "1h"]), /A key is remembered for 1 hour;/);
     const bad = await runCli(["server", "--key-retention", "soon", "--port", "0"], { ...env, TRACKER_BACKEND_URL: "http://127.0.0.1:9" });
     assert.equal(bad.code, 2);
     const named = await runCli(["server", "--features", "retention", "--port", "0"], { ...env, TRACKER_BACKEND_URL: "http://127.0.0.1:9" });
     assert.equal(named.code, 2, "a named backend feature in `server` is still refused (CMP-54)");
     assert.match(named.stderr, /backend features/);
+  });
+
+  it("follow-up F2: `server` states the retention its backend states; a --key-retention that differs is refused", async () => {
+    const env: Record<string, string> = { TRACKER_BACKEND_TOKEN: TOKEN };
+    /** Starts `tiny-tracker server` against `url` and reads create_ticket's description (undefined when it exits). */
+    const serverOn = async (url: string, args: string[] = [], extra: Record<string, string> = {}) => {
+      let text: string | undefined;
+      const r = await runCli(["server", ...args, "--port", "0"], { ...env, TRACKER_BACKEND_URL: url, ...extra }, async (state) => {
+        const mcp = await connectClient(state.mcp, "2026-07-28");
+        try {
+          const tools: any[] = await mcp.tools();
+          text = tools.find((t) => t.name === "create_ticket")!.description;
+          const keyed = tools.filter((t) => "idempotency_key" in (t.inputSchema?.properties ?? {}));
+          assert.ok(keyed.length > 0);
+          for (const t of keyed) assert.ok(t.description.endsWith(text!.slice(text!.lastIndexOf(". ") + 2)), `${t.name} states the same`);
+        } finally {
+          await mcp.close();
+        }
+      });
+      return { ...r, text };
+    };
+
+    // The coordinator's case: a backend started with --key-retention 1d, and a `server` given no flag.
+    const cliBackend = await runCli(["backend", "--key-retention", "1d", "--port", "0"], env, async (state) => {
+      const r = await serverOn(state.backend);
+      assert.equal(r.code, 0, r.stderr);
+      assert.match(r.text!, /A key is remembered for 1 day;/);
+      assert.doesNotMatch(r.text!, /7 days/);
+    });
+    assert.equal(cliBackend.code, 0, cliBackend.stderr);
+
+    const retention = ["inflight", "retention"];
+    const at = async (o: { retentionMs?: number; features?: string[]; defects?: string[] }, check: (url: string) => Promise<void>) => {
+      const features = o.features ?? retention;
+      const b = await startBackend({ token: TOKEN, port: 0, features, defects: o.defects, durability: { features, ...(o.retentionMs ? { retentionMs: o.retentionMs } : {}) } });
+      try {
+        await check(b.url);
+      } finally {
+        await b.close();
+      }
+    };
+    await at({ retentionMs: DAY_MS }, async (url) => {
+      // The fence route states it on every answer; a peek writes nothing.
+      const rest = new Rest(url, TOKEN);
+      const peek = await rest.send("POST", "/operations/any-key-0001/fence", { fence: false });
+      assert.deepEqual([peek.status, peek.body.retention_ms], [404, DAY_MS]);
+      assert.equal((await rest.send("POST", "/operations/bad/fence", {})).body.retention_ms, DAY_MS);
+      const same = await serverOn(url, ["--key-retention", "24h"]);
+      assert.equal(same.code, 0, same.stderr);
+      assert.match(same.text!, /remembered for 1 day;/, "the same retention given in other units is not a mismatch");
+      for (const [args, extra] of [[["--key-retention", "7d"], {}], [[], { TRACKER_KEY_RETENTION: "2h" }]] as Array<[string[], Record<string, string>]>) {
+        const r = await serverOn(url, args, extra);
+        assert.equal(r.code, 2, JSON.stringify(args));
+        assert.match(r.stderr, /gives (7 days|2 hours), but the backend states 1 day; drop it/);
+        assert.equal(r.stdout, "", "nothing started");
+      }
+    });
+    // A backend's default retention is stated too: the server's 7 days is then the backend's.
+    await at({}, async (url) => assert.match((await serverOn(url)).text!, /remembered for 7 days;/));
+    // key-expires-early keeps keys a thousandth of the retention; the stated retention stays the configured one.
+    await at({ retentionMs: DAY_MS, defects: ["key-expires-early"] }, async (url) => assert.match((await serverOn(url)).text!, /remembered for 1 day;/));
+    // A backend that states none (retention off, so no retention_ms; or no fence route): the given value, else "not known".
+    await at({ features: ["inflight"] }, async (url) => {
+      assert.equal((await new Rest(url, TOKEN).send("POST", "/operations/any-key-0001/fence", { fence: false })).body.retention_ms, undefined);
+      const r = await serverOn(url);
+      assert.equal(r.code, 0, r.stderr);
+      assert.match(r.text!, /does not know how long its backend remembers a key/);
+      assert.match((await serverOn(url, ["--key-retention", "3h"])).text!, /remembered for 3 hours;/);
+    });
+    await at({ features: [] }, async (url) => assert.match((await serverOn(url)).text!, /does not know how long/));
   });
 
   it("starts durable with --data-dir and names the journal; a second start on the same dir is refused; retention flags need retention", async () => {

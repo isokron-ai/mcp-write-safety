@@ -242,7 +242,7 @@ Shared-fixture groundwork ([FIXTURE.md](FIXTURE.md)): `test/surface.test.ts` (th
 tiny-tracker is also becoming a shared fixture for write-safety harnesses: a lookup by idempotency key, committed digests you can verify yourself, server-side fault points, and evidence that names the build it came from. The design, the parts built so far and their limits are in [FIXTURE.md](FIXTURE.md), with the larger choices in [docs/decisions](docs/decisions/README.md).
 
 - `--profile 0.1` runs exactly the surface of the published 0.1.0 (its tools, texts and structured results, checked against a transcript of the 0.1.0 tarball). Until 0.2.0 the default build was the same.
-- The default profile turns on each feature a release ships once its gate is met: `execution-records`, `lookup` and `principals` from 0.2.0, and `inflight` and `retention` from 0.3.0 (every key-accepting tool states the retention, 7 days unless `--key-retention` says otherwise). `durable` stays named, since it needs `--data-dir`.
+- The default profile turns on each feature a release ships once its gate is met: `execution-records`, `lookup` and `principals` from 0.2.0, and `inflight` and `retention` from 0.3.0 (every key-accepting tool states the retention, 7 days unless `--key-retention` says otherwise; a separate `tiny-tracker server` states its backend's). `durable` stays named, since it needs `--data-dir`.
 - New behaviour is switched on with `--features` (`TRACKER_FEATURES`). A name this version does not build yet stops the process and says which release builds it.
 
 Feedback is welcome: open an issue or a discussion on [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety).

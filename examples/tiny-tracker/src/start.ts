@@ -23,8 +23,11 @@ export interface StartServerOptions {
   features?: readonly string[];
   /** What the fixture layer adds (attribution, the build descriptor mirror). */
   extras?: ServerExtras;
-  /** The backend's key retention in ms (feature retention; --key-retention), stated in the tools. Default: 7 days. */
-  retentionMs?: number;
+  /**
+   * The backend's key retention in ms (feature retention; --key-retention), stated in the tools. Default: 7 days.
+   * null: not known (a `tiny-tracker server` whose backend states none); the tools say so instead of a number.
+   */
+  retentionMs?: number | null;
 }
 
 export interface StartedServer extends RunningMcpServer {

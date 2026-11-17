@@ -32,6 +32,28 @@ Fixture options (see FIXTURE.md):
                            supervisor keeps the arming, so a once fault does not re-arm on a restart.
 Tokens are read from the environment or a 0600 file, never from the command line.`;
 
+/** The probe key: a peek (fence: false) at a key no tool makes; any answer of the fence route states the retention. */
+const RETENTION_PROBE_KEY = "tiny-tracker.retention-probe";
+
+/**
+ * The key retention the backend states (follow-up F2), in ms, or undefined when it states none: no URL or token, not
+ * reachable within 3 s, no fence route (no inflight), or no retention_ms in its answer (no retention).
+ */
+async function backendRetentionMs(url: string | undefined, token: string | undefined): Promise<number | undefined> {
+  if (!url || !token) return undefined;
+  try {
+    const res = await fetch(`${url.replace(/\/+$/, "")}/operations/${RETENTION_PROBE_KEY}/fence`, {
+      method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ fence: false }), signal: AbortSignal.timeout(3000),
+    });
+    const body = (await res.json().catch(() => null)) as { retention_ms?: unknown } | null;
+    const ms = body?.retention_ms;
+    return typeof ms === "number" && Number.isSafeInteger(ms) && ms >= 1 ? ms : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function fail(message: string): never {
   process.stderr.write(`tiny-tracker: ${message}\n`);
   process.exit(2);
@@ -175,9 +197,11 @@ async function main(): Promise<void> {
   const keyRetention = values["key-retention"] ?? env.TRACKER_KEY_RETENTION;
   const keyExpiry = values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY;
   let durability: import("./backend/durability.js").DurabilityOptions | undefined;
-  // `server` (0.3.0 default flip): retention comes from the profile and the backend is another process; the tools state
-  // the retention given here, which should be the one the backend was started with.
-  let statedRetentionMs: number | undefined;
+  // `server` (0.3.0 default flip): retention comes from the profile and the backend is another process. The tools state
+  // the retention the backend states (follow-up F2, read at start below); --key-retention given here must agree with it.
+  // null: the backend did not state one and none was given, so the tools say the retention is not known.
+  let statedRetentionMs: number | null | undefined;
+  let givenRetentionMs: number | undefined;
   if ((keyRetention !== undefined || keyExpiry !== undefined) && !features.includes("retention")) {
     refusals.push("--key-retention and --key-expiry (TRACKER_KEY_RETENTION, TRACKER_KEY_EXPIRY) need the retention feature");
   } else if (["durable", "inflight", "retention"].some((f) => features.includes(f))) {
@@ -186,7 +210,7 @@ async function main(): Promise<void> {
       const retentionMs = expiry.parseRetention(keyRetention);
       const policy = expiry.parseExpiryPolicy(keyExpiry);
       if (layout !== "server") durability = { features, dataDir: values["data-dir"], retentionMs, policy };
-      else statedRetentionMs = retentionMs;
+      else if (keyRetention !== undefined && keyRetention.trim() !== "") givenRetentionMs = retentionMs;
     } catch (e) {
       if (e instanceof expiry.ExpirySettingError) refusals.push(e.message);
       else throw e;
@@ -219,6 +243,20 @@ async function main(): Promise<void> {
     return;
   }
   // ---- end stream E ----
+
+  // Follow-up F2: a `server` with retention states its backend's retention, read from the backend's fence route (every
+  // answer of it states retention_ms; a peek with fence: false writes nothing). A --key-retention that differs is
+  // refused. A backend that states none (no inflight or retention, or not reachable at start) leaves the given value,
+  // or else "not known": never a default the backend may not have.
+  if (layout === "server" && features.includes("retention")) {
+    const backendStated = await backendRetentionMs(env.TRACKER_BACKEND_URL, env.TRACKER_BACKEND_TOKEN);
+    if (backendStated !== undefined && givenRetentionMs !== undefined && backendStated !== givenRetentionMs) {
+      const { describeRetention } = await import("./backend/expiry.js");
+      fail(`--key-retention (TRACKER_KEY_RETENTION) gives ${describeRetention(givenRetentionMs)}, but the backend states ${describeRetention(backendStated)}; `
+        + "drop it (the backend's is used) or give the backend's. Not starting.");
+    }
+    statedRetentionMs = backendStated ?? givenRetentionMs ?? null;
+  }
 
   // The fixture layer is loaded only when asked for, so the teaching server never imports it (test/import-graph.test.ts).
   let fixture: Awaited<ReturnType<typeof import("./fixture/index.js")["createFixtureLayer"]>> | undefined;
