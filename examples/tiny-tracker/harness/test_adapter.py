@@ -198,5 +198,58 @@ class EvidencePrincipal(unittest.TestCase):
         self.assertNotIn("principal", config.config_for(state, config.parse_args(["--no-build"]))["adapter_config"])
 
 
+NODE = __import__("shutil").which("node")
+CLI = os.path.join(ROOT, "dist", "src", "cli.js")
+
+
+def stdio_env(**extra):
+    """The harness environment without any TRACKER_* setting of the caller's, plus `extra`."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TRACKER_")}
+    env.update(extra)
+    return env
+
+
+@unittest.skipUnless(NODE and os.path.exists(CLI), "needs node on PATH and a built tiny-tracker (npm run build)")
+class StdioTransport(unittest.TestCase):
+    """Note 27 item 3: the adapter's stdio mode against a real `tiny-tracker stdio` (the backend on port 0)."""
+
+    def test_stdio_client_initializes_lists_tools_creates_a_ticket_and_closes(self):
+        client = adapter.StdioMcpClient([NODE, CLI, "stdio"], "2025-11-25", env=stdio_env())
+        try:
+            state = client.wait_state()
+            self.assertIsNotNone(state, client.stderr_tail())
+            self.assertEqual(state.get("transport"), "stdio")
+            self.assertRegex(state.get("backend") or "", r"^http://127\.0\.0\.1:\d+$")
+            init = client.initialize()
+            result = (init["initialize"]["body"] or {}).get("result") or {}
+            self.assertEqual((result.get("serverInfo") or {}).get("name"), "tiny-tracker")
+            self.assertEqual(client.negotiated_version, "2025-11-25")
+            self.assertIn("create_ticket", client.tools())
+            _, meta, body = client.request("tools/call", {"name": "create_ticket",
+                                                          "arguments": {"project": "inbox", "title": "adapter stdio test"}})
+            self.assertEqual(meta.get("transport"), "stdio")
+            self.assertEqual(adapter.classify(meta, body), "success", json.dumps(body)[:400])
+            self.assertTrue(adapter.record_ids_of(body), json.dumps(body)[:400])
+        finally:
+            client.close()
+        self.assertEqual(client.proc.returncode, 0, "closing stdin stops the server cleanly")
+
+    def test_a_refused_start_raises_with_the_servers_reason(self):
+        token = "mcp-token-" + "x" * 24
+        saved = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(stdio_env(TRACKER_MCP_TOKEN=token))
+        try:
+            with self.assertRaises(adapter.StdioStartError) as caught:
+                adapter.Adapter({"mcp_command": [NODE, CLI, "stdio"]})
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        message = str(caught.exception)
+        self.assertIn("exited 2 before its state line", message)
+        self.assertIn("TRACKER_MCP_TOKEN protects the HTTP listener; stdio has none", message)
+        self.assertNotIn(token, message)
+
+
 if __name__ == "__main__":
     unittest.main()

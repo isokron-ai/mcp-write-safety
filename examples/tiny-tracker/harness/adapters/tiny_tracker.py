@@ -103,6 +103,11 @@ Adapter config keys (the config's adapter_config object):
                        control_url are given), and stops it at exit. Over
                        stdio there is one connection: the K-only recovery
                        uses it with no run tag instead of a fresh session.
+                       A start that is refused (or prints no state line
+                       within start_timeout_s, default 20) raises
+                       StdioStartError with the exit code and the server's
+                       stderr tail, e.g. TRACKER_MCP_TOKEN set in the
+                       harness environment, which stdio refuses.
   backend_url          Backend base URL (API and evidence namespace).
   control_url          Control listener URL (optional): run allocation and
                        the server-side fault.
@@ -481,7 +486,8 @@ class StdioMcpClient:
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      env=env if env is not None else dict(os.environ))
         threading.Thread(target=self._read_stdout, daemon=True).start()
-        threading.Thread(target=self._read_stderr, daemon=True).start()
+        self._stderr_thread = threading.Thread(target=self._read_stderr, daemon=True)
+        self._stderr_thread.start()
         atexit.register(self.close)
 
     def _read_stdout(self):
@@ -519,6 +525,24 @@ class StdioMcpClient:
             while self.state is None and self.proc.poll() is None and time.time() < end:
                 self._cond.wait(0.1)
             return self.state
+
+    def stderr_tail(self, lines=20):
+        """The last lines the server wrote to stderr (its refusal, when it would not start). It never prints a token."""
+        if self.proc.poll() is not None:
+            self._stderr_thread.join(2)  # the child has exited: let the reader take what is left in the pipe
+        with self._cond:
+            return "".join(self._stderr[-lines:]).strip()
+
+    def start_failure(self, timeout):
+        """Why there is no state line: the exit code and the stderr tail. A child still running is stopped."""
+        code = self.proc.poll()
+        if code is None:
+            self.close()
+            what = "printed no state line within %ss and was stopped" % timeout
+        else:
+            what = "exited %s before its state line" % code
+        tail = self.stderr_tail()
+        return "the stdio server (%s) %s%s" % (self.endpoint, what, (": " + tail) if tail else " (nothing on stderr)")
 
     def post(self, payload, timeout=60):
         started = time.time()
@@ -681,6 +705,10 @@ def refuse_to_guess(body, where):
         "wrong principal reads an applied write as missing." % (where, len(listed or []), ", ".join(map(str, listed or []))))
 
 
+class StdioStartError(RuntimeError):
+    """mcp_command did not start: the message carries the exit code and the server's stderr tail."""
+
+
 class Adapter(SystemAdapter):
     """The tiny-tracker 0.2.0 adapter. See the module docstring."""
 
@@ -695,7 +723,12 @@ class Adapter(SystemAdapter):
         if c.get("mcp_command"):
             # 0.4.0: the MCP server over stdio; its state line names the backend and control listeners.
             self.stdio = StdioMcpClient(list(c["mcp_command"]), self.protocol_version)
-            state = self.stdio.wait_state() or {}
+            wait = float(c.get("start_timeout_s", 20))
+            state = self.stdio.wait_state(wait)
+            if state is None:
+                # A refused start (exit 2) says why on stderr; the common case is TRACKER_MCP_TOKEN set in the harness
+                # environment, which stdio refuses (it has no listener to protect).
+                raise StdioStartError(self.stdio.start_failure(wait))
             c = dict(c)
             c.setdefault("backend_url", state.get("backend"))
             if state.get("control"):
