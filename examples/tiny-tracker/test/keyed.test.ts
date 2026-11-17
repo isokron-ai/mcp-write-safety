@@ -80,6 +80,8 @@ describe("keyed-state answers at the MCP layer (decision 0004)", () => {
       const args = { project: "inbox", title: "old", idempotency_key: "mcp-expired-001" };
       const first = await r.mcp.call("create_ticket", args);
       clock.advance(7 * DAY_MS);
+      const direct = await r.rest.send("POST", "/tickets", { project: "inbox", title: "old" }, { "idempotency-key": "mcp-expired-001" });
+      assert.deepEqual([direct.status, direct.body.error, direct.headers.get("idempotent-replayed")], [410, "key_expired", "true"], "the backend answers 410");
       const late = await r.mcp.call("create_ticket", args);
       assert.equal(late.isError, false);
       const m = late.structured.mws;
@@ -95,6 +97,25 @@ describe("keyed-state answers at the MCP layer (decision 0004)", () => {
     } finally {
       await r.close();
     }
+  });
+
+  it("the MCP mapping of the backend's 410 key_expired (seams v2.1, B10): applied, replayed: true, read_first, the tombstone's execution id", async () => {
+    const { fromBackend } = await import("../src/mcp/results.js");
+    const w = { operation: "create", type: "ticket", guard: "key" as const, read: { tool: "list_tickets", arguments: { project: "inbox" } } };
+    const body = { error: "key_expired", message: "this key's write was applied; its stored answer has expired: read the object", execution_id: "X-7", result_digest: "ab".repeat(32), committed_at: "2030-01-01T00:00:00.000Z" };
+    for (const b of [body, { ...body, objects: [{ type: "ticket", id: "T-3" }] }]) {
+      const r = fromBackend({ status: 410, body: b } as any, "the ticket", w);
+      const m = (r.structuredContent as any).mws;
+      assert.notEqual(r.isError, true, "an applied write is not an error");
+      assert.deepEqual([m.outcome, m.replayed, m.repeat, m.code], ["applied", true, "read_first", "key_expired"]);
+      assert.equal((r.structuredContent as any).execution_id, "X-7");
+      assert.deepEqual(m.read_with, w.read);
+      assert.doesNotMatch((r.content[0] as any).text, /backend answered 410|not known/);
+      if ("objects" in b) assert.equal(m.object.id, "T-3", "the tombstone's objects name the object to read");
+    }
+    // Any other 410 keeps the generic answer: unknown.
+    const other = fromBackend({ status: 410, body: { error: "gone" } } as any, "the ticket", w);
+    assert.equal((other.structuredContent as any).mws.outcome, "unknown");
   });
 
   it("with retention, every key-accepting tool states it; without, the descriptions are the 0.1 ones", async () => {
