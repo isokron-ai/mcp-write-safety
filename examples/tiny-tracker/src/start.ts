@@ -23,6 +23,8 @@ export interface StartServerOptions {
   features?: readonly string[];
   /** What the fixture layer adds (attribution, the build descriptor mirror). */
   extras?: ServerExtras;
+  /** The backend's key retention in ms (feature retention; --key-retention), stated in the tools. Default: 7 days. */
+  retentionMs?: number;
 }
 
 export interface StartedServer extends RunningMcpServer {
@@ -48,7 +50,7 @@ function isLoopbackUrl(raw: string): boolean {
 export async function startServer(options: StartServerOptions): Promise<StartedServer> {
   let build: Build;
   try {
-    build = createBuild(options.defects ?? [], options.features ?? []);
+    build = createBuild(options.defects ?? [], options.features ?? [], options.retentionMs);
   } catch (e) {
     throw new ConfigError((e as Error).message);
   }

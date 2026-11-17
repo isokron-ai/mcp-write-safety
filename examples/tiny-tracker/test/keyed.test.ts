@@ -362,6 +362,35 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     }
   });
 
+  it("G2 fold-in 4: the tools state the configured retention (--key-retention 1h), and 7 days by default", async () => {
+    const statement = async (args: string[]) => {
+      let text = "";
+      const r = await runCli(["all", "--features", "inflight,retention", ...args, "--port", "0", "--backend-port", "0"], { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" }, async (state) => {
+        const mcp = await connectClient(state.mcp, "2026-07-28");
+        try {
+          const tools: any[] = await mcp.tools();
+          text = tools.find((t) => t.name === "create_ticket")!.description;
+          for (const t of tools) if ("idempotency_key" in (t.inputSchema?.properties ?? {})) assert.match(t.description, args.length ? /remembered for 1 hour;/ : /remembered for 7 days;/, t.name);
+        } finally {
+          await mcp.close();
+        }
+      });
+      assert.equal(r.code, 0, r.stderr);
+      return text;
+    };
+    assert.match(await statement(["--key-retention", "1h"]), /A key is remembered for 1 hour;/);
+    assert.match(await statement([]), /A key is remembered for 7 days;/);
+    // The same through startServer (the code path the CLI uses).
+    const backend = await startBackend({ token: TOKEN, port: 0, features: ["inflight", "retention"] });
+    const server = await startServer({ env: { TRACKER_BACKEND_URL: backend.url, TRACKER_BACKEND_TOKEN: TOKEN }, features: ["inflight", "retention"], retentionMs: 3_600_000, port: 0 });
+    try {
+      assert.match(server.build.tools.get("create_ticket")!.description, /remembered for 1 hour;/);
+    } finally {
+      await server.close();
+      await backend.close();
+    }
+  });
+
   it("starts durable with --data-dir and names the journal; a second start on the same dir is refused; retention flags need retention", async () => {
     const t = tempDir("cli");
     try {

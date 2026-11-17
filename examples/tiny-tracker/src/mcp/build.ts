@@ -29,7 +29,8 @@ export function correctTools(features: readonly string[] = []): ToolDef[] {
   return [...CORRECT_TOOLS, ...(features.includes("lookup") ? LOOKUP_TOOLS : [])];
 }
 
-export function createBuild(defectNames: string[] = [], features: readonly string[] = []): Build {
+/** `retentionMs`: the key retention the backend was configured with (--key-retention), stated by every key-accepting tool. */
+export function createBuild(defectNames: string[] = [], features: readonly string[] = [], retentionMs?: number): Build {
   const build: Build = {
     tools: new Map(correctTools(features).map((t) => [t.name, { ...t }])),
     validation: { ...correctValidation },
@@ -37,7 +38,8 @@ export function createBuild(defectNames: string[] = [], features: readonly strin
     defects: [],
   };
   // ---- stream D: the stated key retention (feature retention) ----
-  applyRetentionStatement(build, features);
+  // G2 fold-in 4: the configured retention, not always the default.
+  applyRetentionStatement(build, features, retentionMs);
   // ---- end stream D ----
   const defects = resolveDefects(defectNames, features);
   // Replacing defects first, wrapping ones after, so that none hides another.

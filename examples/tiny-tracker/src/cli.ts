@@ -332,7 +332,7 @@ async function main(): Promise<void> {
   if (runsServer) {
     if (backend) env.TRACKER_BACKEND_URL = backend.url;
     try {
-      const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras });
+      const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras, ...(durability?.retentionMs !== undefined ? { retentionMs: durability.retentionMs } : {}) });
       closers.push(server.close);
       out.mcp = server.url;
       if (fixture) {
