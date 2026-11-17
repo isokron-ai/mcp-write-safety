@@ -92,6 +92,38 @@ describe("fx-check 0.4.0: durability across a restart (FX-DUR-1) and one journal
   }
 });
 
+describe("fx-check 0.4.0: durable with the fixture clock (the journal keeps its offset, note 19 item 7)", () => {
+  // FX-KEY-1 moves the clock by almost the whole retention, and the offset survives the restart: the FX-DUR-1 plant is
+  // made after that move, so key-expires-early shows on FX-KEY-1 only and the correct build's plant is fresh.
+  const durable = ["--features", `${L3},durable`, "--data-dir", "{DATA_DIR}"];
+  for (const [label, extra, key1] of [["correct build", [], "held"], ["key-expires-early", ["--backend-defect", "key-expires-early"], "violated"]] as const) {
+    it(`${label}: FX-KEY-1 ${key1}, FX-DUR-1 held across the restart, the clock offset kept`, async () => {
+      const run = await start([...durable, ...extra]);
+      let kept = false;
+      try {
+        const first = await check(run, { dataDir: run.dataDir, durability: { plant: true } });
+        assert.equal(verdict(first, "FX-KEY-1").verdict, key1, verdict(first, "FX-KEY-1").reason);
+        assert.equal(verdict(first, "FX-DUR-2").verdict, "held", verdict(first, "FX-DUR-2").reason);
+        const offset = (await (await fetch(`${run.state.backend}/build`, { headers: { authorization: `Bearer ${run.tokens.evidence}` } })).json() as any).clock.offset_ms;
+        assert.ok(offset > 0, "FX-KEY-1 moved the clock");
+        await run.stop(true);
+        kept = true;
+        const again = await start([...durable, ...extra], run);
+        try {
+          const build = await (await fetch(`${again.state.backend}/build`, { headers: { authorization: `Bearer ${again.tokens.evidence}` } })).json() as any;
+          assert.equal(build.clock.offset_ms, offset, "the restart starts at the journalled offset");
+          const after = await check(again, { durability: { verify: first.plant } });
+          assert.equal(verdict(after, "FX-DUR-1").verdict, "held", verdict(after, "FX-DUR-1").reason);
+        } finally {
+          await again.stop();
+        }
+      } finally {
+        if (!kept) await run.stop();
+      }
+    });
+  }
+});
+
 describe("replay-digest-mismatch under the 0.3.0 key records (found by the 0.4.0 matrix)", () => {
   for (const features of [L3, `${L3.replace(",clock", "")},durable`]) {
     it(`FX-DIG-2 is violated with ${features.endsWith("durable") ? "durable" : "inflight and retention"} too, and keyed repeats still answer`, async () => {
