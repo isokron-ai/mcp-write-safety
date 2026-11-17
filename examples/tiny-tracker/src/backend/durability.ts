@@ -42,6 +42,8 @@ export interface DurabilityOptions {
   defects?: readonly string[];
   /** Crash points on the journal's write path (tests). */
   crash?: CrashHook;
+  /** The platform the journal's rules follow (default process.platform; tests). */
+  platform?: string;
   log?: (message: string) => void;
   /**
    * The fixture layer's run registry (seams v2.1). Under durable its run-alloc lines go back into it at load, and its
@@ -86,7 +88,7 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
   let journal: Journal | undefined;
   if (features.durable) {
     if (!options.dataDir) throw new Error("the durable feature needs --data-dir");
-    journal = new Journal(store, keys, { dataDir: options.dataDir, writer: PACKAGE_VERSION, crash: options.crash, log: options.log });
+    journal = new Journal(store, keys, { dataDir: options.dataDir, writer: PACKAGE_VERSION, crash: options.crash, log: options.log, ...(options.platform ? { platform: options.platform } : {}) });
     if (defects.includes("key-record-not-durable") || defects.includes("key-record-after-effect")) journal.keyFromCommitLine = false;
     if (features.inflight) keys.lines = journal;
     journal.replayObservers = options.replayObservers ?? [];

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { durableBackend, movableClock, tempDir, TOKEN } from "./support/durable.js";
-import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks } from "../src/backend/journal.js";
+import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit } from "../src/backend/journal.js";
 import { startBackend } from "../src/start.js";
 import { digestOf, DOMAINS, fingerprintHash } from "../src/digest.js";
 import { DAY_MS, describeRetention, parseExpiryPolicy, parseRetention, retentionSentence } from "../src/backend/expiry.js";
@@ -274,6 +274,24 @@ describe("the data dir and its lock (G13, X5)", () => {
       await b2.close();
     } finally {
       t.cleanup();
+    }
+  });
+});
+
+describe("the flush limit on macOS (G2 fold-in 13)", () => {
+  it("a durable start on darwin states that fsync is not F_FULLFSYNC (crash-safe, not power-cut-safe); other platforms say nothing", async () => {
+    assert.match(flushLimit("darwin")!, /not F_FULLFSYNC.*survives a process crash, not a power cut/);
+    assert.equal(flushLimit("linux"), undefined);
+    for (const platform of ["darwin", "linux"]) {
+      const t = tempDir(`flush-${platform}`);
+      const logged: string[] = [];
+      try {
+        const b = await startBackend({ token: TOKEN, port: 0, clock: movableClock(), features: ["durable"], durability: { features: ["durable"], dataDir: t.dataDir, platform, log: (m) => void logged.push(m) } });
+        await b.close();
+        assert.equal(logged.some((m) => /F_FULLFSYNC/.test(m)), platform === "darwin", platform);
+      } finally {
+        t.cleanup();
+      }
     }
   });
 });

@@ -93,6 +93,17 @@ export interface JournalOptions {
   platform?: string;
 }
 
+/**
+ * What "flushed" means on this platform (G2 fold-in 13). Node's fsyncSync is fsync(2). On macOS that hands the data to
+ * the drive but does not flush the drive's own cache (that takes fcntl F_FULLFSYNC, which Node does not expose), so a
+ * flushed line survives a process crash, not a power cut. Returned for darwin and logged at start; undefined elsewhere.
+ */
+export function flushLimit(platform: string): string | undefined {
+  return platform === "darwin"
+    ? "tiny-tracker: on macOS the journal's fsync is not F_FULLFSYNC (Node does not expose it): a flushed line survives a process crash, not a power cut"
+    : undefined;
+}
+
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 /** The checksum of a line: SHA-256 (hex) of its RFC 8785 bytes without the checksum member. */
@@ -368,6 +379,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
   load(): void {
     prepareDataDir(this.options.dataDir, this.options.platform);
     acquireLock(this.options.dataDir, this.options.wallNow ?? (() => new Date()), (m) => this.log(m));
+    const limit = flushLimit(this.options.platform ?? process.platform);
+    if (limit) this.log(limit);
     try {
       this.replay();
     } catch (e) {
