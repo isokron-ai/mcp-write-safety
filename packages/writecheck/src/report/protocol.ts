@@ -22,9 +22,11 @@ export interface McpRecord {
   patterns: Record<SaysKind, { pattern: string; from: 'declaration' | 'default' }>;
   /** Spec 7.3, rule 11: the result shape the declaration adopts by name and version, at the top level and per tool. */
   result_shapes?: { shape: ShapeName | null; tools: Record<string, ShapeName | null> };
+  /** Facts about the connection that are not verdicts, such as a server that failed on server/discover and was used with initialize only. */
+  notes?: string[];
 }
 
-export function mcpRecord(m: Manifest, revision: string | null, inputRequests: McpRecord['input_requests']): McpRecord {
+export function mcpRecord(m: Manifest, revision: string | null, inputRequests: McpRecord['input_requests'], notes: string[] = []): McpRecord {
   return {
     revision,
     transport: m.server.stdio ? 'stdio' : 'streamable HTTP',
@@ -34,13 +36,14 @@ export function mcpRecord(m: Manifest, revision: string | null, inputRequests: M
     input_requests: inputRequests,
     patterns: patternsInEffect(),
     result_shapes: shapesInEffect(),
+    ...(notes.length ? { notes: [...notes] } : {}),
   };
 }
 
 /** One line for report.md and stdout. */
 export function mcpLine(x: McpRecord): string {
   const per = x.per_call_capabilities.length ? `; for single calls of MWS-RETRY-3: ${x.per_call_capabilities.map((p) => `${p.tool} ${JSON.stringify(p.capabilities)}`).join(', ')}` : '';
-  return `MCP revision ${x.revision ?? 'not established'} over ${x.transport}. Client capabilities declared: none (an empty capabilities object)${per}. Extensions declared: ${x.extensions.length ? x.extensions.join(', ') : 'none'}.`;
+  return `MCP revision ${x.revision ?? 'not established'} over ${x.transport}. Client capabilities declared: none (an empty capabilities object)${per}. Extensions declared: ${x.extensions.length ? x.extensions.join(', ') : 'none'}.${x.notes?.length ? ` Notes (not verdicts): ${x.notes.join(' ')}` : ''}`;
 }
 
 const CONFIRMING = ['MWS-CONC-1', 'MWS-TGT-2', 'MWS-TGT-3'];

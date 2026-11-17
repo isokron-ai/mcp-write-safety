@@ -683,7 +683,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   const cl = cleanupDone as CleanupReport | null;
   const leftovers = cl ? [...cl.left, ...cl.failed, ...cl.unknown.map((u) => ({ resource: u.resource, id: null, name: null, how: `create through ${u.tool} with an unknown outcome`, reason: u.reason }))] : [];
   // Spec 5.3 and 7.3, rules 10 and 11: the revision, transport and declared capabilities; what the tester answered to requests for input.
-  const mcp = mcpRecord(manifest, protocol, session.inputRequests);
+  const mcp = mcpRecord(manifest, protocol, session.inputRequests, session.notes);
   annotateInputs(results, mcp);
   // why: writesafe self-test T5 (spec 5.3): every requirement has a record, if only `not tested` with the reason.
   results.push(...everyRequirement(results, plan?.not_built ?? [], stopped ?? null));

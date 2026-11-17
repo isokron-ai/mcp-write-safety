@@ -232,11 +232,17 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   // on any message before initialize.
   if (on('exit-before-initialize') && !initialized && method !== 'initialize') process.exit(3);
   if (method === 'initialize') initialized = true;
+  // discover-crash (corpus run 3, t05): the shape of a server on an older MCP Python SDK, which fails validation on a method it
+  // does not know (server/discover) and exits 1.
+  if (on('discover-crash') && method === 'server/discover') {
+    process.stderr.write('pydantic_core._pydantic_core.ValidationError: 1 validation error for ClientRequest\n');
+    process.exit(1);
+  }
   if (id === undefined) return;
   const params = (msg['params'] ?? {}) as Obj;
   void (async () => {
     try {
-      if (method === 'initialize') return send({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-11-25', capabilities: on('templates-not-found') ? { tools: {}, resources: {}, prompts: {} } : { tools: {} }, serverInfo: { name: 'tiny-tracker-fake', version: '0.0.0' } } });
+      if (method === 'initialize') return send({ jsonrpc: '2.0', id, result: { protocolVersion: on('old-revision') ? '2024-11-05' : '2025-11-25', capabilities: on('templates-not-found') ? { tools: {}, resources: {}, prompts: {} } : { tools: {} }, serverInfo: { name: 'tiny-tracker-fake', version: '0.0.0' } } });
       if (method === 'ping') return send({ jsonrpc: '2.0', id, result: {} });
       // Variant no-readonly-hints (review B2): no tool declares readOnlyHint: true, so the guard can only be a declared call.
       const listed = on('no-readonly-hints') ? TOOLS.map((t) => ((t['annotations'] as Obj | undefined)?.['readOnlyHint'] === true ? { ...t, annotations: undefined } : t)) : TOOLS;
