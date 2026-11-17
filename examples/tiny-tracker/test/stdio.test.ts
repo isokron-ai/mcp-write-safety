@@ -132,11 +132,11 @@ describe("tiny-tracker stdio: the command line", () => {
 describe("tiny-tracker stdio: refusals (exit 2, nothing served)", () => {
   const cases: Array<[string, string[], Record<string, string>, RegExp]> = [
     ["a fixture-layer feature (CMP-70)", ["--features", "evidence"], {}, /CMP-70|Streamable HTTP only/],
-    ["--port (no listener)", ["--port", "4683"], {}, /--port has no effect over stdio/],
+    ["--port (no listener)", ["--port", "0"], {}, /--port has no effect over stdio/],
     ["--fixture-control", ["--fixture-control"], {}, /--fixture-control has no effect over stdio/],
     ["an MCP token (nothing to protect)", [], { TRACKER_MCP_TOKEN: "mcp-token-0123456789abcdef" }, /stdio has none/],
-    ["--backend-url without a backend token", ["--backend-url", "http://127.0.0.1:4684"], {}, /TRACKER_BACKEND_TOKEN is required/],
-    ["--backend-port with --backend-url", ["--backend-url", "http://127.0.0.1:4684", "--backend-port", "4685"], { TRACKER_BACKEND_TOKEN: "tok-0123456789abcdef" }, /--backend-port has no effect/],
+    ["--backend-url without a backend token", ["--backend-url", "http://127.0.0.1:9"], {}, /TRACKER_BACKEND_TOKEN is required/],
+    ["--backend-port with --backend-url", ["--backend-url", "http://127.0.0.1:9", "--backend-port", "0"], { TRACKER_BACKEND_TOKEN: "tok-0123456789abcdef" }, /--backend-port has no effect/],
     ["an unknown defect", ["--defect", "no-such-defect"], {}, /no-such-defect/],
     ["a backend token on the command line", ["--default-project", "tok-0123456789abcdef"], { TRACKER_BACKEND_TOKEN: "tok-0123456789abcdef" }, /appeared on the command line/],
     ["a positional argument", ["extra"], {}, /no positional arguments/],
