@@ -94,6 +94,15 @@ If the build has no get_operation tool (0.1.0), recovery reports
 
 Adapter config keys (the config's adapter_config object):
   mcp_url              MCP endpoint, e.g. http://127.0.0.1:4632/mcp.
+  mcp_command          Instead of mcp_url (0.4.0): the MCP server over stdio.
+                       A command list, e.g. ["tiny-tracker", "stdio",
+                       "--features", "...", "--fixture-control"]. The adapter
+                       starts it once (tokens come from the environment, as
+                       for any start), reads its state line on stderr for the
+                       backend and control URLs (unless backend_url and
+                       control_url are given), and stops it at exit. Over
+                       stdio there is one connection: the K-only recovery
+                       uses it with no run tag instead of a fresh session.
   backend_url          Backend base URL (API and evidence namespace).
   control_url          Control listener URL (optional): run allocation and
                        the server-side fault.
@@ -447,6 +456,123 @@ class McpClient:
         return [t.get("name") for t in (((body or {}).get("result") or {}).get("tools") or [])]
 
 
+class StdioMcpClient:
+    """A minimal MCP client over stdio (newline-delimited JSON-RPC), with McpClient's interface.
+
+    One process, one connection. A reader thread files every message by id, so an answer that arrives after the caller
+    gave up (a held answer: the server-side drop) is kept apart and never taken for a later call's.
+    """
+
+    def __init__(self, command, protocol_version, env=None):
+        import subprocess
+        import threading
+        import atexit
+        self.protocol_version = protocol_version
+        self.negotiated_version = None
+        self.session_id = None
+        self.endpoint = "stdio:" + " ".join(command[:2])
+        self._messages = {}
+        self._late = []
+        self._waiting = set()
+        self._cond = threading.Condition()
+        self.state = None
+        self._stderr = []
+        # Our own child: stopped by closing its stdin, then by its own pid if it lingers.
+        self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     env=env if env is not None else dict(os.environ))
+        threading.Thread(target=self._read_stdout, daemon=True).start()
+        threading.Thread(target=self._read_stderr, daemon=True).start()
+        atexit.register(self.close)
+
+    def _read_stdout(self):
+        for line in self.proc.stdout:
+            try:
+                msg = json.loads(line.decode("utf-8"))
+            except ValueError:
+                continue
+            with self._cond:
+                mid = msg.get("id") if isinstance(msg, dict) else None
+                if mid in self._waiting:
+                    self._messages[mid] = msg
+                elif mid is not None:
+                    self._late.append(mid)
+                self._cond.notify_all()
+
+    def _read_stderr(self):
+        for line in self.proc.stderr:
+            text = line.decode("utf-8", errors="replace")
+            with self._cond:
+                self._stderr.append(text)
+                if self.state is None and text.lstrip().startswith("{"):
+                    try:
+                        st = json.loads(text)
+                        if isinstance(st, dict) and st.get("transport") == "stdio":
+                            self.state = st
+                    except ValueError:
+                        pass
+                self._cond.notify_all()
+
+    def wait_state(self, timeout=20):
+        """The server's state line (stderr), for the backend and control URLs."""
+        end = time.time() + timeout
+        with self._cond:
+            while self.state is None and self.proc.poll() is None and time.time() < end:
+                self._cond.wait(0.1)
+            return self.state
+
+    def post(self, payload, timeout=60):
+        started = time.time()
+        meta = {"method": "stdio", "url": self.endpoint, "sent_at": utcnow(), "transport": "stdio"}
+        mid = payload.get("id")
+        with self._cond:
+            if mid is not None:
+                self._waiting.add(mid)
+        try:
+            self.proc.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError) as e:
+            meta.update(received_at=utcnow(), http_status=None, connection_error=str(e))
+            return meta, None
+        if mid is None:  # a notification: nothing comes back
+            meta.update(received_at=utcnow(), http_status=202)
+            return meta, None
+        end = started + timeout
+        with self._cond:
+            while mid not in self._messages and time.time() < end and self.proc.poll() is None:
+                self._cond.wait(min(0.1, max(0.0, end - time.time())))
+            msg = self._messages.pop(mid, None)
+            self._waiting.discard(mid)
+        elapsed = round((time.time() - started) * 1000)
+        if msg is None:
+            meta.update(received_at=utcnow(), elapsed_ms=elapsed, http_status=None, timed_out=True)
+            return meta, None
+        raw = json.dumps(msg).encode("utf-8")
+        meta.update(received_at=utcnow(), elapsed_ms=elapsed, http_status=200, content_type="application/json",
+                    response_bytes=len(raw), jsonrpc_id=mid)
+        return meta, raw
+
+    def initialize(self):
+        return McpClient.initialize(self)
+
+    def request(self, method, params, timeout=60):
+        return McpClient.request(self, method, params, timeout)
+
+    def tools(self):
+        return McpClient.tools(self)
+
+    def close(self):
+        if self.proc.poll() is None:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
+            try:
+                self.proc.wait(timeout=10)
+            except Exception:  # still running: stop our own child by its pid
+                self.proc.kill()
+                self.proc.wait(timeout=10)
+
+
 def _public(meta):
     """Transport metadata without response headers (they can carry session ids; nothing secret, but not needed)."""
     return {k: v for k, v in meta.items() if k != "headers"}
@@ -563,7 +689,18 @@ class Adapter(SystemAdapter):
     def __init__(self, config):
         super().__init__(config)
         c = self.config
-        self.endpoint = c["mcp_url"]
+        self.protocol_version = c.get("protocol_version", "2025-11-25")
+        self.stdio = None
+        if c.get("mcp_command"):
+            # 0.4.0: the MCP server over stdio; its state line names the backend and control listeners.
+            self.stdio = StdioMcpClient(list(c["mcp_command"]), self.protocol_version)
+            state = self.stdio.wait_state() or {}
+            c = dict(c)
+            c.setdefault("backend_url", state.get("backend"))
+            if state.get("control"):
+                c.setdefault("control_url", state.get("control"))
+            self.config = c
+        self.endpoint = self.stdio.endpoint if self.stdio else c["mcp_url"]
         self.tool_name = c.get("tool", "create_ticket")
         token_dir = c.get("token_dir")
         self.evidence = Http(c["backend_url"], read_token(c.get("evidence_token_env", "TRACKER_EVIDENCE_TOKEN"), token_dir, "evidence.token"))
@@ -572,9 +709,8 @@ class Adapter(SystemAdapter):
         self.control = Http(control_url, read_token(c.get("control_token_env", "TRACKER_CONTROL_TOKEN"), token_dir, "control.token")) if control_url else None
         self.fault_mode = c.get("fault") or ("server" if self.control and self.control.token else "client")
         self.drop_timeout = float(c.get("drop_timeout_s", 5))
-        self.protocol_version = c.get("protocol_version", "2025-11-25")
         self.operation_path = c.get("operation_path", "/operations/{K}")
-        self.client = McpClient(self.endpoint, self.protocol_version)
+        self.client = self.stdio or McpClient(self.endpoint, self.protocol_version)
         self.run_id = None
         self.principal = c.get("principal")
 
@@ -617,7 +753,8 @@ class Adapter(SystemAdapter):
     # -- adapter contract -------------------------------------------------
     def initialize(self):
         evidence = {"adapter": self.name, "adapter_version": ADAPTER_VERSION, "contract": CONTRACT,
-                    "mcp_url": self.endpoint, "backend_url": self.evidence.base,
+                    "mcp_url": self.endpoint, "mcp_transport": "stdio" if self.stdio else "streamable-http",
+                    "backend_url": self.evidence.base,
                     "control_url": self.control.base if self.control else None,
                     "fault_mode": self.fault_mode, "build": self.config.get("build"), "at": utcnow()}
         evidence.update(self.client.initialize())
@@ -844,9 +981,14 @@ class Adapter(SystemAdapter):
 
     def recover_by_key(self, *, operation_key):
         attempts, files = [], {}
-        client = McpClient(self.endpoint, self.protocol_version)  # a fresh caller: only K
-        init = client.initialize()
-        files["a3_konly_initialize.json"] = init
+        if self.stdio:
+            # One stdio connection: the K-only caller is this connection with no run tag and no operation tag.
+            client = self.stdio
+            files["a3_konly_initialize.json"] = {"note": "stdio: the one connection, reused with only K (no run tag)"}
+        else:
+            client = McpClient(self.endpoint, self.protocol_version)  # a fresh caller: only K
+            init = client.initialize()
+            files["a3_konly_initialize.json"] = init
         tools = client.tools()
         if "get_operation" not in tools:
             attempts.append({"path": "tools/call get_operation {idempotency_key: K}",
@@ -868,7 +1010,7 @@ class Adapter(SystemAdapter):
         cls = classify(meta, body)
         structured = ((body or {}).get("result") or {}).get("structuredContent")
         op = find_record(structured, "operation-record/1")
-        attempt = {"path": "tools/call get_operation {idempotency_key: K} (fresh session, no run tag)",
+        attempt = {"path": "tools/call get_operation {idempotency_key: K} (%s, no run tag)" % ("the stdio connection" if self.stdio else "fresh session"),
                    "response_class": cls, "record_ids_returned": [], "digest_returned": None}
         no_record = re.search(r"no record of this key", text_of(body), re.I) is not None
         if cls == "success" and op is None:
