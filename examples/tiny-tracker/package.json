@@ -56,7 +56,15 @@
     "expected/0.2.0.md",
     "expected/builds-0.3.0.json",
     "expected/0.3.0.json",
-    "expected/0.3.0.md"
+    "expected/0.3.0.md",
+    "expected/builds-0.4.0.json",
+    "expected/0.4.0.json",
+    "expected/0.4.0.md",
+    "verify/python/check_openapi.py",
+    "openapi.yaml",
+    "CONTRIBUTING.md",
+    "docs/STABILITY.md",
+    "docs/patterns.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
