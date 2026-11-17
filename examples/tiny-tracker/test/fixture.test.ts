@@ -275,7 +275,9 @@ describe("the control listener (rule 2, X4)", () => {
       assert.deepEqual(faults.body.armed, []);
       assert.ok(faults.body.points.some((p: any) => p.id === "mcp/after-backend-reply/drop" && p.since === "0.2.0"));
       assert.equal((await post(`${c}/_fixture/faults`, CONTROL, { point: "mcp/after-backend-reply/drop" })).status, 501);
-      assert.equal((await post(`${c}/_fixture/clock`, CONTROL, { advance_ms: 1000 })).status, 501);
+      // Without the clock feature: 501 not_enabled with the feature (openapi.yaml), not not_built (note 27 item 5).
+      const clock = await post(`${c}/_fixture/clock`, CONTROL, { advance_ms: 1000 });
+      assert.deepEqual([clock.status, clock.body.error, clock.body.feature, clock.body.available_from], [501, "not_enabled", "clock", "0.3.0"]);
       assert.equal((await get(`${state.backend}/projects`, CONTROL)).status, 401, "the control token opens nothing on the backend");
     });
     assert.equal(r.code, 0, r.stderr);
