@@ -23,6 +23,11 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 - CI: the Python suites and the OpenAPI check run on Linux and macOS; the whole matrix is regenerated on Linux; the container job checks the evidence listener.
 - `docs/patterns.md` covers the 0.2.0 and 0.3.0 defects and variants and the backend `FX-` defects; CONTRIBUTING and STABILITY cover the 0.2.0 to 0.4.0 features. The `tiny-tracker` issue label is in `.github/labels.json`. The package ships CONTRIBUTING, STABILITY, the patterns page, the OpenAPI file and its check, and the 0.4.0 known answers.
 
+### 0.4.0 additions (coordinator note 19)
+- The fixture clock with `durable`: each clock move is an additive journal `clock` line (`from_ms`, `to_ms`, `at`), written before the offset is stored; the offset is restored at load, and a data dir with clock lines refuses to start without the `clock` feature. CMP-65 (`durable` with `clock` refused) is retired, and the 0.4.0 matrix's durable level runs with the fixture clock, so FX-KEY-1 is checked on durable rows. `tt_recount.py` knows the kind.
+- `TRACKER_CONTAINER_ALLOW_DEFECTS=1` (R23): see the container item under 0.4.0 integration.
+- The known-answer generator writes the second principal's file whenever principals are in effect (the profile included), so FX-LOOK-3 is checked on the matrix's Lv rows.
+
 ## 0.3.0 (unreleased) for MWS 0.9
 
 Durability: a journal (`durable`, opt-in with `--data-dir`), in-flight key records (`inflight`) and a stated key retention (`retention`), both on in the default profile; the fixture clock, supervised restarts and crash fault points. `--profile 0.1` keeps the surface of the published 0.1.0.
@@ -91,6 +96,7 @@ The first shared-fixture release: evidence, execution records, lookup, principal
 - A re-sent If-Match write from another principal was answered as a replay of the first principal's write; it now gets the normal 412.
 - A failure completing a key record after the journal append no longer skips the ledger: the ledger is told, then the store stops.
 - The 0.1.0 entry below says "41 deliberate defects"; 0.1.0 shipped 47 MCP-layer defects and 1 backend defect.
+- `fx-check`: FX-LOOK-2's never-written key no longer shares its first eight characters with the probe keys, so `lookup-wrong-record` cannot mask `lookup-reexecutes`.
 
 ### Stream A
 - Feature `execution-records`: one execution record per applied write (`X-<seq>`), with the principal, the run and operation tags, the request's `fingerprint_hash` and the committed result's RFC 8785 bytes and digest. Each committed answer, and each replay, carries `Tiny-Tracker-Execution`; `GET /executions/:id` with the caller's token shows that principal's records.

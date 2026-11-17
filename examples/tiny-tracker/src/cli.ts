@@ -359,6 +359,8 @@ async function main(): Promise<void> {
     // 0.3.0 integration (seams v2.1): the run registry goes to the journal before the backend opens it, and so before
     // the control listener can allocate: run-alloc lines are restored at load, and each new run is journalled.
     if (durability && fixture) durability.runs = fixture.runs;
+    // 0.4.0 (note 19 item 7): the fixture clock's moves are journalled and its offset is restored at load.
+    if (durability && clock && "restore" in clock) durability.clock = clock as import("./fixture/clock.js").FixtureClock;
     try {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,

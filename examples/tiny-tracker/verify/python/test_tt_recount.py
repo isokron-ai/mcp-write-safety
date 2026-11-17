@@ -174,8 +174,9 @@ class Recount(unittest.TestCase):
             self.assertIn("unknown line kind 'future-kind'", problems[0])
         finally:
             os.unlink(path)
-        # Every known kind passes; a lookup-fence line among them.
-        path = self.write_journal(records, extra=[{"line": "lookup-fence", "principal": "p-default", "key": "k-12345678", "run": None, "fenced_at": "t"}])
+        # Every known kind passes; a lookup-fence line and a clock line (0.4.0) among them.
+        path = self.write_journal(records, extra=[{"line": "lookup-fence", "principal": "p-default", "key": "k-12345678", "run": None, "fenced_at": "t"},
+                                                  {"line": "clock", "from_ms": 0, "to_ms": 60000, "at": "t"}])
         try:
             self.assertEqual(tt_recount.journal_executions(path, "p-default")[1], [])
         finally:
