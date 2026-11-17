@@ -46,10 +46,14 @@ describe("profiles and features", () => {
   });
 
   it("a feature not built yet, an unknown feature or a feature under profile 0.1 stops the command line (exit 2)", async () => {
-    const unbuilt = await runCli(["all", "--features", "inflight"]);
-    assert.equal(unbuilt.code, 2);
-    assert.match(unbuilt.stderr, /not built in this version: inflight \(arrives in 0\.3\.0\)/);
-    assert.equal(unbuilt.stdout, "");
+    // A feature this version does not build yet (from 0.3.0 there may be none left: then every feature is built).
+    const notBuilt = FEATURES.find((f) => !f.built);
+    if (notBuilt) {
+      const unbuilt = await runCli(["all", "--features", notBuilt.name]);
+      assert.equal(unbuilt.code, 2);
+      assert.match(unbuilt.stderr, new RegExp(`not built in this version: ${notBuilt.name} \\(arrives in ${notBuilt.since.replaceAll(".", "\\.")}\\)`));
+      assert.equal(unbuilt.stdout, "");
+    }
     const unknown = await runCli(["all"], { TRACKER_FEATURES: "nope" });
     assert.equal(unknown.code, 2);
     assert.match(unknown.stderr, /unknown feature/);
@@ -204,11 +208,16 @@ describe("the backend defect registry (G5)", () => {
     assert.match(backendDefectRefusals(["nope"], { features: [] }).join(), /unknown backend defect "nope"; known: lost-update/);
     const fake: BackendDefect = { name: "fake-journal", summary: "", context: "FX-DUR-1", seams: ["journal"], requires: ["durable"], apply() {} };
     BACKEND_DEFECTS.push(fake);
+    // Every seam is wired from 0.3.0: the refusal is checked against a seam marked not built for the test.
+    const seam = BACKEND_SEAMS.journal as { wired: boolean };
+    const wired = seam.wired;
+    seam.wired = false;
     try {
       const r = backendDefectRefusals(["fake-journal"], { features: [] }).join("\n");
       assert.match(r, /seam\(s\) not built in this version: journal/);
       assert.match(r, /needs the feature\(s\) durable/);
     } finally {
+      seam.wired = wired;
       BACKEND_DEFECTS.pop();
     }
     assert.match(backendDefectRefusals(["lost-update"], { features: [], host: "0.0.0.0" }).join(), /binds 127\.0\.0\.1 only/);

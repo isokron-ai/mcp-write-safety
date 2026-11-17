@@ -2,7 +2,7 @@
 // inflight and retention; decision 0004, design rule 4). This replaces the
 // in-memory seam of 0.1.0 (memoryKeyRecords) behind the same KeyRecordSeam. The
 // keyed path (src/backend/http.ts) calls get and put as before, begin and abort
-// around the section (seams v2), and `screen` first (src/backend/durability.ts).
+// around the section, and answers each state in the frozen order (seams v2.1).
 //
 // Scope is (principal, key) (D5). The run is kept on each record for a
 // run-scoped reset and is never part of a lookup.
@@ -13,27 +13,25 @@
 //   completed  the stored answer (a StoredReply), replayed to a repeat
 //   tombstone  an expired completed record under the `refuse` policy: what the
 //              write was (execution id, digest, objects), not its answer
-//   fenced     a lookup found no record and closed the key (settle-by-lookup,
-//              review B9): a late original with the key is refused
+//   fenced     the key can never be used again, nothing applied for it: either
+//              a run reset ended its pending record (seams v2.1, by "reset"),
+//              or a lookup found no record and closed it (settle-by-lookup,
+//              review B9, by "lookup"). Fences never expire (owner decision).
 //
 // With a journal (feature durable) a pending record is a `pending` line and its
-// end without a commit an `aborted` line; a completed record is rebuilt from its
-// commit line. A fence is held in memory only: see the stream notes (it is not a
-// line kind of journal-format/1).
+// end without a commit an `aborted` line, or a `fence` line when a run reset
+// ended it; a completed record is rebuilt from its commit line; a lookup fence
+// is a `lookup-fence` line (an additive line kind of journal-format/1).
 
 import { digestOf, DOMAINS, fingerprintHash } from "../digest.js";
 import { executionId } from "../records.js";
 import type { Clock } from "../clock.js";
 import type { CommitSink, CommittedTransaction, ObjectRef } from "./commit.js";
-import type { InflightKeyRecordSeam, KeyExpirySeam, KeyScope, StoredReply } from "./seams.js";
+import type { AbortReason, InflightKeyRecordSeam, KeyExpirySeam, KeyRecordState, KeyScope, KeyTombstone, StoredReply } from "./seams.js";
 import type { ExpiryPolicy } from "./expiry.js";
 
 /** What an expired record keeps (decision 0004): enough to say the write was applied and where to read it. */
-export interface Tombstone {
-  fingerprintHash: string;
-  executionId: string;
-  resultDigest: string;
-  committedAt: string;
+export interface Tombstone extends KeyTombstone {
   objects: ObjectRef[];
   seq: number;
 }
@@ -45,31 +43,18 @@ export type KeyState =
   | { state: "pending"; fingerprint: string; run: string | null; jseq?: number; since?: string }
   | { state: "completed"; reply: KeptReply }
   | { state: "tombstone"; tomb: Tombstone; run: string | null }
-  | { state: "fenced"; at: string; run: string | null };
+  | { state: "fenced"; at: string; run: string | null; by: "reset" | "lookup" };
 
-/** The answer the keyed path gives before it runs a write. `proceed`: no early answer (a new write, or a replay/reuse it decides itself). */
-export type Screen =
-  | { kind: "proceed" }
-  | { kind: "in_progress" }
-  | { kind: "reused" }
-  | { kind: "expired"; tomb: Tombstone }
-  | { kind: "fenced"; at: string };
-
-/** Why a pending record ended with no commit (seams v2.1; v2 freezes refused, journal_unavailable, orphan_at_start). */
-export type AbortReason = "refused" | "journal_unavailable" | "fault" | "internal_error" | "orphan_at_start";
-
-/** The answer of get in seams v2.1 (coordinator note 7): what the keyed path branches on, in this order. */
-export type KeyLookup =
-  | { state: "completed"; reply: StoredReply }
-  | { state: "pending"; since: string }
-  | { state: "expired"; tombstone: Tombstone }
-  | undefined;
 
 /** Where key-state lines go when the store is durable (src/backend/journal.ts). */
 export interface KeyLineWriter {
   /** Writes a pending line; returns its jseq. */
   pending(scope: KeyScope, key: string, fingerprint: string, run: string | null): number;
   aborted(pendingJseq: number, reason: AbortReason): void;
+  /** Writes a fence line: a run reset ended the pending line `pendingJseq` (seams v2.1). */
+  fence(scope: KeyScope, key: string, run: string, pendingJseq: number): void;
+  /** Writes a lookup-fence line: a lookup closed a key that had no record (settle-by-lookup, B9). */
+  lookupFence(scope: KeyScope, key: string, run: string | null, at: string): void;
 }
 
 export interface KeyRecordOptions {
@@ -152,10 +137,27 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
 
   // ---- KeyRecordSeam ----
 
-  get(scope: KeyScope, key: string): StoredReply | undefined {
+  /**
+   * Seams v2.1: the state the keyed path branches on (completed, pending, fenced, expired). A tombstone answers
+   * expired; a fence of either kind answers fenced (a lookup fence names the caller's run, or "" without one).
+   */
+  get(scope: KeyScope, key: string): KeyRecordState | undefined {
+    const s = this.state(scope, key);
+    if (!s) return undefined;
+    if (s.state === "completed") return { state: "completed", reply: s.reply };
+    if (s.state === "tombstone") return { state: "expired", tombstone: s.tomb };
+    if (s.state === "pending") return { state: "pending", since: s.since ?? "" };
+    return { state: "fenced", run: s.run ?? "", by: s.by };
+  }
+
+  /** The stored answer of a completed record, or undefined. */
+  stored(scope: KeyScope, key: string): StoredReply | undefined {
     const s = this.state(scope, key);
     return s?.state === "completed" ? s.reply : undefined;
   }
+
+  /** Set by the journal while it replays: a run reset then fences nothing (the fence lines that follow do). */
+  replaying = false;
 
   put(scope: KeyScope, key: string, reply: StoredReply): void {
     this.journalFailed.delete(id(scope, key));
@@ -169,10 +171,24 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
     for (const [k, s] of this.states) {
       if (!k.startsWith(prefix)) continue;
       if (s.state === "pending") {
-        // seams v2.1: a run reset ends the run's pending records (journalled as aborted); they are not counted.
-        if (s.run === run) this.abort(scope, k.slice(prefix.length), "refused");
+        // Seams v2.1: a run reset fences the run's pending records (a fence line, no aborted line); not counted.
+        if (s.run === run && !this.replaying) {
+          const key = k.slice(prefix.length);
+          this.states.set(k, { state: "fenced", at: this.options.clock.now().toISOString(), run, by: "reset" });
+          if (s.jseq !== undefined) {
+            try {
+              this.lines?.fence(scope, key, run, s.jseq);
+            } catch (e) {
+              // The reset is committed; the fence holds in memory. Its pending line ends as orphan_at_start at the next
+              // start, which is safe: the held write died with this process.
+              this.log?.(`tiny-tracker: could not journal a fence (${(e as Error).message}); its pending line ends at the next start`);
+            }
+          }
+        }
         continue;
       }
+      // Fences never expire and are never reusable (owner decision): a reset does not remove them.
+      if (s.state === "fenced") continue;
       const r = s.state === "completed" ? s.reply.run : s.run;
       if (r === run) { this.states.delete(k); n++; }
     }
@@ -191,7 +207,7 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
    * answer): a journal error is logged and the pending line is ended as orphan_at_start at the next start. Without a
    * reason it is journal_unavailable after a failed commit line, else refused.
    */
-  abort(scope: KeyScope, key: string, reason?: AbortReason): void {
+  abort(scope: KeyScope, key: string, reason: AbortReason): void {
     const k = id(scope, key);
     const failed = this.journalFailed.delete(k);
     const s = this.states.get(k);
@@ -199,7 +215,8 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
     this.states.delete(k);
     if (s.jseq === undefined) return;
     try {
-      this.lines?.aborted(s.jseq, reason ?? (failed ? "journal_unavailable" : "refused"));
+      // A commit line the journal could not write is journal_unavailable, whatever the keyed path saw.
+      this.lines?.aborted(s.jseq, failed ? "journal_unavailable" : reason);
     } catch (e) {
       this.log?.(`tiny-tracker: could not journal the end of a pending key record (${(e as Error).message}); it ends at the next start`);
     }
@@ -208,31 +225,12 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
   /** Where abort reports a journal error (default: none). */
   log: ((message: string) => void) | undefined;
 
-  /** The seams v2.1 shape of get: completed, pending or expired (a fence answers as pending: no write may begin). */
-  lookup(scope: KeyScope, key: string): KeyLookup {
-    const s = this.state(scope, key);
-    if (!s) return undefined;
-    if (s.state === "completed") return { state: "completed", reply: s.reply };
-    if (s.state === "tombstone") return { state: "expired", tombstone: s.tomb };
-    if (s.state === "pending") return { state: "pending", since: s.since ?? "" };
-    return { state: "pending", since: s.at };
-  }
-
   tombstone(scope: KeyScope, key: string) {
     const s = this.state(scope, key);
     return s?.state === "tombstone" ? s.tomb : undefined;
   }
 
-  // ---- the keyed path's questions ----
-
-  /** What a keyed request meets before it runs (decision 0004's answer table). */
-  screen(scope: KeyScope, key: string, fingerprint: string): Screen {
-    const s = this.state(scope, key);
-    if (!s || s.state === "completed") return { kind: "proceed" };
-    if (s.state === "pending") return s.fingerprint === fingerprint ? { kind: "in_progress" } : { kind: "reused" };
-    if (s.state === "fenced") return { kind: "fenced", at: s.at };
-    return s.tomb.fingerprintHash === fingerprintHashOf(scope.principal, fingerprint) ? { kind: "expired", tomb: s.tomb } : { kind: "reused" };
-  }
+  // ---- settle-by-lookup ----
 
   /**
    * Settle-by-lookup's fence (review B9): the state of the key, and when there is none and `write` is set, a fence in
@@ -241,7 +239,10 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
   fence(scope: KeyScope, key: string, run: string | null, write: boolean): KeyState | undefined {
     const s = this.state(scope, key);
     if (s || !write) return s;
-    const fenced: KeyState = { state: "fenced", at: this.options.clock.now().toISOString(), run };
+    const at = this.options.clock.now().toISOString();
+    // Journalled first (lookup-fence line): a fence that a restart forgets would let a late original land.
+    this.lines?.lookupFence(scope, key, run, at);
+    const fenced: KeyState = { state: "fenced", at, run, by: "lookup" };
     this.states.set(id(scope, key), fenced);
     return fenced;
   }
@@ -269,6 +270,11 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
     for (const [k, s] of this.states) if (s.state === "pending" && s.jseq === jseq) this.states.delete(k);
   }
 
+  /** A fence line: the pending record it names becomes fenced by its run's reset. */
+  restoreFence(scope: KeyScope, key: string, run: string, at: string): void {
+    this.states.set(id(scope, key), { state: "fenced", at, run, by: "reset" });
+  }
+
   /** Counts by state (tests and the build descriptor). */
   counts(): Record<KeyState["state"], number> {
     const c = { pending: 0, completed: 0, tombstone: 0, fenced: 0 };
@@ -282,7 +288,7 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
       name: "key-records",
       role: "observer",
       onCommit: (tx: CommittedTransaction) => {
-        const key = tx.request.key;
+        const key = tx.request?.key ?? null;
         if (key === null || tx.kind !== "write") return;
         const s = this.states.get(id({ principal: tx.principal }, key));
         if (s?.state === "completed" && s.reply.seq === tx.seq && !s.reply.objects) s.reply = { ...s.reply, objects: tx.objects };

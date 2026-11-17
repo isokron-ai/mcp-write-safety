@@ -57,8 +57,13 @@ export type KeyRecordState =
      * begins, and the write that held it, if it reaches its commit section, is refused the same way and applies nothing.
      */
     state: "fenced";
-    /** The run whose reset fenced it. */
+    /** The run whose reset fenced it ("" for a lookup fence made without a run tag). */
     run: string;
+    /**
+     * Additive (0.3.0): what fenced it. "reset" (the default when absent): a run reset ended its pending record.
+     * "lookup": settle-by-lookup's fence (review B9), a lookup that found no record closed the key.
+     */
+    by?: "reset" | "lookup";
   }
   | { state: "expired"; tombstone: KeyTombstone };
 

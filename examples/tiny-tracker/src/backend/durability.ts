@@ -8,17 +8,18 @@
 //   retention  the stated key retention with the refuse (tombstone) or forget
 //              policy (src/backend/expiry.ts)
 //
-// The keyed path in src/backend/http.ts asks `screen` before it looks for a
-// stored answer; the commit section itself is unchanged.
+// The keyed path in src/backend/http.ts answers each key state in the frozen
+// order of seams v2.1 (completed, pending, fenced, expired, undefined); this
+// module supplies the states, the journal and the fence route.
 
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import type { KeyRecordSeam, KeyScope } from "./seams.js";
+import type { KeyRecordSeam } from "./seams.js";
 import type { Store } from "./store.js";
-import type { TxMeta } from "./commit.js";
-import { DurableKeyRecords, type KeptReply, type Tombstone } from "./keyrecords.js";
-import { Journal, type CrashHook } from "./journal.js";
-import { describeRetention, keyExpiry, DEFAULT_RETENTION_MS, type ExpiryPolicy } from "./expiry.js";
+import type { CommittedTransaction } from "./commit.js";
+import { DurableKeyRecords, type KeptReply } from "./keyrecords.js";
+import { Journal, type CrashHook, type JournalRun } from "./journal.js";
+import { keyExpiry, DEFAULT_RETENTION_MS, type ExpiryPolicy } from "./expiry.js";
 import { PACKAGE_VERSION } from "../profile.js";
 import { KEY_PATTERN } from "./input.js";
 
@@ -42,6 +43,14 @@ export interface DurabilityOptions {
   /** Crash points on the journal's write path (tests). */
   crash?: CrashHook;
   log?: (message: string) => void;
+  /**
+   * The fixture layer's run registry (seams v2.1). Under durable its run-alloc lines go back into it at load, and its
+   * onAllocate journals each new run (chained before any onAllocate already set). Hand it over before the control
+   * listener can allocate.
+   */
+  runs?: { restore(run: JournalRun): void; onAllocate: ((run: JournalRun) => void) | undefined };
+  /** Told each commit the journal replays at load (the execution records). Set by startBackend. */
+  replayObservers?: Array<(tx: CommittedTransaction) => void>;
 }
 
 type Reply = { status: number; body?: unknown; headers?: Record<string, string> };
@@ -53,23 +62,9 @@ export interface Durability {
   journal?: Journal;
   features: { durable: boolean; inflight: boolean; retention: boolean };
   retentionMs: number;
-  /** A keyed request's early answer from its key's state, or undefined to go on (decision 0004's table). */
-  screen(store: Store, meta: TxMeta, scope: KeyScope, key: string, fingerprint: string): Reply | undefined;
   /** Routes this module serves (POST /operations/:key/fence), or undefined. */
   route(method: string, parts: string[], principal: string, run: string | null, body: unknown): Reply | undefined;
   close(): void;
-}
-
-function expiredBody(tomb: Tombstone, retentionMs: number) {
-  return {
-    error: "key_expired",
-    outcome: "applied",
-    message: `the write with this Idempotency-Key was applied (${tomb.executionId}), but its stored answer is gone: keys are remembered for ${describeRetention(retentionMs)}. Nothing new was written; read the object.`,
-    execution_id: tomb.executionId,
-    result_digest: tomb.resultDigest,
-    committed_at: tomb.committedAt,
-    objects: tomb.objects,
-  };
 }
 
 export function openDurability(store: Store, options: DurabilityOptions): Durability {
@@ -85,7 +80,19 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
     journal = new Journal(store, keys, { dataDir: options.dataDir, writer: PACKAGE_VERSION, crash: options.crash, log: options.log });
     if (defects.includes("key-record-not-durable") || defects.includes("key-record-after-effect")) journal.keyFromCommitLine = false;
     if (features.inflight) keys.lines = journal;
+    journal.replayObservers = options.replayObservers ?? [];
+    if (options.runs) journal.runs = options.runs;
     journal.load();
+    if (options.runs) {
+      // Seams v2.1: a run allocation is journalled before it is registered or answered (run-alloc line).
+      const runs = options.runs;
+      const next = runs.onAllocate;
+      const j = journal;
+      runs.onAllocate = (run) => {
+        j.recordRun(run);
+        next?.(run);
+      };
+    }
     if (defects.includes("key-record-after-effect")) {
       // DEFECT (key-record-after-effect): key records live in a second file, written after the effect is applied.
       const file = join(options.dataDir, AFTER_EFFECT_FILE);
@@ -114,38 +121,23 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
   }
   store.addSink(keys.objectsSink());
 
-  // Without inflight there is no pending state: the keyed path sees a seam with no begin/abort (and looks the key up
-  // again after an awaiting fault hook, as in 0.2.0).
+  // Without inflight there is no pending state: the keyed path sees a seam with no begin/abort (and re-checks its run
+  // after an awaiting fault hook, as in 0.2.0).
   const seam: KeyRecordSeam = features.inflight ? keys : { get: (s, k) => keys.get(s, k), put: (s, k, r) => keys.put(s, k, r), dropRun: (s, r) => keys.dropRun(s, r) };
   return {
     keys, seam, journal, features, retentionMs,
-    screen(store, meta, scope, key, fingerprint): Reply | undefined {
-      const s = keys.screen(scope, key, fingerprint);
-      switch (s.kind) {
-        case "proceed":
-          return undefined;
-        case "in_progress":
-          store.refuse(meta, 409, "in_progress");
-          return { status: 409, headers: { "retry-after": "1" }, body: { error: "in_progress", message: "a request with this Idempotency-Key is still being applied; repeat it later with the same key to get its result" } };
-        case "reused":
-          store.refuse(meta, 422, "idempotency_key_reused");
-          return { status: 422, body: { error: "idempotency_key_reused", message: "this Idempotency-Key was already used for a different request" } };
-        case "fenced":
-          store.refuse(meta, 409, "key_fenced");
-          return { status: 409, body: { error: "key_fenced", message: "this Idempotency-Key was closed by a lookup that found no write with it; nothing was written. Use a new key.", fenced_at: s.at } };
-        case "expired": {
-          const body = expiredBody(s.tomb, retentionMs);
-          store.replay(meta, 409, body, s.tomb.seq);
-          return { status: 409, body, headers: { "idempotent-replayed": "true" } };
-        }
-      }
-    },
     route(method, parts, principal, run, body): Reply | undefined {
       if (!features.inflight || method !== "POST" || parts.length !== 3 || parts[0] !== "operations" || parts[2] !== "fence") return undefined;
       const key = parts[1];
       if (!KEY_PATTERN.test(key)) return { status: 400, body: { error: "bad_idempotency_key", message: "the key must be 8 to 128 characters from A-Z a-z 0-9 . _ : -" } };
       const write = (body as { fence?: unknown } | null | undefined)?.fence !== false;
-      const s = keys.fence({ principal }, key, run, write);
+      let s;
+      try {
+        s = keys.fence({ principal }, key, run, write);
+      } catch (e) {
+        // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed.
+        return { status: 503, body: { error: "journal_unavailable", message: `the fence could not be recorded: ${(e as Error).message}; nothing was fenced` } };
+      }
       if (!s) return { status: 404, body: { error: "no_record", key, state: "none", message: "no record of this key now" } };
       switch (s.state) {
         case "pending":

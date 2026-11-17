@@ -11,8 +11,10 @@
 //                       RFC 8785 bytes without the checksum member)
 //
 // Lines: the header (with the seed), commit lines (commit_seq = tx.seq, the
-// complete CommittedTransaction, pending_jseq), pending lines (inflight) and
-// aborted lines. The effect and its key record are one line: replay rebuilds the
+// complete CommittedTransaction, pending_jseq), pending lines (inflight),
+// aborted lines, fence lines (a run reset ended a pending line; seams v2.1),
+// run-alloc lines (the fixture layer's run registry; seams v2.1) and
+// lookup-fence lines (settle-by-lookup; additive). The effect and its key record are one line: replay rebuilds the
 // key record from the commit line with storedReplyOf(tx).
 //
 // The journal is the commit path's step 2 (src/backend/commit.ts): the line is
@@ -30,10 +32,23 @@ import { closeSync, existsSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, 
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
-import { storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalHeader, type JournalLine, type JournalPendingLine } from "./commit.js";
-import type { JournalSeam, KeyScope } from "./seams.js";
+import { storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
+import type { AbortReason, JournalSeam, KeyScope } from "./seams.js";
 import type { Store } from "./store.js";
-import type { AbortReason, DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
+import type { DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
+
+/** A run as the fixture layer's registry keeps it (src/fixture/control.ts Run); the journal's run-alloc line. */
+export interface JournalRun {
+  run_id: string;
+  principal: string;
+  created_at: string;
+  label: string | null;
+}
+
+/** Where run-alloc lines go back at load (the fixture layer's RunRegistry). */
+export interface RunRestorer {
+  restore(run: JournalRun): void;
+}
 
 export const JOURNAL_FORMAT = "journal-format/1";
 export const JOURNAL_FILE = "journal.jsonl";
@@ -185,6 +200,10 @@ export interface LoadReport {
   commits: number;
   droppedTornLine: boolean;
   abortedOrphans: number;
+  /** Fences restored (fence and lookup-fence lines). */
+  fences: number;
+  /** Runs restored from run-alloc lines. */
+  runs: number;
 }
 
 /** What is wrong with a line at position `expected` (undefined: nothing). */
@@ -197,6 +216,13 @@ function lineProblem(line: JournalLine | undefined, expected: number, lastCommit
     if (line.pending_jseq !== null && !pendings.has(line.pending_jseq)) return `pending_jseq ${line.pending_jseq} names no open pending line`;
   } else if (line.line === "aborted") {
     if (!pendings.has(line.pending_jseq)) return `pending_jseq ${line.pending_jseq} names no open pending line`;
+  } else if (line.line === "fence") {
+    if (!pendings.has(line.pending_jseq)) return `pending_jseq ${line.pending_jseq} names no open pending line`;
+    if (!Number.isSafeInteger(line.reset_seq) || line.reset_seq < 1 || line.reset_seq > lastCommit) return `reset_seq ${line.reset_seq} names no earlier commit`;
+  } else if (line.line === "run-alloc") {
+    if (typeof line.run_id !== "string" || typeof line.principal !== "string") return "a run-alloc line without run_id or principal";
+  } else if (line.line === "lookup-fence") {
+    if (typeof line.key !== "string" || typeof line.principal !== "string") return "a lookup-fence line without principal or key";
   } else if (line.line !== "pending") {
     return `unknown line kind ${JSON.stringify((line as { line: unknown }).line)}`;
   }
@@ -218,6 +244,15 @@ export class Journal implements JournalSeam, KeyLineWriter {
   report: LoadReport | undefined;
   /** False only under the key-record-not-durable defect: a replayed commit line rebuilds no key record. */
   keyFromCommitLine = true;
+  /** The fixture layer's run registry, set before load: run-alloc lines go back into it. */
+  runs: RunRestorer | undefined;
+  /**
+   * Told each replayed commit after its post-state is applied (no clock, no ledger): the execution records, so
+   * /executions/:id and /operations/:key answer for commits made before a restart.
+   */
+  replayObservers: Array<(tx: CommittedTransaction) => void> = [];
+  /** The commit_seq of the last commit line (a fence line names its reset by it). */
+  private lastCommitSeq = 0;
 
   constructor(readonly store: Store, readonly keys: DurableKeyRecords | undefined, readonly options: JournalOptions) {
     this.path = join(options.dataDir, JOURNAL_FILE);
@@ -247,7 +282,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
   }
 
   private replay(): void {
-    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0 };
+    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0, fences: 0, runs: 0 };
     this.report = report;
     // A journal file that is missing, or empty because the first start stopped before its header was flushed, is new.
     if (!existsSync(this.path) || statSync(this.path).size === 0) {
@@ -293,7 +328,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
       }
       const l = line!;
       if (l.line === "pending") open.set(l.jseq, l);
-      if (l.line === "aborted") open.delete(l.pending_jseq);
+      if (l.line === "aborted" || l.line === "fence") open.delete(l.pending_jseq);
       if (l.line === "commit") {
         lastCommit = l.commit_seq;
         if (l.pending_jseq !== null) open.delete(l.pending_jseq);
@@ -302,7 +337,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
       offset += Buffer.byteLength(parts[i]) + (isLast && !terminated ? 0 : 1);
     }
     this.store.applySeed(header.seed);
-    for (const l of lines.slice(1)) this.apply(l);
+    for (const l of lines.slice(1)) this.apply(l, report);
+    this.lastCommitSeq = lastCommit;
     this.jseq = lines.length - 1;
     this.lastChecksum = lines[lines.length - 1].checksum;
     report.lines = lines.length - 1;
@@ -326,22 +362,28 @@ export class Journal implements JournalSeam, KeyLineWriter {
   }
 
   /** Applies one line at start: post-state and key states only, no clock, no event, no sink. */
-  private apply(line: JournalLine): void {
+  private readonly commitTimes = new Map<number, string>();
+
+  private apply(line: JournalLine, report: LoadReport): void {
     const keys = this.keys;
     switch (line.line) {
       case "commit": {
         const tx = line.tx;
         this.store.applyPostState(tx);
+        this.commitTimes.set(tx.seq, tx.committedAt);
+        for (const o of this.replayObservers) o(tx);
         if (!keys) break;
         const scope: KeyScope = { principal: tx.principal };
         if (tx.kind === "run-reset" && tx.reset) {
-          // Replay writes nothing: a pending record the reset ended has its own aborted line later in the file.
-          const lines = keys.lines;
-          keys.lines = undefined;
-          keys.dropRun({ principal: tx.reset.principal }, tx.reset.run);
-          keys.lines = lines;
+          // Replay writes nothing and fences nothing: a pending record the reset fenced has its own fence line next.
+          keys.replaying = true;
+          try {
+            keys.dropRun({ principal: tx.reset.principal }, tx.reset.run);
+          } finally {
+            keys.replaying = false;
+          }
         }
-        else if (tx.kind === "write" && tx.request.key !== null && tx.request.fingerprint !== null) {
+        else if (tx.kind === "write" && tx.request !== null && tx.request.key !== null && tx.request.fingerprint) {
           // The key record goes with the effect, in the same line (FX-DUR-2); a pending record it completes ends here.
           if (this.keyFromCommitLine) keys.restore(scope, tx.request.key, { state: "completed", reply: { ...storedReplyOf(tx), objects: tx.objects } });
           else if (keys.state(scope, tx.request.key)?.state === "pending") keys.restore(scope, tx.request.key, undefined);
@@ -353,6 +395,19 @@ export class Journal implements JournalSeam, KeyLineWriter {
         break;
       case "aborted":
         keys?.restorePendingEnd(line.pending_jseq);
+        break;
+      case "fence":
+        keys?.restorePendingEnd(line.pending_jseq);
+        keys?.restoreFence({ principal: line.principal }, line.key, line.run, this.commitTimes.get(line.reset_seq) ?? "");
+        report.fences++;
+        break;
+      case "lookup-fence":
+        keys?.restore({ principal: line.principal }, line.key, { state: "fenced", at: line.fenced_at, run: line.run, by: "lookup" });
+        report.fences++;
+        break;
+      case "run-alloc":
+        this.runs?.restore({ run_id: line.run_id, principal: line.principal, created_at: line.created_at, label: line.label });
+        report.runs++;
         break;
       default:
         break;
@@ -402,7 +457,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
   // ---- CommitSink (role journal: told first; a throw aborts the write and the store is put back) ----
 
   onCommit(tx: CommittedTransaction): void {
-    const key = tx.kind === "write" ? tx.request.key : null;
+    const key = tx.kind === "write" ? tx.request?.key ?? null : null;
     const pendingJseq = key !== null && this.keys ? this.keys.pendingJseq({ principal: tx.principal }, key) ?? null : null;
     try {
       this.append({ line: "commit", commit_seq: tx.seq, pending_jseq: pendingJseq, tx } as Omit<JournalCommitLine, "jseq" | "checksum">, key);
@@ -410,6 +465,13 @@ export class Journal implements JournalSeam, KeyLineWriter {
       if (key !== null && this.keys && !(e instanceof SimulatedCrash)) this.keys.markJournalFailure({ principal: tx.principal }, key);
       throw e;
     }
+    this.lastCommitSeq = tx.seq;
+  }
+
+  // ---- JournalSeam.recordRun (seams v2.1): RunRegistry.onAllocate, before the run is registered or answered ----
+
+  recordRun(run: JournalRun): void {
+    this.append({ line: "run-alloc", run_id: run.run_id, principal: run.principal, created_at: run.created_at, label: run.label } as Omit<JournalRunAllocLine, "jseq" | "checksum">);
   }
 
   // ---- KeyLineWriter ----
@@ -419,7 +481,16 @@ export class Journal implements JournalSeam, KeyLineWriter {
   }
 
   aborted(pendingJseq: number, reason: AbortReason): void {
-    this.append({ line: "aborted", pending_jseq: pendingJseq, reason } as unknown as Omit<JournalAbortedLine, "jseq" | "checksum">);
+    this.append({ line: "aborted", pending_jseq: pendingJseq, reason } as Omit<JournalAbortedLine, "jseq" | "checksum">);
+  }
+
+  /** In the run reset's apply step, after its commit line: reset_seq is that commit's commit_seq. */
+  fence(scope: KeyScope, key: string, run: string, pendingJseq: number): void {
+    this.append({ line: "fence", principal: scope.principal, key, run, pending_jseq: pendingJseq, reset_seq: this.lastCommitSeq } as Omit<JournalFenceLine, "jseq" | "checksum">, key);
+  }
+
+  lookupFence(scope: KeyScope, key: string, run: string | null, at: string): void {
+    this.append({ line: "lookup-fence", principal: scope.principal, key, run, fenced_at: at } as Omit<JournalLookupFenceLine, "jseq" | "checksum">, key);
   }
 
   close(): void {

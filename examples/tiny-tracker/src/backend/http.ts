@@ -212,9 +212,10 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   const lookupOn = features.includes("lookup");
   if (lookupOn && !executionRecords) throw new Error("the lookup feature needs the execution-records feature (an operation record names its execution record)");
   applyBackendDefects(options.defects ?? [], ops, features);
+  let executions: ExecutionLog | undefined;
   if (executionRecords) {
     // An observer: told after the ledger, before any observer a backend defect adds.
-    const executions = new ExecutionLog(() => ops.digest);
+    executions = new ExecutionLog(() => ops.digest);
     store.addSink(executions);
     store.evidence = evidenceSource({ executions, lookup: () => ops.lookup, digest: () => ops.digest, lookupOn, principals: principals.map((p) => p.id) });
   }
@@ -227,7 +228,11 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   // states in place. Any of durable, inflight or retention switches it on.
   const dOptions: DurabilityOptions | undefined = options.durability ?? (features.some((f) => f === "inflight" || f === "retention") ? { features } : undefined);
   const durable: Durability | undefined = dOptions && dOptions.features.some((f) => f === "durable" || f === "inflight" || f === "retention")
-    ? openDurability(store, { ...dOptions, defects: [...(dOptions.defects ?? []), ...(options.defects ?? [])] }) : undefined;
+    ? openDurability(store, {
+      ...dOptions, defects: [...(dOptions.defects ?? []), ...(options.defects ?? [])],
+      // A restart keeps the execution records: the journal tells the log each commit it replays (G2).
+      replayObservers: executions ? [(tx) => executions!.onCommit(tx)] : [],
+    }) : undefined;
   if (durable) ops.keyRecord = durable.seam;
   // ---- end stream D ----
   store.keyRecords = ops.keyRecord;
@@ -472,7 +477,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
             store.refuse(meta, 409, "in_progress");
             throw new ApiError(409, "in_progress", "a request with this Idempotency-Key is still in progress; repeat it later with the same key", { since: found.since });
           }
-          if (found.state === "fenced") throw fenced(found.run);
+          if (found.state === "fenced") throw fenced(found.run, found.by);
           const t = found.tombstone;
           if (t.fingerprintHash !== meta.request.fingerprintHash) {
             store.refuse(meta, 422, "idempotency_key_reused");
@@ -481,13 +486,17 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
           const expired = {
             error: "key_expired", message: "this key's write was applied; its stored answer has expired: read the object",
             execution_id: t.executionId, result_digest: t.resultDigest, committed_at: t.committedAt,
+            // stream D (additive): the objects the write named, when the tombstone keeps them, so the MCP layer can say
+            // which object to read.
+            ...("objects" in t && Array.isArray((t as { objects?: unknown }).objects) ? { objects: (t as { objects: unknown[] }).objects } : {}),
           };
           store.replay(meta, 410, expired, Number(t.executionId.slice(2)));
           send(410, expired, { ...executionHeader(Number(t.executionId.slice(2))), "idempotent-replayed": "true" });
           return true;
         };
-        const fenced = (run: string) => {
+        const fenced = (run: string, by?: "reset" | "lookup") => {
           store.refuse(meta, 409, "key_fenced");
+          if (by === "lookup") return new ApiError(409, "key_fenced", "this Idempotency-Key was closed by a lookup that found no write with it; nothing was applied, and the key cannot be used again");
           return new ApiError(409, "key_fenced", `run ${run} was reset while a request with this Idempotency-Key was in progress; nothing was applied, and the key cannot be used again`);
         };
         const inflight = isInflight(ops.keyRecord) ? ops.keyRecord : undefined;

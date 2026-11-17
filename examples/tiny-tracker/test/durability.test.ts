@@ -214,7 +214,7 @@ describe("the data dir and its lock (G13, X5)", () => {
 });
 
 describe("in-flight keys (rule 4, R5)", () => {
-  it("a same-key call while the first is pending answers 409 in_progress; another body is refused; after the commit it is a replay", async () => {
+  it("a same-key call while the first is pending answers 409 in_progress, whatever its body; after the commit it is a replay", async () => {
     const t = tempDir("inflight");
     try {
       let release!: () => void;
@@ -235,15 +235,17 @@ describe("in-flight keys (rule 4, R5)", () => {
         const second = await b.api.send("POST", "/tickets", body, keyed("inflight-key-1"));
         assert.equal(second.status, 409);
         assert.equal(second.body.error, "in_progress");
-        assert.equal(second.headers.get("retry-after"), "1");
+        assert.equal(typeof second.body.since, "string", "seams v2.1: the pending record's created_at");
+        // Seams v2.1's frozen order: a pending record answers 409 in_progress whatever the body (the fingerprint is
+        // compared once the record has completed).
         const other = await b.api.send("POST", "/tickets", { ...body, title: "b" }, keyed("inflight-key-1"));
-        assert.equal(other.status, 422);
+        assert.deepEqual([other.status, other.body.error], [409, "in_progress"]);
         release();
         assert.equal((await first).status, 201);
         const third = await b.api.send("POST", "/tickets", body, keyed("inflight-key-1"));
         assert.equal(third.headers.get("idempotent-replayed"), "true");
         assert.equal((await b.api.export()).tickets.length, 1);
-        assert.deepEqual(refusals, ["in_progress", "idempotency_key_reused"], "both early answers are refusals in the ledger's view; the pending owner is untouched");
+        assert.deepEqual(refusals, ["in_progress", "in_progress"], "both early answers are refusals in the ledger's view; the pending owner is untouched");
       } finally {
         await b.close();
       }
@@ -296,9 +298,9 @@ describe("retention, tombstones and forget (decision 0004, B10)", () => {
       const b2 = await durableBackend({ dataDir: t.dataDir, clock });
       try {
         const exp = await b2.api.send("POST", "/tickets", body, keyed("tomb-key-00001"));
-        assert.equal(exp.status, 409);
+        // Seams v2.1 (B10): 410 key_expired, a replay of the tombstone's commit; the MCP layer answers applied.
+        assert.equal(exp.status, 410);
         assert.equal(exp.body.error, "key_expired");
-        assert.equal(exp.body.outcome, "applied");
         assert.equal(exp.body.execution_id, "X-1");
         assert.equal(exp.body.result_digest, digestOf(DOMAINS.executionResult, first.body).digest);
         assert.deepEqual(exp.body.objects, [{ type: "ticket", id: "T-1" }]);
@@ -439,7 +441,7 @@ describe("the persistence gap (FX-DUR-1, FX-DUR-2)", () => {
 });
 
 describe("seams v2.1 shapes, built ahead of the rebase (coordinator note 7)", () => {
-  it("lookup answers completed, pending or expired; a fence answers pending; abort never throws and takes a reason", async () => {
+  it("get answers completed, pending, fenced or expired; abort never throws and takes a reason", async () => {
     const t = tempDir("v21");
     try {
       const clock = movableClock();
@@ -448,19 +450,19 @@ describe("seams v2.1 shapes, built ahead of the rebase (coordinator note 7)", ()
       const s = { principal: "p-default" };
       try {
         await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("v21-key-00001"));
-        assert.equal(keys.lookup(s, "v21-key-00001")!.state, "completed");
+        assert.equal(keys.get(s, "v21-key-00001")!.state, "completed");
         keys.begin(s, "v21-key-00002", "POST /tickets {}", null);
-        assert.equal(keys.lookup(s, "v21-key-00002")!.state, "pending");
+        assert.equal(keys.get(s, "v21-key-00002")!.state, "pending");
+        keys.fence(s, "v21-key-00003", null, true);
+        assert.deepEqual(keys.get(s, "v21-key-00003"), { state: "fenced", run: "", by: "lookup" }, "a fenced key lets no write begin");
         (b.backend.durability!.journal as any).abandon(); // the journal is gone: the abort cannot be written
         const logged: string[] = [];
         keys.log = (m) => void logged.push(m);
         assert.doesNotThrow(() => keys.abort(s, "v21-key-00002", "fault"));
-        assert.equal(keys.lookup(s, "v21-key-00002"), undefined);
+        assert.equal(keys.get(s, "v21-key-00002"), undefined);
         assert.match(logged[0], /next start/);
-        keys.fence(s, "v21-key-00003", null, true);
-        assert.equal(keys.lookup(s, "v21-key-00003")!.state, "pending", "a fenced key lets no write begin");
         clock.advance(7 * DAY_MS);
-        const e = keys.lookup(s, "v21-key-00001");
+        const e = keys.get(s, "v21-key-00001");
         assert.equal(e!.state, "expired");
         assert.equal((e as any).tombstone.executionId, "X-1");
       } finally {
@@ -471,22 +473,32 @@ describe("seams v2.1 shapes, built ahead of the rebase (coordinator note 7)", ()
     }
   });
 
-  it("a run reset ends that run's pending key records with an aborted line; the replay agrees", async () => {
+  it("a run reset fences that run's pending key records with a fence line; the fence survives a restart", async () => {
     const t = tempDir("v21r");
     try {
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       const s = { principal: "p-default" };
       b.backend.durability!.keys.begin(s, "v21-run-key01", "POST /tickets {}", "run-v-1");
       b.backend.durability!.keys.begin(s, "v21-run-key02", "POST /tickets {}", "run-v-2");
-      b.backend.dropRun(s, "run-v-1");
-      assert.equal(b.backend.durability!.keys.lookup(s, "v21-run-key01"), undefined);
-      assert.equal(b.backend.durability!.keys.lookup(s, "v21-run-key02")!.state, "pending");
+      const r = b.backend.dropRun(s, "run-v-1");
+      assert.equal(r.keys, 0, "a fenced pending record is not counted");
+      assert.deepEqual(b.backend.durability!.keys.get(s, "v21-run-key01"), { state: "fenced", run: "run-v-1", by: "reset" });
+      assert.equal(b.backend.durability!.keys.get(s, "v21-run-key02")!.state, "pending");
       await b.crash();
-      const ls = readJournal(join(t.dataDir, JOURNAL_FILE)).lines.map((l: any) => [l.line, l.reason ?? null]);
-      assert.deepEqual(ls, [["header", null], ["pending", null], ["pending", null], ["commit", null], ["aborted", "refused"]]);
+      const lines = readJournal(join(t.dataDir, JOURNAL_FILE)).lines as any[];
+      assert.deepEqual(lines.map((l) => l.line), ["header", "pending", "pending", "commit", "fence"]);
+      assert.deepEqual([lines[4].pending_jseq, lines[4].reset_seq, lines[4].run, lines[4].key], [1, lines[3].commit_seq, "run-v-1", "v21-run-key01"]);
       const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
-      assert.equal(b2.backend.durability!.journal!.report!.abortedOrphans, 1, "only run-v-2's pending record is an orphan");
-      await b2.close();
+      try {
+        assert.equal(b2.backend.durability!.journal!.report!.abortedOrphans, 1, "only run-v-2's pending record is an orphan");
+        assert.equal(b2.backend.durability!.journal!.report!.fences, 1);
+        assert.equal(b2.backend.durability!.keys.get(s, "v21-run-key01")!.state, "fenced", "the fence survives the restart");
+        const late = await b2.api.send("POST", "/tickets", { project: "inbox", title: "late" }, keyed("v21-run-key01"));
+        assert.deepEqual([late.status, late.body.error], [409, "key_fenced"]);
+        assert.equal((await b2.api.export()).tickets.length, 0, "nothing applied under a fenced key");
+      } finally {
+        await b2.close();
+      }
     } finally {
       t.cleanup();
     }

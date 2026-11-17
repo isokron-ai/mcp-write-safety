@@ -44,13 +44,13 @@ class FakeLedger {
       name: "fake-ledger", role: "ledger",
       onCommit: (tx: CommittedTransaction) => {
         if (tx.kind !== "write") return;
-        const e = { kind: "execution" as const, seq: tx.seq, key: tx.request.key, principal: tx.principal, objects: tx.objects.map((o) => `${o.type}:${o.id}`) };
+        const e = { kind: "execution" as const, seq: tx.seq, key: tx.request?.key ?? null, principal: tx.principal, objects: tx.objects.map((o) => `${o.type}:${o.id}`) };
         if (this.sabotage === "drop") { this.sabotage = undefined; return; }
         this.entries.push(e);
         if (this.sabotage === "duplicate") { this.sabotage = undefined; this.entries.push({ ...e }); }
       },
-      onReplay: (tx) => void this.entries.push({ kind: "replay", seq: tx.originalSeq, key: tx.request.key, principal: tx.principal }),
-      onRefusal: (tx) => void this.entries.push({ kind: "refusal", key: tx.request.key, principal: tx.principal }),
+      onReplay: (tx) => void this.entries.push({ kind: "replay", seq: tx.originalSeq, key: tx.request?.key ?? null, principal: tx.principal }),
+      onRefusal: (tx) => void this.entries.push({ kind: "refusal", key: tx.request?.key ?? null, principal: tx.principal }),
     };
   }
 }
@@ -95,9 +95,10 @@ async function history(seed: number, steps: number) {
           m.first = res.body; m.committedAt = clock.offset;
           if (res.headers.get("idempotent-replayed") !== "true") successes.push(res.body);
         } else if (clock.offset - m.committedAt! >= 7 * DAY_MS) {
-          assert.equal(res.status, 409);
+          // Seams v2.1 (B10): 410 key_expired, a replay of the tombstone's commit.
+          assert.equal(res.status, 410);
           assert.equal(res.body.error, "key_expired");
-          assert.equal(res.body.outcome, "applied");
+          assert.equal(res.headers.get("idempotent-replayed"), "true");
         } else {
           assert.equal(res.headers.get("idempotent-replayed"), "true");
           assert.deepEqual(res.body, m.first, "a repeat is the first answer, byte for byte");
@@ -139,7 +140,7 @@ async function history(seed: number, steps: number) {
       // Invariants after every step.
       const lines = commitLines(t.dataDir);
       const perKey = new Map<string, number>();
-      for (const l of lines) if (l.tx.request.key) perKey.set(l.tx.request.key, (perKey.get(l.tx.request.key) ?? 0) + 1);
+      for (const l of lines) if (l.tx.request?.key) perKey.set(l.tx.request.key, (perKey.get(l.tx.request.key) ?? 0) + 1);
       for (const [k, c] of perKey) assert.ok(c <= 1, `key ${k} applied ${c} times`);
       const titles = (await b.api.export()).tickets.map((x) => x.title.replace(/-changed$/, ""));
       assert.equal(new Set(titles).size, titles.length, "at most one ticket per key");

@@ -316,7 +316,9 @@ describe("attribution reaches the records, outside every handler (rule 3, B5)", 
     assert.ok(createPath.length >= 6, createPath.join(", "));
     for (const defects of [[], ...createPath.map((d) => [d]), createPath]) {
       const backend = await backendWith();
-      const server = await startServer({ env: { TRACKER_BACKEND_URL: backend.url, TRACKER_BACKEND_TOKEN: BOB }, defects, port: 0, features: FEATURES, extras: { attribution: true } });
+      // A defect that needs features (0.3.0: inflight) runs with them.
+      const needs = defects.flatMap((d) => [...(DEFECTS.find((x) => x.name === d)?.requires ?? [])]);
+      const server = await startServer({ env: { TRACKER_BACKEND_URL: backend.url, TRACKER_BACKEND_TOKEN: BOB }, defects, port: 0, features: [...new Set([...FEATURES, ...needs])], extras: { attribution: true } });
       const mcp = await connectClient(server.url, "2026-07-28");
       try {
         let n = 0;
