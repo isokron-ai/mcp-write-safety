@@ -527,6 +527,19 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     await at({ features: [] }, async (url) => assert.match((await serverOn(url)).text!, /does not know how long/));
   });
 
+  it("follow-up F3: `server` refuses --key-expiry (and TRACKER_KEY_EXPIRY): the expiry policy is the backend's", async () => {
+    const env = { TRACKER_BACKEND_TOKEN: TOKEN, TRACKER_BACKEND_URL: "http://127.0.0.1:9" };
+    for (const [args, extra] of [[["--key-expiry", "forget"], {}], [["--key-expiry", "refuse"], {}], [[], { TRACKER_KEY_EXPIRY: "forget" }]] as Array<[string[], Record<string, string>]>) {
+      const r = await runCli(["server", ...args, "--port", "0"], { ...env, ...extra });
+      assert.equal(r.code, 2, JSON.stringify([args, extra]));
+      assert.match(r.stderr, /--key-expiry \(TRACKER_KEY_EXPIRY\) is the backend's setting/);
+      assert.equal(r.stdout, "", "nothing started");
+    }
+    // Where the backend runs it is still taken.
+    const all = await runCli(["all", "--key-expiry", "forget", "--port", "0", "--backend-port", "0"], { TRACKER_BACKEND_TOKEN: TOKEN });
+    assert.equal(all.code, 0, all.stderr);
+  });
+
   it("starts durable with --data-dir and names the journal; a second start on the same dir is refused; retention flags need retention", async () => {
     const t = tempDir("cli");
     try {

@@ -204,6 +204,9 @@ async function main(): Promise<void> {
   let givenRetentionMs: number | undefined;
   if ((keyRetention !== undefined || keyExpiry !== undefined) && !features.includes("retention")) {
     refusals.push("--key-retention and --key-expiry (TRACKER_KEY_RETENTION, TRACKER_KEY_EXPIRY) need the retention feature");
+  } else if (layout === "server" && keyExpiry !== undefined) {
+    // Follow-up F3: the expiry policy is the backend's (it keeps the key records); in `server` it would be ignored.
+    refusals.push("--key-expiry (TRACKER_KEY_EXPIRY) is the backend's setting, and in `tiny-tracker server` the backend is another process: give it where the backend runs (`all` or `backend`)");
   } else if (["durable", "inflight", "retention"].some((f) => features.includes(f))) {
     const expiry = await import("./backend/expiry.js");
     try {
