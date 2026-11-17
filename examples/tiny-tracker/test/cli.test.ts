@@ -152,7 +152,8 @@ it("package name: @mcp-write-safety/tiny-tracker, command tiny-tracker, publishe
   const { readFileSync } = await import("node:fs");
   const pj = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { name: string; bin: Record<string, string>; private?: boolean; publishConfig?: { access?: string }; files?: string[] };
   assert.equal(pj.name, "@mcp-write-safety/tiny-tracker");
-  assert.deepEqual(Object.keys(pj.bin), ["tiny-tracker"]);
+  // 0.2.0 adds fx-check, the FX- property checker (stream C).
+  assert.deepEqual(pj.bin, { "tiny-tracker": "dist/src/cli.js", "fx-check": "dist/src/fx-check.js" });
   assert.equal(pj.private, undefined);
   assert.equal(pj.publishConfig?.access, "public");
   assert.ok(pj.files?.includes("dist/src") && pj.files.includes("writecheck.yaml"));
