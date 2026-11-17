@@ -36,7 +36,7 @@ export function tempDir(tag: string): { dir: string; dataDir: string; cleanup():
 /** Where a test wants the next crash: a journal point on the next line of a kind (optionally for one key). */
 export interface Arm {
   point: JournalPoint;
-  line: "commit" | "pending" | "aborted";
+  line: "commit" | "pending" | "aborted" | "fence";
   key?: string;
 }
 

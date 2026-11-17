@@ -105,7 +105,7 @@ function checkJournal(dataDir: string) {
   const open = new Set<number>();
   for (const l of lines) {
     if (l.line === "pending") open.add(l.jseq);
-    if (l.line === "aborted") open.delete(l.pending_jseq);
+    if (l.line === "aborted" || l.line === "fence") open.delete(l.pending_jseq);
     if (l.line === "commit" && l.pending_jseq !== null) open.delete(l.pending_jseq);
   }
   assert.deepEqual([...open], [], "no pending line is left open");
@@ -163,6 +163,63 @@ describe("T1: every write operation crashed at every point of the commit path", 
             t.cleanup();
           }
         });
+      }
+    });
+  }
+});
+
+describe("T1: a run reset with a pending write in its run, crashed at its fence line (G2 fold-in 5)", () => {
+  // The reset's commit line is written, then its fence line for the held write. A crash between them (before-append:
+  // fence) used to free the key at the next start (orphan_at_start): 409 key_fenced before the crash, 201 after it.
+  for (const point of ["before-append", "torn-write", "after-fsync"] as const) {
+    it(`fence line: ${point}: the key stays fenced after the restart, nothing applied, one fence line`, async () => {
+      const t = tempDir("t1f");
+      try {
+        let release!: () => void;
+        let reached!: () => void;
+        const arrived = new Promise<void>((r) => { reached = r; });
+        const gate = new Promise<void>((r) => { release = r; });
+        const b = await durableBackend({
+          dataDir: t.dataDir, clock: movableClock(),
+          faults: { beforeCommit: async ({ meta }) => { if (meta.request.key === "fence-crash-001") { reached(); await gate; } } },
+        });
+        await setup(b.api);
+        const held = b.api.send("POST", "/tickets", { project: "inbox", title: "late" }, { "idempotency-key": "fence-crash-001", "tiny-tracker-run": "run-f-9" });
+        await arrived;
+        b.arm({ point, line: "fence", key: "fence-crash-001" });
+        b.backend.dropRun({ principal: "p-default" }, "run-f-9");
+        assert.deepEqual(b.crashes, [`${point}:fence`], "the crash point was reached");
+        release();
+        const before = await held;
+        assert.deepEqual([before.status, (before.body as any).error], [409, "key_fenced"], "fenced before the crash");
+        const resetSeq = b.backend.store.lastSeq;
+        await b.crash();
+        const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+        try {
+          const report = b2.backend.durability!.journal!.report!;
+          assert.equal(report.fencedAtStart, point === "after-fsync" ? 0 : 1);
+          assert.equal(report.abortedOrphans, 0, "not an orphan: the reset fenced it");
+          const again = await b2.api.send("POST", "/tickets", { project: "inbox", title: "late" }, { "idempotency-key": "fence-crash-001" });
+          assert.deepEqual([again.status, again.body.error], [409, "key_fenced"], "still fenced after the restart");
+          assert.deepEqual((await b2.api.export()).tickets.map((x) => x.title).filter((x) => x === "late"), [], "nothing applied");
+        } finally {
+          await b2.close();
+        }
+        checkJournal(t.dataDir);
+        const lines = readJournal(join(t.dataDir, JOURNAL_FILE)).lines as any[];
+        const fences = lines.filter((l) => l.line === "fence");
+        assert.equal(fences.length, 1, "one fence line");
+        const pending = lines.find((l) => l.line === "pending" && l.key === "fence-crash-001");
+        assert.deepEqual([fences[0].pending_jseq, fences[0].reset_seq, fences[0].run], [pending.jseq, resetSeq, "run-f-9"]);
+        const b3 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+        try {
+          assert.equal(b3.backend.durability!.journal!.report!.fencedAtStart, 0, "a second start reads the fence line");
+          assert.equal((await b3.api.send("POST", "/tickets", { project: "inbox", title: "late" }, { "idempotency-key": "fence-crash-001" })).status, 409);
+        } finally {
+          await b3.close();
+        }
+      } finally {
+        t.cleanup();
       }
     });
   }

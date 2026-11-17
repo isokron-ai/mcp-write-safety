@@ -225,6 +225,11 @@ export interface LoadReport {
   fences: number;
   /** Runs restored from run-alloc lines. */
   runs: number;
+  /**
+   * Pending lines a later run-reset commit line had fenced, with no fence line after it (a crash between the reset's
+   * commit line and its fence line): fenced at start, and their fence lines written then (G2 fold-in 5).
+   */
+  fencedAtStart: number;
 }
 
 /** What is wrong with a line at position `expected` (undefined: nothing). */
@@ -303,7 +308,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
   }
 
   private replay(): void {
-    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0, fences: 0, runs: 0 };
+    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0, fences: 0, runs: 0, fencedAtStart: 0 };
     this.report = report;
     // A journal file that is missing, or empty because the first start stopped before its header was flushed, is new.
     if (!existsSync(this.path) || statSync(this.path).size === 0) {
@@ -336,6 +341,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
     let offset = Buffer.byteLength(parts[0]) + (parts.length === 1 && !terminated ? 0 : 1);
     const lines: JournalLine[] = [header];
     const open = new Map<number, JournalPendingLine>();
+    /** Open pending lines a run-reset commit line has fenced: pending jseq → the reset's commit_seq. */
+    const resetFenced = new Map<number, number>();
     let lastCommit = 0;
     for (let i = 1; i < parts.length; i++) {
       const isLast = i === parts.length - 1;
@@ -358,6 +365,10 @@ export class Journal implements JournalSeam, KeyLineWriter {
       if (l.line === "commit") {
         lastCommit = l.commit_seq;
         if (l.pending_jseq !== null) open.delete(l.pending_jseq);
+        // Seams v2.1: a run reset fences its run's pending records. Its fence lines follow its commit line; if the
+        // process died between them, the pending line is fenced at start below, never ended as an orphan.
+        const reset = l.tx.kind === "run-reset" ? l.tx.reset : undefined;
+        if (reset) for (const p of open.values()) if (p.principal === reset.principal && p.run === reset.run && !resetFenced.has(p.jseq)) resetFenced.set(p.jseq, l.commit_seq);
       }
       lines.push(l);
       offset += Buffer.byteLength(parts[i]) + (isLast && !terminated ? 0 : 1);
@@ -379,11 +390,22 @@ export class Journal implements JournalSeam, KeyLineWriter {
     }
     fsyncSync(this.fd);
     // Orphan pending lines: a write that began and never committed. Nothing was applied; say so before serving.
+    // A pending line whose run a later commit line reset was fenced by that reset (G2 fold-in 5): it gets the fence
+    // line it lost and stays fenced, so a late original can never land under its key.
     for (const p of open.values()) {
+      const resetSeq = resetFenced.get(p.jseq);
+      if (resetSeq !== undefined && p.run !== null) {
+        this.fenceLine({ principal: p.principal }, p.key, p.run, p.jseq, resetSeq);
+        this.keys?.restoreFence({ principal: p.principal }, p.key, p.run, this.commitTimes.get(resetSeq) ?? "");
+        report.fences++;
+        report.fencedAtStart++;
+        continue;
+      }
       this.aborted(p.jseq, "orphan_at_start");
       this.keys?.restore({ principal: p.principal }, p.key, undefined);
       report.abortedOrphans++;
     }
+    if (report.fencedAtStart) this.log(`tiny-tracker: ${report.fencedAtStart} pending key record(s) of a reset run had no fence line; fenced at start`);
     if (report.abortedOrphans) this.log(`tiny-tracker: ${report.abortedOrphans} pending key record(s) with no commit became aborted`);
   }
 
@@ -512,7 +534,11 @@ export class Journal implements JournalSeam, KeyLineWriter {
 
   /** In the run reset's apply step, after its commit line: reset_seq is that commit's commit_seq. */
   fence(scope: KeyScope, key: string, run: string, pendingJseq: number): void {
-    this.append({ line: "fence", principal: scope.principal, key, run, pending_jseq: pendingJseq, reset_seq: this.lastCommitSeq } as Omit<JournalFenceLine, "jseq" | "checksum">, key);
+    this.fenceLine(scope, key, run, pendingJseq, this.lastCommitSeq);
+  }
+
+  private fenceLine(scope: KeyScope, key: string, run: string, pendingJseq: number, resetSeq: number): void {
+    this.append({ line: "fence", principal: scope.principal, key, run, pending_jseq: pendingJseq, reset_seq: resetSeq } as Omit<JournalFenceLine, "jseq" | "checksum">, key);
   }
 
   lookupFence(scope: KeyScope, key: string, run: string | null, at: string): void {

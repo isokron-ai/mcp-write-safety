@@ -179,8 +179,8 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
             try {
               this.lines?.fence(scope, key, run, s.jseq);
             } catch (e) {
-              // The reset is committed; the fence holds in memory. Its pending line ends as orphan_at_start at the next
-              // start, which is safe: the held write died with this process.
+              // The reset is committed; the fence holds in memory. At the next start the reset's commit line fences the
+              // pending line again and writes its fence line then (G2 fold-in 5), so the key stays fenced.
               this.log?.(`tiny-tracker: could not journal a fence (${(e as Error).message}); its pending line ends at the next start`);
             }
           }
