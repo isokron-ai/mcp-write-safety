@@ -31,6 +31,7 @@ import { lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
 import { result, VIOLATED_CAVEAT, type Result } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { ruleNote } from './rules.js';
+import { shownBy } from './stale.js';
 import { fromDeclaration, outcomeByField, saidBy, says } from './says.js';
 import { decidedByShape, quoteField, shapeNamesField, shapeOf, type WriteResult } from './shape.js';
 import { appliedAllSaid, appliedAllUnread, brief, failedKind, identifiesChangeText, KNOWN_RESULT_TYPES, mayBeUnknown, notAppliedText, proseOf, readSecondClause, res2Judge, saysUnknownText, valueMentioned, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
@@ -312,16 +313,32 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
   const route = `Route: ${o.routing}`;
   // MWS-CONC-3
   const valid = o.trials.filter((t) => t.held && t.holder && t.other && !t.holder.indeterminate && !t.other.indeterminate && t.kept);
-  const trialNote = (t: HeldTrial) => `${t.schedule}: held ${showReq(t.held!)}, released ${t.released}; holder ${t.holder!.ok ? 'reported success' : 'was refused'}, other ${t.other!.ok ? 'reported success' : 'was refused'}; afterwards holder's change ${t.kept!.holder ? 'present' : 'absent'}, other's ${t.kept!.other ? 'present' : 'absent'}`;
+  // why: spec MWS-CONC-3 (l.389, l.395) counts a loss only where both calls reported success, and its held covers "one caller
+  // received a conflict" (l.397); a result without isError whose content says the write failed is not a success (MWS-RES-2 test
+  // method), and what a result says is decided by a structured signal or a declared pattern (7.3, rule 11). As in barrier pairs,
+  // an answer that shows a conflict that way is a refusal here, and its form (no isError) is MWS-CONC-4's to judge; a conflict
+  // read only by the built-in default words decides nothing, so such a trial needs reading.
+  const shown = (c: CallBrief): 'signal' | 'default' | null => (c.ok ? shownBy({ text: c.text, data: c.data, tool: c.tool ?? undefined, shape: c.shape ?? null }) : null);
+  const answered = (c: CallBrief) => (!c.ok ? 'was refused' : shown(c) === 'signal' ? 'answered without isError but showed a conflict' : 'reported success');
+  const trialNote = (t: HeldTrial) => `${t.schedule}: held ${showReq(t.held!)}, released ${t.released}; holder ${answered(t.holder!)}, other ${answered(t.other!)}; afterwards holder's change ${t.kept!.holder ? 'present' : 'absent'}, other's ${t.kept!.other ? 'present' : 'absent'}`;
   const learnedNote = o.learned.map((l) => `learning pass (${res.fields![l.field]!.path}): ${l.requests.map(showReq).join(', ') || 'no backend request'}${l.hold ? `; holds the ${l.hold.nth}${l.hold.nth === 1 ? 'st' : l.hold.nth === 2 ? 'nd' : 'th'} ${l.hold.method} ${l.hold.path}` : ''}`);
   if (o.skipped) out.push(result('MWS-CONC-3', w, sc, 'not tested', `held request: ${o.skipped}`, { notes: [route, ...learnedNote] }));
   else if (!valid.length) out.push(result('MWS-CONC-3', w, sc, 'not tested', `held request: no trial could be forced (${o.trials.filter((t) => !t.held).length} never reached the hold; ${o.trials.filter((t) => t.held && (!t.kept || t.holder?.indeterminate || t.other?.indeterminate)).length} had an unknown outcome)`, { notes: [route, ...learnedNote] }));
   else {
-    const lost = valid.filter((t) => t.holder!.ok && t.other!.ok && (!t.kept!.holder || !t.kept!.other));
+    const candidates = valid.filter((t) => t.holder!.ok && t.other!.ok && (!t.kept!.holder || !t.kept!.other));
+    const shownIn = (t: HeldTrial) => { const by = [shown(t.holder!), shown(t.other!)]; return by.includes('signal') ? 'signal' : by.includes('default') ? 'default' : null; };
+    const conflictShown = candidates.filter((t) => shownIn(t) === 'signal');
+    const needsReading = candidates.filter((t) => shownIn(t) === 'default');
+    const lost = candidates.filter((t) => shownIn(t) === null);
     const schedules = new Set(valid.map((t) => t.schedule));
-    const numbers = { trials: valid.length, lost: lost.length, serialized: valid.filter((t) => t.released.startsWith('after the hold timeout')).length, refused: valid.filter((t) => !t.holder!.ok || !t.other!.ok).length, ...(o.control ? { control_pairs: o.control.pairs, control_lost: o.control.lost } : {}) };
-    const notes = [route, ...learnedNote, ...valid.map(trialNote)];
-    if (lost.length) {
+    const numbers = { trials: valid.length, lost: lost.length, serialized: valid.filter((t) => t.released.startsWith('after the hold timeout')).length, refused: valid.filter((t) => !t.holder!.ok || !t.other!.ok).length, ...(candidates.length ? { conflict_shown: conflictShown.length, needs_reading: needsReading.length } : {}), ...(o.control ? { control_pairs: o.control.pairs, control_lost: o.control.lost } : {}) };
+    const conflictNote = conflictShown.length ? [`In ${conflictShown.length} trial(s) one change was absent afterwards but an answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is judged by MWS-CONC-4.`] : [];
+    const readingNote = lost.length && needsReading.length ? [`${needsReading.length} further trial(s) lost a change where only the built-in words read an answer as a conflict; they are not counted (spec 7.3, rule 11).`] : [];
+    const notes = [route, ...learnedNote, ...valid.map(trialNote), ...conflictNote, ...readingNote];
+    if (!lost.length && needsReading.length) {
+      const t0 = needsReading[0]!;
+      out.push(result('MWS-CONC-3', w, sc, 'not tested', `held request: in ${needsReading.length} of ${valid.length} forced trials one change was absent afterwards while both calls answered without isError, and only the tester's built-in words read an answer as a conflict, which decides nothing (spec 7.3, rule 11). It needs reading: ${JSON.stringify(short(t0.holder!.text ?? '', 160))} / ${JSON.stringify(short(t0.other!.text ?? '', 160))} (declare patterns.conflict if the answer reports a refusal).`, { numbers, steps: t0.steps, notes }));
+    } else if (lost.length) {
       const steps = lost.flatMap((t) => t.steps);
       // why: platform only from the same forced schedule (spec 7.4); a partial-update control for a whole-object tool is not that (review).
       const sameSchedule = !!o.control?.kind && (o.control.kind === 'whole' || res.update!.mode !== 'full_replace');

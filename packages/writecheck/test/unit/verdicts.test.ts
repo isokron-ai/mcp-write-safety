@@ -13,6 +13,7 @@ import { versionLeftOutRuns } from '../../src/checks/stale.js';
 import { parseStructured } from '../../src/core/util.js';
 import { annVerdicts } from '../../src/checks/catalog.js';
 import { pairsExperiment, pairsVerdicts } from '../../src/checks/pairs.js';
+import { gatedVerdicts, type GatedObs } from '../../src/checks/gated.js';
 import { readbackVerdicts, type CaseObs } from '../../src/checks/readback.js';
 import { keptValue, meaningOf, protectedProps, refusalProblem, schemaVerdicts, probeCases, validFor, type ProbeObs } from '../../src/checks/schema.js';
 import { staleExperiment, staleVerdicts } from '../../src/checks/stale.js';
@@ -135,6 +136,37 @@ test('barrier pairs: a pair whose answer shows a conflict (declared patterns.con
   const dflt = run('nothing was written');
   assert.equal(dflt.verdict, 'not tested');
   assert.match(dflt.reason, /needs reading/);
+});
+
+test('held request: a trial whose answer shows a conflict (declared patterns.conflict) is not "both reported success" (MWS-CONC-3)', () => {
+  const res = M().resources[0]!;
+  // Raw-statement tool: the held writer's version precondition matched 0 rows on release; the answer has no isError.
+  const cb = (step: string, text: string) => ({ step, ok: true, isError: false, rpc_error: null, text, data: null, indeterminate: false, tool: 'ticket_update', shape: null });
+  const trial = (i: number, schedule: 'hold A, run B' | 'hold B, run A', holderText: string) => ({ schedule, held: { seq: 10 + i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: cb(`h${i}`, holderText), other: cb(`o${i}`, 'modified 1'), kept: { holder: false, other: true }, steps: [`h${i}`, `o${i}`] });
+  const run = (holderText: string) => {
+    const o: GatedObs = { routing: 'r', learned: [], trials: [0, 1, 2, 3].map((i) => trial(i, i % 2 ? 'hold B, run A' : 'hold A, run B', holderText)), control: null, independent: true, conc1: null, res2: null, atom: null };
+    return gatedVerdicts(o, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const shown = run('matched 0, modified 0');
+    assert.equal(shown.verdict, 'held', 'the declared conflict pattern reads the answer as a refusal, not a success');
+    assert.equal(shown.numbers['lost'], 0);
+    assert.equal(shown.numbers['conflict_shown'], 4);
+    assert.ok(shown.notes.some((n) => /judged by MWS-CONC-4/.test(n)));
+    assert.ok(shown.notes.some((n) => /holder answered without isError but showed a conflict/.test(n)));
+    // An answer the declared pattern does not match is still a reported success: the loss stays violated.
+    const silent = run('ok');
+    assert.equal(silent.verdict, 'violated');
+    assert.match(silent.reason, /4 of 4 forced trials/);
+  } finally {
+    usePatterns(null);
+  }
+  // Without a declaration only the built-in words read "nothing was written" as a conflict: that decides nothing (rule 11).
+  const dflt = run('nothing was written');
+  assert.equal(dflt.verdict, 'not tested');
+  assert.match(dflt.reason, /needs reading/);
+  assert.equal(dflt.numbers['needs_reading'], 4);
 });
 
 test('recount re-derives the counters from recorded repetitions', () => {
