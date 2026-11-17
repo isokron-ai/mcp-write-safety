@@ -13,6 +13,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 import { compareRuns, GENERATORS, sampleRows } from "./repro-known-answers.js";
 import { COMPAT_RULES } from "../src/compat.js";
+import { runCli } from "./support/cli-run.js";
 
 const root = (p: string) => fileURLToPath(new URL(`../../${p}`, import.meta.url));
 const repo = (p: string) => fileURLToPath(new URL(`../../../../${p}`, import.meta.url));
@@ -119,6 +120,52 @@ describe("known-answer reproducibility (test/repro-known-answers.ts)", () => {
   });
 });
 
+/**
+ * The route table: every route of src/backend/http.ts, src/backend/durability.ts (fence), src/fixture/evidence.ts and
+ * src/fixture/control.ts with its methods, in openapi.yaml's order. Checked against openapi.yaml and a running build.
+ */
+const ROUTES: Record<string, string[]> = {
+  "/projects": ["get", "post"],
+  "/projects/{key}": ["get", "put", "delete"],
+  "/tickets": ["get", "post"],
+  "/tickets/{id}": ["get", "put", "patch", "delete"],
+  "/tickets/{id}/comments": ["post"],
+  "/tickets/{id}/labels": ["post"],
+  "/tickets/{id}/labels/{labelId}": ["delete"],
+  "/batch": ["post"],
+  "/export": ["get"],
+  "/build": ["get"],
+  "/ledger": ["get"],
+  "/executions": ["get"],
+  "/executions/{id}": ["get"],
+  "/operations/{key}": ["get"],
+  "/operations/{key}/fence": ["post"],
+  "/_fixture/runs": ["get", "post"],
+  "/_fixture/runs/{run}/reset": ["post"],
+  "/_fixture/faults": ["get", "post"],
+  "/_fixture/clock": ["get", "post"],
+};
+
+/** openapi.yaml's paths and their operations, in file order (methods in get, post, put, patch, delete order). */
+function openapiRoutes(api: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  let current: string | undefined;
+  for (const line of api.split("\n")) {
+    const path = /^  (\/[^:]*):\s*$/.exec(line);
+    if (path) {
+      current = path[1];
+      out[current] = [];
+      continue;
+    }
+    if (/^\S/.test(line)) current = undefined;
+    const op = /^    (get|post|put|patch|delete|head|options|trace):/.exec(line);
+    if (current && op) out[current].push(op[1]);
+  }
+  const order = ["get", "post", "put", "patch", "delete", "head", "options", "trace"];
+  for (const k of Object.keys(out)) out[k].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return out;
+}
+
 describe("the kit's documents", () => {
   for (const p of ["CONTRIBUTING.md", "docs/patterns.md", "docs/STABILITY.md", "openapi.yaml"]) {
     it(`${p} exists and names no result as compliant, certified or passing`, () => {
@@ -129,17 +176,11 @@ describe("the kit's documents", () => {
     });
   }
 
-  it("the OpenAPI file declares exactly the routes the source serves, the 501 shape and the keyed codes", () => {
+  it("the OpenAPI file declares exactly the routes of the route table below, methods included, the 501 shape and the keyed codes", () => {
     const api = read(root("openapi.yaml"));
     assert.match(api, /^openapi: 3\.1\.\d+$/m);
     assert.doesNotMatch(api, /Status: draft|Planned \(0\.[23]\.0\)/, "finalized for 0.4.0");
-    // Every route of src/backend/http.ts, src/backend/durability.ts (fence), src/fixture/evidence.ts and
-    // src/fixture/control.ts, and nothing else.
-    const routes = ["/projects", "/projects/{key}", "/tickets", "/tickets/{id}", "/tickets/{id}/comments", "/tickets/{id}/labels",
-      "/tickets/{id}/labels/{labelId}", "/batch", "/export", "/build", "/ledger", "/executions", "/executions/{id}", "/operations/{key}",
-      "/operations/{key}/fence", "/_fixture/runs", "/_fixture/runs/{run}/reset", "/_fixture/faults", "/_fixture/clock"];
-    const declared = [...api.matchAll(/^  (\/[^:]*):$/gm)].map((m) => m[1]);
-    assert.deepEqual([...declared].sort(), [...routes].sort());
+    assert.deepEqual(openapiRoutes(api), ROUTES);
     for (const code of ["in_progress", "key_fenced", "run_reset", "needs_supervise", "key_expired", "principal_required", "not_enabled", "no_record", "needs_feature"]) {
       assert.match(api, new RegExp(`\\b${code}\\b`), code);
     }
@@ -149,6 +190,41 @@ describe("the kit's documents", () => {
     assert.match(api, /TRACKER_EVIDENCE_LISTEN/);
   });
 
+  // Note 27 item 5: the route table is also compared with what the source serves. The routes are dispatched in code
+  // (src/backend/http.ts, src/backend/durability.ts, src/fixture/evidence.ts, src/fixture/control.ts), so a build with
+  // every feature is asked every path with every method: a route is served when some token gets an answer other than
+  // 404 `no_route`, 405 (the evidence namespace is GET only; the fixture clock GET or POST) or 401.
+  it("the route table is what a build with every feature serves, methods included", async () => {
+    const backendToken = `be-${"b".repeat(8)}-0123456789abcdef`;
+    const evidence = `ev-${"e".repeat(8)}-0123456789abcdef`;
+    const control = `ct-${"c".repeat(8)}-0123456789abcdef`;
+    const served: Record<string, string[]> = {};
+    const r = await runCli(["all", "--port", "0", "--backend-port", "0", "--fixture-control", "--control-port", "0",
+      "--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock"],
+    { TRACKER_BACKEND_TOKEN: backendToken, TRACKER_EVIDENCE_TOKEN: evidence, TRACKER_CONTROL_TOKEN: control }, async (state) => {
+      for (const path of Object.keys(ROUTES)) {
+        const concrete = path.replace("{key}", path.startsWith("/projects") ? "ZZPROBE" : "probe-key-0001")
+          .replace("{id}", path.startsWith("/executions") ? "X-999999" : "T-999999").replace("{labelId}", "L-1").replace("{run}", "run-nope-1");
+        const control_ = path.startsWith("/_fixture/");
+        const base = control_ ? state.control : state.backend;
+        const tokens = control_ ? [control] : [backendToken, evidence];
+        for (const method of ["get", "post", "put", "patch", "delete"]) {
+          for (const token of tokens) {
+            const res = await fetch(`${base}${concrete}`, { method: method.toUpperCase(),
+              headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(method === "get" ? {} : { body: "{}" }) });
+            const body = await res.json().catch(() => ({})) as { error?: string };
+            const unserved = res.status === 401 || res.status === 405 || (res.status === 404 && body.error === "no_route");
+            if (!unserved) {
+              (served[path] ??= []).push(method);
+              break;
+            }
+          }
+        }
+      }
+    });
+    assert.ok(r.stateLine, r.stderr);
+    assert.deepEqual(served, ROUTES);
+  });
   it("the OpenAPI file validates as OpenAPI 3.1 (verify/python/check_openapi.py; skipped without openapi-spec-validator)", async (t) => {
     const { py } = await import("./support/python.js");
     const python = process.env.TT_OPENAPI_PYTHON;
