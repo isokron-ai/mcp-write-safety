@@ -1,0 +1,1539 @@
+{
+  "expected": "expected/1",
+  "package": {
+    "name": "@mcp-write-safety/tiny-tracker",
+    "version": "0.3.0"
+  },
+  "builds": [
+    {
+      "build_hash": "aad91aba57cfec22c029fa8b20efd8162ec6e7eafcec2dc513077577652dfabc",
+      "label": "backend defect digest-not-canonical",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "violated"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "31ea5d3ad43128a20545c9130cb044965a2a787c9233fe7ef792e41c42cfe2be",
+      "label": "backend defect digest-of-current-state",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "violated"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "160b2687d82031fb0fb8770128da184f46d821fba12023e09c26e4a8aae9c364",
+      "label": "backend defect key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "1df70352f2825c11127aa421705e2eba92ec00db7e82e39c05447285c345586c",
+      "label": "backend defect lookup-unscoped",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "lookup-unscoped"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "violated"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "0681d7ddc467d314cab7a90e334c283ea65b0dfd6261558c117375be6349b22a",
+      "label": "backend defect lookup-wrong-record",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "fail"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "violated"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "7827dcf8ed5cc2d4ad58d1137b9e8719eccace2398f68371ef79df3f7183eaba",
+      "label": "backend defect replay-digest-mismatch",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "fail"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "violated"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "f437ca65878fb1a54b07d1610220eeaed65487c0750ee2312f2aeea2965bb64a",
+      "label": "correct build",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "3441053b95525487ed9d6b52817c19d78dbf14ca1df660e8ad72500eb7d81f15",
+      "label": "correct build with the fixture clock",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "df7a4d3216a5b703c9777f981379f45531e681271b35bdecef41925a9211b5b7",
+      "label": "defect idempotency-key-dropped",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "idempotency-key-dropped"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "fail"
+          ],
+          "LRT-A2": [
+            "fail"
+          ],
+          "LRT-A3": [
+            "fail"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "50ba6c7175644a453f6fb858b3a08dfdc40773093381a17de0a0ae3b43db3220",
+      "label": "defect idempotency-key-ignores-args",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "idempotency-key-ignores-args"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "fail"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "13877da3e5e6c9fac6aef3b3a49010c977e38cc1805c24181e98d76189f069c5",
+      "label": "defect in-progress-reported-not-applied",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "in-progress-reported-not-applied"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "07c56b83ac030706908f3373a4c64f8132e58fae558149bacc3bb264eaa2ecc6",
+      "label": "defect lookup-reexecutes",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "lookup-reexecutes"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "violated"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "b5fdff7c1accb00aae631cd3ed8fa69a7b389b04ded6fcb83a31f0961f4b27c7",
+      "label": "defect settle-miss-reported-not-applied",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "settle-miss-reported-not-applied"
+      ],
+      "contract": {
+        "repo": "zambodotdev/lost-response-test-contract",
+        "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+        "answers": {
+          "LRT-A1": [
+            "pass"
+          ],
+          "LRT-A2": [
+            "pass"
+          ],
+          "LRT-A3": [
+            "pass"
+          ],
+          "LRT-A4": [
+            "pass"
+          ],
+          "LRT-A5": [
+            "unproven"
+          ]
+        },
+        "self_attested": [
+          "LRT-A3"
+        ]
+      },
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "not checked"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    }
+  ],
+  "writecheck": [
+    {
+      "label": "mcp-writecheck demo (correct build)",
+      "start": [
+        "mcp-writecheck",
+        "demo"
+      ],
+      "measured_on": "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+      "version": "0.1.0",
+      "answers_are": "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+      "answers": {
+        "MWS-ANN-1": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-2": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-3": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-4": [
+          "held"
+        ],
+        "MWS-ANN-5": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ATOM-1": [
+          "held"
+        ],
+        "MWS-ATOM-2": [
+          "held"
+        ],
+        "MWS-CFG-1": [
+          "held"
+        ],
+        "MWS-CFG-2": [
+          "held"
+        ],
+        "MWS-CFG-3": [
+          "held"
+        ],
+        "MWS-CFG-4": [
+          "held"
+        ],
+        "MWS-CONC-1": [
+          "held"
+        ],
+        "MWS-CONC-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-CONC-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-CONC-4": [
+          "held",
+          "self-attested"
+        ],
+        "MWS-CONC-5": [
+          "not applicable",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-CONC-6": [
+          "held"
+        ],
+        "MWS-IN-1": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-IN-3": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-4": [
+          "held",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-IN-5": [
+          "not observed",
+          "not tested"
+        ],
+        "MWS-IN-6": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-7": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-3": [
+          "held"
+        ],
+        "MWS-RES-4": [
+          "held"
+        ],
+        "MWS-RETRY-1": [
+          "held"
+        ],
+        "MWS-RETRY-2": [
+          "held",
+          "not observed"
+        ],
+        "MWS-RETRY-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-SEC-1": [
+          "not observed"
+        ],
+        "MWS-TGT-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-TGT-2": [
+          "held"
+        ],
+        "MWS-TGT-3": [
+          "held"
+        ],
+        "MWS-UPD-1": [
+          "held",
+          "not applicable"
+        ],
+        "MWS-UPD-2": [
+          "held"
+        ]
+      }
+    },
+    {
+      "label": "mcp-writecheck demo with idempotency-key-dropped",
+      "start": [
+        "mcp-writecheck",
+        "demo",
+        "--defect",
+        "idempotency-key-dropped"
+      ],
+      "measured_on": "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+      "version": "0.1.0",
+      "answers_are": "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+      "answers": {
+        "MWS-ANN-1": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-2": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-3": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-4": [
+          "held"
+        ],
+        "MWS-ANN-5": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ATOM-1": [
+          "held"
+        ],
+        "MWS-ATOM-2": [
+          "held"
+        ],
+        "MWS-CFG-1": [
+          "held"
+        ],
+        "MWS-CFG-2": [
+          "held"
+        ],
+        "MWS-CFG-3": [
+          "held"
+        ],
+        "MWS-CFG-4": [
+          "held"
+        ],
+        "MWS-CONC-1": [
+          "held"
+        ],
+        "MWS-CONC-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-CONC-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-CONC-4": [
+          "held",
+          "self-attested"
+        ],
+        "MWS-CONC-5": [
+          "not applicable",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-CONC-6": [
+          "held"
+        ],
+        "MWS-IN-1": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-IN-3": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-4": [
+          "held",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-IN-5": [
+          "not observed",
+          "not tested"
+        ],
+        "MWS-IN-6": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-7": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-3": [
+          "held"
+        ],
+        "MWS-RES-4": [
+          "held"
+        ],
+        "MWS-RETRY-1": [
+          "held"
+        ],
+        "MWS-RETRY-2": [
+          "held",
+          "not observed",
+          "violated"
+        ],
+        "MWS-RETRY-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-SEC-1": [
+          "not observed"
+        ],
+        "MWS-TGT-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-TGT-2": [
+          "held"
+        ],
+        "MWS-TGT-3": [
+          "held"
+        ],
+        "MWS-UPD-1": [
+          "held",
+          "not applicable"
+        ],
+        "MWS-UPD-2": [
+          "held"
+        ]
+      }
+    },
+    {
+      "label": "mcp-writecheck demo with idempotency-key-ignores-args",
+      "start": [
+        "mcp-writecheck",
+        "demo",
+        "--defect",
+        "idempotency-key-ignores-args"
+      ],
+      "measured_on": "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+      "version": "0.1.0",
+      "answers_are": "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+      "answers": {
+        "MWS-ANN-1": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-2": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-3": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-4": [
+          "held"
+        ],
+        "MWS-ANN-5": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ATOM-1": [
+          "held"
+        ],
+        "MWS-ATOM-2": [
+          "held"
+        ],
+        "MWS-CFG-1": [
+          "held"
+        ],
+        "MWS-CFG-2": [
+          "held"
+        ],
+        "MWS-CFG-3": [
+          "held"
+        ],
+        "MWS-CFG-4": [
+          "held"
+        ],
+        "MWS-CONC-1": [
+          "held"
+        ],
+        "MWS-CONC-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-CONC-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-CONC-4": [
+          "held",
+          "self-attested"
+        ],
+        "MWS-CONC-5": [
+          "not applicable",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-CONC-6": [
+          "held"
+        ],
+        "MWS-IN-1": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-IN-3": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-4": [
+          "held",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-IN-5": [
+          "not observed",
+          "not tested"
+        ],
+        "MWS-IN-6": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-7": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-3": [
+          "held"
+        ],
+        "MWS-RES-4": [
+          "held"
+        ],
+        "MWS-RETRY-1": [
+          "held"
+        ],
+        "MWS-RETRY-2": [
+          "held",
+          "not observed",
+          "violated"
+        ],
+        "MWS-RETRY-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-SEC-1": [
+          "not observed"
+        ],
+        "MWS-TGT-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-TGT-2": [
+          "held"
+        ],
+        "MWS-TGT-3": [
+          "held"
+        ],
+        "MWS-UPD-1": [
+          "held",
+          "not applicable"
+        ],
+        "MWS-UPD-2": [
+          "held"
+        ]
+      }
+    }
+  ]
+}

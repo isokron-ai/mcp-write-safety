@@ -1,0 +1,155 @@
+{
+  "release": "0.3.0",
+  "note": "The builds expected/0.3.0.json covers: the 0.2.0 builds, now with the 0.3.0 default features inflight and retention named, plus the 0.3.0 MCP defects (in-progress-reported-not-applied, settle-miss-reported-not-applied), the backend defect key-expires-early and a build with the fixture clock. Not covered: durable and its defects (key-record-not-durable, key-record-after-effect), which need a data dir per start that this generator does not give, and the variants (TRACKER_VARIANTS). The 0.4.0 matrix adds both.",
+  "builds": [
+    {
+      "label": "correct build",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention"
+      ],
+      "contract": true,
+      "fixture": true,
+      "writecheck": true,
+      "mcpDefects": []
+    },
+    {
+      "label": "defect idempotency-key-dropped",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "idempotency-key-dropped"
+      ],
+      "contract": true,
+      "fixture": true,
+      "writecheck": true,
+      "mcpDefects": [
+        "idempotency-key-dropped"
+      ]
+    },
+    {
+      "label": "defect idempotency-key-ignores-args",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "idempotency-key-ignores-args"
+      ],
+      "contract": true,
+      "fixture": true,
+      "writecheck": true,
+      "mcpDefects": [
+        "idempotency-key-ignores-args"
+      ]
+    },
+    {
+      "label": "defect lookup-reexecutes",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "lookup-reexecutes"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect replay-digest-mismatch",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect digest-not-canonical",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect lookup-wrong-record",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect lookup-unscoped",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "lookup-unscoped"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "defect in-progress-reported-not-applied",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "in-progress-reported-not-applied"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "defect settle-miss-reported-not-applied",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--defect",
+        "settle-miss-reported-not-applied"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect key-expires-early",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "correct build with the fixture clock",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock"
+      ],
+      "contract": true,
+      "fixture": true
+    }
+  ]
+}

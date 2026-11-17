@@ -16,17 +16,31 @@ const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referen
 const needJsonschema = jsonschema || GATE ? false : "the Python jsonschema package is not installed";
 
 describe("known-answer generator (expected/)", () => {
-  it("the 0.2.0 build list names known features, unique labels, and no ports or tokens", () => {
-    const list = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.2.0.json"), "utf8"));
-    assert.equal(list.release, "0.2.0");
+  for (const release of ["0.2.0", "0.3.0"]) {
+    it(`the ${release} build list names known features, unique labels, and no ports or tokens`, () => {
+      const list = JSON.parse(readFileSync(join(ROOT, "expected", `builds-${release}.json`), "utf8"));
+      assert.equal(list.release, release);
+      const labels = list.builds.map((b: any) => b.label);
+      assert.equal(new Set(labels).size, labels.length);
+      assert.ok(labels.includes("correct build"));
+      for (const b of list.builds) {
+        const features = b.args[b.args.indexOf("--features") + 1].split(",");
+        for (const f of features) assert.ok((FEATURE_NAMES as string[]).includes(f), f);
+        // A port or token setting, or a port number (a defect name may hold "port", as in-progress-reported-not-applied does).
+        assert.ok(!b.args.some((a: string) => /^--[\w-]*(port|token)/i.test(a) || /^\d{2,5}$/.test(a)), b.label);
+      }
+    });
+  }
+
+  it("the 0.3.0 known answers cover every 0.2.0 build and are keyed by the 0.3.0 package", () => {
+    const list = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.3.0.json"), "utf8"));
+    const old = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.2.0.json"), "utf8"));
     const labels = list.builds.map((b: any) => b.label);
-    assert.equal(new Set(labels).size, labels.length);
-    assert.ok(labels.includes("correct build"));
-    for (const b of list.builds) {
-      const features = b.args[b.args.indexOf("--features") + 1].split(",");
-      for (const f of features) assert.ok((FEATURE_NAMES as string[]).includes(f), f);
-      assert.ok(!b.args.some((a: string) => /port|token/i.test(a)), b.label);
-    }
+    for (const b of old.builds) assert.ok(labels.includes(b.label), b.label);
+    const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.3.0.json"), "utf8"));
+    assert.equal(doc.package.version, "0.3.0");
+    assert.equal(doc.package.version, JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version);
+    assert.deepEqual(doc.builds.map((b: any) => b.label).sort(), [...labels].sort());
   });
 
   it("generates schema-valid, time-free answers keyed by build_hash, the same on every run", { skip: needJsonschema }, async () => {
