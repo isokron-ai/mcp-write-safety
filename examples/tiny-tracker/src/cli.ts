@@ -12,7 +12,7 @@ import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension, BackendFaultHooks } from "./backend/http.js";
 import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
 import type { Clock } from "./clock.js";
-import { CONTAINER_ALLOW_DEFECTS_ENV, containerAllowDefects, containerMode, resolveTransport, TransportError } from "./transport.js"; // stream F
+import { containerMode, resolveTransport, TransportError } from "./transport.js"; // stream F
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -34,6 +34,14 @@ Fixture options (see FIXTURE.md):
   --fault POINT[:once]     arm a fault point at start (process/position/action, src/fault-points.ts); the
                            supervisor keeps the arming, so a once fault does not re-arm on a restart.
 Tokens are read from the environment or a 0600 file, never from the command line.`;
+
+/**
+ * Settings that existed in a pre-release of 0.4.0 and were removed before it shipped. A start that still sets one is
+ * refused, naming it, so a stale setting is never ignored without a word.
+ */
+const RETIRED_ENV: Record<string, string> = {
+  TRACKER_CONTAINER_ALLOW_DEFECTS: "was removed in 0.4.0: in container mode a build with defects serves its evidence off loopback behind the evidence token, with no opt-in; unset it",
+};
 
 function fail(message: string): never {
   process.stderr.write(`tiny-tracker: ${message}\n`);
@@ -152,6 +160,7 @@ async function main(): Promise<void> {
     fixtureControl, dataDir: values["data-dir"], supervise, keyExpiry: values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY,
     transport: stdio ? "stdio" : "http",
   });
+  for (const [name, why] of Object.entries(RETIRED_ENV)) if (env[name] !== undefined) refusals.push(`${name} ${why}`);
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
   if (tokenDir !== undefined && !needsFixtureLayer(features, fixtureControl)) refusals.push("--token-dir has no effect without a fixture feature or --fixture-control");
@@ -188,22 +197,18 @@ async function main(): Promise<void> {
     else {
       evidenceListen = { host: m[1].replace(/^\[|\]$/g, ""), port: Number(m[2]) };
       const loopback = ["127.0.0.1", "localhost", "::1"].includes(evidenceListen.host);
-      // 0.4.0 (owner decision: evidence reachable behind its token): in container mode, which already refuses to start
-      // without a bearer token on /mcp, a defect build may serve its read-only evidence on the container's interfaces,
-      // so an outside harness can check a defect build, but only with the R23 opt-in TRACKER_CONTAINER_ALLOW_DEFECTS=1
-      // (coordinator, note 19, pending the owner's confirmation of the default). Outside a container a defect build
-      // stays on loopback.
+      // 0.4.0 (owner decision, 16 Nov: evidence reachable behind its token, no opt-in): in container mode, which already
+      // refuses to start without a bearer token on /mcp, a defect build serves its read-only evidence on the
+      // container's interfaces behind the evidence token, so an outside harness can check a defect build. Outside a
+      // container a defect build keeps every listener on loopback.
       let container = false;
-      let allowDefects = false;
       try {
         container = containerMode(env);
-        allowDefects = containerAllowDefects(env);
       } catch {
         // An unrecognized value is refused by the transport checks below.
       }
-      if (!loopback && (mcpDefects.length > 0 || backendDefects.length > 0)) {
-        if (!container) refusals.push("a build with defects keeps every listener on loopback outside container mode; TRACKER_EVIDENCE_LISTEN on another address is refused");
-        else if (!allowDefects) refusals.push(`in container mode a build with defects serves its evidence off loopback only with ${CONTAINER_ALLOW_DEFECTS_ENV}=1; TRACKER_EVIDENCE_LISTEN on another address is refused`);
+      if (!loopback && !container && (mcpDefects.length > 0 || backendDefects.length > 0)) {
+        refusals.push("a build with defects keeps every listener on loopback outside container mode; TRACKER_EVIDENCE_LISTEN on another address is refused");
       }
     }
   }

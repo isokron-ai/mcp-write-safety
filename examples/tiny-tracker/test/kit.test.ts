@@ -78,9 +78,13 @@ describe("the CI workflow (.github/workflows/tiny-tracker.yml)", () => {
     assert.match(wf, /expected exit 2 without a token/);
   });
 
-  it("the container job checks R23 and a restart on a reused /data volume (note 19, items 3 and 8)", () => {
-    assert.match(wf, /expected exit 2 without the opt-in/);
-    assert.match(wf, /-e TRACKER_CONTAINER_ALLOW_DEFECTS=1/);
+  it("the container job checks the defect build's evidence (R23 retired) and a restart on a reused /data volume", () => {
+    // R23 retired (coordinator notes 24 and 27): a defect build in container mode starts with no opt-in and answers
+    // /build 404 without the evidence token, 200 with it; outside container mode it is refused; the removed variable is
+    // refused by name.
+    assert.match(wf, /expected exit 2 for a defect build off loopback outside container mode/);
+    assert.match(wf, /expected exit 2 with the removed TRACKER_CONTAINER_ALLOW_DEFECTS/);
+    assert.match(wf, /defect build, evidence without token: \$none, with: \$good/);
     assert.match(wf, /-v tt-data:\/data/);
     assert.match(wf, /--data-dir \/data/);
     assert.match(wf, /docker kill tt-dur/);

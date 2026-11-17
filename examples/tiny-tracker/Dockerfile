@@ -17,9 +17,8 @@
 # The evidence routes (GET /build, /ledger, /executions, /operations, /export) for a harness outside the container
 # (owner decision: evidence reachable behind its token): name the evidence feature and TRACKER_EVIDENCE_LISTEN, and
 # give the evidence token the same way as the MCP token. Only the evidence routes are served there, for any Host, and
-# only with the evidence token; the backend API stays on the container's loopback. A defect build may do this too,
-# but only with -e TRACKER_CONTAINER_ALLOW_DEFECTS=1 (R23): without it such a start is refused. /mcp stays behind the
-# bearer token either way.
+# only with the evidence token; the backend API stays on the container's loopback. A defect build does this too, with
+# no opt-in; /mcp stays behind the bearer token either way.
 #
 #   docker run --rm --init -p 127.0.0.1:47310:47310 -p 127.0.0.1:47312:47312 \
 #     -v "$PWD/mcp.token:/run/secrets/mcp.token:ro" -e TRACKER_MCP_TOKEN_FILE=/run/secrets/mcp.token \

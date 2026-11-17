@@ -21,12 +21,6 @@ import type { McpListenOptions } from "./mcp/server.js";
 
 export const MCP_TOKEN_ENV = { value: "TRACKER_MCP_TOKEN", file: "TRACKER_MCP_TOKEN_FILE" } as const;
 export const CONTAINER_ENV = "TRACKER_CONTAINER";
-/**
- * R23 (0.4.0): in container mode a build with defects serves its evidence off loopback (TRACKER_EVIDENCE_LISTEN on
- * another address) only with this opt-in. Without it a plain container never exposes a defect build's evidence on the
- * container's interfaces; /mcp is bearer-gated either way (X1).
- */
-export const CONTAINER_ALLOW_DEFECTS_ENV = "TRACKER_CONTAINER_ALLOW_DEFECTS";
 
 /** 16 to 256 printable ASCII characters, no spaces (the fixture tokens' rule). */
 const TOKEN_PATTERN = /^[\x21-\x7e]{16,256}$/;
@@ -42,18 +36,6 @@ export function containerMode(env: Record<string, string | undefined>): boolean 
   if (raw === undefined || raw === "" || raw === "0") return false;
   if (raw === "1") return true;
   throw new TransportError(`${CONTAINER_ENV}="${raw}" is not recognized; use 1 or 0. Not starting.`);
-}
-
-/**
- * Whether the R23 opt-in is on. Only "1" or "0" (or unset), as TRACKER_CONTAINER; any other value stops the start, and
- * "1" outside container mode is refused (it has no effect there: a defect build keeps every listener on loopback).
- */
-export function containerAllowDefects(env: Record<string, string | undefined>): boolean {
-  const raw = env[CONTAINER_ALLOW_DEFECTS_ENV];
-  if (raw === undefined || raw === "" || raw === "0") return false;
-  if (raw !== "1") throw new TransportError(`${CONTAINER_ALLOW_DEFECTS_ENV}="${raw}" is not recognized; use 1 or 0. Not starting.`);
-  if (!containerMode(env)) throw new TransportError(`${CONTAINER_ALLOW_DEFECTS_ENV}=1 has no effect outside container mode (${CONTAINER_ENV}=1): a build with defects keeps every listener on loopback there. Not starting.`);
-  return true;
 }
 
 /** The MCP bearer token from the environment or its file, or undefined when neither is set. */
@@ -93,14 +75,12 @@ export function loadMcpToken(env: Record<string, string | undefined>, platform: 
  * MCP listener). Refuses:
  *   - container mode for `backend` (its listener is loopback-only inside the container: run `all` there);
  *   - container mode for an MCP listener without a bearer token (X1);
- *   - TRACKER_CONTAINER_ALLOW_DEFECTS with a value other than 1 or 0, or set to 1 outside container mode (R23);
  *   - an MCP token over stdio, where there is no listener to protect;
  *   - an MCP token equal to another token (a principal's too, given in otherTokens), or one on the command line.
  */
 export function resolveTransport(layout: TransportLayout, env: Record<string, string | undefined>, argv: readonly string[] = [],
   platform: string = process.platform, otherTokens: Record<string, string | undefined> = {}): McpListenOptions | undefined {
   const container = containerMode(env);
-  containerAllowDefects(env); // R23: an unrecognized value, or the opt-in outside container mode, stops the start
   const token = loadMcpToken(env, platform);
   if (container && layout === "backend") {
     throw new TransportError("container mode runs `tiny-tracker all`, `server` or `stdio`; the backend listener stays on the container's loopback. Not starting.");

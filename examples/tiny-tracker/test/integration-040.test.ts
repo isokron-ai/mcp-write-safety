@@ -3,9 +3,9 @@
 //     the evidence and control tokens, however they are given (env, file or
 //     the token folder);
 //   - container mode: the evidence routes on TRACKER_EVIDENCE_LISTEN behind the
-//     evidence token, for a defect build too (owner decision) with the R23 opt-in
-//     TRACKER_CONTAINER_ALLOW_DEFECTS=1, the bearer token
-//     on /mcp, and the refusal without it;
+//     evidence token, for a defect build too (owner decision, no opt-in; the R23
+//     variable TRACKER_CONTAINER_ALLOW_DEFECTS was removed in 0.4.0 and is
+//     refused if set), the bearer token on /mcp, and the refusal without it;
 //   - the configured key retention is stated in the tool descriptions and the
 //     server instructions (D's note, FX-KEY-2).
 //
@@ -20,7 +20,7 @@ import { randomBytes } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { runCli } from "./support/cli-run.js";
-import { containerAllowDefects, resolveTransport, TransportError } from "../src/transport.js";
+import { resolveTransport, TransportError } from "../src/transport.js";
 import { createBuild } from "../src/mcp/build.js";
 
 const tok = (p: string) => `${p}-${randomBytes(12).toString("hex")}`;
@@ -83,13 +83,12 @@ describe("the MCP token differs from every other token (0.4.0 integration)", () 
 describe("container mode with the evidence listener (owner decision: evidence reachable behind its token)", () => {
   const features = "evidence,strict-input,execution-records,lookup,principals,ledger";
   for (const defect of [undefined, "read-merge-put"]) {
-    it(`TRACKER_CONTAINER=1 serves /mcp behind the bearer token and the evidence routes on 0.0.0.0 behind the evidence token${defect ? ` (defect build ${defect}, with TRACKER_CONTAINER_ALLOW_DEFECTS=1)` : ""}`, async () => {
+    it(`TRACKER_CONTAINER=1 serves /mcp behind the bearer token and the evidence routes on 0.0.0.0 behind the evidence token${defect ? ` (defect build ${defect}, no opt-in)` : ""}`, async () => {
       const mcp = tok("mcp");
       const evidence = tok("ev");
       const args = ["all", "--features", features, "--port", "0", "--backend-port", "0", ...(defect ? ["--defect", defect] : [])];
-      // R23: a defect build serves its evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1.
-      const r = await runCli(args, { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: mcp, TRACKER_EVIDENCE_TOKEN: evidence, TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0",
-        ...(defect ? { TRACKER_CONTAINER_ALLOW_DEFECTS: "1" } : {}) }, async (state) => {
+      // Owner decision (16 Nov): a defect build serves its evidence off loopback behind the evidence token, no opt-in.
+      const r = await runCli(args, { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: mcp, TRACKER_EVIDENCE_TOKEN: evidence, TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" }, async (state) => {
         assert.match(state.evidence_listener, /^http:\/\/0\.0\.0\.0:\d+$/);
         const ev = state.evidence_listener.replace("0.0.0.0", "127.0.0.1");
         // A harness outside the container reaches it with another Host header (a published port).
@@ -132,49 +131,47 @@ describe("container mode with the evidence listener (owner decision: evidence re
     assert.match(r.stderr, /keeps every listener on loopback outside container mode/);
   });
 
-  // R23 (note 19, items 1 and 3): without the opt-in a plain container never serves a defect build's evidence off loopback.
-  for (const [what, args] of [["an MCP-layer defect", ["--defect", "read-merge-put"]], ["a backend defect", ["--backend-defect", "lost-update"]]] as const) {
-    it(`in container mode ${what} serves evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1 (R23)`, async () => {
+  // R23 retired (coordinator notes 24 and 27 item 2): no opt-in. A defect build in container mode starts and serves its
+  // evidence off loopback behind the evidence token; outside container mode it is still refused (the test above).
+  for (const [what, args, mcpDefects, backendDefects] of [
+    ["an MCP-layer defect", ["--defect", "read-merge-put"], ["read-merge-put"], []],
+    ["a backend defect", ["--backend-defect", "lost-update"], [], ["lost-update"]],
+  ] as const) {
+    it(`in container mode ${what} starts with no opt-in: /build answers 200 with the evidence token, 404 without it`, async () => {
       const mcp = tok("mcp");
-      const base = { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: mcp, TRACKER_EVIDENCE_TOKEN: tok("ev"), TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" };
-      const cmd = ["all", "--features", features, "--port", "0", "--backend-port", "0", ...args];
-      for (const allow of [undefined, "0", ""]) {
-        const r = await runCli(cmd, { ...base, ...(allow !== undefined ? { TRACKER_CONTAINER_ALLOW_DEFECTS: allow } : {}) });
-        assert.equal(r.code, 2, `allow=${allow}: ${r.stderr}`);
-        assert.equal(r.stateLine, undefined);
-        assert.match(r.stderr, /serves its evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1/);
-        assert.ok(!r.stderr.includes(mcp));
-      }
-      // Loopback needs no opt-in.
-      const lo = await runCli(cmd, { ...base, TRACKER_EVIDENCE_LISTEN: "127.0.0.1:0" });
-      assert.ok(lo.stateLine, lo.stderr);
-      // Nor does a defect build without the evidence listener: /mcp is bearer-gated (owner decision).
-      const { TRACKER_EVIDENCE_LISTEN: _l, ...noListen } = base;
-      const plain = await runCli(cmd, noListen);
-      assert.ok(plain.stateLine, plain.stderr);
-      // With it, the start goes ahead.
-      const ok = await runCli(cmd, { ...base, TRACKER_CONTAINER_ALLOW_DEFECTS: "1" });
-      assert.ok(ok.stateLine, ok.stderr);
-      assert.match(ok.stateLine!.evidence_listener, /^http:\/\/0\.0\.0\.0:\d+$/);
+      const evidence = tok("ev");
+      const r = await runCli(["all", "--features", features, "--port", "0", "--backend-port", "0", ...args],
+        { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: mcp, TRACKER_EVIDENCE_TOKEN: evidence, TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" }, async (state) => {
+          assert.match(state.evidence_listener, /^http:\/\/0\.0\.0\.0:\d+$/);
+          const ev = state.evidence_listener.replace("0.0.0.0", "127.0.0.1");
+          assert.equal((await fetch(`${ev}/build`)).status, 404, "no token, no evidence");
+          const build = await fetch(`${ev}/build`, { headers: { authorization: `Bearer ${evidence}` } });
+          assert.equal(build.status, 200);
+          const d = await build.json() as any;
+          assert.deepEqual(d.defects.mcp, mcpDefects);
+          assert.deepEqual(d.defects.backend, backendDefects);
+        });
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok(r.stateLine, r.stderr);
+      for (const t of [mcp, evidence]) assert.ok(!r.stdout.includes(t) && !r.stderr.includes(t), "no token is printed");
     });
   }
 
-  it("TRACKER_CONTAINER_ALLOW_DEFECTS takes only 1 or 0, and 1 is refused outside container mode (R23)", async () => {
-    assert.equal(containerAllowDefects({}), false);
-    assert.equal(containerAllowDefects({ TRACKER_CONTAINER_ALLOW_DEFECTS: "0" }), false);
-    assert.equal(containerAllowDefects({ TRACKER_CONTAINER: "1", TRACKER_CONTAINER_ALLOW_DEFECTS: "1" }), true);
-    for (const bad of ["yes", "true", "2", " 1"]) {
-      assert.throws(() => containerAllowDefects({ TRACKER_CONTAINER: "1", TRACKER_CONTAINER_ALLOW_DEFECTS: bad }), /is not recognized; use 1 or 0/);
+  it("TRACKER_CONTAINER_ALLOW_DEFECTS was removed in 0.4.0: set to any value, every start is refused and names it", async () => {
+    const container = { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: tok("mcp"), TRACKER_EVIDENCE_TOKEN: tok("ev"), TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" };
+    for (const [env, args] of [
+      [container, ["all", "--features", features, "--defect", "read-merge-put", "--port", "0", "--backend-port", "0"]],
+      [container, ["all", "--port", "0", "--backend-port", "0"]],
+      [{}, ["all", "--port", "0", "--backend-port", "0"]],
+      [{}, ["backend", "--port", "0"]],
+    ] as const) {
+      for (const value of ["1", "0", ""]) {
+        const r = await runCli([...args], { ...env, TRACKER_BACKEND_TOKEN: tok("be"), TRACKER_CONTAINER_ALLOW_DEFECTS: value });
+        assert.equal(r.code, 2, `${args.join(" ")} with ${JSON.stringify(value)}: ${r.stderr}`);
+        assert.equal(r.stateLine, undefined);
+        assert.match(r.stderr, /TRACKER_CONTAINER_ALLOW_DEFECTS was removed in 0\.4\.0/);
+      }
     }
-    assert.throws(() => containerAllowDefects({ TRACKER_CONTAINER_ALLOW_DEFECTS: "1" }), /has no effect outside container mode/);
-    // resolveTransport checks it on every start, evidence listener or not.
-    assert.throws(() => resolveTransport("all", { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: tok("mcp"), TRACKER_CONTAINER_ALLOW_DEFECTS: "on" }), TransportError);
-    const r = await runCli(["all", "--port", "0", "--backend-port", "0"], { TRACKER_CONTAINER_ALLOW_DEFECTS: "1" });
-    assert.equal(r.code, 2);
-    assert.match(r.stderr, /has no effect outside container mode/);
-    const bad = await runCli(["all", "--port", "0", "--backend-port", "0"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: tok("mcp"), TRACKER_CONTAINER_ALLOW_DEFECTS: "yes" });
-    assert.equal(bad.code, 2);
-    assert.match(bad.stderr, /is not recognized; use 1 or 0/);
   });
 
   it("container mode without the MCP token refuses before anything listens, evidence listener or not", async () => {

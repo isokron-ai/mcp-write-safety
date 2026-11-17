@@ -14,7 +14,8 @@
 #                contract rows need the driver checkout, which the release checklist runs).
 #   container    builds the image and checks the start refusal (X1): no token, exit 2; with a token, /mcp needs it;
 #                the evidence listener (TRACKER_EVIDENCE_LISTEN) answers only with the evidence token; a defect build
-#                serves evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1 (R23); a durable server
+#                serves evidence off loopback behind the evidence token with no opt-in, is refused outside container
+#                mode, and the removed TRACKER_CONTAINER_ALLOW_DEFECTS is refused by name (R23 retired); a durable server
 #                killed and started again on its reused /data volume (pid 1 both times) takes its own lease and lock
 #                over and replays a keyed write.
 #
@@ -199,26 +200,34 @@ jobs:
           echo "evidence without token: $none, with: $good, API path: $api"
           [ "$none" = "404" ] && [ "$good" = "200" ] && [ "$api" = "404" ]
           ! docker logs tt-ev 2>&1 | grep -qF -e "$ev" -e "$mcp"
-      - name: A defect build serves evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1 (R23)
+      - name: A defect build serves evidence behind the evidence token with no opt-in; outside container mode it is refused (R23 retired)
         run: |
           mcp="$(openssl rand -hex 24)"
           ev="$(openssl rand -hex 24)"
           set +e
-          docker run --rm -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+          docker run --rm -e TRACKER_CONTAINER=0 -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
             tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put > out.txt 2> err.txt
           code=$?
           set -e
           cat err.txt
-          [ "$code" = "2" ] || { echo "::error::expected exit 2 without the opt-in, got $code"; exit 1; }
-          grep -q "only with TRACKER_CONTAINER_ALLOW_DEFECTS=1" err.txt
-          docker run -d --name tt-r23 -p 127.0.0.1:47312:47312 -e TRACKER_CONTAINER_ALLOW_DEFECTS=1 \
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 for a defect build off loopback outside container mode, got $code"; exit 1; }
+          grep -q "keeps every listener on loopback outside container mode" err.txt
+          set +e
+          docker run --rm -e TRACKER_CONTAINER_ALLOW_DEFECTS=1 -e TRACKER_MCP_TOKEN="$mcp" tiny-tracker:ci > out.txt 2> err.txt
+          code=$?
+          set -e
+          cat err.txt
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 with the removed TRACKER_CONTAINER_ALLOW_DEFECTS, got $code"; exit 1; }
+          grep -q "TRACKER_CONTAINER_ALLOW_DEFECTS was removed in 0.4.0" err.txt
+          docker run -d --name tt-r23 -p 127.0.0.1:47312:47312 \
             -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
             tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put
           trap 'docker logs tt-r23; docker rm -f tt-r23 >/dev/null' EXIT
           for _ in $(seq 1 50); do docker logs tt-r23 2>/dev/null | grep -q '"evidence_listener"' && break; sleep 0.2; done
+          none="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47312/build)"
           good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
-          echo "defect build with the opt-in, evidence: $good"
-          [ "$good" = "200" ]
+          echo "defect build, evidence without token: $none, with: $good"
+          [ "$none" = "404" ] && [ "$good" = "200" ]
       - name: A durable server restarted on its reused /data replays a keyed write (pid 1 both times)
         run: |
           token="$(openssl rand -hex 24)"
