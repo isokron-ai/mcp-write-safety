@@ -88,5 +88,10 @@
     "name": "triage:needs-reply",
     "color": "d93f0b",
     "description": "Waiting for a reply from the steward"
+  },
+  {
+    "name": "tiny-tracker",
+    "color": "5319e7",
+    "description": "The tiny-tracker sample server and shared fixture (examples/tiny-tracker)"
   }
 ]
