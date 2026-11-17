@@ -12,7 +12,7 @@ import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension, BackendFaultHooks } from "./backend/http.js";
 import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
 import type { Clock } from "./clock.js";
-import { containerMode, resolveTransport, TransportError } from "./transport.js"; // stream F
+import { CONTAINER_ALLOW_DEFECTS_ENV, containerAllowDefects, containerMode, resolveTransport, TransportError } from "./transport.js"; // stream F
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -190,15 +190,20 @@ async function main(): Promise<void> {
       const loopback = ["127.0.0.1", "localhost", "::1"].includes(evidenceListen.host);
       // 0.4.0 (owner decision: evidence reachable behind its token): in container mode, which already refuses to start
       // without a bearer token on /mcp, a defect build may serve its read-only evidence on the container's interfaces,
-      // so an outside harness can check a defect build. Outside a container a defect build stays on loopback.
+      // so an outside harness can check a defect build, but only with the R23 opt-in TRACKER_CONTAINER_ALLOW_DEFECTS=1
+      // (coordinator, note 19, pending the owner's confirmation of the default). Outside a container a defect build
+      // stays on loopback.
       let container = false;
+      let allowDefects = false;
       try {
         container = containerMode(env);
+        allowDefects = containerAllowDefects(env);
       } catch {
-        // An unrecognized TRACKER_CONTAINER is refused by the transport check below.
+        // An unrecognized value is refused by the transport checks below.
       }
-      if (!loopback && !container && (mcpDefects.length > 0 || backendDefects.length > 0)) {
-        refusals.push("a build with defects keeps every listener on loopback outside container mode; TRACKER_EVIDENCE_LISTEN on another address is refused");
+      if (!loopback && (mcpDefects.length > 0 || backendDefects.length > 0)) {
+        if (!container) refusals.push("a build with defects keeps every listener on loopback outside container mode; TRACKER_EVIDENCE_LISTEN on another address is refused");
+        else if (!allowDefects) refusals.push(`in container mode a build with defects serves its evidence off loopback only with ${CONTAINER_ALLOW_DEFECTS_ENV}=1; TRACKER_EVIDENCE_LISTEN on another address is refused`);
       }
     }
   }
