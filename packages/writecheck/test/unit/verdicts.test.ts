@@ -204,6 +204,23 @@ test('held request: a trial whose answer shows a conflict (declared patterns.con
   assert.equal(dflt.numbers['needs_reading'], 4);
 });
 
+test('held request, mixed run: one silent loss among shown conflicts stays violated (review round 2, item 3)', () => {
+  const res = M().resources[0]!;
+  const cb = (step: string, text: string) => ({ step, ok: true, isError: false, rpc_error: null, text, data: null, indeterminate: false, tool: 'ticket_update', shape: null });
+  const trials = ['matched 0', 'matched 0', 'matched 0', 'ok'].map((holderText, i) => ({ schedule: (i % 2 ? 'hold B, run A' : 'hold A, run B') as 'hold A, run B' | 'hold B, run A', held: { seq: i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: cb(`h${i}`, holderText), other: cb(`o${i}`, 'modified 1'), kept: { holder: false, other: true }, steps: [`h${i}`, `o${i}`] }));
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const r = gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+    assert.equal(r.verdict, 'violated');
+    assert.equal(r.numbers['lost'], 1);
+    assert.equal(r.numbers['conflict_shown'], 3);
+    assert.match(r.reason, /1 of 4 forced trials/);
+    assert.deepEqual(r.steps, ['h3', 'o3'], 'the steps are the counted loss, not a shown conflict');
+  } finally {
+    usePatterns(null);
+  }
+});
+
 test('CONC-3 pairs: the mechanical-rule note is not given on a record that is not tested for a failed validity arm (review round 2, item 1)', () => {
   const res = M().resources[0]!;
   const exp = pairsExperiment(res, 40, 'separate');
