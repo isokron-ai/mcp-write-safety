@@ -19,6 +19,7 @@ A keyed call's result describes the write the key identifies, even where the cal
    - same key while the first is pending: `code: in_progress`, `outcome: unknown`, `repeat: same_key`;
    - an expired key whose fingerprint matches the tombstone: `outcome: applied`, `replayed: true`, `repeat: read_first`, with the execution record id from the tombstone and a text that says the stored answer is gone and the object should be read;
    - an expired key with a different fingerprint: refused, nothing applied.
+   At the backend (seams v2.1, `docs/INTERFACES.md` 1.1) these are: the stored reply with `idempotent-replayed: true`; 422 `idempotency_key_reused`; 409 `in_progress`; 410 `key_expired` with `idempotent-replayed: true` and `{execution_id, result_digest, committed_at}` from the tombstone, told to the ledger as a replay; 422 `idempotency_key_reused`. A key whose pending record was fenced by a run reset answers 409 `key_fenced`, nothing applied, for the life of the data dir.
 4. **A refused first call does not hold the key.** A backend refusal (status 300 and above) is decided before any effect and stores nothing, so a repeat with the same key is a new attempt.
 5. **`get_operation` on a key with no record** answers "no record of this key now". It never says nothing was written: a held request can still arrive.
 

@@ -15,6 +15,7 @@
 //   POST /_fixture/runs/:id/reset     reset one run's data and keys   (0.2.0)
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { FAULT_POINTS } from "../fault-points.js";
 import { wallClock, type Clock } from "../clock.js";
@@ -48,15 +49,36 @@ class ControlError extends Error {
   }
 }
 
+/**
+ * Run ids are `run-<boot8>-<12 random hex>` (seams v2.1): the boot id is public, so a counter suffix would let anyone
+ * guess another caller's next run. The backend refuses a run tag the registry never allocated (403 run_not_allocated).
+ */
 export class RunRegistry {
   private readonly runs: Run[] = [];
+  /**
+   * Called with each new run before it is registered or answered: the 0.3.0 journal appends its `run-alloc` line here
+   * (JournalSeam.recordRun). A throw refuses the allocation and registers nothing.
+   */
+  onAllocate: ((run: Run) => void) | undefined = undefined;
   constructor(private readonly bootId: string, private readonly clock: Clock = wallClock) {}
 
   allocate(label: string | null, principal = "p-default"): Run {
     if (this.runs.length >= MAX_RUNS) throw new ControlError(429, "too_many_runs", `at most ${MAX_RUNS} runs per process`);
-    const run: Run = { run_id: `run-${this.bootId.slice(0, 8)}-${this.runs.length + 1}`, principal, created_at: this.clock.now().toISOString(), label };
+    let run_id: string;
+    do run_id = `run-${this.bootId.slice(0, 8)}-${randomBytes(6).toString("hex")}`; while (this.has(run_id));
+    const run: Run = { run_id, principal, created_at: this.clock.now().toISOString(), label };
+    try {
+      this.onAllocate?.({ ...run });
+    } catch (e) {
+      throw new ControlError(503, "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}`);
+    }
     this.runs.push(run);
-    return run;
+    return { ...run };
+  }
+
+  /** Puts back a run read from the journal's `run-alloc` line at load (0.3.0); no callback, no new id. */
+  restore(run: Run): void {
+    if (!this.has(run.run_id)) this.runs.push({ ...run });
   }
 
   list(): Run[] {

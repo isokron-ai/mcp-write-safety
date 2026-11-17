@@ -15,6 +15,7 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - Defects carry a `requires` list; `--defect all` means every defect valid for the active features. The backend has its own defect registry (seams, banner, refusal rules), and a computed defect placement map.
 - `--token-dir`: a 0700 folder where evidence and control tokens are generated (0600) when not supplied; only its path is printed.
 - Each write's committed transaction carries its complete post-state (objects, deletes, id counters, owners, applied-write entries), its request body and reply headers, the boot id and one record-clock time used for every stored time. A re-sent If-Match write that was already applied is reported as a replay, not a second commit. A journal failure is reported to the ledger. Backend fault hooks (before and after the commit section) and a run reset through the commit path.
+- Seams v2.1: key records answer in a fixed order (completed, pending as 409 `in_progress`, fenced as 409 `key_fenced`, expired as 410 `key_expired`), and every keyed answer reaches the ledger. A run reset fences its run's pending keys, so a write in flight during the reset never lands after it. Run ids are random; with the control listener on, a run tag that was never allocated is refused. A generated token file is written whole before it appears.
 - The backend's single commit path (validate, journal, apply, ledger, reply), an injected clock for every timestamp, typed backend seams, principals with key records scoped by principal, and frozen record field names (`docs/INTERFACES.md`).
 - RFC 8785 canonical bytes and domain-tagged SHA-256 digests, with cross-language vectors (`vectors/digest-1.json`) and a standard-library Python verifier (`verify/python`).
 - `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).
@@ -25,6 +26,8 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - A start whose command line holds one of its tokens (8 characters or more), or where two tokens are equal, stops with exit 2. This holds under every profile, `--profile 0.1` included.
 
 ### Fixed
+- A re-sent If-Match write from another principal was answered as a replay of the first principal's write; it now gets the normal 412.
+- A failure completing a key record after the journal append no longer skips the ledger: the ledger is told, then the store stops.
 - The 0.1.0 entry below says "41 deliberate defects"; 0.1.0 shipped 47 MCP-layer defects and 1 backend defect.
 
 ## 0.1.0 (16 Nov 2026) for MWS 0.9

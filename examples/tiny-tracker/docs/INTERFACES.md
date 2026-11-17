@@ -1,6 +1,6 @@
 # Frozen interfaces for the parallel build of 0.2.0, 0.3.0 and 0.4.0
 
-Status: frozen at the seams commit on top of Phase 0 (`469e92c`), revised by seams v2 (on `9754124`): the complete `CommittedTransaction`, replayed conditional writes, journal line numbering, the run reset through the commit path, the fault hooks, owners, principals and one ports table. Six streams build against this page without talking to each other. A stream that needs to change anything listed here does not change it in its branch: it writes the change into its gate note, and the lane lead lands it as a separate commit that every stream rebases on.
+Status: frozen at the seams commit on top of Phase 0 (`469e92c`), revised by seams v2 (on `9754124`): the complete `CommittedTransaction`, replayed conditional writes, journal line numbering, the run reset through the commit path, the fault hooks, owners, principals and one ports table. Revised by seams v2.1 (on `e4b42b6`, coordinator note 7 and stream D's input): key-record states and the frozen keyed branch order, `abort(scope, key, reason)` that never throws, fenced keys, `principal` on applied-write entries, `request: null` for a run reset, `afterJournal` fail-stop, random run ids and refusal of unallocated run tags, the `fence` and `run-alloc` journal lines, the torn-line rule, `?principal=` on executions, and `durable` requiring `strict-input`. Six streams build against this page without talking to each other. A stream that needs to change anything listed here does not change it in its branch: it writes the change into its gate note, and the lane lead lands it as a separate commit that every stream rebases on.
 
 `test/interfaces.test.ts` and the tests named below hold these contracts.
 
@@ -15,14 +15,15 @@ Status: frozen at the seams commit on top of Phase 0 (`469e92c`), revised by sea
   2. **Journal append.** The sink with `role: "journal"` (at most one) gets `onCommit` first.
      - If it throws, every `Store.STATE_FIELDS` value is put back (objects, id counters, applied-write log, owners, commit sequence). Nothing is applied and no key is held; the pending record is aborted.
      - The ledger is told: `onRefusal` with status 503 and code `journal_unavailable` (ledger kind `journal-unavailable`). The request gets 503 `journal_unavailable`, and the store carries on.
-  3. **Apply.** The write is now in effect. `afterJournal` completes the key record with `storedReplyOf(tx)`.
+  3. **Apply.** The write is now in effect. `afterJournal` completes the key record with `storedReplyOf(tx)`. If `afterJournal` throws, the ledger and observers are still told of the commit, then the store stops (fail-stop, `CommitSinkError` named `afterJournal`, 503 `stopped`): the write is journalled and applied, so the evidence must have it.
   4. **Ledger, then observers.** Every `role: "ledger"` sink first, then every `"observer"`, each group in the order added. Backend defects that watch commits add observers through `BackendOps.observers` (added after the sinks given to `startBackend`), never through `store.addSink` from a side registry. If a sink throws, the store stops: every later request gets 503 (fail-stop).
   5. **After the section.** The `backend/after-commit` fault hook (`faults.afterCommit`), then the reply.
 - **`CommitSink`.** Its shape is `{ name; role: "journal" | "ledger" | "observer"; onCommit(CommittedTransaction); onReplay?(ReplayedTransaction); onRefusal?(RefusedTransaction) }`. Sinks are synchronous; the journal flushes with `writeSync` + `fsyncSync`. They are given as `startBackend({ sinks })` or added with `store.addSink`.
 - **`TxMeta`.** It carries:
   - `principal`;
   - `attribution { run, operation }`, from `Tiny-Tracker-Run` and `Tiny-Tracker-Operation`, with a malformed tag set to `null`;
-  - `request { method, path, key, fingerprint, fingerprintHash, body }`:
+  - `request { method, path, key, fingerprint, fingerprintHash, body }`, or **`null` for a run reset** (`Store.dropRun`, its commit and its refusal): no client request carries it, so its ledger entry has `request: null` and no `fingerprint_hash` is made up. A client write always has one (`WriteMeta`). Fields:
+    - `key` is the Idempotency-Key of a keyed POST, else `null`: a key header on a PATCH, PUT or DELETE is ignored and not recorded, so an execution record never names a key that has no key record.
     - `fingerprint` is the backend's own key-reuse comparison string `METHOD path canonicalJson(body)` for a keyed POST, else `null`. Records never hash it.
     - `fingerprintHash` is the records' `fingerprint_hash`, computed once by the HTTP layer for every write: `fingerprintHash(principal, method, path, body)` (see below). Sinks use it as given.
     - `body` is the parsed request body, or `null`.
@@ -34,19 +35,35 @@ Status: frozen at the seams commit on top of Phase 0 (`469e92c`), revised by sea
   - `post.deletes { projects, tickets }`: keys and ids removed; their owners and applied-write entries go with them.
   - `post.counters { ticket, label, comment }`: the id counters after the commit.
   - `post.owners`: the owners of the objects the commit created (below).
-  - `post.applied`: the applied-write entries the commit added, each `{ ticket, fromVersion, toVersion, fingerprint, seq }`.
+  - `post.applied`: the applied-write entries the commit added, each `{ ticket, principal, fromVersion, toVersion, fingerprint, seq }`.
   - `reset { principal, run, objects, keys }` on a run reset; `keys` is `null` when the journal is told and the count by the time the ledger is told.
 - **`committedAt`: one record-clock read per commit.** `Store.commit` reads `Clock.now()` once at the start of the section. Every time the write stores (`created_at`, `updated_at`, a comment's `created_at`), the key record's `committedAt` and the execution record's `committed_at` are that value. Journal replay (`applyPostState`) reuses the stored value and never recomputes it.
 - **The commit sequence.** `seq` counts commits only, starting at 1. It is never reused. A refusal, a replay (keyed or conditional) and an aborted write consume none. A run reset consumes one.
   - A write's execution record is `X-<seq>`, and its `seq` is this value; execution ids skip the seq of a run reset.
   - It is **not** a journal line number (§1.9). The ledger keeps its own `seq` and links by `execution_id`.
 - **Object owners (decided: owners travel in the transaction).** The store keeps who created each project and ticket (`principal`, and the run tag of the creating request) beside the objects, not in them, so the 0.1 surface is unchanged. `post.owners` carries the new entries; `applyPostState` restores them from the line; there is no separate `recordOwners` call. `Store.ownerOf(ref)` reads them, and the run reset and run-ownership checks use them. The seed has no owner.
-- **Re-sent conditional writes.** The applied-write log stores the `seq` of the commit that applied each entry. An If-Match PATCH or PUT re-sent after it applied, with nothing changed since, is answered `idempotent-replayed: true` and reported as a replay of that `seq`.
+- **Re-sent conditional writes.** The applied-write log stores the `seq` and the `principal` of the commit that applied each entry, and keeps the **last 20 entries per ticket** (`Store.APPLIED_CAP`; an older re-send gets the normal 412). An If-Match PATCH or PUT re-sent **by the same principal** after it applied, with nothing changed since, is answered `idempotent-replayed: true` and reported as a replay of that `seq`. Another principal sending the same write gets the normal 412 `precondition_failed` (seams v2.1 fixed a replay across principals).
 - **The backend fault hooks** (`BackendOptions.faults: BackendFaultHooks`). Streams B and E arm backend faults here, without editing `http.ts`:
   - `beforeCommit({ meta }) → Promise<void>`: `backend/before-commit`, after the pending record and before the section. Throw an `ApiError` to answer with it (reported as a refusal; the pending record is aborted); await to delay (the `delay` action); exit to crash. On a keyed write without a pending-record seam the key record is looked up again after the hook, so a same-key request that committed meanwhile is answered as a replay, never applied twice.
   - `afterCommit({ meta, tx }) → Promise<undefined | "drop" | { status, body }>`: `backend/after-commit`, only for a committed write. `undefined` sends the reply; `"drop"` closes the connection with no answer; `{ status, body }` answers that instead (the `error` action). Await to hold; exit to crash.
-- **The keyed path** (`http.ts`, A owns it; D's call sites are in place): look up the key record (reuse 422 / replay) → `begin` (only when the seam `isInflight`) → `beforeCommit` → the section, whose `afterJournal` calls `put(scope, key, storedReplyOf(tx))` → `afterCommit` → reply. Every way out that does not reach `put` calls `abort`: a refusal, a fault-hook error, a journal failure, any throw.
-- **Run tags and principals in the backend.** `BackendOptions.runOwner(run)` (the fixture layer's run registry) names the principal a run belongs to. A write tagged with another principal's run is refused 403 `run_not_owned` (reported as a refusal); a run this process did not allocate stays a tag only.
+- **The keyed path** (`http.ts`, A owns it; D's call sites are in place). Every step below is inside one `try`, so every answer reaches the ledger.
+  1. `get(scope, key)` returns `KeyRecordState | undefined`, answered in this **frozen order**:
+     - `{ state: "completed", reply }`: same backend fingerprint → the stored reply, `idempotent-replayed: true`, a replay of `reply.seq`; else 422 `idempotency_key_reused` (a refusal).
+     - `{ state: "pending", since }`: 409 `in_progress` (body carries `since`), a refusal in the ledger; the MCP layer reports outcome `unknown`, `repeat: same_key` (rule 4, decision 0004). Nothing begins.
+     - `{ state: "fenced", run }`: 409 `key_fenced`, a refusal. Nothing begins. The key's pending record was ended by a run reset; it stays fenced for the life of the store.
+     - `{ state: "expired", tombstone }`: the B10 answer. `tombstone.fingerprintHash` equals `request.fingerprintHash` → **410 `key_expired`**, `idempotent-replayed: true`, body `{ error, message, execution_id, result_digest, committed_at }`, told to the ledger as a replay of the tombstone's commit (`originalSeq` from `execution_id`); the MCP layer reports outcome `applied`, `replayed: true`, `repeat: read_first`. A different fingerprint → 422 `idempotency_key_reused` (a refusal).
+     - `undefined` → begin.
+  2. `begin` (only when the seam `isInflight`). A throw from `begin` is told to the ledger (an `ApiError` as its refusal; a `JournalError` as 503 `journal_unavailable`), and `abort` is still called.
+  3. `beforeCommit`. Without a pending-record seam the key record is looked up again after it (step 1's order). With one, the write re-checks its own record: `fenced` → 409 `key_fenced`, nothing applied and no `abort` (the fence ended the record); anything but `pending` → an internal error (aborted `internal_error`).
+  4. The section; its `afterJournal` marks the write committed, then calls `put(scope, key, storedReplyOf(tx))`.
+  5. `afterCommit`, then the reply.
+- **`abort(scope, key, reason)`** is called on every way out after `begin` that commits nothing, with the reason: `fault` (the `beforeCommit` hook threw, an armed `ApiError` included; the ledger still records that `ApiError` as a refusal), `refused` (an `ApiError` from the section, or a reply of 300 and above), `journal_unavailable` (`JournalError`), `internal_error` (any other throw). D writes `orphan_at_start` at load. **`abort` never throws:** it runs where the answer is already decided (a 503, say); the keyed path also wraps it, logging any error and keeping the answer. `abort` must accept a key with no pending record (after a failed `begin`). A committed write is never aborted, even when `put` throws (fail-stop, step 3 of the commit order).
+- **Run tags and principals in the backend.** `BackendOptions.runOwner(run)` (the fixture layer's run registry) names the principal a run belongs to. The CLI gives it only when the control listener allocates runs (`--fixture-control`). When it is given:
+  - a write tagged with another principal's run is refused 403 `run_not_owned`;
+  - a write tagged with a run the registry **never allocated** is refused 403 `run_not_allocated` (seams v2.1);
+  - `Store.dropRun` of a run never allocated is refused 404 `run_not_allocated`.
+  Each is reported as a refusal. Without `runOwner` a run tag is a tag only.
+- **Run ids** are `run-<boot8>-<12 random hex>` (seams v2.1): the boot id is public, so a counter suffix was guessable. `RunRegistry.onAllocate(run)` runs before a run is registered or answered (the 0.3.0 journal appends a `run-alloc` line there; a throw refuses the allocation with 503 `journal_unavailable` and registers nothing), and `RunRegistry.restore(run)` puts a journalled run back at load, so the 403 checks hold after a `--supervise` restart. `FixtureLayer.runs` exposes the registry.
 - **`fingerprint_hash`.** In every record it is `fingerprintHash(principal, method, path, body)`: SHA-256 under `dev.writesafety.tiny-tracker/request-fingerprint/1` over the RFC 8785 bytes of `{body, method, path, principal}`. It is in the vectors, in Node and Python, and it is `TxRequest.fingerprintHash`.
 
 ### 1.2 The clock (`src/clock.ts`)
@@ -63,11 +80,13 @@ Status: frozen at the seams commit on top of Phase 0 (`469e92c`), revised by sea
 |---|---|---|---|
 | `patchTicket` | `BackendOps.patchTicket` (sync, inside the section) plus optional `beforePatch` (async, before it) | wired | — |
 | `inputRules` | `InputRules { checkKey; checkStrings }` | wired | — |
-| `keyRecord` | `KeyRecordSeam { get(scope, key); put(scope, key, StoredReply); dropRun(scope, run) }` | wired (memory) | A uses it; D replaces it with `InflightKeyRecordSeam` (`begin`, `abort`, `tombstone`; `isInflight(seam)` selects the call sites) |
+| `keyRecord` | `KeyRecordSeam { get(scope, key): KeyRecordState \| undefined; put(scope, key, StoredReply); dropRun(scope, run) }`; `KeyRecordState` = `{state: "completed", reply}` \| `{state: "pending", since}` \| `{state: "fenced", run}` \| `{state: "expired", tombstone: KeyTombstone}` | wired (memory: `completed` only) | A uses it; D replaces it with `InflightKeyRecordSeam` (`begin`, `abort(scope, key, reason: AbortReason)`, `tombstone`; `isInflight(seam)` selects the call sites) |
 | `digest` | `DigestSeam { resultDigest(body): ServedDigest }` | named | A |
 | `lookup` | `LookupSeam { find(scope, key): StoredReply \| undefined }` | named | A |
-| `journal` | `JournalSeam extends CommitSink { load(); close() }` | named | D |
+| `journal` | `JournalSeam extends CommitSink { load(); recordRun(run); close() }` | named | D |
 | `keyExpiry` | `KeyExpirySeam { retentionMs; expiresAt(d); isExpired(reply, now) }` | named | D |
+
+**`dropRun` and pending records.** `KeyRecordSeam.dropRun(scope, run)` removes the run's completed records and returns how many. An `InflightKeyRecordSeam` also **fences** the run's pending records (not counted): each becomes `{state: "fenced", run}`, and under `durable` a journal `fence` line ends its pending line (no `aborted` line). The held write finds the fence after `beforeCommit` and is refused 409 `key_fenced` (§1.1), so a write in flight when its run is reset never lands after the reset. Writes that hold no pending record (unkeyed writes, or keyed writes on the memory seam) and are held at `beforeCommit` across a reset commit after it, as writes that arrived after it.
 
 A backend defect replaces a seam by assigning the `BackendOps` member. Its file declares `seams` and `requires`. A backend defect that watches commits sets `BackendOps.observers` (§1.1).
 
@@ -86,7 +105,9 @@ A backend defect replaces a seam by assigning the `BackendOps` member. Its file 
   - wire `TRACKER_BACKEND_TOKENS_FILE` into the command line (until then the CLI refuses the variable, in a block marked `// ---- lane lead: principals ----` that A replaces);
   - put every principal token into the start-up checks (`checkDistinct`, `checkArgv` in `cli.ts`) and give the list to `startBackend({ principals })` and `createFixtureLayer({ principals })`, which uses it for its own checks and gives the ids to the control listener;
   - give `runOwner` and `bootId` from the fixture layer to `startBackend` (the CLI does this now for `all`).
-- **Evidence reads across principals (frozen for A, B, C and the OpenAPI).** The evidence token is read-only and may read any principal's records. `GET /operations/:key` and `GET /executions/:id` take the principal explicitly as `?principal=<id>`: required when more than one principal is configured (400 `principal_required` without it), and defaulting to the single configured principal otherwise. Every response names `principal`. The A5 delayed leg reads with the writing principal's id. F's OpenAPI documents the parameter this way.
+- **Evidence reads across principals (frozen for A, B, C and the OpenAPI; revised in seams v2.1).** The evidence token is read-only and may read any principal's records. Every response names `principal`. The A5 delayed leg reads with the writing principal's id. F's OpenAPI documents the parameters this way.
+  - `GET /operations/:key?principal=<id>`: keys are per principal, so the parameter is **required** when more than one principal is configured (400 `principal_required` without it), and defaults to the single configured principal otherwise.
+  - `GET /executions/:id[?principal=<id>]`: execution ids are global, so the parameter is **optional** under any number of principals. Given and equal to the record's principal: the record. Given and different, or naming no configured principal: **404 `not_found`**, the same body as an unknown id, so it leaks neither the record nor whose it is.
 - **Container mode (stream A's obligation, owner decision):** in container mode the evidence routes listen on all interfaces, behind the evidence token only; A builds the bind switch, F's container uses it.
 
 ### 1.5 Records (`src/records.ts`, `schemas/*-1.schema.json`)
@@ -139,7 +160,11 @@ A backend defect replaces a seam by assigning the `BackendOps` member. Its file 
 - **Commit line:** `{ line: "commit", commit_seq, pending_jseq, tx }`. Only a commit line has `commit_seq`; it equals `tx.seq` and the execution record's `seq`. `pending_jseq` names the pending line it completes, or is `null`.
 - **Pending line** (0.3.0 `inflight`): `{ line: "pending", principal, key, fingerprint, run, created_at, clock_offset_ms }`. It has no `commit_seq`: it is written before the section, when the commit's number is not known.
 - **Aborted line:** `{ line: "aborted", pending_jseq, reason }`, `reason` one of `refused`, `journal_unavailable`, `orphan_at_start`. It ends a pending line nothing applied for: a refusal, a fault-hook error, a journal failure, or a pending line with no commit found at start (D writes the aborted line before serving).
-- Every line has `checksum`: lower-case hex SHA-256 of the line's RFC 8785 bytes without `checksum`. Only a torn last line is tolerated (decision 0003).
+- **Fence line** (seams v2.1, 0.3.0 `inflight`): `{ line: "fence", principal, key, run, pending_jseq, reset_seq }`. Written when a run reset (`KeyRecordSeam.dropRun`, in the reset's apply step, after its commit line, `reset_seq` = that commit's `commit_seq`) fences a pending record. It ends the pending line it names (no `aborted` line for it), and at load it restores `{state: "fenced", run}`, so the key stays refused (409 `key_fenced`) across a restart.
+- **Run-alloc line** (seams v2.1, decided: allocating a run gets a journal line): `{ line: "run-alloc", run_id, principal, created_at, label }`. Written by `JournalSeam.recordRun` from `RunRegistry.onAllocate` before the run is answered; at load each goes back with `RunRegistry.restore`. It has no `commit_seq` and takes no commit sequence.
+- The aborted line's `reason` is `AbortReason` (`src/backend/seams.ts`): `refused`, `journal_unavailable`, `fault`, `internal_error`, `orphan_at_start`.
+- Every line has `checksum`: lower-case hex SHA-256 of the line's RFC 8785 bytes without `checksum`.
+- **Torn lines (seams v2.1).** Only a torn **last** line is tolerated at load. "The store carries on" after a journal failure must not leave a torn line mid-file, so: after a failed append, D's journal **truncates the file back to the end of the last good line** (`ftruncate`, then `fsync`) before any later append, and keeps its next `jseq`; if it cannot truncate, it **fails stop**: every later append throws, and every write answers 503. A journal never appends after a partial line. (Decision 0003, section 5.)
 
 ## 2. D1–D6: coordinator answers, approved by the owner
 
@@ -177,6 +202,8 @@ Every stream branches from the head of `tiny-tracker/shared-fixture` after the s
 \* new file.
 
 **Defects that need a feature.** Streams A and D add feature-gated defects to `DEFECTS` (MCP layer) or `BACKEND_DEFECTS` with a non-empty `requires`, never to a side registry. The registry and the tests support them: `ungatedDefects()` is the 0.1 set (47) and the whole of `--defect all` without features; the self-test runs a gated defect with its `requires` features on; the README lists it in the "Defects that need a feature" table with a Requires column. The 0.1 golden is unaffected, because profile 0.1 has no features.
+
+**`durable` requires `strict-input` (decided in seams v2.1, on stream D's input).** A journal line is checksummed over RFC 8785 bytes, which a request body with a lone surrogate does not have, so under `durable` without `strict-input` such a write would be refused 503 `journal_unavailable` after validation. Stream D adds the compat rule **CMP-50** in its range: `durable` without `strict-input` in the effective feature set exits 2 and names the missing feature. (`strict-input` refuses such strings at the door, 400, before anything is begun.)
 
 **Compatibility rules see the effective feature set.** `checkCompat` evaluates each rule on the profile's features plus the named ones (`c.features`); only CMP-1 reads the named set (`c.named`). A rule such as CMP-5 therefore still refuses after a release flips its feature into the default profile.
 

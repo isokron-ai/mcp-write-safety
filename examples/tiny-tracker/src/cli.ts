@@ -151,7 +151,8 @@ async function main(): Promise<void> {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
         features, extension: backendExtension,
-        ...(fixture ? { bootId: fixture.descriptor.bootId, runOwner: fixture.runOwner } : {}),
+        // Run tags are checked against the registry only when the control listener allocates runs (seams v2.1).
+        ...(fixture ? { bootId: fixture.descriptor.bootId, ...(fixtureControl ? { runOwner: fixture.runOwner } : {}) } : {}),
       });
     } catch (e) {
       fail((e as Error).message);

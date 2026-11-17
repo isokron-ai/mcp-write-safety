@@ -206,6 +206,8 @@ export class Store {
    * field here; one that adds wiring adds it to WIRING_FIELDS.
    */
   static readonly STATE_FIELDS = ["projects", "tickets", "applied", "seq", "owners", "commitSeq"] as const;
+  /** The applied-write log keeps this many entries per ticket (INTERFACES 1.1). */
+  static readonly APPLIED_CAP = 20;
   /** Fields that are configuration or bookkeeping, not state: never snapshotted. */
   static readonly WIRING_FIELDS = ["clock", "bootId", "seed", "journal", "sinks", "stopped", "section", "keyRecords", "runOwner"] as const;
 
@@ -323,7 +325,8 @@ export class Store {
    *   2. journal: the journal sink appends the committed post-state; if it throws, the store is put back as it was,
    *      nothing is applied, the ledger is told of a 503 journal_unavailable refusal, and the caller gets a
    *      JournalError (503);
-   *   3. apply: the write is now in effect, and `afterJournal` records what goes with it (the key record);
+   *   3. apply: the write is now in effect, and `afterJournal` records what goes with it (the key record); if it
+   *      throws, the ledger and observers are still told, then the store stops (fail-stop);
    *   4. ledger, then observers: if one throws, the store stops (fail-stop: the journal and memory agree, the
    *      evidence does not);
    *   5. reply (the caller sends it, after the after-commit fault hook).
@@ -358,7 +361,7 @@ export class Store {
     }
     const tx: CommittedTransaction = {
       ...this.event(meta, reply.status), kind, seq, committedAt: section.committedAt, body: reply.body, headers: { ...(reply.headers ?? {}) },
-      objects: kind === "run-reset" ? [...((reply.body as { objects?: ObjectRef[] })?.objects ?? [])] : objectsOf(meta.request.path, reply.body),
+      objects: kind === "run-reset" ? [...((reply.body as { objects?: ObjectRef[] })?.objects ?? [])] : objectsOf(meta.request?.path ?? "", reply.body),
       post: this.postState(section),
     };
     if (kind === "run-reset") tx.reset = { principal: meta.principal, run: meta.attribution.run!, objects: [...tx.objects], keys: null };
@@ -372,8 +375,22 @@ export class Store {
       }
     }
     this.commitSeq = seq;
-    afterJournal?.(tx, reply);
+    // The write is journalled and applied from here on. An exception in afterJournal (completing the key record) must
+    // not skip the ledger: the ledger and observers are still told of the commit, then the store stops (fail-stop),
+    // exactly as when a sink throws (seams v2.1).
+    let afterFailed = false;
+    let afterError: unknown;
+    try {
+      afterJournal?.(tx, reply);
+    } catch (e) {
+      afterFailed = true;
+      afterError = e;
+    }
     this.notify((s) => s.onCommit(tx));
+    if (afterFailed) {
+      this.stopped = new CommitSinkError("afterJournal", afterError);
+      throw this.stopped;
+    }
     return { reply, tx };
   }
 
@@ -426,17 +443,20 @@ export class Store {
    * Run reset (contract 1.8): removes the projects and tickets one principal's run created, and that run's key
    * records, as one commit (kind "run-reset"): journalled, so a restart does not bring them back, and told to the
    * ledger with tx.reset. A project that still holds a ticket of another run is kept. Refused with 403 run_not_owned
-   * when the run is known to belong to another principal.
+   * when the run is known to belong to another principal, and with 404 run_not_allocated when a run registry is
+   * wired (runOwner) and never allocated it. Its meta has `request: null` (no client request; the ledger entry's
+   * request is null). The key-record seam's dropRun also fences the run's pending key records (src/backend/seams.ts).
    */
   dropRun(scope: KeyScope, run: string): { objects: number; keys: number; tx: CommittedTransaction } {
     const owner = this.runOwner?.(run);
-    const meta: TxMeta = {
-      principal: scope.principal, attribution: { run, operation: null },
-      request: { method: "POST", path: `/_fixture/runs/${encodeURIComponent(run)}/reset`, key: null, fingerprint: null, fingerprintHash: "", body: null },
-    };
+    const meta: TxMeta = { principal: scope.principal, attribution: { run, operation: null }, request: null };
     if (owner !== undefined && owner !== scope.principal) {
       this.refuse(meta, 403, "run_not_owned");
       throw new ApiError(403, "run_not_owned", `run ${run} belongs to another principal`);
+    }
+    if (this.runOwner && owner === undefined) {
+      this.refuse(meta, 404, "run_not_allocated");
+      throw new ApiError(404, "run_not_allocated", `run ${run} was never allocated by this fixture`);
     }
     let removed: ObjectRef[] = [];
     const { tx } = this.commit(meta, () => {
@@ -559,15 +579,22 @@ export class Store {
     return clone(ticket);
   }
 
+  /** The principal of the write in progress (the commit section's); "" outside a section. */
+  private principal(): string {
+    return this.section?.meta.principal ?? "";
+  }
+
   /**
    * Checks an If-Match precondition. Returns a replay result when the
    * precondition is stale only because this very write was already applied
-   * from that version and nothing has changed since.
+   * from that version, by the same principal, and nothing has changed since.
+   * Another principal sending the same write gets the normal 412 (seams v2.1).
    */
   private precondition(ticket: Ticket, ifMatch: number | "*" | undefined, fingerprint: string): WriteResult | undefined {
     if (ifMatch === undefined || ifMatch === "*" || ifMatch === ticket.version) return undefined;
     const last = this.applied.get(ticket.id)?.at(-1);
-    if (last && last.fromVersion === ifMatch && last.toVersion === ticket.version && last.fingerprint === fingerprint) {
+    if (last && last.fromVersion === ifMatch && last.toVersion === ticket.version && last.fingerprint === fingerprint
+      && last.principal === this.principal()) {
       return { ticket: clone(ticket), changed: [], replayed: true, originalSeq: last.seq };
     }
     throw new ApiError(412, "precondition_failed",
@@ -575,10 +602,10 @@ export class Store {
   }
 
   private record(ticket: Ticket, fromVersion: number, fingerprint: string): void {
-    const entry: AppliedWrite = { ticket: ticket.id, fromVersion, toVersion: ticket.version, fingerprint, seq: this.section?.seq ?? 0 };
+    const entry: AppliedWrite = { ticket: ticket.id, principal: this.principal(), fromVersion, toVersion: ticket.version, fingerprint, seq: this.section?.seq ?? 0 };
     const list = this.applied.get(ticket.id) ?? [];
     list.push(entry);
-    this.applied.set(ticket.id, list.slice(-20));
+    this.applied.set(ticket.id, list.slice(-Store.APPLIED_CAP));
     this.section?.applied.push({ ...entry });
   }
 

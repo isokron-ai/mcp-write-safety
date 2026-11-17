@@ -11,7 +11,7 @@
 import { statSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { TokenError } from "../tokens.js";
 
 export type TokenKind = "evidence" | "control";
@@ -56,11 +56,16 @@ export function ensureTokenDir(dir: string, platform: string = process.platform)
 function tokenFromDir(kind: TokenKind, dir: string, platform: string): string {
   ensureTokenDir(dir, platform);
   const file = join(dir, `${kind}.token`);
+  // Written whole into a temporary file, then link()ed into place (seams v2.1): link fails with EEXIST when the file is
+  // there, so two starts never both create it, and the token file never exists half-written for a concurrent start.
+  const tmp = join(dir, `.${kind}.token.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
   try {
-    // "wx": created only if absent, so two processes never both write one.
-    writeFileSync(file, `${randomBytes(24).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
+    writeFileSync(tmp, `${randomBytes(24).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
+    linkSync(tmp, file);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw new TokenError(`${file} could not be written: ${(e as Error).message}. Not starting.`);
+  } finally {
+    try { unlinkSync(tmp); } catch { /* not created */ }
   }
   const st = lstatSync(file);
   if (st.isSymbolicLink()) throw new TokenError(`${file} must not be a symbolic link. Not starting.`);
@@ -68,7 +73,8 @@ function tokenFromDir(kind: TokenKind, dir: string, platform: string): string {
   if (!st.isFile() || (platform !== "win32" && (st.mode & 0o077) !== 0)) throw new TokenError(`${file} must be a file only its owner can read (chmod 600). Not starting.`);
   if (uid !== undefined && st.uid !== uid) throw new TokenError(`${file} must be owned by the user running tiny-tracker. Not starting.`);
   const token = readFileSync(file, "utf8").trim();
-  // Another process created the file a moment ago and has not written it yet (two starts at once on one folder).
+  // An empty file cannot come from a start of this version (the file is linked into place whole); one left by an older
+  // version, or by hand, is refused rather than used.
   if (token === "") throw new TokenError(`${file} is empty: another tiny-tracker is starting with the same --token-dir; start one at a time, or remove the empty file. Not starting.`);
   return token;
 }

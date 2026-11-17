@@ -42,8 +42,13 @@ export interface FixtureLayer {
   serverExtras: ServerExtras;
   /** Starts the control listener (only with --fixture-control). */
   startControl(port: number): Promise<RunningControl>;
-  /** For startBackend: which principal a run belongs to (the backend refuses another principal's run tag). */
+  /**
+   * For startBackend: which principal a run belongs to (the backend refuses another principal's run tag, and a tag
+   * never allocated). Give it to the backend only when the control listener allocates runs (--fixture-control).
+   */
   runOwner(run: string): string | undefined;
+  /** The run registry (the 0.3.0 journal sets `onAllocate` and calls `restore` at load). */
+  runs: RunRegistry;
 }
 
 /** Loads tokens and builds the descriptor. Throws TokenError (start nothing) when a token is missing, unsafe or shared. */
@@ -69,5 +74,6 @@ export function createFixtureLayer(options: FixtureOptions): FixtureLayer {
       return startControl({ token: controlToken, port, descriptor, runs, principals: principalIds });
     },
     runOwner: (run) => runs.owner(run),
+    runs,
   };
 }

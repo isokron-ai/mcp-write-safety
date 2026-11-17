@@ -261,9 +261,10 @@ describe("the control listener (rule 2, X4)", () => {
       assert.equal((await post(`${c}/_fixture/runs`, CONTROL, {}, { "content-type": "text/plain" })).status, 415);
       const run1 = await post(`${c}/_fixture/runs`, CONTROL, { label: "first" });
       assert.equal(run1.status, 201);
-      assert.match(run1.body.run_id, /^run-[0-9a-f]{8}-1$/);
+      assert.match(run1.body.run_id, /^run-[0-9a-f]{8}-[0-9a-f]{12}$/);
       const run2 = await post(`${c}/_fixture/runs`, CONTROL, {});
-      assert.match(run2.body.run_id, /-2$/);
+      assert.match(run2.body.run_id, /^run-[0-9a-f]{8}-[0-9a-f]{12}$/);
+      assert.notEqual(run2.body.run_id, run1.body.run_id, "random suffixes, not a counter");
       assert.deepEqual((await get(`${c}/_fixture/runs`, CONTROL)).body.runs.map((x: any) => x.label), ["first", null]);
       assert.equal((await post(`${c}/_fixture/runs/run-nope-9/reset`, CONTROL, {})).status, 404);
       const reset = await post(`${c}/_fixture/runs/${run1.body.run_id}/reset`, CONTROL, {});

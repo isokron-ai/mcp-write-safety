@@ -14,12 +14,15 @@ import { META_KEYS } from "../src/fixture-properties.js";
 import { connectClient } from "./support/stack.js";
 import type { Clock } from "../src/clock.js";
 import type { CommitSink, CommittedTransaction, RefusedTransaction, ReplayedTransaction } from "../src/backend/commit.js";
-import { memoryKeyRecords, type InflightKeyRecordSeam, type KeyRecordSeam, type StoredReply } from "../src/backend/seams.js";
+import { memoryKeyRecords, type AbortReason, type InflightKeyRecordSeam, type KeyRecordSeam, type KeyTombstone, type StoredReply } from "../src/backend/seams.js";
 import { storedReplyOf, type AppliedWrite, type ObjectOwner, type SeedState } from "../src/backend/commit.js";
 import { Store, type Project, type Ticket } from "../src/backend/store.js";
 import { ApiError } from "../src/backend/store.js";
 import { BACKEND_DEFECTS, type BackendDefect } from "../src/backend/defects/index.js";
-import { fingerprintHash } from "../src/digest.js";
+import { digestOf, DOMAINS, fingerprintHash } from "../src/digest.js";
+import { executionId } from "../src/records.js";
+import { RunRegistry } from "../src/fixture/control.js";
+import { readdirSync } from "node:fs";
 import { createFixtureLayer } from "../src/fixture/index.js";
 import { checkArgv, TokenError } from "../src/tokens.js";
 import { loadToken } from "../src/fixture/tokens.js";
@@ -63,8 +66,8 @@ describe("the commit point (rule 9)", () => {
       const first = rec.events[0].tx as CommittedTransaction;
       assert.equal(first.principal, "p-default");
       assert.deepEqual(first.attribution, { run: "run-abc-1", operation: "op-1" });
-      assert.equal(first.request.key, "iface-key-0001");
-      assert.match(first.request.fingerprint!, /^POST \/tickets \{/);
+      assert.equal(first.request!.key, "iface-key-0001");
+      assert.match(first.request!.fingerprint!, /^POST \/tickets \{/);
       assert.deepEqual(first.objects, [{ type: "ticket", id: "T-1" }]);
       assert.equal((first.body as any).ticket.created_at, created.body.ticket.created_at, "post-state, as committed");
       assert.equal(first.clockOffsetMs, 0);
@@ -207,9 +210,9 @@ describe("principals and key-record scoping (D5)", () => {
     k.put({ principal: "p-a" }, "key-00000002", reply("run-2"));
     k.put({ principal: "p-b" }, "key-00000001", reply("run-1"));
     assert.equal(k.dropRun({ principal: "p-a" }, "run-1"), 1, "run tags are scoped per principal");
-    assert.ok(k.get({ principal: "p-b" }, "key-00000001"));
+    assert.equal(k.get({ principal: "p-b" }, "key-00000001")?.state, "completed");
     assert.equal(k.get({ principal: "p-a" }, "key-00000001"), undefined);
-    assert.ok(k.get({ principal: "p-a" }, "key-00000002"));
+    assert.deepEqual(k.get({ principal: "p-a" }, "key-00000002"), { state: "completed", reply: reply("run-2") });
   });
 });
 
@@ -299,7 +302,8 @@ function replay(seed: SeedState, txs: CommittedTransaction[]) {
     for (const a of tx.post.applied) applied.set(a.ticket, [...(applied.get(a.ticket) ?? []), { ...a }].slice(-20));
     counters = { ...tx.post.counters };
     commitSeq = tx.seq;
-    if (tx.kind === "write" && tx.request.key !== null) keys.set(`${tx.principal}\u0000${tx.request.key}`, storedReplyOf(tx));
+    // Key records only for a write with a backend fingerprint (a keyed POST); a run reset has no request at all.
+    if (tx.kind === "write" && tx.request?.fingerprint != null) keys.set(`${tx.principal}\u0000${tx.request.key}`, storedReplyOf(tx));
     if (tx.kind === "run-reset") for (const [k, v] of keys) if (v.run === tx.reset!.run && k.startsWith(`${tx.reset!.principal}\u0000`)) keys.delete(k);
   }
   return { projects, tickets, applied, owners, seq: counters, commitSeq, keys };
@@ -322,17 +326,18 @@ describe("seams v2: the CommittedTransaction is complete post-state", () => {
       assert.equal(created.body.ticket.created_at, tx.committedAt);
       assert.equal(created.body.ticket.updated_at, tx.committedAt);
       assert.equal(created.body.ticket.comments[0].created_at, tx.committedAt);
-      assert.equal(backend.store.keyRecords!.get({ principal: "p-default" }, "clock-key-0001")!.committedAt, tx.committedAt, "the key record's time is the commit's");
-      assert.deepEqual(tx.request.body, body, "the request body travels with the transaction");
-      assert.equal(tx.request.fingerprintHash, fingerprintHash("p-default", "POST", "/tickets", body), "fingerprint_hash computed once, at the commit point");
+      const kr = backend.store.keyRecords!.get({ principal: "p-default" }, "clock-key-0001");
+      assert.equal(kr?.state === "completed" && kr.reply.committedAt, tx.committedAt, "the key record's time is the commit's");
+      assert.deepEqual(tx.request!.body, body, "the request body travels with the transaction");
+      assert.equal(tx.request!.fingerprintHash, fingerprintHash("p-default", "POST", "/tickets", body), "fingerprint_hash computed once, at the commit point");
       assert.equal(tx.headers.etag, '"1"', "the reply headers, ETag included");
       assert.deepEqual(tx.post.counters, { ticket: 1, label: 2, comment: 1 });
       assert.deepEqual(tx.post.owners, [{ type: "ticket", id: "T-1", principal: "p-default", run: "run-c-1" }]);
       assert.deepEqual(tx.post.upserts.tickets.map((t) => t.labels.map((l) => l.id)), [["L-1", "L-2"]]);
       const unkeyed = await api.send("PATCH", "/tickets/T-1", { title: "b" });
       assert.equal(unkeyed.status, 200);
-      assert.equal(journal.lines[1].request.fingerprint, null, "no backend comparison string without a key");
-      assert.equal(journal.lines[1].request.fingerprintHash, fingerprintHash("p-default", "PATCH", "/tickets/T-1", { title: "b" }), "fingerprint_hash for a write without a key");
+      assert.equal(journal.lines[1].request!.fingerprint, null, "no backend comparison string without a key");
+      assert.equal(journal.lines[1].request!.fingerprintHash, fingerprintHash("p-default", "PATCH", "/tickets/T-1", { title: "b" }), "fingerprint_hash for a write without a key");
       assert.equal(unkeyed.body.ticket.updated_at, journal.lines[1].committedAt);
     } finally {
       await backend.close();
@@ -353,34 +358,51 @@ describe("seams v2: the CommittedTransaction is complete post-state", () => {
       assert.deepEqual(tx.post.deletes.tickets, [b.id]);
       assert.deepEqual(tx.post.counters, { ticket: 2, label: 2, comment: 0 });
       assert.equal(tx.post.applied.length, 1);
-      assert.deepEqual({ ...tx.post.applied[0], fingerprint: undefined }, { ticket: a.id, fromVersion: 1, toVersion: 2, fingerprint: undefined, seq: tx.seq });
+      assert.deepEqual({ ...tx.post.applied[0], fingerprint: undefined }, { ticket: a.id, principal: "p-default", fromVersion: 1, toVersion: 2, fingerprint: undefined, seq: tx.seq });
     } finally {
       await backend.close();
     }
   });
 
-  it("replaying the journalled transactions onto the seed rebuilds every state field and every key record", async () => {
+  it("replaying the journalled transactions onto the seed rebuilds every state field, the whole key-record map and every execution record", async () => {
     const clock = steppingClock();
     const journal = new JournalRecorder();
-    const runs = new Map([["run-a-1", "p-default"]]);
-    const backend = await startBackend({ token: TOKEN, port: 0, clock, sinks: [journal], runOwner: (r) => runs.get(r) });
+    const runs = new Map([["run-a-1", "p-default"], ["run-b-1", "p-default"]]);
+    const live = new Map<string, StoredReply>();
+    const fake: BackendDefect = {
+      name: "fake-visible-keys", summary: "", context: "MWS-RETRY-2", seams: ["keyRecord"], requires: [],
+      apply(ops) { ops.keyRecord = visibleKeyRecords(live); },
+    };
+    BACKEND_DEFECTS.push(fake);
+    const backend = await startBackend({ token: TOKEN, port: 0, clock, sinks: [journal], runOwner: (r) => runs.get(r), defects: ["fake-visible-keys"] });
     try {
       const api = new Rest(backend.url, TOKEN);
+      const served: unknown[] = [];
+      const send = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+        const r = await api.send(method, path, body, headers);
+        if (r.status < 300 && r.headers.get("idempotent-replayed") === null) served.push(r.status === 204 ? undefined : r.body);
+        return r;
+      };
       const run = { "tiny-tracker-run": "run-a-1" };
-      await api.send("POST", "/projects", { key: "p1", name: "P1" }, run);
-      const t1 = (await api.send("POST", "/tickets", { project: "p1", title: "one", labels: ["a"] }, { "idempotency-key": "replay-key-0001", ...run })).body.ticket;
-      const t2 = (await api.send("POST", "/tickets", { project: "inbox", title: "two", comment: "c" }, { "idempotency-key": "replay-key-0002" })).body.ticket;
-      await api.send("PATCH", `/tickets/${t2.id}`, { details: { severity: "high" } }, { "if-match": '"1"' });
-      await api.send("PUT", `/tickets/${t2.id}`, { title: "two!", status: "open", assignee: null, priority: 1 }, { "if-match": '"2"' });
-      await api.send("POST", `/tickets/${t2.id}/labels`, { name: "z" });
-      await api.send("POST", `/tickets/${t2.id}/comments`, { body: "again" });
-      await api.send("PUT", "/projects/inbox", { name: "Inbox" });
-      await api.send("POST", "/batch", { ops: [{ op: "patch", id: t1.id, set: { labels: ["a", "b"] } }] });
-      const t3 = (await api.send("POST", "/tickets", { project: "inbox", title: "three" })).body.ticket;
-      await api.send("DELETE", `/tickets/${t3.id}`);
+      await send("POST", "/projects", { key: "p1", name: "P1" }, run);
+      const t1 = (await send("POST", "/tickets", { project: "p1", title: "one", labels: ["a"] }, { "idempotency-key": "replay-key-0001", ...run })).body.ticket;
+      const t2 = (await send("POST", "/tickets", { project: "inbox", title: "two", comment: "c" }, { "idempotency-key": "replay-key-0002", "tiny-tracker-run": "run-b-1" })).body.ticket;
+      await send("POST", "/tickets", { project: "inbox", title: "four" }, { "idempotency-key": "replay-key-0003" });
+      // A PATCH that carries an Idempotency-Key: the key is ignored, so no execution record names it.
+      await send("PATCH", `/tickets/${t2.id}`, { details: { severity: "high" } }, { "if-match": '"1"', "idempotency-key": "patch-key-0001" });
+      await send("PUT", `/tickets/${t2.id}`, { title: "two!", status: "open", assignee: null, priority: 1 }, { "if-match": '"2"' });
+      await send("POST", `/tickets/${t2.id}/labels`, { name: "z" });
+      await send("POST", `/tickets/${t2.id}/comments`, { body: "again" });
+      await send("PUT", "/projects/inbox", { name: "Inbox" });
+      await send("POST", "/batch", { ops: [{ op: "patch", id: t1.id, set: { labels: ["a", "b"] } }] });
+      const t3 = (await send("POST", "/tickets", { project: "inbox", title: "three" })).body.ticket;
+      await send("DELETE", `/tickets/${t3.id}`);
       const reset = backend.dropRun({ principal: "p-default" }, "run-a-1");
       assert.deepEqual(reset.tx.reset!.objects, [{ type: "ticket", id: t1.id }, { type: "project", id: "p1" }]);
       assert.equal(reset.keys, 1);
+      assert.equal(reset.tx.request, null, "a run reset carries no request");
+      const patchTx = journal.lines.find((t) => t.request?.method === "PATCH")!;
+      assert.equal(patchTx.request!.key, null, "a key header on a PATCH is not recorded");
       const readsBefore = clock.reads;
       const rebuilt = replay(backend.store.seed, journal.lines);
       assert.equal(clock.reads, readsBefore, "replay reads no clock");
@@ -391,15 +413,45 @@ describe("seams v2: the CommittedTransaction is complete post-state", () => {
       assert.deepEqual(asObject([...rebuilt.owners]), asObject(state.owners));
       assert.deepEqual(rebuilt.seq, state.seq);
       assert.equal(rebuilt.commitSeq, state.commitSeq);
-      assert.deepEqual(rebuilt.keys.get("p-default\u0000replay-key-0002"), backend.store.keyRecords!.get({ principal: "p-default" }, "replay-key-0002"));
-      assert.equal(rebuilt.keys.get("p-default\u0000replay-key-0001"), undefined, "the reset dropped the run's key record");
-      assert.equal(backend.store.keyRecords!.get({ principal: "p-default" }, "replay-key-0001"), undefined);
+      assert.deepEqual(asObject([...rebuilt.keys]), asObject([...live]), "the whole key-record map");
+      assert.deepEqual([...rebuilt.keys.keys()].sort(), ["p-default\u0000replay-key-0002", "p-default\u0000replay-key-0003"], "the reset dropped run-a-1's record");
+      // Execution records from the journal: every key they name has a key record (or was dropped by the reset with its
+      // run), and every result digest is the digest of the body the client was served.
+      const writes = journal.lines.filter((t) => t.kind === "write");
+      const records = writes.map((t) => ({
+        id: executionId(t.seq), principal: t.principal, run: t.attribution.run, seq: t.seq,
+        request: { method: t.request!.method, path: t.request!.path, key: t.request!.key, fingerprint_hash: t.request!.fingerprintHash },
+        objects: t.objects, result: digestOf(DOMAINS.executionResult, t.body ?? null), committed_at: t.committedAt,
+      }));
+      assert.deepEqual(records.map((r) => r.id), writes.map((t) => `X-${t.seq}`));
+      for (const r of records) {
+        if (r.request.key === null) continue;
+        const k = `${r.principal}\u0000${r.request.key}`;
+        assert.ok(rebuilt.keys.has(k) || r.run === "run-a-1", `${r.id} names key ${r.request.key}, which has a key record`);
+        if (rebuilt.keys.has(k)) assert.equal(rebuilt.keys.get(k)!.seq, r.seq);
+      }
+      assert.deepEqual(records.map((r) => r.result.digest), served.map((b) => digestOf(DOMAINS.executionResult, b ?? null).digest), "digests of the bodies as served");
       assert.deepEqual(journal.lines.map((t) => t.seq), journal.lines.map((_, i) => i + 1), "every commit, the reset included, takes the next seq");
     } finally {
+      BACKEND_DEFECTS.pop();
       await backend.close();
     }
   });
 });
+
+/** Memory key records whose map the test can see (keyed `principal\0key`, like the reference replay). */
+function visibleKeyRecords(map: Map<string, StoredReply>): KeyRecordSeam {
+  const id = (s: { principal: string }, k: string) => `${s.principal}\u0000${k}`;
+  return {
+    get: (s, k) => { const r = map.get(id(s, k)); return r && { state: "completed", reply: r }; },
+    put: (s, k, r) => void map.set(id(s, k), r),
+    dropRun(s, run) {
+      let n = 0;
+      for (const [k, v] of map) if (v.run === run && k.startsWith(`${s.principal}\u0000`)) { map.delete(k); n++; }
+      return n;
+    },
+  };
+}
 
 describe("seams v2: a re-sent conditional write is a replay, not a commit", () => {
   it("an If-Match PATCH repeated after it applied is told to sinks as a replay of its commit; no new seq", async () => {
@@ -476,16 +528,48 @@ describe("seams v2: journal failure, the snapshot, sink order", () => {
   });
 });
 
-/** A key-record seam with the 0.3.0 pending state, logging the calls the keyed path makes. */
-function loggingInflight(log: string[]): InflightKeyRecordSeam {
-  const inner: KeyRecordSeam = memoryKeyRecords();
+/** A key-record seam with the 0.3.0 pending and expired states, logging the calls the keyed path makes. */
+function loggingInflight(log: string[], opts: { abortThrows?: boolean; putThrows?: boolean } = {}): InflightKeyRecordSeam & { expired: Map<string, KeyTombstone> } {
+  const done = new Map<string, StoredReply>();
+  const pending = new Map<string, { since: string; run: string | null }>();
+  const fences = new Map<string, string>();
+  const expired = new Map<string, KeyTombstone>();
+  const id = (s: { principal: string }, k: string) => `${s.principal}\u0000${k}`;
   return {
-    get: (s, k) => inner.get(s, k),
-    put: (s, k, r) => { log.push(`put ${k}`); inner.put(s, k, r); },
-    dropRun: (s, r) => inner.dropRun(s, r),
-    begin: (_s, k) => void log.push(`begin ${k}`),
-    abort: (_s, k) => void log.push(`abort ${k}`),
-    tombstone: () => undefined,
+    expired,
+    get(s, k) {
+      const i = id(s, k);
+      const p = pending.get(i);
+      if (p) return { state: "pending", since: p.since };
+      const f = fences.get(i);
+      if (f) return { state: "fenced", run: f };
+      const t = expired.get(i);
+      if (t) return { state: "expired", tombstone: t };
+      const r = done.get(i);
+      return r && { state: "completed", reply: r };
+    },
+    put(s, k, r) {
+      log.push(`put ${k}`);
+      if (opts.putThrows) throw new Error("key store full");
+      pending.delete(id(s, k));
+      done.set(id(s, k), r);
+    },
+    dropRun(s, run) {
+      let n = 0;
+      for (const [i, r] of done) if (r.run === run && i.startsWith(`${s.principal}\u0000`)) { done.delete(i); n++; }
+      for (const [i, p] of pending) if (p.run === run && i.startsWith(`${s.principal}\u0000`)) { pending.delete(i); fences.set(i, run); log.push(`fence ${i.split("\u0000")[1]}`); }
+      return n;
+    },
+    begin(s, k, _f, run) {
+      log.push(`begin ${k}`);
+      pending.set(id(s, k), { since: "2030-01-01T00:00:00.000Z", run });
+    },
+    abort(s, k, reason: AbortReason) {
+      log.push(`abort ${k} ${reason}`);
+      pending.delete(id(s, k));
+      if (opts.abortThrows) throw new Error("abort failed");
+    },
+    tombstone: (s, k) => expired.get(id(s, k)),
   };
 }
 
@@ -499,9 +583,13 @@ describe("seams v2: the keyed path calls begin and abort (stream D's call sites)
     BACKEND_DEFECTS.push(fake);
     const journal = new JournalRecorder();
     let refuseNext = false;
+    let crashNext = false;
     const backend = await startBackend({
       token: TOKEN, port: 0, sinks: [journal], defects: ["fake-inflight"],
-      faults: { async beforeCommit() { if (refuseNext) { refuseNext = false; throw new ApiError(500, "fault", "armed error"); } } },
+      faults: { async beforeCommit() {
+        if (refuseNext) { refuseNext = false; throw new ApiError(500, "fault", "armed error"); }
+        if (crashNext) { crashNext = false; throw new Error("hook broke"); }
+      } },
     });
     try {
       const api = new Rest(backend.url, TOKEN);
@@ -511,11 +599,14 @@ describe("seams v2: the keyed path calls begin and abort (stream D's call sites)
       assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "inflight-k-0003" })).status, 500);
       journal.failNext = true;
       assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "inflight-k-0004" })).status, 503);
+      crashNext = true;
+      assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "inflight-k-0005" })).status, 500);
       assert.deepEqual(log, [
         "begin inflight-k-0001", "put inflight-k-0001",
-        "begin inflight-k-0002", "abort inflight-k-0002",
-        "begin inflight-k-0003", "abort inflight-k-0003",
-        "begin inflight-k-0004", "abort inflight-k-0004",
+        "begin inflight-k-0002", "abort inflight-k-0002 refused",
+        "begin inflight-k-0003", "abort inflight-k-0003 fault",
+        "begin inflight-k-0004", "abort inflight-k-0004 journal_unavailable",
+        "begin inflight-k-0005", "abort inflight-k-0005 fault",
       ]);
     } finally {
       BACKEND_DEFECTS.pop();
@@ -603,8 +694,13 @@ describe("seams v2: run ownership and configured principals", () => {
       assert.equal((rec.events.at(-1)!.tx as RefusedTransaction).code, "run_not_owned");
       const alice = new Rest(backend.url, "alice-token-0000000000");
       assert.equal((await alice.send("POST", "/tickets", { project: "inbox", title: "x" }, { "tiny-tracker-run": "run-a-1" })).status, 201);
-      assert.equal((await bob.send("POST", "/tickets", { project: "inbox", title: "y" }, { "tiny-tracker-run": "run-unknown-1" })).status, 201, "a run this process did not allocate is a tag only");
+      const unknown = await bob.send("POST", "/tickets", { project: "inbox", title: "y" }, { "tiny-tracker-run": "run-unknown-1" });
+      assert.equal(unknown.status, 403, "with a run registry wired, a tag it never allocated is refused");
+      assert.equal(unknown.body.error, "run_not_allocated");
+      assert.equal((rec.events.at(-1)!.tx as RefusedTransaction).code, "run_not_allocated");
+      assert.throws(() => backend.dropRun({ principal: "p-bob" }, "run-unknown-1"), /never allocated/);
       assert.throws(() => backend.dropRun({ principal: "p-bob" }, "run-a-1"), /belongs to another principal/);
+      assert.equal((rec.events.at(-1)!.tx as RefusedTransaction).request, null, "a run reset's refusal carries request: null");
       assert.equal(backend.dropRun({ principal: "p-alice" }, "run-a-1").objects, 1);
     } finally {
       await backend.close();
@@ -676,5 +772,201 @@ describe("seams v2: compatibility rules see the effective feature set", () => {
       def.splice(0, def.length, ...saved);
     }
     assert.deepEqual(checkCompat({ ...base, profile: "default", features: [] }), []);
+  });
+});
+
+// ---- seams v2.1 ----
+
+/** Starts a backend whose key-record seam is a loggingInflight one (installed as a test defect). */
+async function inflightBackend(log: string[], opts: Parameters<typeof loggingInflight>[1] & { sinks?: CommitSink[]; faults?: Parameters<typeof startBackend>[0]["faults"]; runOwner?: (r: string) => string | undefined; principals?: Parameters<typeof startBackend>[0]["principals"] } = {}) {
+  const seam = loggingInflight(log, opts);
+  const fake: BackendDefect = {
+    name: "fake-inflight-21", summary: "", context: "MWS-RETRY-2", seams: ["keyRecord"], requires: [],
+    apply(ops) { ops.keyRecord = seam; },
+  };
+  BACKEND_DEFECTS.push(fake);
+  const backend = await startBackend({ token: TOKEN, port: 0, sinks: opts.sinks, defects: ["fake-inflight-21"], faults: opts.faults, runOwner: opts.runOwner });
+  return { seam, backend, close: async () => { BACKEND_DEFECTS.pop(); await backend.close(); } };
+}
+
+describe("seams v2.1: the keyed path answers every key-record state, in the frozen order, inside the try", () => {
+  it("pending: a same-key call while the first is held answers 409 in_progress, told to the ledger as a refusal", async () => {
+    const log: string[] = [];
+    const rec = new Recorder();
+    let hold = true;
+    const b = await inflightBackend(log, { sinks: [rec], faults: { async beforeCommit() { if (hold) { hold = false; await new Promise((r) => setTimeout(r, 150)); } } } });
+    try {
+      const api = new Rest(b.backend.url, TOKEN);
+      const h = { "idempotency-key": "pending-key-0001" };
+      const [x, y] = await Promise.all([api.send("POST", "/tickets", { project: "inbox", title: "a" }, h),
+        new Promise((r) => setTimeout(r, 30)).then(() => api.send("POST", "/tickets", { project: "inbox", title: "a" }, h))]);
+      assert.equal(x.status, 201);
+      assert.equal(y.status, 409);
+      assert.equal(y.body.error, "in_progress");
+      assert.equal(y.body.since, "2030-01-01T00:00:00.000Z");
+      assert.deepEqual(rec.events.map((e) => [e.kind, (e.tx as RefusedTransaction).code]), [["refusal", "in_progress"], ["commit", undefined]]);
+      assert.deepEqual(log, ["begin pending-key-0001", "put pending-key-0001"], "the second call never began, so nothing is aborted for it");
+      const again = await api.send("POST", "/tickets", { project: "inbox", title: "a" }, h);
+      assert.equal(again.headers.get("idempotent-replayed"), "true", "completed: replayed");
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("expired: the same request gets the B10 answer (410 key_expired, a replay of the tombstone's commit); another request is refused 422", async () => {
+    const log: string[] = [];
+    const rec = new Recorder();
+    const b = await inflightBackend(log, { sinks: [rec] });
+    try {
+      const api = new Rest(b.backend.url, TOKEN);
+      const body = { project: "inbox", title: "old" };
+      b.seam.expired.set("p-default\u0000expired-key-0001", {
+        fingerprintHash: fingerprintHash("p-default", "POST", "/tickets", body), executionId: "X-7", resultDigest: "ab".repeat(32), committedAt: "2030-01-01T00:00:00.000Z",
+      });
+      const same = await api.send("POST", "/tickets", body, { "idempotency-key": "expired-key-0001" });
+      assert.equal(same.status, 410);
+      assert.equal(same.headers.get("idempotent-replayed"), "true");
+      assert.deepEqual({ error: same.body.error, execution_id: same.body.execution_id, result_digest: same.body.result_digest, committed_at: same.body.committed_at },
+        { error: "key_expired", execution_id: "X-7", result_digest: "ab".repeat(32), committed_at: "2030-01-01T00:00:00.000Z" });
+      const other = await api.send("POST", "/tickets", { project: "inbox", title: "new" }, { "idempotency-key": "expired-key-0001" });
+      assert.equal(other.status, 422);
+      assert.equal(other.body.error, "idempotency_key_reused");
+      assert.deepEqual(rec.events.map((e) => e.kind), ["replay", "refusal"]);
+      assert.equal((rec.events[0].tx as ReplayedTransaction).originalSeq, 7);
+      assert.equal((rec.events[0].tx as ReplayedTransaction).status, 410);
+      assert.deepEqual(log, [], "nothing begun, nothing applied");
+      assert.equal((await api.export()).tickets.length, 0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("the run reset fences a pending record: the write held at before-commit is refused 409 key_fenced and applies nothing; the key stays fenced", async () => {
+    const log: string[] = [];
+    const rec = new Recorder();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let entered!: () => void;
+    const inHook = new Promise<void>((r) => { entered = r; });
+    const b = await inflightBackend(log, { sinks: [rec], runOwner: (r) => (r === "run-f-1" ? "p-default" : undefined), faults: { async beforeCommit() { entered(); await held; } } });
+    try {
+      const api = new Rest(b.backend.url, TOKEN);
+      const pendingCall = api.send("POST", "/tickets", { project: "inbox", title: "late" }, { "idempotency-key": "fence-key-0001", "tiny-tracker-run": "run-f-1" });
+      await inHook;
+      const reset = b.backend.dropRun({ principal: "p-default" }, "run-f-1");
+      assert.equal(reset.keys, 0, "a fenced pending record is not counted as dropped");
+      release();
+      const r = await pendingCall;
+      assert.equal(r.status, 409);
+      assert.equal(r.body.error, "key_fenced");
+      assert.equal((await api.export()).tickets.length, 0, "the held write never lands after the reset");
+      const later = await api.send("POST", "/tickets", { project: "inbox", title: "late" }, { "idempotency-key": "fence-key-0001" });
+      assert.equal(later.status, 409);
+      assert.equal(later.body.error, "key_fenced", "fenced: nothing begins");
+      assert.deepEqual(log, ["begin fence-key-0001", "fence fence-key-0001"], "the fence ended the record: no abort, no second begin");
+      assert.deepEqual(rec.events.map((e) => [e.kind, (e.tx as RefusedTransaction).code]), [["commit", undefined], ["refusal", "key_fenced"], ["refusal", "key_fenced"]]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("abort never hides the answer: a seam whose abort throws still gives the 503", async () => {
+    const log: string[] = [];
+    const journal = new JournalRecorder();
+    const b = await inflightBackend(log, { sinks: [journal], abortThrows: true });
+    const errors: string[] = [];
+    const saved = console.error;
+    console.error = (m: string) => void errors.push(m);
+    try {
+      journal.failNext = true;
+      const r = await new Rest(b.backend.url, TOKEN).send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "abort-key-0001" });
+      assert.equal(r.status, 503);
+      assert.equal(r.body.error, "journal_unavailable");
+      assert.deepEqual(log, ["begin abort-key-0001", "abort abort-key-0001 journal_unavailable"]);
+      assert.match(errors.join("\n"), /abort of a pending key record failed \(journal_unavailable\): abort failed/);
+    } finally {
+      console.error = saved;
+      await b.close();
+    }
+  });
+
+  it("an exception completing the key record (afterJournal) still tells the ledger, then stops the store; nothing is aborted", async () => {
+    const log: string[] = [];
+    const rec = new Recorder();
+    const b = await inflightBackend(log, { sinks: [rec], putThrows: true });
+    try {
+      const api = new Rest(b.backend.url, TOKEN);
+      const r = await api.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "after-key-0001" });
+      assert.equal(r.status, 503);
+      assert.match(r.body.message, /commit sink afterJournal failed: key store full/);
+      assert.deepEqual(rec.events.map((e) => [e.kind, (e.tx as CommittedTransaction).seq]), [["commit", 1]], "the ledger has the commit");
+      assert.deepEqual(log, ["begin after-key-0001", "put after-key-0001"], "a committed write is never aborted");
+      assert.equal((await api.send("GET", "/tickets")).status, 503, "fail-stop");
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("seams v2.1: a re-sent conditional write is a replay only for the same principal", () => {
+  it("bob re-sending alice's If-Match PATCH (and PUT) gets the normal 412, not idempotent-replayed (regression)", async () => {
+    const principals = parsePrincipals(JSON.stringify({ principals: [{ id: "p-alice", token: "alice-token-0000000000" }, { id: "p-bob", token: "bob-token-00000000000000" }] }));
+    const rec = new Recorder();
+    const backend = await startBackend({ token: "unused-token-000000000000", port: 0, principals, sinks: [rec] });
+    try {
+      const alice = new Rest(backend.url, "alice-token-0000000000");
+      const bob = new Rest(backend.url, "bob-token-00000000000000");
+      const t = (await alice.send("POST", "/tickets", { project: "inbox", title: "a" })).body.ticket;
+      assert.equal((await alice.send("PATCH", `/tickets/${t.id}`, { title: "b" }, { "if-match": '"1"' })).status, 200);
+      const bobs = await bob.send("PATCH", `/tickets/${t.id}`, { title: "b" }, { "if-match": '"1"' });
+      assert.equal(bobs.status, 412);
+      assert.equal(bobs.body.error, "precondition_failed");
+      assert.equal(bobs.headers.get("idempotent-replayed"), null);
+      const alices = await alice.send("PATCH", `/tickets/${t.id}`, { title: "b" }, { "if-match": '"1"' });
+      assert.equal(alices.headers.get("idempotent-replayed"), "true", "the same principal's re-send is still a replay");
+      const put = { title: "c", status: "open", assignee: null, priority: 3 };
+      assert.equal((await alice.send("PUT", `/tickets/${t.id}`, put, { "if-match": '"2"' })).status, 200);
+      assert.equal((await bob.send("PUT", `/tickets/${t.id}`, put, { "if-match": '"2"' })).status, 412);
+      assert.deepEqual(rec.events.map((e) => [e.kind, e.tx.principal]), [
+        ["commit", "p-alice"], ["commit", "p-alice"], ["refusal", "p-bob"], ["replay", "p-alice"], ["commit", "p-alice"], ["refusal", "p-bob"],
+      ]);
+      assert.deepEqual((rec.events[1].tx as CommittedTransaction).post.applied.map((a) => a.principal), ["p-alice"], "the applied-write entry names its principal");
+    } finally {
+      await backend.close();
+    }
+  });
+
+  it("the applied-write log keeps the last 20 entries per ticket", () => {
+    assert.equal(Store.APPLIED_CAP, 20);
+  });
+});
+
+describe("seams v2.1: run ids and the token folder", () => {
+  it("run ids carry a random suffix; an allocation the journal cannot record registers nothing; restore puts a run back", () => {
+    const reg = new RunRegistry("0011223344556677");
+    const a = reg.allocate(null);
+    const b = reg.allocate(null);
+    assert.match(a.run_id, /^run-00112233-[0-9a-f]{12}$/);
+    assert.notEqual(a.run_id, b.run_id);
+    const seen: string[] = [];
+    reg.onAllocate = (r) => { seen.push(r.run_id); throw new Error("disk full"); };
+    assert.throws(() => reg.allocate(null), /could not be recorded/);
+    assert.equal(reg.has(seen[0]), false);
+    reg.onAllocate = undefined;
+    reg.restore({ run_id: "run-00112233-aaaaaaaaaaaa", principal: "p-alice", created_at: "2030-01-01T00:00:00.000Z", label: null });
+    assert.equal(reg.owner("run-00112233-aaaaaaaaaaaa"), "p-alice");
+  });
+
+  it("a generated token file is linked into place whole: no temporary file is left behind", () => {
+    const base = mkdtempSync(join(tmpdir(), "tt-tokenlink-"));
+    try {
+      const dir = join(base, "tokens");
+      const t = loadToken("evidence", {}, "linux", dir);
+      assert.match(t, /^[0-9a-f]{48}$/);
+      assert.deepEqual(readdirSync(dir), ["evidence.token"]);
+      assert.equal(loadToken("evidence", {}, "linux", dir), t);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

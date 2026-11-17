@@ -120,7 +120,7 @@ Both are SHA-256 over RFC 8785 bytes, under the domain tags `dev.writesafety.tin
 A harness allocates a **run id** on the control listener and tags each call with it, plus its own **operation tag**, in the request `_meta`:
 
 ```json
-{"_meta": {"dev.writesafety.tiny-tracker/run": "run-3f9a01c2-1", "dev.writesafety.tiny-tracker/operation": "a1-attempt-1"}}
+{"_meta": {"dev.writesafety.tiny-tracker/run": "run-3f9a01c2-8e41b07d29a6", "dev.writesafety.tiny-tracker/operation": "a1-attempt-1"}}
 ```
 
 The server reads both tags before any tool handler runs and stamps them on every backend request the call makes, as `Tiny-Tracker-Run` and `Tiny-Tracker-Operation`. No handler and no defect sits on that path, so an effect is attributed to its run and operation even in a build that drops or mangles the idempotency key. A tag that is not 1 to 128 of `A-Z a-z 0-9 . _ : -` is dropped, never forwarded. Direct backend callers send the same headers.

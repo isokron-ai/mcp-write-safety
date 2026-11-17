@@ -4,8 +4,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ApiError, canonicalJson, Store, type SectionReply, type TicketFields } from "./store.js";
-import { CommitSinkError, JournalError, storedReplyOf, type CommitSink, type CommittedTransaction, type TxMeta } from "./commit.js";
-import { isInflight, memoryKeyRecords, type KeyRecordSeam, type KeyScope } from "./seams.js";
+import { CommitSinkError, JournalError, storedReplyOf, type CommitSink, type CommittedTransaction, type WriteMeta } from "./commit.js";
+import { isInflight, memoryKeyRecords, type AbortReason, type KeyRecordSeam, type KeyRecordState, type KeyScope } from "./seams.js";
 import { fingerprintHash } from "../digest.js";
 import type { Clock } from "../clock.js";
 import { defaultPrincipals, principalFor, type Principal } from "../principals.js";
@@ -38,14 +38,16 @@ export interface BackendOptions {
   faults?: BackendFaultHooks;
   /**
    * Which principal a run tag belongs to (the fixture layer's run registry), or undefined for a run it did not
-   * allocate. A write tagged with another principal's run is refused 403 run_not_owned.
+   * allocate. When given (the fixture layer's control listener allocates runs), a write tagged with another
+   * principal's run is refused 403 run_not_owned, and a write tagged with a run that was never allocated is refused
+   * 403 run_not_allocated (seams v2.1). Without it a run tag is a tag only.
    */
   runOwner?: (run: string) => string | undefined;
 }
 
 /** What a backend fault hook is told about the write. */
 export interface FaultContext {
-  meta: TxMeta;
+  meta: WriteMeta;
 }
 
 /**
@@ -158,6 +160,16 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   store.keyRecords = ops.keyRecord;
   store.runOwner = options.runOwner;
   const faults = options.faults ?? {};
+  /** abort must not throw (it decides nothing): a seam that throws anyway is logged, and the answer already decided stands. */
+  const safeAbort = (scope: KeyScope, key: string, reason: AbortReason) => {
+    const seam = ops.keyRecord;
+    if (!isInflight(seam)) return;
+    try {
+      seam.abort(scope, key, reason);
+    } catch (e) {
+      console.error(`tiny-tracker: abort of a pending key record failed (${reason}): ${(e as Error)?.message ?? String(e)}`);
+    }
+  };
   const strictInput = features.includes("strict-input");
   type Reply = SectionReply;
 
@@ -270,17 +282,25 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       }
       const keyed = key !== undefined && method === "POST";
       const fingerprint = keyed ? `${method} ${url.pathname} ${canonicalJson(body ?? null)}` : null;
-      const meta: TxMeta = {
+      const meta: WriteMeta = {
         principal,
         attribution: { run: tag(req.headers[HEADERS.run.toLowerCase()]), operation: tag(req.headers[HEADERS.operation.toLowerCase()]) },
-        request: { method, path: url.pathname, key: key ?? null, fingerprint, fingerprintHash: fingerprintHash(principal, method, url.pathname, body ?? null), body: body ?? null },
+        // Only a keyed POST records its key: a key header on another write is ignored (no key record is made for it).
+        request: { method, path: url.pathname, key: keyed ? key : null, fingerprint, fingerprintHash: fingerprintHash(principal, method, url.pathname, body ?? null), body: body ?? null },
       };
-      // A run tag the fixture layer gave another principal is refused: run tags are scoped per principal.
+      // A run tag the fixture layer gave another principal is refused: run tags are scoped per principal. With a run
+      // registry wired, a tag it never allocated is refused too (run ids are random; a guessed or stale tag is not a run).
       const runTag = meta.attribution.run;
-      const owner = runTag === null ? undefined : options.runOwner?.(runTag);
-      if (owner !== undefined && owner !== principal) {
-        store.refuse(meta, 403, "run_not_owned");
-        throw new ApiError(403, "run_not_owned", `run ${runTag} belongs to another principal`);
+      if (runTag !== null && options.runOwner) {
+        const owner = options.runOwner(runTag);
+        if (owner === undefined) {
+          store.refuse(meta, 403, "run_not_allocated");
+          throw new ApiError(403, "run_not_allocated", `run ${runTag} was not allocated by this fixture`);
+        }
+        if (owner !== principal) {
+          store.refuse(meta, 403, "run_not_owned");
+          throw new ApiError(403, "run_not_owned", `run ${runTag} belongs to another principal`);
+        }
       }
       /** Sends a committed reply, after the backend/after-commit fault hook. */
       const sendCommitted = async (reply: Reply, tx: CommittedTransaction | undefined) => {
@@ -293,44 +313,105 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         // A keyed POST is applied once. The same key with a different request is refused. From the last lookup to the
         // commit below nothing awaits, so no second request runs between them (rule 9).
         const scope = { principal };
-        /** Answers from the key record when there is one; true when it answered. */
-        const fromRecord = (): boolean => {
-          const seen = ops.keyRecord.get(scope, key);
-          if (!seen) return false;
-          if (seen.fingerprint !== fingerprint) {
-            store.refuse(meta, 422, "idempotency_key_reused");
-            throw new ApiError(422, "idempotency_key_reused", "this Idempotency-Key was already used for a different request");
+        /**
+         * The frozen branch order (seams v2.1; docs/INTERFACES.md 1.1), every branch told to the ledger:
+         *   completed → replay (same fingerprint) or 422 idempotency_key_reused;
+         *   pending   → 409 in_progress (outcome unknown, rule 4), a refusal in the ledger;
+         *   fenced    → 409 key_fenced (its run was reset while it was pending), a refusal; nothing begins;
+         *   expired   → the B10 answer: same fingerprint_hash → 410 key_expired as a replay of the tombstone's commit
+         *               (idempotent-replayed: true, the execution id, no stored body); else 422 idempotency_key_reused;
+         *   undefined → false: the caller begins the write.
+         * Returns true when it answered.
+         */
+        const answerFromRecord = (found: KeyRecordState | undefined): boolean => {
+          if (found === undefined) return false;
+          if (found.state === "completed") {
+            const seen = found.reply;
+            if (seen.fingerprint !== fingerprint) {
+              store.refuse(meta, 422, "idempotency_key_reused");
+              throw new ApiError(422, "idempotency_key_reused", "this Idempotency-Key was already used for a different request");
+            }
+            store.replay(meta, seen.status, seen.body, seen.seq);
+            send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
+            return true;
           }
-          store.replay(meta, seen.status, seen.body, seen.seq);
-          send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
+          if (found.state === "pending") {
+            store.refuse(meta, 409, "in_progress");
+            throw new ApiError(409, "in_progress", "a request with this Idempotency-Key is still in progress; repeat it later with the same key", { since: found.since });
+          }
+          if (found.state === "fenced") throw fenced(found.run);
+          const t = found.tombstone;
+          if (t.fingerprintHash !== meta.request.fingerprintHash) {
+            store.refuse(meta, 422, "idempotency_key_reused");
+            throw new ApiError(422, "idempotency_key_reused", "this Idempotency-Key was already used for a different request (its record has expired)");
+          }
+          const expired = {
+            error: "key_expired", message: "this key's write was applied; its stored answer has expired: read the object",
+            execution_id: t.executionId, result_digest: t.resultDigest, committed_at: t.committedAt,
+          };
+          store.replay(meta, 410, expired, Number(t.executionId.slice(2)));
+          send(410, expired, { "idempotent-replayed": "true" });
           return true;
         };
-        if (fromRecord()) return;
-        // 0.3.0 (inflight): the pending record goes first; every way out that commits nothing aborts it.
+        const fenced = (run: string) => {
+          store.refuse(meta, 409, "key_fenced");
+          return new ApiError(409, "key_fenced", `run ${run} was reset while a request with this Idempotency-Key was in progress; nothing was applied, and the key cannot be used again`);
+        };
         const inflight = isInflight(ops.keyRecord) ? ops.keyRecord : undefined;
-        inflight?.begin(scope, key, fingerprint!, meta.attribution.run);
-        let completed = false;
+        let began = false;
+        let committed = false;
+        let hookFault = false;
         let result: { reply: Reply; tx?: CommittedTransaction };
         try {
+          if (answerFromRecord(ops.keyRecord.get(scope, key))) return;
+          // 0.3.0 (inflight): the pending record goes first; every way out that commits nothing aborts it.
+          if (inflight) {
+            began = true;
+            try {
+              inflight.begin(scope, key, fingerprint!, meta.attribution.run);
+            } catch (e) {
+              if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
+              else if (e instanceof JournalError) store.refuse(meta, 503, "journal_unavailable");
+              throw e;
+            }
+          }
           if (faults.beforeCommit) {
             try {
               await faults.beforeCommit({ meta });
             } catch (e) {
               if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
+              hookFault = true;
               throw e;
             }
             // The hook awaited: a same-key request may have committed meanwhile (without a pending record).
-            if (!inflight && fromRecord()) return;
+            if (!inflight && answerFromRecord(ops.keyRecord.get(scope, key))) return;
+          }
+          // Re-check our own pending record after the await: the run reset fences its run's pending records, and a write
+          // held while its run was reset never lands after it. The fence already ended the record: no abort for it.
+          if (inflight) {
+            const own = inflight.get(scope, key);
+            if (own?.state === "fenced") {
+              began = false;
+              throw fenced(own.run);
+            }
+            if (own?.state !== "pending") throw new Error(`the pending record of this key ended without a commit (${own?.state ?? "none"})`);
           }
           // Only a result below 300 is kept, and only once the journal has it: a refused first call stores nothing and
           // does not hold the key (decision 0004). A journal failure aborts the pending record too.
           result = store.commit(meta, () => route(method, url, req, body), (tx) => {
+            committed = true;
             ops.keyRecord.put(scope, key, storedReplyOf(tx));
-            completed = true;
           });
-        } finally {
-          if (!completed) inflight?.abort(scope, key);
+        } catch (e) {
+          if (began && !committed) {
+            const reason: AbortReason = hookFault ? "fault" : e instanceof ApiError ? "refused" : e instanceof JournalError ? "journal_unavailable" : "internal_error";
+            safeAbort(scope, key, reason);
+            began = false;
+          }
+          throw e;
         }
+        // Reached without a throw and without a commit: the section's reply was 300 or above (a refusal).
+        if (began && !committed) safeAbort(scope, key, "refused");
         return await sendCommitted(result.reply, result.tx);
       }
       // The awaits a write may have come before its commit section: BackendOps.beforePatch, then the fault hook.

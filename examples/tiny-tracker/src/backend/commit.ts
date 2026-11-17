@@ -37,7 +37,10 @@ export interface TxAttribution {
 export interface TxRequest {
   method: string;
   path: string;
-  /** The Idempotency-Key, when the request carried one. */
+  /**
+   * The Idempotency-Key of a keyed POST, else null. A key header on any other write (PATCH, PUT, DELETE) is ignored and
+   * is not recorded here, so an execution record never names a key that has no key record (seams v2.1).
+   */
   key: string | null;
   /**
    * The backend's own comparison string for a keyed POST, `METHOD path canonicalJson(body)`, else null. It decides
@@ -59,8 +62,16 @@ export interface TxMeta {
   /** The principal whose token authorized the request (src/principals.ts). */
   principal: string;
   attribution: TxAttribution;
-  request: TxRequest;
+  /**
+   * The client request. null for a run reset (Store.dropRun: its commit and its refusal), which no client request
+   * carries: its ledger entry has `request: null` (seams v2.1; a fingerprint_hash is never made up for it).
+   * Every write from the HTTP layer has one (WriteMeta).
+   */
+  request: TxRequest | null;
 }
+
+/** TxMeta of a client write (the HTTP layer's): `request` is always set. */
+export type WriteMeta = TxMeta & { request: TxRequest };
 
 export interface ObjectRef {
   type: "ticket" | "project" | "comment" | "label";
@@ -92,9 +103,17 @@ export interface ObjectOwner {
   run: string | null;
 }
 
-/** One entry of the applied-write log, which recognizes a re-sent conditional write that was already applied. */
+/**
+ * One entry of the applied-write log, which recognizes a re-sent conditional write that was already applied. The log
+ * keeps the last 20 entries per ticket (older ones are dropped, so a re-send older than that gets the normal 412).
+ */
 export interface AppliedWrite {
   ticket: string;
+  /**
+   * The principal whose write it was (seams v2.1). A re-send is a replay only for the same principal: another
+   * principal sending the same If-Match write gets the normal 412.
+   */
+  principal: string;
   fromVersion: number;
   toVersion: number;
   /** The store's comparison string (`PATCH canonicalJson(fields)` or `PUT ...`). */
@@ -191,7 +210,7 @@ export interface CommitSink {
 /** The key record a keyed write's commit completes: derived from the transaction alone, so journal replay rebuilds it. */
 export function storedReplyOf(tx: CommittedTransaction): import("./seams.js").StoredReply {
   return {
-    fingerprint: tx.request.fingerprint!, status: tx.status, body: tx.body, headers: tx.headers,
+    fingerprint: tx.request!.fingerprint!, status: tx.status, body: tx.body, headers: tx.headers,
     run: tx.attribution.run, seq: tx.seq, committedAt: tx.committedAt, clockOffsetMs: tx.clockOffsetMs,
   };
 }
@@ -203,7 +222,16 @@ export function storedReplyOf(tx: CommittedTransaction): import("./seams.js").St
 // record's seq). A pending line (0.3.0 inflight) is written before the section and holds no commit_seq: the commit
 // that completes it names it by `pending_jseq`, and a pending line no commit names is ended by an `aborted` line
 // (written when the write is refused or its journal append fails, or at start for an orphan found on load).
-// `checksum` is lower-case hex SHA-256 of the line's RFC 8785 bytes without the checksum member.
+// A `fence` line (seams v2.1) records a key a run reset fenced: it ends the pending line it names (no `aborted` line),
+// and at load it puts the fence back, so the key stays refused (409 key_fenced) across a restart. A `run-alloc` line records a run the fixture layer allocated, so the run registry (and the run_not_owned and
+// run_not_allocated checks) survive a restart. `checksum` is lower-case hex SHA-256 of the line's RFC 8785 bytes
+// without the checksum member.
+//
+// Torn lines (decision 0003 section 5): only a torn LAST line is tolerated at load. A failed append can leave a partial
+// line; since the store carries on after a journal failure, the writer must not append after it. After a failed
+// append the journal truncates the file back to the offset of the end of the last good line (ftruncate, then fsync)
+// before the next append; if it cannot truncate, it fails stop (it throws on every later append and the store
+// answers 503) instead of appending after a torn line.
 
 /** The state a store starts from before any commit: the seeded projects, as created, and the id counters. */
 export interface SeedState {
@@ -241,7 +269,35 @@ export interface JournalAbortedLine {
   line: "aborted";
   /** The pending line this ends: nothing was applied for it. */
   pending_jseq: number;
-  reason: "refused" | "journal_unavailable" | "orphan_at_start";
+  /** InflightKeyRecordSeam.abort's reason (src/backend/seams.ts AbortReason). */
+  reason: import("./seams.js").AbortReason;
+  checksum: string;
+}
+
+/** A key fenced by a run reset (KeyRecordSeam.dropRun): ends its pending line; restored as { state: "fenced" } at load. */
+export interface JournalFenceLine {
+  jseq: number;
+  line: "fence";
+  principal: string;
+  key: string;
+  /** The run whose reset fenced the key. */
+  run: string;
+  /** The pending line this ends. */
+  pending_jseq: number;
+  /** The commit_seq of the run reset that fenced it (the reset's commit line comes first). */
+  reset_seq: number;
+  checksum: string;
+}
+
+/** A run the fixture layer allocated (src/fixture/control.ts RunRegistry): replayed into the registry at load. */
+export interface JournalRunAllocLine {
+  jseq: number;
+  line: "run-alloc";
+  run_id: string;
+  principal: string;
+  /** Record clock, as the registry gave it. */
+  created_at: string;
+  label: string | null;
   checksum: string;
 }
 
@@ -255,7 +311,7 @@ export interface JournalCommitLine {
   checksum: string;
 }
 
-export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine;
+export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine;
 
 export class CommitSinkError extends Error {
   constructor(readonly sink: string, cause: unknown) {
