@@ -96,7 +96,7 @@ class Recount(unittest.TestCase):
         self.assertEqual(tt_recount.operation_count(entries, "op-2", "key-00000002")["external_effect_count"], 1, "a dropped key still counts")
         self.assertEqual(tt_recount.operation_count(entries, "op-5", "key-other")["external_effect_count"], 0)
 
-    def write_journal(self, records, tamper=None, torn=True, other_principal=False):
+    def write_journal(self, records, tamper=None, torn=True, other_principal=False, extra=None, raw_tail=None):
         """A journal-format/1 file shaped as tiny-tracker writes it (INTERFACES 1.9): jseq and checksum on every line."""
         import hashlib
         lines = [{"jseq": 0, "line": "header", "journal": "journal-format/1", "writer": "0.3.0", "boot_id": "0123456789abcdef", "seed": {}}]
@@ -107,10 +107,13 @@ class Recount(unittest.TestCase):
                   "objects": r["objects"], "body": tt_digest.loads(r["result"]["canonical"])}
             lines.append({"jseq": len(lines), "line": "commit", "commit_seq": r["seq"], "pending_jseq": None, "tx": tx})
         if other_principal:
-            lines.append({"jseq": len(lines), "line": "commit", "commit_seq": 99, "pending_jseq": None,
-                          "tx": {"kind": "write", "seq": 99, "principal": "p-second", "attribution": {"run": None, "operation": None},
+            seq = records[-1]["seq"] + 1
+            lines.append({"jseq": len(lines), "line": "commit", "commit_seq": seq, "pending_jseq": None,
+                          "tx": {"kind": "write", "seq": seq, "principal": "p-second", "attribution": {"run": None, "operation": None},
                                  "request": {"method": "POST", "path": "/tickets", "key": None}, "objects": [], "body": {}}})
         lines.append({"jseq": len(lines), "line": "run-alloc", "run_id": "run-0123abcd-0123456789ab", "principal": "p-default", "created_at": "t", "label": None})
+        for e in extra or []:
+            lines.append(dict(e, jseq=len(lines)))
         text = ""
         for i, l in enumerate(lines):
             l["checksum"] = hashlib.sha256(tt_digest.canonicalize(l).encode("utf-8")).hexdigest()
@@ -119,6 +122,8 @@ class Recount(unittest.TestCase):
             text += json.dumps(l) + "\n"
         if torn:
             text += '{"jseq": %d, "line": "comm' % len(lines)
+        if raw_tail is not None:
+            text += raw_tail
         f = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8")
         f.write(text)
         f.close()
@@ -147,6 +152,41 @@ class Recount(unittest.TestCase):
             out = tt_recount.recount(export, entries, records, got, problems)
             self.assertIn("journal: line jseq 2 has a bad jseq or checksum", out["problems"])
             self.assertTrue(any("journal and ledger name different executions" in p for p in out["problems"]))
+        finally:
+            os.unlink(path)
+
+    def test_journal_reader_refuses_a_commit_seq_gap_and_an_unknown_kind_as_tiny_tracker_does(self):
+        # G2 fold-in 10: both lines are checksummed, so only the reader's own checks can catch them.
+        export, entries, records = history()
+        gap = {"line": "commit", "commit_seq": records[-1]["seq"] + 5, "pending_jseq": None,
+               "tx": {"kind": "write", "seq": records[-1]["seq"] + 5, "principal": "p-default", "attribution": {"run": None, "operation": None},
+                      "request": {"method": "POST", "path": "/tickets", "key": None}, "objects": [], "body": {}}}
+        path = self.write_journal(records, extra=[gap], torn=False)
+        try:
+            _, problems = tt_recount.journal_executions(path, "p-default")
+            self.assertEqual(problems, ["journal: line jseq 7 has commit_seq 10 where 6 was expected"])
+        finally:
+            os.unlink(path)
+        path = self.write_journal(records, extra=[{"line": "future-kind", "principal": "p-default"}], torn=False)
+        try:
+            _, problems = tt_recount.journal_executions(path, "p-default")
+            self.assertEqual(len(problems), 1)
+            self.assertIn("unknown line kind 'future-kind'", problems[0])
+        finally:
+            os.unlink(path)
+        # Every known kind passes; a lookup-fence line among them.
+        path = self.write_journal(records, extra=[{"line": "lookup-fence", "principal": "p-default", "key": "k-12345678", "run": None, "fenced_at": "t"}])
+        try:
+            self.assertEqual(tt_recount.journal_executions(path, "p-default")[1], [])
+        finally:
+            os.unlink(path)
+
+    def test_journal_reader_tolerates_only_an_unterminated_undecodable_last_line(self):
+        export, entries, records = history()
+        path = self.write_journal(records, torn=False, raw_tail='{"jseq": 7, "line": "comm\n')
+        try:
+            self.assertEqual(tt_recount.journal_executions(path, "p-default")[1], ["journal: line jseq 7 has a bad jseq or checksum"],
+                             "a bad last line with its newline is not a torn write")
         finally:
             os.unlink(path)
 

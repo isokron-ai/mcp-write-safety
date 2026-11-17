@@ -15,7 +15,8 @@ the raw files:
   digests     every execution record's served digest is SHA-256 over its domain tag and served
               canonical bytes, and the bytes are RFC 8785 (tt_digest.py); from the journal, the digest is
               recomputed from each committed body and must equal the record's served digest;
-  journal     every line's jseq is contiguous and its checksum holds (only a torn last line is tolerated).
+  journal     every line's jseq is contiguous and its checksum holds, commit_seq is contiguous, and an unknown line
+              kind is refused (only a torn last line, unterminated and not decodable, is tolerated).
               The journal holds every principal's writes: --principal keeps the one the ledger was read for.
 
   python3 -I tt_recount.py --export export.json --ledger ledger.json [--executions executions.json]
@@ -83,37 +84,62 @@ def find_records(value, kind, out=None, depth=0):
     return out
 
 
+# journal-format/1's line kinds (tiny-tracker INTERFACES 1.9; lookup-fence is the additive 0.3.0 kind).
+JOURNAL_LINE_KINDS = frozenset(["header", "commit", "pending", "aborted", "fence", "run-alloc", "lookup-fence"])
+
+
 def journal_executions(path, principal=None):
     """Execution records derived from a journal-format/1 file (tiny-tracker decision 0003, INTERFACES 1.9).
 
     The journal keeps post-state, not records: each commit line holds the committed transaction. A write's record
     is derived from it here: id X-<commit_seq>, principal, run and operation tag, key, objects, and the result
     digest recomputed from the committed body (RFC 8785 bytes under the execution-result domain tag). Every line's
-    jseq and checksum (SHA-256 of the line's RFC 8785 bytes without the checksum member) are checked; only a torn
-    last line is tolerated. Returns (records, problems). `principal` keeps one principal's writes (the ledger and
+    jseq and checksum (SHA-256 of the line's RFC 8785 bytes without the checksum member) are checked, as tiny-tracker's
+    own reader does (G2 fold-in 10): the first line is the header, commit_seq is contiguous from 1 over every
+    principal's commits, and a line kind this reader does not know is refused, never skipped (an older reader must not
+    pass over a fence). Only a torn write is tolerated: an unterminated last line that does not decode. Returns
+    (records, problems). `principal` keeps one principal's writes (the ledger and
     the export a third party reads are filtered by ?principal=; the journal holds every principal's).
     """
     records, problems = [], []
     with open(path, encoding="utf-8") as f:
         lines = [l for l in f.read().split("\n")]
-    if lines and lines[-1] == "":
+    terminated = bool(lines) and lines[-1] == ""
+    if terminated:
         lines.pop()
+    last_commit = 0
     for i, text in enumerate(lines):
         last = i == len(lines) - 1
         try:
             line = json.loads(text)
             body = {k: v for k, v in line.items() if k != "checksum"}
-            ok = isinstance(line, dict) and line.get("jseq") == i and \
+            decodes = isinstance(line, dict) and isinstance(line.get("jseq"), int) and \
                 hashlib.sha256(tt_digest.canonicalize(body).encode("utf-8")).hexdigest() == line.get("checksum")
         except (ValueError, AttributeError, tt_digest.CanonicalizationError):
-            ok = False
-        if not ok:
-            if last:
-                break  # a torn last line is tolerated (decision 0003)
+            decodes = False
+        if not decodes:
+            if last and not terminated:
+                break  # a torn write: an unterminated last line that does not decode (decision 0003)
+            problems.append("journal: line jseq %d has a bad jseq or checksum" % i)
+            last_commit = None  # a bad line may have been a commit: the next commit line sets the count again
+            continue
+        if line.get("jseq") != i:
             problems.append("journal: line jseq %d has a bad jseq or checksum" % i)
             continue
-        if line.get("line") != "commit":
+        kind = line.get("line")
+        if (i == 0) != (kind == "header"):
+            problems.append("journal: line jseq %d is %s" % (i, "not the header" if i == 0 else "a second header"))
             continue
+        if kind not in JOURNAL_LINE_KINDS:
+            problems.append("journal: line jseq %d has an unknown line kind %r; this reader knows %s and does not skip a line"
+                            % (i, kind, ", ".join(sorted(JOURNAL_LINE_KINDS))))
+            continue
+        if kind != "commit":
+            continue
+        if last_commit is not None and line.get("commit_seq") != last_commit + 1:
+            problems.append("journal: line jseq %d has commit_seq %r where %d was expected" % (i, line.get("commit_seq"), last_commit + 1))
+        if isinstance(line.get("commit_seq"), int):
+            last_commit = line["commit_seq"]
         tx = line.get("tx") or {}
         if tx.get("kind") != "write" or not tx.get("request"):
             continue
