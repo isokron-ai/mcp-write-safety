@@ -66,6 +66,14 @@ export const FAULT_POINTS: readonly FaultPoint[] = [
   point("backend", "after-commit", "drop", "0.3.0", "The backend commits and never answers (capped hold)."),
 ];
 
+// ---- stream B ----
+/**
+ * The points this version can arm (on the control listener, or at start once stream E's --fault lands). Each needs an
+ * action in src/fixture/faults.ts (FAULT_ACTIONS). Stream E appends the 0.3.0 points.
+ */
+export const BUILT_FAULT_POINTS: readonly string[] = ["mcp/after-backend-reply/drop"];
+// ---- end stream B ----
+
 export function faultPoint(id: string): FaultPoint | undefined {
   return FAULT_POINTS.find((p) => p.id === id);
 }

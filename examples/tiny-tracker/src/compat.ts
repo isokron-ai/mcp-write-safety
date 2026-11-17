@@ -7,7 +7,7 @@
 // under --profile 0.1. Tests cover the table pairwise (test/compat.test.ts),
 // not as the full product of every factor.
 
-import { faultPoint, FAULT_DEMOS, RETIRED_FAULT_NAMES } from "./fault-points.js";
+import { BUILT_FAULT_POINTS, faultPoint, FAULT_DEMOS, RETIRED_FAULT_NAMES } from "./fault-points.js";
 import { activeFeatures, featureInfo, type FeatureName, type ProfileName } from "./profile.js";
 
 export type ProcessLayout = "all" | "backend" | "server";
@@ -91,7 +91,18 @@ export const COMPAT_RULES: readonly CompatRule[] = [
   },
   {
     id: "CMP-7", post01: false,
-    check: (c) => c.faults.length > 0 ? "no fault can be armed in this version (the fault controller arrives in 0.2.0)" : undefined,
+    // Narrowed by stream B (0.2.0): a fault armed at start needs the faults feature and a point this build can arm.
+    check: (c) => {
+      if (c.faults.length === 0) return undefined;
+      if (!has(c.features, "faults")) return "a fault armed at start needs the faults feature";
+      for (const f of c.faults) {
+        const p = faultPoint(f);
+        if (p && !BUILT_FAULT_POINTS.includes(p.id)) return p.since === null ? `fault point ${p.id} is not planned for any release` : `fault point ${p.id} arrives in ${p.since}; this build cannot arm it`;
+        const demo = FAULT_DEMOS[f];
+        if (demo) return `fault demonstration "${f}" arrives in ${demo.since}; this build cannot arm it`;
+      }
+      return undefined;
+    },
   },
   {
     id: "CMP-8", post01: true,
@@ -124,6 +135,28 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     id: "CMP-21", post01: true,
     check: (c) => has(c.named, "principals") && c.layout === "server"
       ? "principals is a backend feature; name it where the backend runs (`all` or `backend`)" : undefined,
+  },
+  // ---- stream B (CMP-30 to CMP-39) ----
+  {
+    id: "CMP-30", post01: true,
+    check: (c) => has(c.features, "ledger") && !has(c.features, "evidence")
+      ? "the ledger feature needs the evidence feature (the ledger is read at GET /ledger in the evidence namespace)" : undefined,
+  },
+  {
+    id: "CMP-31", post01: true,
+    check: (c) => has(c.features, "ledger") && !has(c.features, "strict-input")
+      ? "the ledger feature needs strict-input (the ledger hashes every request; strict-input refuses keys and strings that cannot be hashed the same way in every language)"
+      : undefined,
+  },
+  {
+    id: "CMP-32", post01: true,
+    check: (c) => has(c.features, "faults") && !has(c.features, "ledger")
+      ? "the faults feature needs the ledger feature (every fault arming and firing is a ledger entry)" : undefined,
+  },
+  {
+    id: "CMP-33", post01: true,
+    check: (c) => has(c.features, "faults") && !c.fixtureControl
+      ? "the faults feature needs --fixture-control (faults are armed on the control listener only, never on the command line)" : undefined,
   },
 ];
 

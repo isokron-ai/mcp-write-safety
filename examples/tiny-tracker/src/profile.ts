@@ -32,7 +32,7 @@ export interface FeatureInfo {
 
 export const FEATURES = [
   { name: "evidence", since: "0.2.0", built: true, layer: "fixture",
-    summary: "Read-only evidence namespace on the backend listener (/build, /export; /ledger, /executions and /operations arrive in 0.2.0) behind its own evidence token; the build descriptor mirrored in the MCP instructions and in every tool result's _meta; run and operation tags carried from request _meta to every backend request." },
+    summary: "Read-only evidence namespace on the backend listener (/build and /export; /ledger, /executions and /operations with their features) behind its own evidence token; the build descriptor mirrored in the MCP instructions and in every tool result's _meta; run and operation tags carried from request _meta to every backend request." },
   { name: "strict-input", since: "0.2.0", built: true, layer: "core",
     summary: "The backend validates idempotency keys (length and characters) and refuses request bodies that hold strings that are not well-formed Unicode." },
   { name: "execution-records", since: "0.2.0", built: true, layer: "core",
@@ -41,10 +41,10 @@ export const FEATURES = [
     summary: "Look a write up by its idempotency key, in the caller's own scope: GET /operations/:key and the get_operation and get_execution tools. Needs execution-records." },
   { name: "principals", since: "0.2.0", built: true, layer: "core",
     summary: "Two or more backend tokens, each a principal (TRACKER_BACKEND_TOKENS_FILE); key records and lookups are scoped to the principal." },
-  { name: "ledger", since: "0.2.0", built: false, layer: "fixture",
-    summary: "An append-only execution ledger below every MCP-layer defect, with attribution from request _meta." },
-  { name: "faults", since: "0.2.0", built: false, layer: "fixture",
-    summary: "Server-side fault points, armed through the control listener." },
+  { name: "ledger", since: "0.2.0", built: true, layer: "fixture",
+    summary: "An append-only execution ledger below every MCP-layer defect, with attribution from request _meta: every write attempt, fault arming and firing, run allocation and run reset; GET /ledger and the export (evidence token). Needs evidence and strict-input." },
+  { name: "faults", since: "0.2.0", built: true, layer: "fixture",
+    summary: "Server-side fault points, armed through the control listener; this version arms mcp/after-backend-reply/drop. Needs the ledger and --fixture-control." },
   { name: "durable", since: "0.3.0", built: false, layer: "core",
     summary: "A JSONL journal of committed post-state in --data-dir, so data and key records survive a restart." },
   { name: "inflight", since: "0.3.0", built: false, layer: "core",

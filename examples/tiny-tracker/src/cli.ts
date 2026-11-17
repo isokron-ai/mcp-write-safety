@@ -193,11 +193,22 @@ async function main(): Promise<void> {
         // Run tags are checked against the registry only when the control listener allocates runs (seams v2.1).
         ...(fixture ? { bootId: fixture.descriptor.bootId, ...(fixtureControl ? { runOwner: fixture.runOwner } : {}) } : {}),
         ...(principals ? { principals } : {}), ...(evidenceListen ? { evidenceListen } : {}), // stream A
+        ...(fixture ? fixture.backendOptions : {}), // ---- stream B: the ledger sink and the backend fault hooks ----
       });
     } catch (e) {
       fail((e as Error).message);
     }
     closers.push(backend.close);
+    // ---- stream B ----
+    // The run reset and the record routes reach the started backend. On shutdown, held answers are sent before the
+    // servers close. (Stream A: add `evidence: <its EvidenceSource>` here when execution records are on.)
+    if (fixture) {
+      const layer = fixture;
+      layer.attachBackend({ store: backend.store, dropRun: backend.dropRun });
+      process.prependListener("SIGINT", () => layer.close());
+      process.prependListener("SIGTERM", () => layer.close());
+    }
+    // ---- end stream B ----
     out.backend = backend.url;
     if (backend.evidenceUrl) out.evidence_listener = backend.evidenceUrl; // stream A: container mode
     if (backendDefects.length) out.backend_defects = backendDefects;

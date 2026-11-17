@@ -20,7 +20,7 @@ import { PACKAGE_VERSION, type ProfileName } from "../profile.js";
 import type { ProcessLayout } from "../compat.js";
 
 export const DESCRIPTOR_VERSION = "build-descriptor/1";
-export const FIXTURE_API_VERSION = "fixture-api/0";
+export const FIXTURE_API_VERSION = "fixture-api/1"; // ---- stream B: the control API ships (fault arming, run reset), R7 ----
 
 export interface DescriptorInput {
   layout: ProcessLayout;

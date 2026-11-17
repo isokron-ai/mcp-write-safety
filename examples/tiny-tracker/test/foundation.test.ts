@@ -105,7 +105,7 @@ describe("the compatibility table (src/compat.ts)", () => {
     assert.match(checkCompat({ ...base, faults: ["crash-between-effect-and-record"] }).join(), /meaningful only with one of/);
     assert.deepEqual(checkCompat({ ...base, faults: ["crash-between-effect-and-record"], variants: ["key-store-honest"] }).filter((m) => /meaningful/.test(m)), []);
     assert.match(checkCompat({ ...base, faults: ["crash-after-commit"] }).join(), /named by point now/);
-    assert.match(checkCompat({ ...base, faults: ["mcp/after-backend-reply/drop"] }).join(), /no fault can be armed in this version/);
+    assert.match(checkCompat({ ...base, faults: ["mcp/after-backend-reply/drop"] }).join(), /a fault armed at start needs the faults feature/);
     assert.match(checkCompat({ ...base, faults: ["backend/after-backend-reply/drop"] }).join(), /unknown fault point/);
   });
 

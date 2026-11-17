@@ -4,15 +4,17 @@
 // Hardening: loopback Host only; any request carrying an Origin header is
 // refused (no browser page can drive it); POST needs content-type
 // application/json and a body under 64 KiB; the token is compared in constant
-// time. Every control action will also be a ledger event (0.2.0).
+// time; at most 32 connections, and a request must arrive whole within 10 s.
+// Every control action that changes something is a ledger entry (with the
+// ledger feature): fault arming, run allocation and run reset.
 //
 //   GET  /_fixture/clock              the fixture clock (offset 0: wall time)
 //   POST /_fixture/clock              move it                         (0.3.0)
-//   GET  /_fixture/faults             the fault point table and what is armed
-//   POST /_fixture/faults             arm a fault                     (0.2.0)
+//   GET  /_fixture/faults             the fault point table, what is armed, what is spent
+//   POST /_fixture/faults             arm a fault                     (feature faults)
 //   POST /_fixture/runs               allocate a run id
 //   GET  /_fixture/runs               the runs allocated since start
-//   POST /_fixture/runs/:id/reset     reset one run's data and keys   (0.2.0)
+//   POST /_fixture/runs/:id/reset     reset one run's data and keys   (feature ledger)
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
@@ -21,9 +23,30 @@ import { FAULT_POINTS } from "../fault-points.js";
 import { wallClock, type Clock } from "../clock.js";
 import type { BuildDescriptor } from "./descriptor.js";
 import { bearerMatches } from "./tokens.js";
+import { ApiError, type Store } from "../backend/store.js";
+import { CommitSinkError, JournalError } from "../backend/commit.js";
+import type { RunningBackend } from "../backend/http.js";
+import type { EvidenceSource } from "../backend/seams.js";
+import { FaultError, type FaultController } from "./faults.js";
+import type { Ledger } from "./ledger.js";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const MAX_BODY = 64 * 1024;
+/** X4/X5: connections the control listener holds at once, and how long a request may take to arrive. */
+export const CONTROL_MAX_CONNECTIONS = 32;
+export const CONTROL_REQUEST_TIMEOUT_MS = 10_000;
+
+/** The run reset: RunningBackend.dropRun (Store.dropRun through the commit path, with the key-record seam in use). */
+export type DropRun = RunningBackend["dropRun"];
+
+/** The backend this process runs, once it has started (FixtureLayer.attachBackend). */
+export interface AttachedBackend {
+  store: Store;
+  /** The run reset; absent only in tests that check the 501. */
+  dropRun?: DropRun;
+  /** Execution and operation records (stream A), when this build keeps them. */
+  evidence?: EvidenceSource;
+}
 
 export interface Run {
   run_id: string;
@@ -93,6 +116,11 @@ export class RunRegistry {
   owner(id: string): string | undefined {
     return this.runs.find((r) => r.run_id === id)?.principal;
   }
+
+  get(id: string): Run | undefined {
+    const r = this.runs.find((x) => x.run_id === id);
+    return r && { ...r };
+  }
 }
 
 export interface RunningControl {
@@ -119,12 +147,35 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 
 const notBuilt = (since: string, what: string) => new ControlError(501, "not_built", `${what} arrives in ${since}; this build cannot do it`, { available_from: since });
 
-export async function startControl(options: {
-  token: string; port: number; descriptor: BuildDescriptor; runs: RunRegistry;
+export interface ControlOptions {
+  token: string;
+  port: number;
+  descriptor: BuildDescriptor;
+  runs: RunRegistry;
+  /** The ledger (feature ledger): records arming, run allocation and reset; a reset needs it. */
+  ledger?: Ledger;
+  /** The fault controller (feature faults). */
+  faults?: FaultController;
+  /** The backend, once started. */
+  backend?: () => AttachedBackend | undefined;
   /** The configured principal ids: a run is allocated only for one of them (default: p-default only). */
   principals?: readonly string[];
-}): Promise<RunningControl> {
-  const { token, descriptor, runs } = options;
+}
+
+const notEnabled = (feature: string, what: string) =>
+  new ControlError(501, "not_enabled", `${what} needs the ${feature} feature, which this process does not run`, { feature, available_from: "0.2.0" });
+
+/** Runs a ledger append; a ledger that cannot append stops the store, so the control action answers 503. */
+function recorded<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    throw new ControlError(503, "ledger_stopped", `the ledger could not record this action: ${(e as Error).message}`);
+  }
+}
+
+export async function startControl(options: ControlOptions): Promise<RunningControl> {
+  const { token, descriptor, runs, ledger, faults } = options;
   const principals = options.principals ?? ["p-default"];
 
   async function route(req: IncomingMessage, path: string): Promise<{ status: number; body: unknown }> {
@@ -134,8 +185,17 @@ export async function startControl(options: {
       if (method === "POST") throw notBuilt("0.3.0", "moving the fixture clock");
     }
     if (path === "/_fixture/faults") {
-      if (method === "GET") return { status: 200, body: { armed: [...descriptor.armedFaults], points: FAULT_POINTS } };
-      if (method === "POST") throw notBuilt("0.2.0", "arming a fault");
+      if (method === "GET") return { status: 200, body: faults ? { ...faults.list(), points: FAULT_POINTS } : { armed: [], points: FAULT_POINTS } };
+      if (method === "POST") {
+        if (!faults) throw notEnabled("faults", "arming a fault");
+        const body = await readBody(req);
+        try {
+          return { status: 201, body: { fault: recordedArm(faults, body) } };
+        } catch (e) {
+          if (e instanceof FaultError) throw new ControlError(e.status, e.code, e.message, e.extra);
+          throw e;
+        }
+      }
     }
     if (path === "/_fixture/runs") {
       if (method === "GET") return { status: 200, body: { runs: runs.list() } };
@@ -145,15 +205,48 @@ export async function startControl(options: {
         const principal = body && typeof body === "object" && body.principal !== undefined ? body.principal : "p-default";
         if (typeof principal !== "string" || !/^p-[a-z0-9-]{1,62}$/.test(principal)) throw new ControlError(400, "bad_principal", "principal must match ^p-[a-z0-9-]{1,62}$");
         if (!principals.includes(principal)) throw new ControlError(400, "unknown_principal", `principal ${principal} is not configured on this backend`);
-        return { status: 201, body: runs.allocate(label, principal) };
+        const run = runs.allocate(label, principal);
+        if (ledger) recorded(() => ledger.runAllocated(run.principal, run.run_id));
+        return { status: 201, body: run };
       }
     }
     const reset = /^\/_fixture\/runs\/([^/]+)\/reset$/.exec(path);
     if (reset && method === "POST") {
-      if (!runs.has(decodeURIComponent(reset[1]))) throw new ControlError(404, "no_such_run", `no run ${reset[1]} was allocated by this process`);
-      throw notBuilt("0.2.0", "a run-scoped reset (objects and key records are tagged by run from 0.2.0)");
+      const run = runs.get(decodeURIComponent(reset[1]));
+      if (!run) throw new ControlError(404, "no_such_run", `no run ${reset[1]} was allocated by this process`);
+      // The ledger records every reset (from the reset's commit event), so a reset needs it: evidence never loses
+      // data without saying so.
+      if (!ledger) throw notEnabled("ledger", "a run-scoped reset");
+      const backend = options.backend?.();
+      if (!backend?.dropRun) throw notBuilt("0.2.0", "a run-scoped reset (this backend cannot drop one run's records)");
+      try {
+        backend.store.checkRunning();
+      } catch (e) {
+        throw new ControlError(503, "stopped", (e as Error).message);
+      }
+      // Store.dropRun is one commit (kind run-reset) through the frozen commit path: journalled, then told to the
+      // ledger with tx.reset. The ledger writes the run-reset entry from that event, never by hand here.
+      let dropped: { objects: number; keys: number };
+      try {
+        dropped = backend.dropRun({ principal: run.principal }, run.run_id);
+      } catch (e) {
+        if (e instanceof ApiError) throw new ControlError(e.status, e.code, e.message);
+        if (e instanceof CommitSinkError || e instanceof JournalError) throw new ControlError(503, e instanceof JournalError ? "journal_unavailable" : "stopped", e.message);
+        throw e;
+      }
+      const entry = ledger.list({ kind: "run-reset", run: run.run_id, principal: run.principal }).at(-1);
+      return { status: 200, body: { run_id: run.run_id, principal: run.principal, dropped: { objects: dropped.objects, keys: dropped.keys }, ledger_seq: entry?.seq ?? null } };
     }
     throw new ControlError(404, "no_route", `no control route for ${method} ${path}`);
+  }
+
+  function recordedArm(f: FaultController, body: unknown) {
+    try {
+      return f.arm(body);
+    } catch (e) {
+      if (e instanceof FaultError) throw e;
+      throw new ControlError(503, "ledger_stopped", `the ledger could not record this action: ${(e as Error).message}`);
+    }
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -178,7 +271,8 @@ export async function startControl(options: {
     }
   }
 
-  const server: Server = createServer((req, res) => void handle(req, res));
+  const server: Server = createServer({ requestTimeout: CONTROL_REQUEST_TIMEOUT_MS, headersTimeout: CONTROL_REQUEST_TIMEOUT_MS }, (req, res) => void handle(req, res));
+  server.maxConnections = CONTROL_MAX_CONNECTIONS;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, "127.0.0.1", () => resolve());
