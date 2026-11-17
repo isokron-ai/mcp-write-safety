@@ -124,6 +124,24 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
     }
   });
 
+  it("G2 round 2, item 5: a decodable first line that is not a header is refused, not wiped as a torn header; a torn header is", async () => {
+    const t = tempDir("header");
+    try {
+      prepareDataDir(t.dataDir);
+      const file = join(t.dataDir, JOURNAL_FILE);
+      const notHeader = encodeLine({ jseq: 0, line: "run-alloc", run_id: "run-0123abcd-0123456789ab", principal: "p-default", created_at: "t", label: null } as any);
+      writeFileSync(file, notHeader);
+      await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), JournalCorruptError);
+      assert.equal(readFileSync(file, "utf8"), notHeader, "not wiped");
+      writeFileSync(file, notHeader.slice(0, 25));
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      await b.close();
+      assert.equal(readJournal(file).lines[0].line, "header", "a torn header starts a new journal");
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("only a torn last line is tolerated: it is dropped and cut; a bad line in the middle stops the start", async () => {
     const t = tempDir("torn");
     try {

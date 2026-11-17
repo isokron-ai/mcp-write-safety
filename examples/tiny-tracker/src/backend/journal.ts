@@ -491,8 +491,10 @@ export class Journal implements JournalSeam, KeyLineWriter {
     if (terminated) parts.pop();
     const header = decodeLine(parts[0]);
     if (header === undefined || header.line !== "header" || header.jseq !== 0) {
-      // A header torn at the very first start (nothing after it) is the only header problem that is not corruption.
-      if (parts.length === 1 && !terminated) {
+      // A header torn at the very first start (nothing after it) is the only header problem that is not corruption:
+      // unterminated and not decodable, as fold-in 3's rule for any last line (G2 round 2, item 5). A first line that
+      // decodes but is not a header is refused, never wiped.
+      if (parts.length === 1 && !terminated && header === undefined) {
         this.log("tiny-tracker: the journal header was torn at the first start; starting a new journal");
         const fd = openSync(this.path, "r+");
         ftruncateSync(fd, 0);
