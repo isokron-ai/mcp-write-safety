@@ -5,7 +5,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -404,6 +404,27 @@ describe("the lock takeover (G2 fold-in 7)", () => {
         await b.close();
         other.cleanup();
       }
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("round 3, F5: a clean close removes the lock only if it is still the file this process created", async () => {
+    const t = tempDir("lockrel");
+    try {
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      const path = join(t.dataDir, LOCK_FILE);
+      const text = readFileSync(path, "utf8");
+      // Another starter replaced it meanwhile (here with the same bytes, a new inode; the old file is kept under another
+      // name so its inode number is not reused): not this process's file.
+      renameSync(path, join(t.dir, "old-lock"));
+      writeFileSync(path, text);
+      await b.close();
+      assert.equal(readFileSync(path, "utf8"), text, "left alone: another starter's lock");
+      unlinkSync(path);
+      const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      await b2.close();
+      assert.equal(existsSync(path), false, "its own lock is removed");
     } finally {
       t.cleanup();
     }

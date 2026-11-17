@@ -169,6 +169,8 @@ const HELD = new Set<string>();
  * Module state is per thread: acquireLock runs on the main thread only.
  */
 const WRITTEN = new Set<string>();
+/** The lock this process created in each data dir it holds: its inode and text (G2 round 3, F5: release checks both). */
+const CREATED = new Map<string, { ino: number; text: string }>();
 
 /** The key a data dir is held under: its real path (the dir exists once prepareDataDir ran), else the resolved path. */
 function heldKey(dir: string): string {
@@ -266,21 +268,23 @@ export const LOCK_UNREADABLE_GRACE_MS = 10_000;
  * into place, so the lock never exists empty for another starter to read. link(2) refuses if a lock exists (EEXIST),
  * which is the O_EXCL of the old create. Where link is not supported, an O_EXCL create with the content written at
  * once is the fallback; a starter that reads it empty treats it as held (LOCK_UNREADABLE_GRACE_MS).
- * Returns false when a lock exists.
+ * Returns the new lock's inode, or false when a lock exists.
  */
-function createLock(path: string, content: string): boolean {
+function createLock(path: string, content: string): number | false {
   const tmp = `${path}.new-${process.pid}-${randomBytes(6).toString("hex")}`;
   const fd = openSync(tmp, "wx", 0o600);
   // From here every way out removes the temp file, a failed write or fsync included (G2 round 3, F3).
   try {
+    let ino: number;
     try {
       writeSync(fd, content);
       fsyncSync(fd);
+      ino = fstatSync(fd).ino;
     } finally {
       closeSync(fd);
     }
     linkSync(tmp, path);
-    return true;
+    return ino; // the link is the same inode
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "EEXIST") return false;
@@ -290,10 +294,10 @@ function createLock(path: string, content: string): boolean {
       try {
         writeSync(lfd, content);
         fsyncSync(lfd);
+        return fstatSync(lfd).ino;
       } finally {
         closeSync(lfd);
       }
-      return true;
     } catch (e2) {
       if ((e2 as NodeJS.ErrnoException).code === "EEXIST") return false;
       throw e2;
@@ -361,9 +365,11 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
   for (let attempt = 0; attempt < 5; attempt++) {
     // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
     const content = JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString() });
-    if (createLock(path, content)) {
+    const createdIno = createLock(path, content);
+    if (createdIno !== false) {
       HELD.add(real);
       WRITTEN.add(content);
+      CREATED.set(real, { ino: createdIno, text: content });
       sweepLockLeftovers(dir, log);
       return;
     }
@@ -416,11 +422,27 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
   throw new DataDirError(`could not take the data-dir lock in ${dir}`);
 }
 
+/**
+ * Releases the lock this process created (G2 round 3, F5): the lock file is removed only if it is still that file (the
+ * same inode and the same text). A lock another starter put in its place is left alone.
+ */
 export function releaseLock(dir: string): void {
-  if (!HELD.delete(heldKey(dir))) return;
+  const real = heldKey(dir);
+  if (!HELD.delete(real)) return;
+  const created = CREATED.get(real);
+  CREATED.delete(real);
+  if (created) WRITTEN.delete(created.text);
+  if (!created) return;
+  const path = join(dir, LOCK_FILE);
   try {
-    const text = readFileSync(join(dir, LOCK_FILE), "utf8");
-    if (WRITTEN.delete(text)) unlinkSync(join(dir, LOCK_FILE));
+    const fd = openSync(path, "r");
+    let same = false;
+    try {
+      same = fstatSync(fd).ino === created.ino && readFileSync(fd, "utf8") === created.text;
+    } finally {
+      closeSync(fd);
+    }
+    if (same) unlinkSync(path);
   } catch {
     // Gone already.
   }
@@ -792,11 +814,9 @@ export class Journal implements JournalSeam, KeyLineWriter {
     const real = heldKey(this.options.dataDir);
     HELD.delete(real);
     // As a killed process: its lock text is no longer one this process holds, so the next start takes it over.
-    try {
-      WRITTEN.delete(readFileSync(join(this.options.dataDir, LOCK_FILE), "utf8"));
-    } catch {
-      // no lock file
-    }
+    const created = CREATED.get(real);
+    CREATED.delete(real);
+    if (created) WRITTEN.delete(created.text);
   }
 }
 
