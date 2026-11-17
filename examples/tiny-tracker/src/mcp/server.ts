@@ -1,6 +1,17 @@
 // The MCP server: the official TypeScript SDK's McpServer, served over
 // Streamable HTTP with createMcpHandler (2026-07-28, with the stateless
-// 2025-era fallback), on node:http, loopback only.
+// 2025-era fallback), on node:http, loopback only by default.
+//
+// Transports and listener security (0.4.0, owned here):
+//   - createMcpServer is transport-independent; src/stdio.ts serves the same
+//     factory over stdio.
+//   - startMcpServer listens on 127.0.0.1. With a bearer token (TRACKER_MCP_TOKEN
+//     or _FILE, resolved in src/transport.ts) every /mcp request must carry it.
+//     It listens on every interface only in container mode, and refuses to
+//     unless a bearer token is set (review X1).
+//   - Resource caps on the listener (review X5): body size, connections,
+//     requests in flight, header and request timeouts, and a cap on how long a
+//     POST may stay unanswered (a held answer is cut off, not kept forever).
 
 import { fail, notApplied } from "./results.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -11,6 +22,7 @@ import type { ServerConfig } from "./config.js";
 import type { Build, Deps } from "./types.js";
 import { toolInputSchema } from "./validate.js";
 import { attributionFromMeta, runWithAttribution } from "../attribution.js";
+import { bearerMatches } from "../tokens.js";
 
 export const SERVER_INFO = { name: "tiny-tracker", version: "0.3.0" };
 
@@ -83,7 +95,47 @@ export function createMcpServer(build: Build, config: ServerConfig, deps: Deps, 
   return server;
 }
 
-const MAX_BODY = 4 * 1024 * 1024;
+/** Resource caps on the MCP listener (review X5). Tests may lower them; the CLI uses these values. */
+export interface McpHttpCaps {
+  /** Largest request body, in bytes (413 beyond it). Also the largest stdio message (src/stdio.ts). */
+  maxBodyBytes: number;
+  /** Open sockets at once; the OS-level accept beyond it is dropped by node:http. */
+  maxConnections: number;
+  /** /mcp requests being answered at once; beyond it 503 with Retry-After. */
+  maxInFlight: number;
+  /** Time allowed to receive the request headers. */
+  headersTimeoutMs: number;
+  /** Time allowed to receive the whole request. */
+  requestTimeoutMs: number;
+  /**
+   * Longest time a POST may stay unanswered. A held answer (a fault's drop or delay, a defect waiting on a gate) is cut
+   * off here by closing the connection without a reply: the backstop under any cap the fault controller sets itself.
+   */
+  responseCapMs: number;
+}
+
+export const MCP_HTTP_CAPS: Readonly<McpHttpCaps> = Object.freeze({
+  maxBodyBytes: 4 * 1024 * 1024,
+  maxConnections: 256,
+  maxInFlight: 64,
+  headersTimeoutMs: 10_000,
+  requestTimeoutMs: 30_000,
+  responseCapMs: 120_000,
+});
+
+/** Where and how the MCP listener accepts connections. */
+export interface McpListenOptions {
+  /** 127.0.0.1 (default) or, in container mode only, every interface. */
+  host?: "127.0.0.1" | "0.0.0.0";
+  /** When set, every /mcp request must carry `Authorization: Bearer <token>` (compared in constant time). */
+  bearerToken?: string;
+  caps?: Partial<McpHttpCaps>;
+}
+
+/** The listener settings cannot be served safely: nothing was started. */
+export class ListenError extends Error {}
+
+const MAX_BODY = MCP_HTTP_CAPS.maxBodyBytes;
 class BodyTooLarge extends Error {}
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
@@ -104,7 +156,7 @@ function hostAllowed(req: IncomingMessage): boolean {
 }
 
 /** Minimal node:http to fetch-API bridge for the SDK's web-standard handler. */
-async function toWebRequest(req: IncomingMessage, port: number): Promise<Request> {
+async function toWebRequest(req: IncomingMessage, port: number, maxBody: number = MAX_BODY): Promise<Request> {
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(", ") : v);
@@ -115,7 +167,7 @@ async function toWebRequest(req: IncomingMessage, port: number): Promise<Request
     let size = 0;
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
-      if (size > MAX_BODY) throw new BodyTooLarge();
+      if (size > maxBody) throw new BodyTooLarge();
       chunks.push(chunk as Buffer);
     }
     body = new Uint8Array(Buffer.concat(chunks));
@@ -132,12 +184,23 @@ async function sendWebResponse(response: Response, res: ServerResponse): Promise
   res.end();
 }
 
-export async function startMcpServer(build: Build, config: ServerConfig, port = 0, extras: ServerExtras = {}): Promise<RunningMcpServer> {
+export async function startMcpServer(build: Build, config: ServerConfig, port = 0, extras: ServerExtras = {},
+  listen: McpListenOptions = {}): Promise<RunningMcpServer> {
+  const host = listen.host ?? "127.0.0.1";
+  const token = listen.bearerToken;
+  // X1: a listener beyond loopback without a bearer token is never started. The Host check is not access control.
+  if (host !== "127.0.0.1" && (token === undefined || token.length === 0)) {
+    throw new ListenError("the MCP listener listens beyond loopback only with a bearer token (TRACKER_MCP_TOKEN or TRACKER_MCP_TOKEN_FILE). Not starting.");
+  }
+  const caps: McpHttpCaps = { ...MCP_HTTP_CAPS, ...listen.caps };
   const deps: Deps = { api: new TrackerApi(config.backendUrl, config.backendToken, extras.attribution === true), config };
   const handler = createMcpHandler(() => createMcpServer(build, config, deps, extras));
   let boundPort = 0;
+  let inFlight = 0;
   const http = createServer((req, res) => {
     void (async () => {
+      let counted = false;
+      let cap: NodeJS.Timeout | undefined;
       try {
         if (!hostAllowed(req)) {
           res.writeHead(403, { "content-type": "text/plain" }).end("Forbidden: loopback Host and Origin only");
@@ -147,14 +210,39 @@ export async function startMcpServer(build: Build, config: ServerConfig, port = 
           res.writeHead(404, { "content-type": "text/plain" }).end("Not found; the MCP endpoint is /mcp");
           return;
         }
-        await sendWebResponse(await handler.fetch(await toWebRequest(req, boundPort)), res);
+        if (token !== undefined && !bearerMatches(req.headers.authorization, token)) {
+          res.writeHead(401, { "content-type": "text/plain", "www-authenticate": 'Bearer realm="tiny-tracker"' })
+            .end("Unauthorized: this listener needs its bearer token");
+          return;
+        }
+        if (inFlight >= caps.maxInFlight) {
+          res.writeHead(503, { "content-type": "text/plain", "retry-after": "1" }).end("Busy: too many requests in flight");
+          return;
+        }
+        inFlight += 1;
+        counted = true;
+        if (req.method === "POST") {
+          // Cut a held answer off at the cap: the connection closes with no reply, which a client sees as a lost response.
+          cap = setTimeout(() => { req.socket.destroy(); }, caps.responseCapMs);
+          cap.unref();
+        }
+        await sendWebResponse(await handler.fetch(await toWebRequest(req, boundPort, caps.maxBodyBytes)), res);
       } catch (e) {
         if (!res.headersSent) res.writeHead(e instanceof BodyTooLarge ? 413 : 500, { "content-type": "text/plain" });
         res.end();
+      } finally {
+        if (cap) clearTimeout(cap);
+        if (counted) inFlight -= 1;
       }
     })();
   });
-  await new Promise<void>((resolve) => http.listen(port, "127.0.0.1", resolve));
+  http.maxConnections = caps.maxConnections;
+  http.headersTimeout = caps.headersTimeoutMs;
+  http.requestTimeout = caps.requestTimeoutMs;
+  await new Promise<void>((resolve, reject) => {
+    http.once("error", reject);
+    http.listen(port, host, () => { http.off("error", reject); resolve(); });
+  });
   boundPort = (http.address() as AddressInfo).port;
   return {
     url: `http://127.0.0.1:${boundPort}/mcp`,

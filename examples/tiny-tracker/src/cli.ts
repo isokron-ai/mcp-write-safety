@@ -12,6 +12,7 @@ import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension, BackendFaultHooks } from "./backend/http.js";
 import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
 import type { Clock } from "./clock.js";
+import { resolveTransport, TransportError } from "./transport.js"; // stream F
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -209,6 +210,15 @@ async function main(): Promise<void> {
     if (e instanceof TokenError) fail(e.message);
     throw e;
   }
+
+  // ---- stream F: transport settings (src/transport.ts): container mode needs a bearer token for /mcp (X1) ----
+  try {
+    resolveTransport(layout, env, process.argv.slice(2));
+  } catch (e) {
+    if (e instanceof TransportError) fail(e.message);
+    throw e;
+  }
+  // ---- end stream F ----
 
   // ---- stream E: --supervise hands over to the supervisor (src/supervisor.ts), which starts this command twice ----
   if (supervise) {
