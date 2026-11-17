@@ -31,3 +31,7 @@ A delayed-recovery check (24 hours) should not depend on one process staying up.
 - A whole-stack restart keeps data, key records and digests; delayed recovery no longer needs a pinned process.
 - The journal is readable with standard tools, and a third party can recount effects from it.
 - The journal format has its own version, separate from the package version and from `fixture-api`.
+
+## The data-dir lock (G2 round 3)
+
+The lock is best-effort, as G13 allows ("one instance, enforced best-effort"): Node core has no OS-held lock. A stale lock is taken over by rename-aside, compare (same inode and text) and link-back, and a moved lock that is not proven stale is never deleted. Two residual cases are stated, not fixed: a starter that crashes or stalls between the move and the link-back can leave the holder without a lock file; and three simultaneous starts can leave two running (the second refuses and keeps the moved lock). The mitigation is one starter per data dir (`--supervise` serializes its children). 0.4.0 adopts an OS-held lock: a native helper, mkdir leases with heartbeats, or the supervisor as the only starter.

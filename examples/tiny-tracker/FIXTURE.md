@@ -275,6 +275,14 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - The journal format (`journal-format/1`), each schema (`-1` in its file name) and each digest domain (`/1` in its tag) have their own versions, separate from the package version.
 - `--profile 0.1` keeps the 0.1.0 surface in every later release.
 
+### Planned for 0.4.0
+
+| Item | Why | Options |
+|---|---|---|
+| An OS-held data-dir lock | The 0.3.0 pid-file lock is best-effort (see the limits) | a small native helper (flock/fcntl), `proper-lockfile`-style mkdir leases with heartbeats, or the supervisor as the only starter |
+| The fixture clock's offset in the journal | CMP-65 refuses `durable` with `clock` in 0.3.0 | a new journal-format/1 line kind |
+| writecheck rows for the inflight-gated MCP defects | they have no expectation row in 0.3.0 | a harness leg with `inflight` |
+
 ## Limits: what a run against this fixture does not show
 
 - **It shows how a harness behaves against this server, nothing about any other server.** A harness that reports the expected answers here has been checked against one small, deliberately simple target.
@@ -290,6 +298,11 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - **writecheck coverage.** writecheck's tiny-tracker integration test starts `tiny-tracker server` with the default profile, so the two inflight-gated MCP-layer defects, `in-progress-reported-not-applied` and `settle-miss-reported-not-applied`, have no expectation row there: that run says nothing about them (tiny-tracker's own tests show both). Rows and a leg with `inflight` are listed for 0.4.0.
 - **Crash points between the effect and the key record.** `key-record-after-effect` shows from outside the process only through `backend/after-effect-before-key/crash`, which needs `tiny-tracker all --supervise` and `durable`; a run with no crash between the two (the restart leg of a planted A5, say) shows nothing against it. The in-process T1 shows it too.
 - **One instance.** Behaviour with more than one server instance on the same data is out of scope.
+- **The data-dir lock is best-effort (G13: one instance, enforced best-effort).** Node has no OS-held file lock (flock or fcntl), so the lock is a pid file taken over by rename-aside, compare and link-back. No live lock is ever deleted, but two residual cases can leave two servers on one dir:
+  - a starter that crashes or stalls between moving a stale lock aside and linking it back can leave the current holder without a lock file, and a later start then runs beside it;
+  - three starts at the same instant: if a third creates a lock just after a second moved a live holder's lock aside, the second refuses and keeps the moved lock on disk (it names the file), while the third and the holder both run.
+
+  Mitigation: run one starter per data dir. `--supervise` serializes its own children (it restarts the backend child only after the old one has exited). 0.4.0 replaces this with an OS-held lock (see *Planned for 0.4.0*).
 - **Two containers sharing one data-dir volume are not supported.** Both servers are usually pid 1, and neither can see whether the other is alive, so the lock cannot tell a live holder in the other container from an earlier run of its own: a lock that names this pid and that this process did not write is taken as an earlier run's and taken over. Give each container its own data dir.
 - **Forced overlaps are not guaranteed.** A simultaneous same-key repeat can only be observed or not observed; known answers list both where both can happen.
 
