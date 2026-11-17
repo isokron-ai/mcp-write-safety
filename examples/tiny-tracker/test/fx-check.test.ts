@@ -154,6 +154,20 @@ describe("fx-check FX-LOOK-2 on the real lookup-reexecutes build (G1 review fold
       await run.stop();
     }
   });
+
+  it("with lookup-wrong-record as well, FX-LOOK-2 is still violated: the never-written key shares no 8-character prefix with a probe key", async () => {
+    const { startBuild } = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);
+    const run = await startBuild(["--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults", "--defect", "lookup-reexecutes", "--backend-defect", "lookup-wrong-record"]);
+    try {
+      const r = await fxCheck({ backend: run.state.backend, mcp: run.state.mcp, control: run.state.control, tokens: run.tokens, probe: true });
+      const v = verdicts(r);
+      assert.equal(v["FX-LOOK-1"], "violated", r.findings.find((f) => f.id === "FX-LOOK-1")?.reason);
+      assert.equal(v["FX-LOOK-2"], "violated", r.findings.find((f) => f.id === "FX-LOOK-2")?.reason);
+      assert.equal(r.probes.reset, "reset");
+    } finally {
+      await run.stop();
+    }
+  });
 });
 
 describe("Python recount over what the evidence API serves (three-way recount readiness)", { skip: needPython }, () => {

@@ -405,8 +405,10 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
   if (lookNeeds("FX-LOOK-2")) {
     const before = { executions: await executionCount(), tickets: listOf((await ev("/export")).body, "tickets")?.length };
     const looked: string[] = [];
-    // A hit (k1) and a miss (a key never used): a lookup must not write in either case.
-    const miss = `fxc-${tag}-never-written`;
+    // A hit (k1) and a miss (a key never used): a lookup must not write in either case. The miss key's first eight
+    // characters differ from every probe key's (fxc-<tag>), so a lookup that matches keys by prefix (the
+    // lookup-wrong-record defect) still misses on it instead of answering a probe key's record and hiding a re-execution.
+    const miss = `fxm-${tag}-never-written`;
     for (const key of [k1!, miss]) {
       for (let i = 0; i < 2; i++) {
         await ev(`/operations/${encodeURIComponent(key)}`); looked.push("evidence");
