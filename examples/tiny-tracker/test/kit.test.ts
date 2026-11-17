@@ -44,7 +44,9 @@ describe("the container image (Dockerfile)", () => {
 
   it("documents loopback publishing and its own test status", () => {
     assert.match(df, /-p 127\.0\.0\.1:47310:47310/);
-    assert.match(df, /not built or run by the fixture's own test suite/);
+    assert.match(df, /CI's container job builds the image/);
+    assert.match(df, /TRACKER_EVIDENCE_LISTEN=0\.0\.0\.0:47312/);
+    assert.match(df, /^EXPOSE 47312$/m);
   });
 
   it("the build context leaves out local installs and builds", () => {
