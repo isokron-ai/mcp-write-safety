@@ -4,6 +4,14 @@
 // against any server that declares the endpoints, not only this one.
 //
 //   fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--probe] [--json]
+//            [--data-dir DIR] [--durability-plant FILE | --durability-verify FILE]
+//
+// 0.4.0 adds the durability and retention properties: FX-KEY-2 from the tool
+// descriptions (--mcp); FX-KEY-1 by moving the fixture clock to just inside
+// the stated retention (feature clock, --control, --probe; it moves the clock
+// last, and for good); FX-DUR-1 across a restart (a plant, then a verify);
+// FX-DUR-2 from the data dir's files (read only). FX-DUR-3 and FX-KEY-3 need a
+// crash or a hold no fault point offers: "not checked", with the reason.
 //
 // Tokens come from the environment or a file, never from the command line:
 //   TRACKER_EVIDENCE_TOKEN (or _FILE, or DIR/evidence.token)   needed
@@ -30,7 +38,7 @@
 // the command line, a token, or the build descriptor could not be used.
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -59,6 +67,13 @@ export interface FxCheckOptions {
   dropWaitMs?: number;
   /** The principal evidence reads name (?principal=), when more than one is configured. */
   principal?: string;
+  /**
+   * FX-DUR-1 across a restart (0.4.0): `plant` makes one keyed create (outside any run, so the probe reset keeps it) and
+   * returns it in the report; `verify` is a plant from before a restart of the same build, checked now.
+   */
+  durability?: { plant?: boolean; verify?: DurabilityPlant };
+  /** FX-DUR-2 (0.4.0): the build's data dir, read (never written) to check the journal format's files and lines. */
+  dataDir?: string;
 }
 
 export interface FxCheckReport {
@@ -67,6 +82,8 @@ export interface FxCheckReport {
   build: { build_hash: string; descriptor_hash: string; features: string[]; defects: unknown } | null;
   probes: { run: string | null; principal: string | null; keys: string[]; reset: string | null };
   findings: Finding[];
+  /** With durability.plant: the plant to keep for --durability-verify after a restart. */
+  plant?: DurabilityPlant;
 }
 
 /** The feature each property needs; a build without it gets "not applicable". */
@@ -89,7 +106,36 @@ const NEEDS: Record<FixturePropertyId, string[]> = {
 };
 
 /** Properties this version of fx-check probes; the others are reported, never guessed. */
-const CHECKED = new Set<FixturePropertyId>(["FX-BLD-1", "FX-DIG-1", "FX-DIG-2", "FX-DIG-3", "FX-LOOK-1", "FX-LOOK-2", "FX-LOOK-3", "FX-FLT-1"]);
+const CHECKED = new Set<FixturePropertyId>(["FX-BLD-1", "FX-DIG-1", "FX-DIG-2", "FX-DIG-3", "FX-LOOK-1", "FX-LOOK-2", "FX-LOOK-3", "FX-FLT-1",
+  "FX-DUR-1", "FX-DUR-2", "FX-DUR-3", "FX-KEY-1", "FX-KEY-2", "FX-KEY-3"]);
+
+/** The files journal-format/1 keeps in a data dir (decision 0003, src/backend/journal.ts); anything else is not the format. */
+export const DATA_DIR_FILES = ["tiny-tracker.data", "lock", "journal.jsonl"] as const;
+
+/**
+ * What --durability-plant writes and --durability-verify reads (FX-DUR-1): one keyed create made before a restart.
+ * No token is kept in it.
+ */
+export interface DurabilityPlant {
+  fx_check_plant: "fx-check-plant/1";
+  build_hash: string;
+  boot_id: string;
+  principal: string | null;
+  key: string;
+  request: { path: string; body: unknown };
+  status: number;
+  execution_id: string | null;
+  /** The response body as committed, in RFC 8785 form. */
+  canonical: string;
+}
+
+/** "A key is remembered for 7 days; ..." → milliseconds, or undefined (FX-KEY-2's sentence, src/backend/expiry.ts). */
+export function statedRetentionMs(text: string): number | undefined {
+  const m = /A key is remembered for (\d+) (day|hour|minute|second|ms)s?\b/.exec(text);
+  if (!m) return undefined;
+  const unit = { day: 86_400_000, hour: 3_600_000, minute: 60_000, second: 1000, ms: 1 }[m[2] as "day"];
+  return Number(m[1]) * unit;
+}
 
 interface Reply { status: number; body: any; headers: Headers; error?: string }
 
@@ -189,8 +235,12 @@ class Mcp {
   }
 
   async tools(): Promise<string[]> {
+    return (await this.toolList()).map((t: any) => t.name);
+  }
+
+  async toolList(): Promise<any[]> {
     const r = await this.rpc("tools/list", {});
-    return (r.message?.result?.tools ?? []).map((t: any) => t.name);
+    return r.message?.result?.tools ?? [];
   }
 
   call(name: string, args: unknown, meta?: Record<string, string>, timeoutMs?: number) {
@@ -499,6 +549,143 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
     }
   }
 
+  // ---- FX-KEY-2: every key-accepting tool states the key retention (read-only, needs --mcp) ----
+  let stated: number | undefined;
+  if (wants("FX-KEY-2") || wants("FX-KEY-1")) {
+    if (!o.mcp) {
+      for (const id of ["FX-KEY-2", "FX-KEY-1"] as const) if (wants(id)) set(id, "not checked", "needs --mcp: the stated retention is read from the tool descriptions");
+    } else {
+      const mcp = new Mcp(o.mcp);
+      const init = await mcp.initialize();
+      const tools = await mcp.toolList();
+      const keyed = tools.filter((t) => t?.inputSchema?.properties && "idempotency_key" in t.inputSchema.properties);
+      const values = keyed.map((t) => ({ name: t.name as string, ms: statedRetentionMs(String(t.description ?? "")) }));
+      const unstated = values.filter((v) => v.ms === undefined).map((v) => v.name);
+      const distinct = [...new Set(values.map((v) => v.ms).filter((v) => v !== undefined))];
+      const inInstructions = statedRetentionMs(String(init?.instructions ?? ""));
+      stated = distinct.length === 1 ? distinct[0] : undefined;
+      if (wants("FX-KEY-2")) {
+        const problems: string[] = [];
+        if (keyed.length === 0) problems.push("no tool takes an idempotency_key");
+        if (unstated.length) problems.push(`${unstated.join(", ")} state${unstated.length === 1 ? "s" : ""} no key retention`);
+        if (distinct.length > 1) problems.push(`the tools state ${distinct.length} different retentions`);
+        if (inInstructions !== undefined && stated !== undefined && inInstructions !== stated) problems.push("the server instructions state another retention than the tools");
+        set("FX-KEY-2", problems.length ? "violated" : "held", problems.length ? problems.join("; ")
+          : `all ${keyed.length} key-accepting tools state the same retention (${stated} ms)${inInstructions !== undefined ? ", as do the server instructions" : ""}`,
+          { tools: keyed.length, retention_ms: stated ?? null, instructions: inInstructions ?? null });
+      }
+    }
+  }
+
+  // ---- FX-DUR-1: a keyed create survives a whole-stack restart (plant, then verify after the restart) ----
+  if (o.durability?.verify && wants("FX-DUR-1")) {
+    const p = o.durability.verify;
+    const bootNow = d.process?.boot_id;
+    if (p.build_hash !== d.build_hash) set("FX-DUR-1", "not checked", `the plant is from build ${p.build_hash}, this is ${d.build_hash}`);
+    else if (p.boot_id === bootNow) set("FX-DUR-1", "not checked", "the boot_id is the plant's: the stack was not restarted");
+    else if (!o.tokens.backend) set("FX-DUR-1", "not checked", "no backend token: the repeat after the restart is a write");
+    else {
+      const before = await executionCount();
+      const again = await request(`${base}${p.request.path}`, {
+        method: "POST", headers: { authorization: `Bearer ${o.tokens.backend}`, "content-type": "application/json", [HEADERS.operation]: opTag(), "idempotency-key": p.key },
+        body: JSON.stringify(p.request.body),
+      });
+      const after = await executionCount();
+      const problems: string[] = [];
+      if (again.status !== p.status) problems.push(`the repeat after the restart answered ${again.status}, the first write ${p.status}`);
+      else {
+        if (again.headers.get("idempotent-replayed") !== "true") problems.push("the repeat after the restart is not marked as a replay");
+        if (canonicalize(again.body ?? null) !== p.canonical) problems.push("the repeat after the restart answers other bytes than the first write");
+        const x = again.headers.get("tiny-tracker-execution");
+        if (p.execution_id && x !== null && x !== p.execution_id) problems.push(`the repeat names execution ${x}, the first write ${p.execution_id}`);
+      }
+      if (before !== undefined && after !== undefined && after !== before) problems.push(`the repeat made ${after - before} new execution(s)`);
+      set("FX-DUR-1", problems.length ? "violated" : "held", problems.length ? problems.join("; ")
+        : `after the restart (boot ${p.boot_id} → ${bootNow}) the keyed repeat was answered as a replay of ${p.execution_id ?? "the first write"}, with the same bytes and no new execution`,
+        { key: p.key, boot_before: p.boot_id, boot_after: bootNow });
+    }
+  } else if (o.durability?.plant && wants("FX-DUR-1")) {
+    if (!o.tokens.backend || o.probe !== true) set("FX-DUR-1", "not checked", "the plant is a write: needs --probe and a backend token");
+    else {
+      const key = newKey();
+      const body = { title: `fx-check durability plant ${key}`, project: "inbox" };
+      // No run tag: the probe run is reset at the end, and a reset would remove what the restart must show.
+      const r = await request(`${base}/tickets`, {
+        method: "POST", headers: { authorization: `Bearer ${o.tokens.backend}`, "content-type": "application/json", [HEADERS.operation]: opTag(), "idempotency-key": key },
+        body: JSON.stringify(body),
+      });
+      if (r.status !== 201) set("FX-DUR-1", "not checked", `the plant create answered ${r.status}`);
+      else {
+        report.plant = { fx_check_plant: "fx-check-plant/1", build_hash: d.build_hash, boot_id: d.process?.boot_id, principal, key,
+          request: { path: "/tickets", body }, status: r.status, execution_id: r.headers.get("tiny-tracker-execution"), canonical: canonicalize(r.body ?? null) };
+        set("FX-DUR-1", "not checked", `planted ${key}; restart the stack on the same data dir and run --durability-verify with the plant`, { key });
+      }
+    }
+  } else if (wants("FX-DUR-1")) set("FX-DUR-1", "not checked", "needs a restart: plant with --durability-plant FILE, restart the stack, then --durability-verify FILE");
+
+  // ---- FX-DUR-2: the effect and its key record are one journal line (the data dir's files, read only) ----
+  if (wants("FX-DUR-2")) {
+    if (!o.dataDir) set("FX-DUR-2", "not checked", "needs --data-dir: the journal's files are read from it (never written)");
+    else {
+      const { readdirSync } = await import("node:fs");
+      let names: string[] = [];
+      let lines: any[] = [];
+      try {
+        names = readdirSync(o.dataDir);
+        const text = readFileSync(join(o.dataDir, "journal.jsonl"), "utf8");
+        lines = text.split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+      } catch (e) {
+        set("FX-DUR-2", "not checked", `the data dir could not be read: ${(e as Error).message}`);
+      }
+      if (wants("FX-DUR-2")) {
+        const problems: string[] = [];
+        const extra = names.filter((n) => !(DATA_DIR_FILES as readonly string[]).includes(n));
+        if (extra.length) problems.push(`the data dir holds ${extra.join(", ")} beside the journal: key records kept in another file are written apart from their effect`);
+        const keyed = lines.filter((l) => l?.line === "commit" && l?.tx?.request?.key);
+        // A key record is rebuilt from its commit line: the request's key, the status, the committed body and headers.
+        const bare = keyed.filter((l) => l.tx.body === undefined || l.tx.headers === undefined || typeof l.tx.status !== "number");
+        if (bare.length) problems.push(`${bare.length} keyed commit line(s) carry no committed answer to rebuild the key record from`);
+        if (keyed.length === 0 && !problems.length) set("FX-DUR-2", "not checked", "the journal holds no keyed commit yet (run with --probe first)");
+        else set("FX-DUR-2", problems.length ? "violated" : "held", problems.length ? problems.join("; ")
+          : `${keyed.length} keyed commit line(s), each with its key and reply in the one line; the data dir holds only the journal-format/1 files`,
+          { keyed_lines: keyed.length, files: names.sort() });
+      }
+    }
+  }
+
+  // ---- FX-DUR-3 and FX-KEY-3: need a crash or a hold the fault points do not offer ----
+  if (wants("FX-DUR-3")) set("FX-DUR-3", "not checked", "needs a crash between the journal append and the answer, which no fault point offers; the crash suite (T1) covers it");
+  if (wants("FX-KEY-3")) set("FX-KEY-3", "not checked", "needs a backend request held before commit, which no built fault point offers; the inflight tests cover it");
+
+  // ---- FX-KEY-1: a key is remembered for at least the stated retention (moves the fixture clock: last) ----
+  if (!skipWrites("FX-KEY-1")) {
+    if (!control) set("FX-KEY-1", "not checked", "needs --control with a control token (the fixture clock moves there)");
+    else if (d.clock?.domain === undefined || !(Array.isArray(d.features) && d.features.includes("clock"))) set("FX-KEY-1", "not checked", "the build has no fixture clock (feature clock): the retention cannot be waited out");
+    else if (stated === undefined) set("FX-KEY-1", "not checked", "no single stated retention to check against (FX-KEY-2)");
+    else {
+      const key = newKey();
+      const body = { title: `fx-check retention probe ${key}`, project: "inbox" };
+      const send = () => request(`${base}/tickets`, {
+        method: "POST", headers: { authorization: `Bearer ${o.tokens.backend}`, "content-type": "application/json", [HEADERS.operation]: opTag(), ...(run ? { [HEADERS.run]: run } : {}), "idempotency-key": key },
+        body: JSON.stringify(body),
+      });
+      const first = await send();
+      // Just inside the stated retention: a minute short of it (half of it when it is two minutes or less).
+      const advance = stated > 120_000 ? stated - 60_000 : Math.floor(stated / 2);
+      const moved = first.status === 201 ? await ctl("POST", "/_fixture/clock", { advance_ms: advance }) : undefined;
+      if (first.status !== 201) set("FX-KEY-1", "not checked", `the probe create answered ${first.status}`);
+      else if (moved?.status !== 200) set("FX-KEY-1", "not checked", `moving the fixture clock answered ${moved?.status}`);
+      else {
+        const again = await send();
+        const replayed = again.status === first.status && again.headers.get("idempotent-replayed") === "true" && canonicalize(again.body ?? null) === canonicalize(first.body ?? null);
+        set("FX-KEY-1", replayed ? "held" : "violated", replayed
+          ? `${advance} ms after the write (stated retention ${stated} ms) the keyed repeat was still answered as a replay`
+          : `${advance} ms after the write, inside the stated retention of ${stated} ms, the keyed repeat answered ${again.status}${again.body?.error ? ` ${again.body.error}` : ""}, not a replay`,
+          { key, advance_ms: advance, retention_ms: stated });
+      }
+    }
+  }
+
   // ---- FX-BLD-1 (part two): the MCP mirror ----
   if (wants("FX-BLD-1")) {
     if (o.mcp) {
@@ -555,7 +742,11 @@ export function formatReport(r: FxCheckReport): string {
 }
 
 const USAGE = `usage: fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--principal ID] [--probe] [--json]
+                [--data-dir DIR] [--durability-plant FILE | --durability-verify FILE]
 Read-only by default; --probe writes probe tickets in a run of its own and resets it afterwards.
+FX-DUR-1 needs a restart: --probe --durability-plant FILE writes one keyed ticket (outside the run) and keeps it in
+FILE; restart the stack on the same data dir, then --durability-verify FILE checks its repeat is a replay.
+--data-dir DIR is read (never written) for FX-DUR-2. FX-KEY-1 moves the fixture clock (feature clock, --probe).
 Tokens from the environment or a file: TRACKER_EVIDENCE_TOKEN (needed), TRACKER_BACKEND_TOKEN, TRACKER_CONTROL_TOKEN,
 FX_CHECK_SECOND_TOKEN (each also as NAME_FILE). Exit 0: nothing violated; 1: a property violated; 2: unusable setup.`;
 
@@ -565,6 +756,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
     ({ values } = parseArgs({ args: argv, options: {
       backend: { type: "string" }, mcp: { type: "string" }, control: { type: "string" }, "token-dir": { type: "string" }, principal: { type: "string" },
       probe: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean" },
+      "durability-plant": { type: "string" }, "durability-verify": { type: "string" }, "data-dir": { type: "string" },
     } }));
   } catch (e) {
     err.write(`fx-check: ${(e as Error).message}\n${USAGE}\n`);
@@ -583,9 +775,22 @@ export async function main(argv: string[], env: Record<string, string | undefine
   if (argv.some((a) => all.some((t) => t.length >= 8 && a.includes(t)))) { err.write("fx-check: a token is on the command line; give tokens by environment or file only\n"); return 2; }
   if (!tokens.evidence) { err.write("fx-check: no evidence token (TRACKER_EVIDENCE_TOKEN, TRACKER_EVIDENCE_TOKEN_FILE or --token-dir)\n"); return 2; }
   try {
+    let verify: DurabilityPlant | undefined;
+    if (typeof values["durability-verify"] === "string") {
+      try {
+        verify = JSON.parse(readFileSync(values["durability-verify"], "utf8"));
+      } catch (e) {
+        err.write(`fx-check: --durability-verify: ${(e as Error).message}\n`);
+        return 2;
+      }
+      if (verify?.fx_check_plant !== "fx-check-plant/1") { err.write("fx-check: --durability-verify names no fx-check plant\n"); return 2; }
+    }
     const report = await fxCheck({ backend: values.backend, mcp: values.mcp as string | undefined, control: values.control as string | undefined,
       tokens: { ...tokens, evidence: tokens.evidence }, probe: values.probe === true,
+      ...(verify ? { durability: { verify } } : typeof values["durability-plant"] === "string" ? { durability: { plant: true } } : {}),
+      ...(typeof values["data-dir"] === "string" ? { dataDir: values["data-dir"] } : {}),
       ...((values.principal ?? env.FX_CHECK_PRINCIPAL) ? { principal: (values.principal ?? env.FX_CHECK_PRINCIPAL) as string } : {}) });
+    if (report.plant && typeof values["durability-plant"] === "string") writeFileSync(values["durability-plant"], `${JSON.stringify(report.plant, null, 2)}\n`, { mode: 0o600 });
     out.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
     return report.findings.some((f) => f.verdict === "violated") ? 1 : 0;
   } catch (e) {
