@@ -126,7 +126,7 @@ describe("the kit's documents", () => {
       "/operations/{key}/fence", "/_fixture/runs", "/_fixture/runs/{run}/reset", "/_fixture/faults", "/_fixture/clock"];
     const declared = [...api.matchAll(/^  (\/[^:]*):$/gm)].map((m) => m[1]);
     assert.deepEqual([...declared].sort(), [...routes].sort());
-    for (const code of ["in_progress", "key_fenced", "run_reset", "needs_supervise", "key_expired", "principal_required", "not_enabled", "no_record"]) {
+    for (const code of ["in_progress", "key_fenced", "run_reset", "needs_supervise", "key_expired", "principal_required", "not_enabled", "no_record", "needs_feature"]) {
       assert.match(api, new RegExp(`\\b${code}\\b`), code);
     }
     assert.match(api, /"410": \{ \$ref: "#\/components\/responses\/KeyExpired" \}/);
