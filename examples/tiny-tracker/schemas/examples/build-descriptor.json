@@ -4,10 +4,13 @@
     "name": "@mcp-write-safety/tiny-tracker",
     "version": "0.1.0"
   },
-  "fixture_api": "fixture-api/0",
+  "fixture_api": "fixture-api/1",
   "profile": "default",
   "features": [
-    "evidence"
+    "evidence",
+    "execution-records",
+    "lookup",
+    "principals"
   ],
   "defects": {
     "mcp": [],
@@ -34,9 +37,9 @@
   },
   "process": {
     "layout": "all",
-    "boot_id": "5e22fec86c4b05de",
+    "boot_id": "df45c3835b0cf85e",
     "restart_count": 0,
-    "started_at": "2026-11-17T04:34:29.254Z"
+    "started_at": "2026-11-17T06:30:54.645Z"
   },
   "journal": {
     "head": null
@@ -48,6 +51,6 @@
     "domain": "wall",
     "offset_ms": 0
   },
-  "build_hash": "38514fb2fa3073a768b3a8a413b603a35625cc91270241b0265b52fde66b7c0d",
-  "descriptor_hash": "e324a8325269f41c4b492134ba01fa25f2072571d62f767fdc4d66a1f62745ed"
+  "build_hash": "bf36346f902ed0c29eeba5d0a4d6d890400f8027d0fe535c345ce78fcc107940",
+  "descriptor_hash": "d5346432a77269ef182de5ffeb923e162c5ab1631a4ffa214b92980ad1206193"
 }

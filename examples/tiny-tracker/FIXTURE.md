@@ -217,10 +217,15 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-4 | `durable` without `--data-dir` (and `--data-dir` without `durable`) |
 | CMP-5 | The `key-store-honest` variant with a `lookup` named with `--features` or `TRACKER_FEATURES`: its keys live in the MCP server, where a backend lookup cannot see them. A `lookup` that comes only from the default profile is not refused: the build turns it off and says so (owner decision, 16 Nov 2026). The state line carries `"features_off": ["lookup off: key-store-honest keeps keys in the MCP server"]`, a notice goes to stderr, and the build descriptor's `features` and `build_hash` are those of the build without `lookup`. |
 | CMP-6 | A fault demonstration without the defect or variant that makes it meaningful (for example a crash between effect and key record needs `key-record-after-effect` or `key-store-honest`); a fault name the point table replaced; an unknown point |
-| CMP-7 | Arming any fault at start in this version |
+| CMP-7 | A fault armed at start without the `faults` feature, or at a point this build cannot arm (the answer names the release that builds the point, or says it is not planned). Faults are armed on the control listener (`POST /_fixture/faults`); in 0.2.0 the armable point is `mcp/after-backend-reply/drop` |
 | CMP-8 | `--fixture-control` outside `tiny-tracker all` (this version) |
 | CMP-9 | `--backend-defect` in `tiny-tracker server`, where no backend runs |
 | CMP-10 | `strict-input` in `tiny-tracker server` |
+| CMP-11 | `evidence` outside `tiny-tracker all` in this version (the build descriptor must cover both layers) |
+| CMP-20 | `lookup` without `execution-records` (an operation record names the execution record of its write) |
+| CMP-21 | `principals` named in `tiny-tracker server` (it is a backend feature) |
+| CMP-30, CMP-31 | `ledger` without `evidence`, or without `strict-input` (the ledger hashes every request) |
+| CMP-32, CMP-33 | `faults` without the `ledger`, or without `--fixture-control` (faults are armed on the control listener only) |
 
 Tests check the command line against the table on a pairwise set of combinations, not the full product.
 
@@ -253,7 +258,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 
 ## Versions and stability
 
-- The fixture interface is **`fixture-api/0`**: a draft. Paths, fields and names on this page can change in 0.x; a change is listed in the CHANGELOG, and a removal is announced one release ahead.
+- The fixture interface is **`fixture-api/1`** from 0.2.0 (it was `fixture-api/0` before): the control API arms faults (`POST /_fixture/faults`) and resets runs (`POST /_fixture/runs/:id/reset`), and the evidence namespace serves `/ledger`, `/executions` and `/operations` with their features. It is still a draft in 0.x: paths, fields and names on this page can change; a change is listed in the CHANGELOG and bumps the number, and a removal is announced one release ahead.
 - The journal format (`journal-format/1`), each schema (`-1` in its file name) and each digest domain (`/1` in its tag) have their own versions, separate from the package version.
 - `--profile 0.1` keeps the 0.1.0 surface in every later release.
 
