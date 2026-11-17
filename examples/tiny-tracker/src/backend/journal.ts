@@ -23,8 +23,10 @@
 // store is put back and the request gets 503. Replay applies post-state only: no
 // operation is re-run and no clock is read, so a restart cannot change a digest.
 //
-// Recovery: a bad last line (a torn write) is dropped, cut from the file and
-// logged. A bad line anywhere else stops the start with an error. A pending line
+// Recovery: a torn write (an unterminated last line that does not decode) is
+// dropped, cut from the file and logged. Any other bad line, the last one
+// included when it has its newline or decodes (an unknown kind, a sequence
+// gap), stops the start with an error and the file is not touched. A pending line
 // that no commit or aborted line names is ended at start by an aborted line
 // (reason orphan_at_start), written before the backend serves.
 
@@ -340,7 +342,12 @@ export class Journal implements JournalSeam, KeyLineWriter {
       const line = decodeLine(parts[i]);
       const bad = lineProblem(line, i, lastCommit, new Set(open.keys()));
       if (bad !== undefined) {
-        if (!isLast) throw new JournalCorruptError(`${this.path}: line jseq ${i} is not valid (${bad}); only a torn last line is tolerated. Not starting.`);
+        // G2 fold-in 3: only a torn write is tolerated, that is an unterminated last line that does not decode. A line
+        // that decodes (an unknown kind, a sequence gap) or that has its newline is refused whatever its problem, and
+        // the file is left as it is (nothing below has touched it yet).
+        if (!(isLast && !terminated && line === undefined)) {
+          throw new JournalCorruptError(`${this.path}: line jseq ${i} is not valid (${bad}); only a torn last line (unterminated, not decodable) is tolerated. Not starting.`);
+        }
         this.log(`tiny-tracker: dropped a torn last journal line (jseq ${i}: ${bad})`);
         report.droppedTornLine = true;
         break;
@@ -534,16 +541,30 @@ export class Journal implements JournalSeam, KeyLineWriter {
 /** Reads a journal file without a store (recounts, tests): the lines, after the same checks as a start. */
 export function readJournal(path: string): { lines: JournalLine[]; tornLast: boolean } {
   const parts = readFileSync(path, "utf8").split("\n");
-  if (parts[parts.length - 1] === "") parts.pop();
+  const terminated = parts[parts.length - 1] === "";
+  if (terminated) parts.pop();
   const lines: JournalLine[] = [];
   let tornLast = false;
+  const open = new Set<number>();
+  let lastCommit = 0;
   for (let i = 0; i < parts.length; i++) {
     const l = decodeLine(parts[i]);
-    if (!l || l.jseq !== i) {
-      if (i === parts.length - 1) { tornLast = true; break; }
-      throw new JournalCorruptError(`${path}: line jseq ${i} is not valid`);
+    const bad = i === 0
+      ? (l === undefined ? "a bad checksum or a torn write" : l.line !== "header" || l.jseq !== 0 ? "not a journal header" : undefined)
+      : lineProblem(l, i, lastCommit, open);
+    if (bad !== undefined) {
+      // As at start (G2 fold-in 3): only an unterminated last line that does not decode is a torn write.
+      if (i === parts.length - 1 && !terminated && l === undefined) { tornLast = true; break; }
+      throw new JournalCorruptError(`${path}: line jseq ${i} is not valid (${bad})`);
     }
-    lines.push(l);
+    const line = l!;
+    if (line.line === "pending") open.add(line.jseq);
+    if (line.line === "aborted" || line.line === "fence") open.delete(line.pending_jseq);
+    if (line.line === "commit") {
+      lastCommit = line.commit_seq;
+      if (line.pending_jseq !== null) open.delete(line.pending_jseq);
+    }
+    lines.push(line);
   }
   return { lines, tornLast };
 }

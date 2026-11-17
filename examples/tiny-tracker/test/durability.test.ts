@@ -124,6 +124,46 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
     }
   });
 
+  it("G2 fold-in 3: a valid-looking last line with any problem is refused and the journal is untouched; only an unterminated undecodable line is dropped", async () => {
+    const t = tempDir("lastline");
+    try {
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      await b.api.send("POST", "/tickets", { project: "inbox", title: "a" });
+      await b.api.send("POST", "/tickets", { project: "inbox", title: "b" });
+      await b.close();
+      const file = join(t.dataDir, JOURNAL_FILE);
+      const good = readFileSync(file, "utf8");
+      const lines = readJournal(file).lines as any[];
+      const last = lines[lines.length - 1];
+      // Each case, checksummed (so it decodes), with and without its newline; and an undecodable line with its newline.
+      const unknownKind = encodeLine({ jseq: 3, line: "future-kind", principal: "p-default" } as any);
+      const forged = encodeLine({ ...last, jseq: 3, commit_seq: last.commit_seq + 5, tx: { ...last.tx, seq: last.commit_seq + 5 }, checksum: undefined } as any);
+      const cases: Array<[string, string]> = [
+        ["a checksummed unknown-kind line, terminated", `${unknownKind}\n`],
+        ["a checksummed unknown-kind line, unterminated", unknownKind],
+        ["a forged commit_seq+5 line, terminated", `${forged}\n`],
+        ["a forged commit_seq+5 line, unterminated", forged],
+        ["a line with a bad checksum, terminated", `${unknownKind.replace("future-kind", "future-kinx")}\n`],
+      ];
+      for (const [what, tail] of cases) {
+        writeFileSync(file, good + tail);
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), JournalCorruptError, what);
+        assert.equal(readFileSync(file, "utf8"), good + tail, `${what}: the journal is not touched`);
+        assert.ok(!existsSync(join(t.dataDir, LOCK_FILE)), `${what}: the lock is released`);
+        assert.throws(() => readJournal(file), JournalCorruptError, `${what}: the reader refuses it too`);
+      }
+      // The torn write: unterminated and not decodable. Dropped, cut, logged.
+      writeFileSync(file, good + unknownKind.slice(0, 20));
+      assert.equal(readJournal(file).tornLast, true);
+      const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      assert.equal(b2.backend.durability!.journal!.report!.droppedTornLine, true);
+      await b2.close();
+      assert.equal(readFileSync(file, "utf8"), good);
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("an orphan pending line becomes aborted (orphan_at_start) before the backend serves; the key is free", async () => {
     const t = tempDir("orphan");
     try {
