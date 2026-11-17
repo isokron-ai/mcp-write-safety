@@ -11,7 +11,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { Worker } from "node:worker_threads";
 import { durableBackend, movableClock, tempDir, TOKEN } from "./support/durable.js";
-import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit, LOCK_UNREADABLE_GRACE_MS } from "../src/backend/journal.js";
+import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit, LOCK_UNREADABLE_GRACE_MS, acquireLock, releaseLock } from "../src/backend/journal.js";
 import { startBackend } from "../src/start.js";
 import { digestOf, DOMAINS, fingerprintHash } from "../src/digest.js";
 import { DAY_MS, describeRetention, parseExpiryPolicy, parseRetention, retentionSentence } from "../src/backend/expiry.js";
@@ -443,6 +443,36 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       } finally {
         await b.close();
         other.cleanup();
+      }
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("G2 follow-up 2: two locks written in the same millisecond differ (a nonce), so releasing one keeps the other this process's; a case alias is one dir", () => {
+    const t = tempDir("locknonce");
+    try {
+      const fixed = () => new Date("2026-01-01T00:00:00.000Z");
+      const a = join(t.dir, "aa");
+      const b = join(t.dir, "bb");
+      const c = join(t.dir, "cc");
+      for (const d of [a, b, c]) prepareDataDir(d);
+      acquireLock(a, fixed, () => {});
+      acquireLock(b, fixed, () => {});
+      try {
+        const textA = readFileSync(join(a, LOCK_FILE), "utf8");
+        assert.notEqual(textA, readFileSync(join(b, LOCK_FILE), "utf8"), "a frozen clock no longer gives two equal lock texts");
+        releaseLock(b);
+        // A's lock met under a spelling HELD misses (here: its text in another dir): still this process's, refused.
+        // Before the fix, releasing bb dropped the shared text and this start took over its own live lock.
+        writeFileSync(join(c, LOCK_FILE), textA);
+        assert.throws(() => acquireLock(c, fixed, () => {}), /its lock names this process/);
+        // A case-variant spelling: one dir on a case-insensitive filesystem (APFS); on a case-sensitive one (Linux) it
+        // is another dir, so this part only runs where the filesystem folds case.
+        const alias = join(t.dir, "AA");
+        if (existsSync(alias)) assert.throws(() => acquireLock(alias, fixed, () => {}), /already open in this process/);
+      } finally {
+        releaseLock(a);
       }
     } finally {
       t.cleanup();

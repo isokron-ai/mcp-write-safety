@@ -175,7 +175,8 @@ const CREATED = new Map<string, { ino: number; text: string }>();
 /** The key a data dir is held under: its real path (the dir exists once prepareDataDir ran), else the resolved path. */
 function heldKey(dir: string): string {
   try {
-    return realpathSync(dir);
+    // native: the canonical spelling, the case included on a case-insensitive filesystem (APFS: "aa" and "AA" are one dir).
+    return realpathSync.native(dir);
   } catch {
     return resolve(dir);
   }
@@ -364,7 +365,9 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
   if (HELD.has(real)) throw new DataDirError(`the data dir ${dir} is already open in this process; one writer per data dir`);
   for (let attempt = 0; attempt < 5; attempt++) {
     // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
-    const content = JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString() });
+    // nonce (G2 follow-up 2): two locks this process writes never share a text, even in the same millisecond or under a
+    // frozen wallNow, so releasing one never makes another look like an earlier process's (WRITTEN matches on text).
+    const content = JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString(), nonce: randomBytes(8).toString("hex") });
     const createdIno = createLock(path, content);
     if (createdIno !== false) {
       HELD.add(real);
