@@ -44,7 +44,7 @@
     "seq": {
       "type": "integer",
       "minimum": 1,
-      "description": "The store's commit sequence number: one per applied write, from 1 (the journal line number from 0.3.0). The id is X-<seq>. The ledger has its own sequence and links here by execution_id."
+      "description": "The store's commit sequence number: one per commit, from 1, never reused; the id is X-<seq>. A run reset also takes one (and has no execution record), so execution ids can skip a number. It is not a journal line number: a journal commit line carries it as commit_seq. The ledger has its own sequence and links here by execution_id."
     },
     "request": {
       "type": "object",
@@ -82,8 +82,7 @@
         "path",
         "key",
         "fingerprint_hash"
-      ],
-      "additionalProperties": false
+      ]
     },
     "objects": {
       "type": "array",

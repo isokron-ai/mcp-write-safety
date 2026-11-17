@@ -3,9 +3,10 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { ApiError, canonicalJson, Store, type TicketFields } from "./store.js";
-import { CommitSinkError, JournalError, type CommitSink, type TxMeta } from "./commit.js";
-import { memoryKeyRecords, type KeyRecordSeam } from "./seams.js";
+import { ApiError, canonicalJson, Store, type SectionReply, type TicketFields } from "./store.js";
+import { CommitSinkError, JournalError, storedReplyOf, type CommitSink, type CommittedTransaction, type TxMeta } from "./commit.js";
+import { isInflight, memoryKeyRecords, type KeyRecordSeam, type KeyScope } from "./seams.js";
+import { fingerprintHash } from "../digest.js";
 import type { Clock } from "../clock.js";
 import { defaultPrincipals, principalFor, type Principal } from "../principals.js";
 import { HEADERS, TAG_PATTERN } from "../fixture-properties.js";
@@ -31,6 +32,36 @@ export interface BackendOptions {
   sinks?: CommitSink[];
   /** Principals and their tokens (default: one, p-default, with `token`). */
   principals?: Principal[];
+  /** The boot id every event carries (the fixture layer gives its descriptor's; default: a fresh random one). */
+  bootId?: string;
+  /** The backend fault hooks (streams B and E arm faults through these, never by editing this file). */
+  faults?: BackendFaultHooks;
+  /**
+   * Which principal a run tag belongs to (the fixture layer's run registry), or undefined for a run it did not
+   * allocate. A write tagged with another principal's run is refused 403 run_not_owned.
+   */
+  runOwner?: (run: string) => string | undefined;
+}
+
+/** What a backend fault hook is told about the write. */
+export interface FaultContext {
+  meta: TxMeta;
+}
+
+/**
+ * The backend fault positions (src/fault-points.ts), as hooks. Both may await; neither runs inside the section.
+ * - beforeCommit (backend/before-commit): after the pending key record (keyed writes under inflight) and before the
+ *   synchronous section, so nothing is validated or written yet. Throw an ApiError to answer with it (reported to the
+ *   ledger as a refusal, the pending record aborted); await to delay; exit the process to crash.
+ * - afterCommit (backend/after-commit): after the section (journal, apply, ledger) and before the reply, only for a
+ *   write that committed. Return undefined to send the reply, "drop" to close the connection with no answer, or
+ *   { status, body } to answer that instead (the error action). Await to hold; exit the process to crash.
+ * On a keyed write the key record is looked up again after beforeCommit, so a same-key request that committed while
+ * the hook waited is answered as a replay, not applied twice.
+ */
+export interface BackendFaultHooks {
+  beforeCommit?(ctx: FaultContext): Promise<void>;
+  afterCommit?(ctx: FaultContext & { tx: CommittedTransaction }): Promise<undefined | "drop" | { status: number; body: unknown }>;
 }
 
 export interface BackendExtension {
@@ -40,6 +71,9 @@ export interface BackendExtension {
 export interface RunningBackend {
   url: string;
   store: Store;
+  bootId: string;
+  /** The run reset (Store.dropRun through the commit path, with the key-record seam in use). */
+  dropRun(scope: KeyScope, run: string): ReturnType<Store["dropRun"]>;
   close(): Promise<void>;
 }
 
@@ -61,6 +95,11 @@ export interface BackendOps {
   inputRules: InputRules;
   /** Seam keyRecord: the records that answer keyed repeats, scoped by principal. */
   keyRecord: KeyRecordSeam;
+  /**
+   * Commit observers a backend defect adds (a defect that watches commits). They are added as role "observer" after
+   * the sinks given to startBackend, so they are told after every ledger sink.
+   */
+  observers?: CommitSink[];
 }
 
 function correctOps(): BackendOps {
@@ -106,14 +145,21 @@ function tag(value: string | string[] | undefined): string | null {
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export async function startBackend(options: BackendOptions): Promise<RunningBackend> {
-  const store = new Store(undefined, options.clock);
+  const store = new Store(undefined, options.clock, options.bootId);
   for (const sink of options.sinks ?? []) store.addSink(sink);
   const principals = options.principals ?? defaultPrincipals(options.token);
   const ops: BackendOps = correctOps();
   const features = options.features ?? [];
   applyBackendDefects(options.defects ?? [], ops, features);
+  for (const o of ops.observers ?? []) {
+    if (o.role !== "observer") throw new Error(`a backend defect's commit sink must have role "observer" (${o.name})`);
+    store.addSink(o);
+  }
+  store.keyRecords = ops.keyRecord;
+  store.runOwner = options.runOwner;
+  const faults = options.faults ?? {};
   const strictInput = features.includes("strict-input");
-  type Reply = { status: number; body?: unknown; headers?: Record<string, string> };
+  type Reply = SectionReply;
 
   /** Synchronous for every correct route (rule 9); a promise only where a backend defect awaits inside its write. */
   function route(method: string, url: URL, req: IncomingMessage, body: unknown, prepared?: unknown): Reply {
@@ -160,12 +206,14 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       if (parts.length === 2 && method === "PATCH") {
         const r = ops.patchTicket(store, id, b as TicketFields, ifMatch, prepared);
         return { ...ticketReply(200, { ticket: r.ticket, changed: r.changed }),
-          headers: { etag: etag(r.ticket.version), ...(r.replayed ? { "idempotent-replayed": "true" } : {}) } };
+          headers: { etag: etag(r.ticket.version), ...(r.replayed ? { "idempotent-replayed": "true" } : {}) },
+          replayOf: r.replayed ? r.originalSeq : undefined };
       }
       if (parts.length === 2 && method === "PUT") {
         const r = store.putTicket(id, b as TicketFields, ifMatch, url.searchParams.get("force") === "true");
         return { ...ticketReply(200, { ticket: r.ticket, changed: r.changed }),
-          headers: { etag: etag(r.ticket.version), ...(r.replayed ? { "idempotent-replayed": "true" } : {}) } };
+          headers: { etag: etag(r.ticket.version), ...(r.replayed ? { "idempotent-replayed": "true" } : {}) },
+          replayOf: r.replayed ? r.originalSeq : undefined };
       }
       if (parts.length === 2 && method === "DELETE") {
         store.deleteTicket(id, ifMatch);
@@ -225,43 +273,80 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       const meta: TxMeta = {
         principal,
         attribution: { run: tag(req.headers[HEADERS.run.toLowerCase()]), operation: tag(req.headers[HEADERS.operation.toLowerCase()]) },
-        request: { method, path: url.pathname, key: key ?? null, fingerprint },
+        request: { method, path: url.pathname, key: key ?? null, fingerprint, fingerprintHash: fingerprintHash(principal, method, url.pathname, body ?? null), body: body ?? null },
+      };
+      // A run tag the fixture layer gave another principal is refused: run tags are scoped per principal.
+      const runTag = meta.attribution.run;
+      const owner = runTag === null ? undefined : options.runOwner?.(runTag);
+      if (owner !== undefined && owner !== principal) {
+        store.refuse(meta, 403, "run_not_owned");
+        throw new ApiError(403, "run_not_owned", `run ${runTag} belongs to another principal`);
+      }
+      /** Sends a committed reply, after the backend/after-commit fault hook. */
+      const sendCommitted = async (reply: Reply, tx: CommittedTransaction | undefined) => {
+        const outcome = tx && faults.afterCommit ? await faults.afterCommit({ meta, tx }) : undefined;
+        if (outcome === "drop") return void res.destroy();
+        if (outcome) return send(outcome.status, outcome.body);
+        send(reply.status, reply.body, reply.headers);
       };
       if (keyed) {
-        // A keyed POST is applied once. The same key with a different request is refused. From this lookup to the
+        // A keyed POST is applied once. The same key with a different request is refused. From the last lookup to the
         // commit below nothing awaits, so no second request runs between them (rule 9).
         const scope = { principal };
-        const seen = ops.keyRecord.get(scope, key);
-        if (seen && seen.fingerprint !== fingerprint) {
-          store.refuse(meta, 422, "idempotency_key_reused");
-          throw new ApiError(422, "idempotency_key_reused",
-            "this Idempotency-Key was already used for a different request");
-        }
-        if (seen) {
+        /** Answers from the key record when there is one; true when it answered. */
+        const fromRecord = (): boolean => {
+          const seen = ops.keyRecord.get(scope, key);
+          if (!seen) return false;
+          if (seen.fingerprint !== fingerprint) {
+            store.refuse(meta, 422, "idempotency_key_reused");
+            throw new ApiError(422, "idempotency_key_reused", "this Idempotency-Key was already used for a different request");
+          }
           store.replay(meta, seen.status, seen.body, seen.seq);
-          return send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
+          send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
+          return true;
+        };
+        if (fromRecord()) return;
+        // 0.3.0 (inflight): the pending record goes first; every way out that commits nothing aborts it.
+        const inflight = isInflight(ops.keyRecord) ? ops.keyRecord : undefined;
+        inflight?.begin(scope, key, fingerprint!, meta.attribution.run);
+        let completed = false;
+        let result: { reply: Reply; tx?: CommittedTransaction };
+        try {
+          if (faults.beforeCommit) {
+            try {
+              await faults.beforeCommit({ meta });
+            } catch (e) {
+              if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
+              throw e;
+            }
+            // The hook awaited: a same-key request may have committed meanwhile (without a pending record).
+            if (!inflight && fromRecord()) return;
+          }
+          // Only a result below 300 is kept, and only once the journal has it: a refused first call stores nothing and
+          // does not hold the key (decision 0004). A journal failure aborts the pending record too.
+          result = store.commit(meta, () => route(method, url, req, body), (tx) => {
+            ops.keyRecord.put(scope, key, storedReplyOf(tx));
+            completed = true;
+          });
+        } finally {
+          if (!completed) inflight?.abort(scope, key);
         }
-        // Only a result below 300 is kept, and only once the journal has it: a refused first call stores nothing and
-        // does not hold the key (decision 0004).
-        const { reply } = store.commit(meta, () => route(method, url, req, body), (tx, r) => {
-          ops.keyRecord.put(scope, key, { fingerprint: fingerprint!, status: tx.status, body: tx.body, headers: r.headers ?? {},
-            run: meta.attribution.run, seq: tx.seq, committedAt: store.clock.now().toISOString(), clockOffsetMs: store.clock.offsetMs() });
-        });
-        return send(reply.status, reply.body, reply.headers);
+        return await sendCommitted(result.reply, result.tx);
       }
-      // The one await a write may have comes before its commit section (BackendOps.beforePatch).
+      // The awaits a write may have come before its commit section: BackendOps.beforePatch, then the fault hook.
       const parts = url.pathname.split("/").filter(Boolean);
       let prepared: unknown;
-      if (method === "PATCH" && parts[0] === "tickets" && parts.length === 2 && ops.beforePatch) {
-        try {
+      try {
+        if (method === "PATCH" && parts[0] === "tickets" && parts.length === 2 && ops.beforePatch) {
           prepared = await ops.beforePatch(store, decodeURIComponent(parts[1]), (body ?? {}) as TicketFields, parseIfMatch(req.headers["if-match"] as string | undefined));
-        } catch (e) {
-          if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
-          throw e;
         }
+        if (faults.beforeCommit) await faults.beforeCommit({ meta });
+      } catch (e) {
+        if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
+        throw e;
       }
-      const { reply } = store.commit(meta, () => route(method, url, req, body, prepared));
-      send(reply.status, reply.body, reply.headers);
+      const { reply, tx } = store.commit(meta, () => route(method, url, req, body, prepared));
+      await sendCommitted(reply, tx);
     } catch (error) {
       if (error instanceof JournalError) {
         send(503, { error: "journal_unavailable", message: error.message });
@@ -281,6 +366,8 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   return {
     url: `http://127.0.0.1:${port}`,
     store,
+    bootId: store.bootId,
+    dropRun: (scope, run) => store.dropRun(scope, run),
     close: () => new Promise<void>((resolve) => {
       server.closeAllConnections();
       server.close(() => resolve());

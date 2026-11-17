@@ -11,7 +11,11 @@ export interface RequestRef {
   method: string;
   path: string;
   key: string | null;
-  /** Lower-case hex SHA-256 of the backend fingerprint `METHOD path canonicalJson(body)`. */
+  /**
+   * fingerprintHash(principal, method, path, body) (src/digest.ts): SHA-256 under
+   * dev.writesafety.tiny-tracker/request-fingerprint/1 over the RFC 8785 bytes of {body, method, path, principal}.
+   * It is TxRequest.fingerprintHash, computed once by the HTTP layer; not a hash of the backend's comparison string.
+   */
   fingerprint_hash: string;
 }
 
@@ -23,12 +27,13 @@ export interface ExecutionRecord {
   run: string | null;
   operation_tag: string | null;
   boot_id: string;
-  /** The store's commit sequence (the journal line number from 0.3.0); id is X-<seq>. Not the ledger's sequence. */
+  /** The store's commit sequence (CommittedTransaction.seq; a journal commit line's commit_seq, not its jseq); id is X-<seq>. Not the ledger's sequence. */
   seq: number;
   request: RequestRef & { method: "POST" | "PUT" | "PATCH" | "DELETE" };
   objects: RecordObject[];
   /** Domain dev.writesafety.tiny-tracker/execution-result/1 over the committed response body. */
   result: ServedDigest;
+  /** CommittedTransaction.committedAt: the commit's one record-clock read. */
   committed_at: string;
   clock_offset_ms: number;
 }
@@ -51,7 +56,11 @@ export interface OperationRecord {
   status: number | null;
 }
 
-export type LedgerKind = "start" | "execution" | "replay" | "refusal" | "fault-armed" | "fault-fired" | "run-allocated" | "run-reset";
+/**
+ * "journal-unavailable": a write whose journal append failed (nothing applied; status 503; a RefusedTransaction with
+ * code journal_unavailable). "run-reset": from the run reset's CommittedTransaction (kind "run-reset", tx.reset).
+ */
+export type LedgerKind = "start" | "execution" | "replay" | "refusal" | "journal-unavailable" | "fault-armed" | "fault-fired" | "run-allocated" | "run-reset";
 
 export interface LedgerEntry {
   entry: "ledger-entry/1";

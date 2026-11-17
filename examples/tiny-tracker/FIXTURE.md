@@ -154,7 +154,7 @@ The records 0.2.0 serves, as draft schemas (`$id` under `https://writesafety.dev
 | Ledger entry: one line of the append-only ledger | [`ledger-entry-1`](schemas/ledger-entry-1.schema.json) | `GET /ledger`, export |
 | Known-answer file | [`expected-1`](schemas/expected-1.schema.json) | `expected/<version>.json` in each release |
 
-Every record carries the principal (one constant value until there are two), `clock_offset_ms` and the `boot_id` of the process that wrote it. An execution record's `seq` is the store's commit sequence (from 0.3.0, the journal line number); the ledger has its own sequence and links to it by `execution_id`. The ledger is written below every MCP-layer defect and is never edited; it records executions, replays, refusals, fault arming and firing, run allocation and reset. A replay serves the same execution record as the first answer.
+Every record carries the principal (one constant value until there are two), `clock_offset_ms` and the `boot_id` of the process that wrote it. An execution record's `seq` is the store's commit sequence (a journal commit line carries it as `commit_seq`; it is not the line's position in the journal); the ledger has its own sequence and links to it by `execution_id`. The ledger is written below every MCP-layer defect and is never edited; it records executions, replays, refusals, fault arming and firing, run allocation and reset. A replay serves the same execution record as the first answer.
 
 ## Answers on keyed calls
 

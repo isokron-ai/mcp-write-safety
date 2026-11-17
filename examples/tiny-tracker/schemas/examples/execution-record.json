@@ -5,7 +5,7 @@
   "run": "run-3f9a01c2-1",
   "operation_tag": "op-1",
   "boot_id": "3f9a01c27b4d5e60",
-  "seq": 2,
+  "seq": 1,
   "request": {
     "method": "POST",
     "path": "/tickets",

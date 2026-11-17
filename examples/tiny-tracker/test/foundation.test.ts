@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeFeatures, FEATURES, parseFeatures, parseProfile, PROFILE_FEATURES, SettingError } from "../src/profile.js";
 import { checkCompat, COMPAT_RULES, type Combination } from "../src/compat.js";
-import { DEFECTS, resolveDefects } from "../src/defects/index.js";
+import { DEFECTS, resolveDefects, ungatedDefects } from "../src/defects/index.js";
 import type { Defect } from "../src/defects/types.js";
 import { BACKEND_DEFECTS, BACKEND_SEAMS, backendBanner, backendDefectRefusals, type BackendDefect } from "../src/backend/defects/index.js";
 import { placementMap, PLANNED_DEFECTS, PLANNED_VARIANTS, plannedSeams } from "../src/defect-placement.js";
@@ -168,10 +168,12 @@ describe("the compatibility table (src/compat.ts)", () => {
 });
 
 describe("defects: requires and --defect all", () => {
-  it("no existing defect needs a feature, so --defect all is unchanged", () => {
-    assert.equal(DEFECTS.filter((d) => d.requires?.length).length, 0);
-    assert.equal(resolveDefects(["all"]).length, DEFECTS.length);
-    assert.equal(DEFECTS.length, 47);
+  it("the defects that need no feature are the 0.1 set, so --defect all without features is unchanged; gated defects join only with their features", () => {
+    assert.equal(ungatedDefects().length, 47, "the 0.1 set");
+    assert.deepEqual(resolveDefects(["all"]), ungatedDefects());
+    for (const d of DEFECTS.filter((x) => x.requires?.length)) {
+      assert.ok(resolveDefects(["all"], [...d.requires!]).includes(d), d.name);
+    }
   });
 
   it("all and a requirement ID take only defects valid for the active features; a named one with missing features stops", () => {

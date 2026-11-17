@@ -16,13 +16,21 @@ export type FaultPosition = (typeof FAULT_POSITIONS)[number];
 export type FaultAction = (typeof FAULT_ACTIONS)[number];
 
 /**
- * The backend commit path (frozen order, src/backend/store.ts Store.commit): validate, journal append, apply in memory,
- * ledger, reply. Fault positions are named against it:
- *   backend before-commit  after validate, before the journal append: nothing is written;
- *   backend after-commit   after the ledger, before the reply: written, journalled, in the ledger, unanswered;
+ * The backend commit path (frozen order, src/backend/commit.ts and Store.commit):
+ *   pending   before the section, may await: BackendOps.beforePatch (a defect's wait), then the pending key record
+ *             (keyed writes under inflight, 0.3.0);
+ *   validate, journal, apply, ledger   the one synchronous section (validate and compute is the `mutate` call; the
+ *             journal append, the apply and the ledger follow with no await);
+ *   reply     after the section.
+ * Fault positions are named against it, and run as BackendOptions.faults hooks (never inside the section):
+ *   backend before-commit  after the pending record, before the section: nothing validated or written (delay fits here);
+ *   backend after-commit   after the section (journalled, applied, in the ledger), before the reply: unanswered;
  *   mcp after-backend-reply  in the MCP process, after the backend's reply arrived, before the MCP answer.
  */
-export const COMMIT_STEPS = ["validate", "journal", "apply", "ledger", "reply"] as const;
+export const COMMIT_STEPS = ["pending", "validate", "journal", "apply", "ledger", "reply"] as const;
+
+/** The steps inside the one synchronous commit section (no await between them). */
+export const SECTION_STEPS = ["validate", "journal", "apply", "ledger"] as const;
 
 export interface FaultPoint {
   /** process/position/action, e.g. "mcp/after-backend-reply/drop". */

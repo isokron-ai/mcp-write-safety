@@ -14,6 +14,7 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - A compatibility table: illegal combinations of profile, features, defects, variants, faults and process layout stop the process (exit 2).
 - Defects carry a `requires` list; `--defect all` means every defect valid for the active features. The backend has its own defect registry (seams, banner, refusal rules), and a computed defect placement map.
 - `--token-dir`: a 0700 folder where evidence and control tokens are generated (0600) when not supplied; only its path is printed.
+- Each write's committed transaction carries its complete post-state (objects, deletes, id counters, owners, applied-write entries), its request body and reply headers, the boot id and one record-clock time used for every stored time. A re-sent If-Match write that was already applied is reported as a replay, not a second commit. A journal failure is reported to the ledger. Backend fault hooks (before and after the commit section) and a run reset through the commit path.
 - The backend's single commit path (validate, journal, apply, ledger, reply), an injected clock for every timestamp, typed backend seams, principals with key records scoped by principal, and frozen record field names (`docs/INTERFACES.md`).
 - RFC 8785 canonical bytes and domain-tagged SHA-256 digests, with cross-language vectors (`vectors/digest-1.json`) and a standard-library Python verifier (`verify/python`).
 - `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).

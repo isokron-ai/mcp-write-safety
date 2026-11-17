@@ -8,7 +8,7 @@
 // not as the full product of every factor.
 
 import { faultPoint, FAULT_DEMOS, RETIRED_FAULT_NAMES } from "./fault-points.js";
-import { featureInfo, type ProfileName } from "./profile.js";
+import { activeFeatures, featureInfo, type FeatureName, type ProfileName } from "./profile.js";
 
 export type ProcessLayout = "all" | "backend" | "server";
 
@@ -16,7 +16,7 @@ export type ProcessLayout = "all" | "backend" | "server";
 export interface Combination {
   layout: ProcessLayout;
   profile: ProfileName;
-  /** Features named with --features or TRACKER_FEATURES (not the profile's own). */
+  /** Features named with --features or TRACKER_FEATURES (not the profile's own; checkCompat adds those). */
   features: readonly string[];
   /** MCP-layer defects as resolved (names). */
   defects: readonly string[];
@@ -28,12 +28,20 @@ export interface Combination {
   dataDir?: string;
 }
 
+/**
+ * What a rule sees: `features` is the effective set (the profile's own features plus the named ones), so a rule
+ * still refuses after a release flips a feature into the default profile; `named` is the set as named.
+ */
+export interface EffectiveCombination extends Combination {
+  named: readonly string[];
+}
+
 export interface CompatRule {
   id: string;
   /** False: applies under every profile. True: not under profile 0.1, so that profile keeps the 0.1.0 command line. */
   post01: boolean;
   /** The message when the combination breaks the rule, or undefined when it does not. */
-  check(c: Combination): string | undefined;
+  check(c: EffectiveCombination): string | undefined;
 }
 
 const has = (list: readonly string[], name: string) => list.includes(name);
@@ -41,8 +49,8 @@ const has = (list: readonly string[], name: string) => list.includes(name);
 export const COMPAT_RULES: readonly CompatRule[] = [
   {
     id: "CMP-1", post01: false,
-    check: (c) => c.profile === "0.1" && c.features.length > 0
-      ? `profile 0.1 is the 0.1.0 surface and takes no features (named: ${c.features.join(", ")})` : undefined,
+    check: (c) => c.profile === "0.1" && c.named.length > 0
+      ? `profile 0.1 is the 0.1.0 surface and takes no features (named: ${c.named.join(", ")})` : undefined,
   },
   {
     id: "CMP-2", post01: false,
@@ -109,5 +117,7 @@ export const COMPAT_RULES: readonly CompatRule[] = [
 
 /** The rules a combination breaks, as messages. Empty: it may start. */
 export function checkCompat(c: Combination): string[] {
-  return COMPAT_RULES.filter((r) => !(r.post01 && c.profile === "0.1")).map((r) => r.check(c)).filter((m): m is string => m !== undefined);
+  const known = c.features.filter((f): f is FeatureName => featureInfo(f) !== undefined);
+  const e: EffectiveCombination = { ...c, named: c.features, features: [...new Set([...activeFeatures(c.profile, known), ...c.features])] };
+  return COMPAT_RULES.filter((r) => !(r.post01 && e.profile === "0.1")).map((r) => r.check(e)).filter((m): m is string => m !== undefined);
 }

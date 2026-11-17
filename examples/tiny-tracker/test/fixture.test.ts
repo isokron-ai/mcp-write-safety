@@ -245,12 +245,12 @@ describe("the control listener (rule 2, X4)", () => {
     const noToken = await runCli(["all", "--fixture-control"], { TRACKER_BACKEND_TOKEN: BACKEND });
     assert.equal(noToken.code, 2);
     assert.match(noToken.stderr, /control listener needs a token/);
-    const split = await runCli(["server", "--fixture-control"], { ...TOKENS, TRACKER_BACKEND_URL: "http://127.0.0.1:4671" });
+    const split = await runCli(["server", "--fixture-control"], { ...TOKENS, TRACKER_BACKEND_URL: "http://127.0.0.1:9/" });
     assert.equal(split.code, 2);
     assert.match(split.stderr, /--fixture-control runs with `tiny-tracker all` only/);
 
-    const r = await runCli(["all", "--fixture-control", "--control-port", "4672", "--port", "4670", "--backend-port", "4671"], TOKENS, async (state) => {
-      assert.equal(state.control, "http://127.0.0.1:4672");
+    const r = await runCli(["all", "--fixture-control", "--control-port", "0", "--port", "0", "--backend-port", "0"], TOKENS, async (state) => {
+      assert.match(state.control, /^http:\/\/127\.0\.0\.1:\d+$/);
       assert.equal(state.evidence, undefined, "control without the evidence feature serves no evidence");
       const c = state.control as string;
       assert.deepEqual((await get(`${c}/_fixture/clock`, CONTROL)).body, { domain: "wall", offset_ms: 0 });

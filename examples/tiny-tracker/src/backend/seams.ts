@@ -15,7 +15,7 @@ export interface KeyScope {
   principal: string;
 }
 
-/** A completed keyed POST, kept to answer its repeats. */
+/** A completed keyed POST, kept to answer its repeats. Built from the commit by storedReplyOf (src/backend/commit.ts). */
 export interface StoredReply {
   fingerprint: string;
   status: number;
@@ -25,6 +25,7 @@ export interface StoredReply {
   run: string | null;
   /** Commit-point sequence number of the commit that made it. */
   seq: number;
+  /** The commit's committedAt (one record-clock read per commit), never a second clock read. */
   committedAt: string;
   clockOffsetMs: number;
 }
@@ -39,12 +40,21 @@ export interface KeyRecordSeam {
 
 /** 0.3.0 (inflight, retention): the pending and tombstone states. */
 export interface InflightKeyRecordSeam extends KeyRecordSeam {
-  /** Writes the pending record before the commit section; a same-key call meanwhile answers in_progress. */
+  /**
+   * Writes the pending record (a journal `pending` line under durable) before the commit section, before the
+   * backend/before-commit fault hook. A same-key call meanwhile answers in_progress. `put` completes it.
+   */
   begin(scope: KeyScope, key: string, fingerprint: string, run: string | null): void;
-  /** A pending record with no commit (refused, or found at start): nothing applied. */
+  /** A pending record with no commit (refused, a fault hook error, a journal failure, or an orphan found at start): nothing applied. */
   abort(scope: KeyScope, key: string): void;
   /** What an expired record keeps (decision 0004). */
   tombstone(scope: KeyScope, key: string): { fingerprintHash: string; executionId: string; resultDigest: string; committedAt: string } | undefined;
+}
+
+/** True when a key-record seam has the 0.3.0 pending state (the keyed path then calls begin and abort). */
+export function isInflight(seam: KeyRecordSeam): seam is InflightKeyRecordSeam {
+  const s = seam as Partial<InflightKeyRecordSeam>;
+  return typeof s.begin === "function" && typeof s.abort === "function";
 }
 
 /** Seam digest (0.2.0, execution-records): the served digest of a committed response body. */

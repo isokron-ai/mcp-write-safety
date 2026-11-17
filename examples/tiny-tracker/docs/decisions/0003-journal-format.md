@@ -9,11 +9,11 @@ A delayed-recovery check (24 hours) should not depend on one process staying up.
 
 ## Decision
 
-1. **One JSONL journal** in the data dir. The first line is a header: `{"journal":"journal-format/1","writer":"<package version>"}`.
+1. **One JSONL journal** in the data dir. The first line is a header: `{"jseq":0,"line":"header","journal":"journal-format/1","writer":"<package version>","boot_id":…,"seed":{…}}`. The seed (the seeded projects as created, and the id counters) lives in the header, so a restart keeps the seed's `created_at`.
 2. **Post-state only, never commands.** A line records what a transaction committed: ids, versions, timestamps and the id counters as committed, the operation record and the execution record. Replaying a journal never calls the clock or re-runs an operation, so a restart cannot change a digest.
-3. **One line per transaction.** The effect, its key record and its execution record are in the same line, so the "same transaction" of the idempotency pattern is literal and readable. Each line carries a sequence number and a checksum. The answer is sent only after the line is flushed (`fsync`).
+3. **One line per transaction.** The effect, its key record and its execution record are in the same line, so the "same transaction" of the idempotency pattern is literal and readable. Each line carries its own line number `jseq` (0 for the header, contiguous) and a checksum; a commit line also carries `commit_seq`, the store's commit sequence (the execution record's `seq`), which is not derived from the line's position. Line shapes: `docs/INTERFACES.md` 1.9. The answer is sent only after the line is flushed (`fsync`).
 4. **Commits stay synchronous.** Where a write has a pending state, the pending line is written first; the commit is one synchronous section after it. Conditional writes and batches are one section each.
-5. **Recovery:** only a torn **last** line is tolerated (it is dropped and the drop is logged). A bad line anywhere else stops the start with an error. A pending line with no commit becomes `aborted`: nothing was applied.
+5. **Recovery:** only a torn **last** line is tolerated (it is dropped and the drop is logged). A bad line anywhere else stops the start with an error. A pending line with no commit becomes `aborted` (an `aborted` line naming it by `pending_jseq`): nothing was applied.
 6. **One process per data dir.** A pid lock refuses a second writer, including a stale child next to its supervisor. More than one server instance is a non-goal.
 7. The data dir is created `0700`; a directory that is not empty and was not created by tiny-tracker is refused.
 

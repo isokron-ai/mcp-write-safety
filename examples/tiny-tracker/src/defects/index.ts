@@ -104,6 +104,11 @@ export const DEFECTS: Defect[] = [
   tokenInError,
 ];
 
+/** The defects that need no feature: the 0.1 set (47), the whole of `--defect all` under profile 0.1. */
+export function ungatedDefects(): Defect[] {
+  return DEFECTS.filter((d) => !(d.requires ?? []).length);
+}
+
 /** True when every feature the defect needs is active. */
 export function defectAvailable(d: Defect, features: readonly string[]): boolean {
   return (d.requires ?? []).every((f) => features.includes(f));

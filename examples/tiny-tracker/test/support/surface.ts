@@ -250,7 +250,10 @@ export interface RecordOptions {
   cli: string;
   /** Appended to every configuration's arguments (e.g. ["--profile", "0.1"]). */
   extraArgs?: string[];
-  /** MCP port; the backend gets portBase + 1. */
+  /**
+   * Kept for the callers' signatures and ignored: every configuration binds port 0 (the OS picks a free port), so runs
+   * of several suites at once never collide. Loopback ports are masked in the transcript, so the record is the same.
+   */
   portBase: number;
   configs?: SurfaceConfig[];
 }
@@ -261,7 +264,7 @@ export async function recordSurface(options: RecordOptions): Promise<Transcript>
     const dir = mkdtempSync(join(tmpdir(), "tt-surface-"));
     try {
       const env = Object.fromEntries(Object.entries(config.env ?? {}).map(([k, v]) => [k, v.replace("{JOURNAL}", join(dir, "keys"))]));
-      const args = [...config.args, "--port", String(options.portBase), "--backend-port", String(options.portBase + 1), ...(options.extraArgs ?? [])];
+      const args = [...config.args, "--port", "0", "--backend-port", "0", ...(options.extraArgs ?? [])];
       const started = await startCli(options.cli, args, { TRACKER_BACKEND_TOKEN: SURFACE_TOKEN, ...env });
       try {
         out.push(await recordOne(config, started.stateLine));

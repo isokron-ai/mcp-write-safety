@@ -66,6 +66,11 @@ export class RunRegistry {
   has(id: string): boolean {
     return this.runs.some((r) => r.run_id === id);
   }
+
+  /** The principal a run was allocated for, or undefined when this process did not allocate it. */
+  owner(id: string): string | undefined {
+    return this.runs.find((r) => r.run_id === id)?.principal;
+  }
 }
 
 export interface RunningControl {
@@ -92,8 +97,13 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 
 const notBuilt = (since: string, what: string) => new ControlError(501, "not_built", `${what} arrives in ${since}; this build cannot do it`, { available_from: since });
 
-export async function startControl(options: { token: string; port: number; descriptor: BuildDescriptor; runs: RunRegistry }): Promise<RunningControl> {
+export async function startControl(options: {
+  token: string; port: number; descriptor: BuildDescriptor; runs: RunRegistry;
+  /** The configured principal ids: a run is allocated only for one of them (default: p-default only). */
+  principals?: readonly string[];
+}): Promise<RunningControl> {
   const { token, descriptor, runs } = options;
+  const principals = options.principals ?? ["p-default"];
 
   async function route(req: IncomingMessage, path: string): Promise<{ status: number; body: unknown }> {
     const method = req.method ?? "GET";
@@ -112,6 +122,7 @@ export async function startControl(options: { token: string; port: number; descr
         const label = body && typeof body === "object" && typeof body.label === "string" ? body.label.slice(0, 200) : null;
         const principal = body && typeof body === "object" && body.principal !== undefined ? body.principal : "p-default";
         if (typeof principal !== "string" || !/^p-[a-z0-9-]{1,62}$/.test(principal)) throw new ControlError(400, "bad_principal", "principal must match ^p-[a-z0-9-]{1,62}$");
+        if (!principals.includes(principal)) throw new ControlError(400, "unknown_principal", `principal ${principal} is not configured on this backend`);
         return { status: 201, body: runs.allocate(label, principal) };
       }
     }

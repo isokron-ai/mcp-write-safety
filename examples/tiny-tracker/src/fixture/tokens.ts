@@ -8,7 +8,7 @@
 // never taken from the command line, never printed on stdout and never put in
 // a record, a descriptor or a result.
 
-import { statSync, readFileSync, existsSync } from "node:fs";
+import { statSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -26,24 +26,51 @@ const TOKEN_PATTERN = /^[\x21-\x7e]{16,256}$/;
 
 export { TokenError } from "../tokens.js";
 
+/** The current user's uid (POSIX); undefined on Windows, where the folder's ACL is the operator's to set. */
+function myUid(platform: string): number | undefined {
+  return platform === "win32" || typeof process.getuid !== "function" ? undefined : process.getuid();
+}
+
 /**
- * The token folder (--token-dir, owner decision D1): a 0700 directory where a token the operator did not supply is
+ * The token folder (--token-dir, decision D1): a 0700 directory where a token the operator did not supply is
  * generated as <kind>.token (0600) and kept across restarts. Only the folder's path is ever printed.
+ * The folder and the token files are checked with lstat (a symbolic link is refused, never followed) and must be
+ * owned by the user running tiny-tracker.
  */
 export function ensureTokenDir(dir: string, platform: string = process.platform): void {
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const st = statSync(dir);
+  if (!existsSync(dir)) {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw new TokenError(`--token-dir could not be created: ${(e as Error).message}. Not starting.`);
+    }
+  }
+  const st = lstatSync(dir);
+  if (st.isSymbolicLink()) throw new TokenError("--token-dir must not be a symbolic link. Not starting.");
   if (!st.isDirectory()) throw new TokenError("--token-dir must name a directory. Not starting.");
+  const uid = myUid(platform);
+  if (uid !== undefined && st.uid !== uid) throw new TokenError("--token-dir must be owned by the user running tiny-tracker. Not starting.");
   if (platform !== "win32" && (st.mode & 0o077) !== 0) throw new TokenError("--token-dir must not be readable, writable or searchable by group or others (chmod 700). Not starting.");
 }
 
 function tokenFromDir(kind: TokenKind, dir: string, platform: string): string {
   ensureTokenDir(dir, platform);
   const file = join(dir, `${kind}.token`);
-  if (!existsSync(file)) writeFileSync(file, `${randomBytes(24).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
-  const st = statSync(file);
+  try {
+    // "wx": created only if absent, so two processes never both write one.
+    writeFileSync(file, `${randomBytes(24).toString("hex")}\n`, { mode: 0o600, flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw new TokenError(`${file} could not be written: ${(e as Error).message}. Not starting.`);
+  }
+  const st = lstatSync(file);
+  if (st.isSymbolicLink()) throw new TokenError(`${file} must not be a symbolic link. Not starting.`);
+  const uid = myUid(platform);
   if (!st.isFile() || (platform !== "win32" && (st.mode & 0o077) !== 0)) throw new TokenError(`${file} must be a file only its owner can read (chmod 600). Not starting.`);
-  return readFileSync(file, "utf8").trim();
+  if (uid !== undefined && st.uid !== uid) throw new TokenError(`${file} must be owned by the user running tiny-tracker. Not starting.`);
+  const token = readFileSync(file, "utf8").trim();
+  // Another process created the file a moment ago and has not written it yet (two starts at once on one folder).
+  if (token === "") throw new TokenError(`${file} is empty: another tiny-tracker is starting with the same --token-dir; start one at a time, or remove the empty file. Not starting.`);
+  return token;
 }
 
 /** A token from the environment or its file (the operator's wins), else generated in the token folder, else an error. */

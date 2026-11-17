@@ -41,7 +41,9 @@ describe("every requirement has a check and a defect", () => {
   it("the README's defect table lists every defect with its requirement", () => {
     const readme = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
     for (const d of DEFECTS) {
-      assert.ok(readme.includes(`| \`${d.name}\` | ${d.requirement} |`), `README row missing for ${d.name}`);
+      // A defect that needs a feature is listed in the second table, with its features in the Requires column.
+      const row = d.requires?.length ? `| \`${d.name}\` | ${d.requirement} | ${d.requires.join(", ")} |` : `| \`${d.name}\` | ${d.requirement} |`;
+      assert.ok(readme.includes(row), `README row missing for ${d.name}: ${row}`);
     }
   });
 });
@@ -67,7 +69,8 @@ for (const defect of DEFECTS) {
   describe(`--defect ${defect.name} (${defect.requirement})`, () => {
     let broken: Map<RequirementId, Verdict>;
     before(async () => {
-      broken = await runChecks({ defects: [defect.name] });
+      // A defect that needs features runs with them on (they change nothing for the correct build's checks).
+      broken = await runChecks({ defects: [defect.name], features: [...(defect.requires ?? [])] });
     });
 
     it(`broken build: ${defect.requirement} violated`, () => {

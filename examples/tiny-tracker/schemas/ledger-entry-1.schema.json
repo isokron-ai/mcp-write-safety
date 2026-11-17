@@ -25,11 +25,13 @@
       "pattern": "^[0-9a-f]{16}$"
     },
     "kind": {
+      "description": "journal-unavailable: a write whose journal append failed; nothing was applied and the caller got 503 (status 503, execution_id null). run-reset: one principal's run removed through the commit path; objects lists what was removed.",
       "enum": [
         "start",
         "execution",
         "replay",
         "refusal",
+        "journal-unavailable",
         "fault-armed",
         "fault-fired",
         "run-allocated",
@@ -100,8 +102,7 @@
             "path",
             "key",
             "fingerprint_hash"
-          ],
-          "additionalProperties": false
+          ]
         }
       ]
     },

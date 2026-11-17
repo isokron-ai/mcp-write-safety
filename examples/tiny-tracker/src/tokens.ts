@@ -22,8 +22,11 @@ export function checkDistinct(tokens: Record<string, string | undefined>): void 
 /** Refuses a command line that carries a token: argv is visible to every local user and ends up in published run notes. */
 export function checkArgv(argv: readonly string[], tokens: Record<string, string | undefined>): void {
   for (const [name, value] of Object.entries(tokens)) {
-    // A token under 8 characters (only the backend token can be that short) is not looked for: it would match ordinary words.
-    if (value !== undefined && value.length >= 8 && argv.some((a) => a.includes(value))) {
+    if (value === undefined || value.length === 0) continue;
+    // A token of 8 characters or more is looked for anywhere in an argument (--flag=TOKEN, a URL holding it). A shorter
+    // one (only a 0.1-style backend token can be that short) would match ordinary words, so an argument must equal it.
+    const found = value.length >= 8 ? argv.some((a) => a.includes(value)) : argv.some((a) => a === value || a.endsWith(`=${value}`));
+    if (found) {
       throw new TokenError(`the ${name} token appeared on the command line; give it in the environment or a 0600 file. Not starting.`);
     }
   }

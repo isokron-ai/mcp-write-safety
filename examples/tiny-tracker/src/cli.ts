@@ -97,6 +97,8 @@ async function main(): Promise<void> {
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
   if (tokenDir !== undefined && !needsFixtureLayer(features, fixtureControl)) refusals.push("--token-dir has no effect without a fixture feature or --fixture-control");
+  // ---- lane lead: principals (stream A replaces this refusal when it wires the file and the principals feature) ----
+  if (env.TRACKER_BACKEND_TOKENS_FILE !== undefined) refusals.push("TRACKER_BACKEND_TOKENS_FILE is read from 0.2.0 (feature principals); this build has one principal, p-default, holding TRACKER_BACKEND_TOKEN");
   if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
 
   if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
@@ -149,6 +151,7 @@ async function main(): Promise<void> {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
         features, extension: backendExtension,
+        ...(fixture ? { bootId: fixture.descriptor.bootId, runOwner: fixture.runOwner } : {}),
       });
     } catch (e) {
       fail((e as Error).message);
