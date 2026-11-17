@@ -49,6 +49,10 @@ async function main(): Promise<void> {
       "control-port": { type: "string" },
       "data-dir": { type: "string" },
       "token-dir": { type: "string" },
+      // ---- stream D: key retention options ----
+      "key-retention": { type: "string" },
+      "key-expiry": { type: "string" },
+      // ---- end stream D ----
       help: { type: "boolean" },
     },
   });
@@ -137,6 +141,22 @@ async function main(): Promise<void> {
     }
   }
   // ---- end stream A ----
+  // ---- stream D: durability settings (durable, inflight, retention) ----
+  const keyRetention = values["key-retention"] ?? env.TRACKER_KEY_RETENTION;
+  const keyExpiry = values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY;
+  let durability: import("./backend/durability.js").DurabilityOptions | undefined;
+  if ((keyRetention !== undefined || keyExpiry !== undefined) && !features.includes("retention")) {
+    refusals.push("--key-retention and --key-expiry (TRACKER_KEY_RETENTION, TRACKER_KEY_EXPIRY) need the retention feature");
+  } else if (layout !== "server" && ["durable", "inflight", "retention"].some((f) => features.includes(f))) {
+    const expiry = await import("./backend/expiry.js");
+    try {
+      durability = { features, dataDir: values["data-dir"], retentionMs: expiry.parseRetention(keyRetention), policy: expiry.parseExpiryPolicy(keyExpiry) };
+    } catch (e) {
+      if (e instanceof expiry.ExpirySettingError) refusals.push(e.message);
+      else throw e;
+    }
+  }
+  // ---- end stream D ----
   if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
 
   if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
@@ -192,6 +212,9 @@ async function main(): Promise<void> {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
         features, extension: backendExtension,
+        // ---- stream D ----
+        durability,
+        // ---- end stream D ----
         // Run tags are checked against the registry only when the control listener allocates runs (seams v2.1).
         ...(fixture ? { bootId: fixture.descriptor.bootId, ...(fixtureControl ? { runOwner: fixture.runOwner } : {}) } : {}),
         ...(principals ? { principals } : {}), ...(evidenceListen ? { evidenceListen } : {}), // stream A
@@ -214,6 +237,9 @@ async function main(): Promise<void> {
     out.backend = backend.url;
     if (backend.evidenceUrl) out.evidence_listener = backend.evidenceUrl; // stream A: container mode
     if (backendDefects.length) out.backend_defects = backendDefects;
+    // ---- stream D: the state line names the data dir and the journal head ----
+    if (backend.durability?.journal) out.journal = { data_dir: values["data-dir"], head: backend.durability.journal.head() };
+    // ---- end stream D ----
   }
   if (mode === "all" || mode === "server") {
     if (backend) env.TRACKER_BACKEND_URL = backend.url;

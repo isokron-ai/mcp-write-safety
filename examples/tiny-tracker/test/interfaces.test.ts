@@ -229,9 +229,8 @@ describe("frozen record field names", () => {
 
   it("the seams the streams need are named; keyRecord is wired", () => {
     assert.equal(BACKEND_SEAMS.keyRecord.wired, true);
-    // digest and lookup are wired by 0.2.0 (stream A); journal and keyExpiry wait for 0.3.0.
-    for (const s of ["digest", "lookup"] as const) assert.equal(BACKEND_SEAMS[s].wired, true, s);
-    for (const s of ["journal", "keyExpiry"] as const) assert.equal(BACKEND_SEAMS[s].wired, false, s);
+    // digest and lookup are wired by 0.2.0 (stream A); journal and keyExpiry by 0.3.0 (stream D).
+    for (const s of ["digest", "lookup", "journal", "keyExpiry"] as const) assert.equal(BACKEND_SEAMS[s].wired, true, s);
   });
 });
 

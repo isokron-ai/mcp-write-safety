@@ -27,6 +27,11 @@ import { replayDigestMismatch } from "./replay-digest-mismatch.js";
 import { digestNotCanonical } from "./digest-not-canonical.js";
 import { lookupWrongRecord } from "./lookup-wrong-record.js";
 import { lookupUnscoped } from "./lookup-unscoped.js";
+// ---- stream D ----
+import { keyRecordNotDurable } from "./key-record-not-durable.js";
+import { keyRecordAfterEffect } from "./key-record-after-effect.js";
+import { keyExpiresEarly } from "./key-expires-early.js";
+// ---- end stream D ----
 
 /** Named places in the backend a defect may replace. */
 export const BACKEND_SEAMS = {
@@ -35,8 +40,8 @@ export const BACKEND_SEAMS = {
   digest: { wired: true, since: "0.2.0", note: "The canonical bytes and digest of a committed result (execution records)" },
   keyRecord: { wired: true, since: "0.1.0", note: "Reading and completing a key record, scoped by principal (src/backend/seams.ts); pending and tombstone states from 0.3.0" },
   lookup: { wired: true, since: "0.2.0", note: "A key's record within the caller's scope: GET /operations/:key and the get_operation tool (src/backend/lookup.ts)" },
-  journal: { wired: false, since: "0.3.0", note: "The JSONL journal: one commit line per transaction, flushed before the answer" },
-  keyExpiry: { wired: false, since: "0.3.0", note: "Key retention and tombstones" },
+  journal: { wired: true, since: "0.3.0", note: "The JSONL journal: one commit line per transaction, flushed before the answer" },
+  keyExpiry: { wired: true, since: "0.3.0", note: "Key retention and tombstones" },
 } as const satisfies Record<string, { wired: boolean; since: string; note: string }>;
 
 export type BackendSeam = keyof typeof BACKEND_SEAMS;
@@ -53,7 +58,7 @@ export interface BackendDefect {
   apply(ops: BackendOps): void;
 }
 
-export const BACKEND_DEFECTS: BackendDefect[] = [lostUpdate, digestOfCurrentState, replayDigestMismatch, digestNotCanonical, lookupWrongRecord, lookupUnscoped];
+export const BACKEND_DEFECTS: BackendDefect[] = [lostUpdate, digestOfCurrentState, replayDigestMismatch, digestNotCanonical, lookupWrongRecord, lookupUnscoped, keyRecordNotDurable, keyRecordAfterEffect, keyExpiresEarly];
 
 /** The banner a backend defect build prints on stderr (the MCP layer's banner names them with a backend: prefix). */
 export function backendBanner(names: readonly string[]): string {

@@ -805,8 +805,12 @@ export class Store {
   // operation re-run; times, ids, counters, owners and applied-write entries come from the journal as committed.
 
   /** Replaces the constructor's seed with a journal header's (so the seed keeps its first created_at). Stream D. */
-  applySeed(_seed: SeedState): void {
-    throw new Error("Store.applySeed is built by stream D (0.3.0, feature durable)");
+  applySeed(seed: SeedState): void {
+    if (this.commitSeq !== 0 || this.tickets.size !== 0) throw new Error("a seed is applied only to a store with no commits");
+    this.projects.clear();
+    for (const p of seed.projects) this.projects.set(p.key, clone(p));
+    this.seq = { ...seed.counters };
+    (this as { seed: SeedState }).seed = clone(seed);
   }
 
   /**
@@ -814,8 +818,25 @@ export class Store {
    * and the commit sequence (lastSeq becomes tx.seq). Key records are rebuilt by the journal from the same line
    * (storedReplyOf(tx); a run-reset line drops tx.reset's key records). Stream D.
    */
-  applyPostState(_tx: CommittedTransaction): void {
-    throw new Error("Store.applyPostState is built by stream D (0.3.0, feature durable)");
+  applyPostState(tx: CommittedTransaction): void {
+    if (this.section) throw new Error("applyPostState runs outside a commit section (journal replay only)");
+    if (tx.seq <= this.commitSeq) throw new Error(`commit ${tx.seq} is not after ${this.commitSeq}`);
+    const post = tx.post;
+    for (const p of post.upserts.projects) this.projects.set(p.key, clone(p));
+    for (const t of post.upserts.tickets) this.tickets.set(t.id, clone(t));
+    for (const k of post.deletes.projects) {
+      this.projects.delete(k);
+      this.owners.delete(`project:${k}`);
+    }
+    for (const k of post.deletes.tickets) {
+      this.tickets.delete(k);
+      this.applied.delete(k);
+      this.owners.delete(`ticket:${k}`);
+    }
+    for (const o of post.owners) this.owners.set(`${o.type}:${o.id}`, { ...o });
+    for (const a of post.applied) this.applied.set(a.ticket, [...(this.applied.get(a.ticket) ?? []), { ...a }].slice(-20));
+    this.seq = { ...post.counters };
+    this.commitSeq = tx.seq;
   }
   // ---- end stream D ----
 }

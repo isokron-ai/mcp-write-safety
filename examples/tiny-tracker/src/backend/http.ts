@@ -15,6 +15,9 @@ import { defaultPrincipals, principalFor, type Principal } from "../principals.j
 import { HEADERS, TAG_PATTERN } from "../fixture-properties.js";
 import { applyBackendDefects } from "./defects/index.js";
 import { correctInputRules, type InputRules } from "./input.js";
+// ---- stream D: durability (import) ----
+import { openDurability, type Durability, type DurabilityOptions } from "./durability.js";
+// ---- end stream D ----
 
 export interface BackendOptions {
   /** Bearer token the MCP layer must send. */
@@ -52,6 +55,13 @@ export interface BackendOptions {
    * Needs an `extension` (the evidence namespace); every other path answers 404 there.
    */
   evidenceListen?: { host: string; port: number };
+  // ---- stream D: durability (option) ----
+  /**
+   * The 0.3.0 features durable, inflight and retention (src/backend/durability.ts). When absent, inflight and
+   * retention named in `features` switch on with their defaults; durable needs this option (its data dir).
+   */
+  durability?: DurabilityOptions;
+  // ---- end stream D ----
 }
 
 /** What a backend fault hook is told about the write. */
@@ -95,6 +105,9 @@ export interface RunningBackend {
   /** The run reset (Store.dropRun through the commit path, with the key-record seam in use). */
   dropRun(scope: KeyScope, run: string): ReturnType<Store["dropRun"]>;
   close(): Promise<void>;
+  // ---- stream D: durability (handle) ----
+  durability?: Durability;
+  // ---- end stream D ----
 }
 
 /**
@@ -209,6 +222,14 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     if (o.role !== "observer") throw new Error(`a backend defect's commit sink must have role "observer" (${o.name})`);
     store.addSink(o);
   }
+  // ---- stream D: durability (open) ----
+  // Opens the journal (replaying it into the store) and puts the key-record seam with the pending, tombstone and fence
+  // states in place. Any of durable, inflight or retention switches it on.
+  const dOptions: DurabilityOptions | undefined = options.durability ?? (features.some((f) => f === "inflight" || f === "retention") ? { features } : undefined);
+  const durable: Durability | undefined = dOptions && dOptions.features.some((f) => f === "durable" || f === "inflight" || f === "retention")
+    ? openDurability(store, { ...dOptions, defects: [...(dOptions.defects ?? []), ...(options.defects ?? [])] }) : undefined;
+  if (durable) ops.keyRecord = durable.seam;
+  // ---- end stream D ----
   store.keyRecords = ops.keyRecord;
   store.runOwner = options.runOwner;
   const faults = options.faults ?? {};
@@ -346,6 +367,10 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         // An execution record serves canonical bytes of the request and the result: every string in them must encode.
         ops.inputRules.checkStrings(body);
       }
+      // ---- stream D: the fence route (settle-by-lookup) ----
+      const dReply = durable?.route(method, url.pathname.split("/").filter(Boolean).map(decodeURIComponent), principal, tag(req.headers[HEADERS.run.toLowerCase()]), body ?? null);
+      if (dReply) return send(dReply.status, dReply.body, dReply.headers);
+      // ---- end stream D ----
       if (!MUTATING.has(method)) {
         const reply = await route(method, url, req, body, undefined, principal);
         return send(reply.status, reply.body, reply.headers);
@@ -600,6 +625,9 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     ...(evidenceUrl ? { evidenceUrl } : {}),
     bootId: store.bootId,
     dropRun: (scope, run) => store.dropRun(scope, run),
+    // ---- stream D: durability (handle) ----
+    durability: durable,
+    // ---- end stream D ----
     close: async () => {
       if (evidenceServer) {
         evidenceServer.closeAllConnections();
@@ -609,6 +637,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         server.closeAllConnections();
         server.close(() => resolve());
       });
+      durable?.close(); // stream D
     },
   };
 }
