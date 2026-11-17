@@ -30,8 +30,8 @@
 // that no commit or aborted line names is ended at start by an aborted line
 // (reason orphan_at_start), written before the backend serves.
 
-import { closeSync, existsSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
 import { ensurePrivateDir, PrivateDirError } from "../private-dir.js";
@@ -144,8 +144,23 @@ export function prepareDataDir(dir: string, platform: string = process.platform)
   }
 }
 
-/** Data dirs held by a live Journal in this process (a second writer in the same process is refused too). */
+/**
+ * Data dirs held by a live Journal in this process (a second writer in the same process is refused too), keyed by the
+ * directory's real path (G2 fold-in 7): on macOS /tmp is /private/tmp and tmpdir() lies under /var, so two spellings of
+ * one directory must not count as two.
+ */
 const HELD = new Set<string>();
+/** Data dirs whose Journal this process abandoned (tests' in-process crash): their lock names this pid and is stale. */
+const ABANDONED = new Set<string>();
+
+/** The key a data dir is held under: its real path (the dir exists once prepareDataDir ran), else the resolved path. */
+function heldKey(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
 
 /**
  * Whether a lock holder still runs. A killed process that its parent has not reaped yet (a zombie: a supervised child
@@ -170,15 +185,56 @@ export function alive(pid: number, procRoot = "/proc"): boolean {
   return true;
 }
 
+/** Test seam (G2 fold-in 7): called after a lock was judged stale and before it is taken over. */
+export const lockHooks: { beforeTakeover?: (path: string) => void } = {};
+
+/**
+ * Removes a stale lock without ever removing another starter's fresh one (G2 fold-in 7). The lock is renamed aside
+ * (atomic: of two starters only one moves a given file) and the moved file is compared with the stale text this starter
+ * read. The same text: the stale lock is gone, and the caller creates its own with O_EXCL. Another text: a second
+ * starter took the lock over in between, so the moved file is linked back (link refuses if a lock exists again) and the
+ * caller reads the lock afresh. Returns false when the lock could not be put back (a third starter created one in the
+ * same instant); the caller then refuses to start.
+ */
+function removeStaleLock(path: string, staleText: string): boolean {
+  const aside = `${path}.stale-${process.pid}-${randomBytes(6).toString("hex")}`;
+  try {
+    renameSync(path, aside);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return true; // another starter removed it first
+    throw e;
+  }
+  let moved: string | undefined;
+  try {
+    moved = readFileSync(aside, "utf8");
+  } catch {
+    // unreadable: treat it as not the stale lock
+  }
+  if (moved === staleText) {
+    unlinkSync(aside);
+    return true;
+  }
+  let restored = true;
+  try {
+    linkSync(aside, path);
+  } catch {
+    restored = false;
+  }
+  unlinkSync(aside);
+  return restored;
+}
+
 /**
  * The pid lock (review G13): one writer per data dir. A lock whose process is gone is stale and is taken over (logged);
- * a lock held by a live process, or by a live journal in this process, refuses the start.
+ * a lock held by a live process, by a live journal in this process, or naming this process's pid (another spelling of
+ * a directory this process holds), refuses the start. The takeover is a compare-and-remove (removeStaleLock), then an
+ * O_EXCL create, so two starters can never both hold the dir.
  */
 export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) => void): void {
   const path = join(dir, LOCK_FILE);
-  const real = resolve(dir);
+  const real = heldKey(dir);
   if (HELD.has(real)) throw new DataDirError(`the data dir ${dir} is already open in this process; one writer per data dir`);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const fd = openSync(path, "wx", 0o600);
       // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
@@ -186,27 +242,42 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
       fsyncSync(fd);
       closeSync(fd);
       HELD.add(real);
+      ABANDONED.delete(real);
       return;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     }
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; // removed meanwhile: try to create it again
+      throw e;
+    }
     let pid = NaN;
     try {
-      pid = Number(JSON.parse(readFileSync(path, "utf8")).pid);
+      pid = Number(JSON.parse(text).pid);
     } catch {
       // A lock torn at a crash holds no live pid.
+    }
+    if (pid === process.pid && !ABANDONED.has(real)) {
+      throw new DataDirError(`the data dir ${dir} is already open in this process (its lock names this process); one writer per data dir`);
     }
     if (Number.isSafeInteger(pid) && pid !== process.pid && alive(pid)) {
       throw new DataDirError(`the data dir ${dir} is locked by process ${pid}; one server per data dir (more than one instance is not supported)`);
     }
+    lockHooks.beforeTakeover?.(path);
+    if (!removeStaleLock(path, text)) {
+      throw new DataDirError(`the data dir ${dir}: another start took the lock over at the same moment; one server per data dir`);
+    }
     log(`tiny-tracker: taking over a stale data-dir lock (process ${Number.isNaN(pid) ? "unknown" : pid} is gone)`);
-    unlinkSync(path);
+    ABANDONED.delete(real);
   }
   throw new DataDirError(`could not take the data-dir lock in ${dir}`);
 }
 
 export function releaseLock(dir: string): void {
-  if (!HELD.delete(resolve(dir))) return;
+  if (!HELD.delete(heldKey(dir))) return;
   try {
     if (JSON.parse(readFileSync(join(dir, LOCK_FILE), "utf8")).pid === process.pid) unlinkSync(join(dir, LOCK_FILE));
   } catch {
@@ -560,7 +631,9 @@ export class Journal implements JournalSeam, KeyLineWriter {
       try { closeSync(this.fd); } catch { /* closed */ }
       this.fd = undefined;
     }
-    HELD.delete(resolve(this.options.dataDir));
+    const real = heldKey(this.options.dataDir);
+    HELD.delete(real);
+    ABANDONED.add(real);
   }
 }
 

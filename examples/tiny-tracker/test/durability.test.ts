@@ -5,10 +5,10 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { durableBackend, movableClock, tempDir, TOKEN } from "./support/durable.js";
-import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum } from "../src/backend/journal.js";
+import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks } from "../src/backend/journal.js";
 import { startBackend } from "../src/start.js";
 import { digestOf, DOMAINS, fingerprintHash } from "../src/digest.js";
 import { DAY_MS, describeRetention, parseExpiryPolicy, parseRetention, retentionSentence } from "../src/backend/expiry.js";
@@ -247,6 +247,63 @@ describe("the data dir and its lock (G13, X5)", () => {
       const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       assert.equal(JSON.parse(readFileSync(join(t.dataDir, LOCK_FILE), "utf8")).pid, process.pid);
       await b2.close();
+    } finally {
+      t.cleanup();
+    }
+  });
+});
+
+describe("the lock takeover (G2 fold-in 7)", () => {
+  it("a second spelling of a held dir is refused (HELD keys on the real path), and a lock naming this process is held, not stale", async () => {
+    const t = tempDir("lockpath");
+    try {
+      const real = join(t.dir, "real");
+      mkdirSync(real, { mode: 0o700 });
+      symlinkSync(real, join(t.dir, "alias"));
+      const b = await durableBackend({ dataDir: join(real, "data"), clock: movableClock() });
+      try {
+        // As /tmp and /private/tmp on macOS: one directory, two paths. Before the fix this process opened it twice.
+        await assert.rejects(durableBackend({ dataDir: join(t.dir, "alias", "data"), clock: movableClock() }), /already open in this process/);
+      } finally {
+        await b.close();
+      }
+      // A lock that names this process, with no journal of this process holding the dir: still held, never stale.
+      prepareDataDir(t.dataDir);
+      writeFileSync(join(t.dataDir, LOCK_FILE), JSON.stringify({ pid: process.pid, started_at: "x" }));
+      await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /already open in this process \(its lock names this process\)/);
+      assert.equal(JSON.parse(readFileSync(join(t.dataDir, LOCK_FILE), "utf8")).pid, process.pid, "the lock is left alone");
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("two starters on a stale lock: the one that comes second never removes the other's fresh lock", async () => {
+    const t = tempDir("lockrace");
+    try {
+      prepareDataDir(t.dataDir);
+      const path = join(t.dataDir, LOCK_FILE);
+      writeFileSync(path, JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "dead" }));
+      // Between this starter's stale check and its takeover, another starter (a live process: our parent stands in for
+      // it) takes the stale lock over. Before the fix this starter unlinked that fresh lock and created its own.
+      let raced = false;
+      lockHooks.beforeTakeover = (p) => {
+        if (raced) return;
+        raced = true;
+        unlinkSync(p);
+        writeFileSync(p, JSON.stringify({ pid: process.ppid, started_at: "fresh" }));
+      };
+      try {
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), new RegExp(`locked by process ${process.ppid}`));
+      } finally {
+        lockHooks.beforeTakeover = undefined;
+      }
+      assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { pid: process.ppid, started_at: "fresh" }, "the other starter's lock is in place");
+      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")), [], "nothing left aside");
+      // Without a race the stale lock is taken over as before.
+      writeFileSync(path, JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "dead" }));
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      assert.equal(JSON.parse(readFileSync(path, "utf8")).pid, process.pid);
+      await b.close();
     } finally {
       t.cleanup();
     }
