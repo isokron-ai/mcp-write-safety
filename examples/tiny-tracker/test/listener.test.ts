@@ -2,7 +2,7 @@
 //   - X1: container mode listens on every interface and refuses to start
 //     without a bearer token for /mcp; with one, /mcp needs it.
 //   - X5: caps on the listener (body, requests in flight, unanswered POSTs)
-//     and a data dir only its owner can use.
+//     (the 0700 data dir is in test/private-dir.test.ts).
 // No container runtime is needed: the start refusal is the same code path the
 // image runs (TRACKER_CONTAINER=1), tested here in Node.
 //
@@ -10,13 +10,12 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { resolveTransport, TransportError, loadMcpToken, containerMode } from "../src/transport.js";
-import { ensurePrivateDir, PrivateDirError } from "../src/private-dir.js";
 import { ListenError, MCP_HTTP_CAPS, startMcpServer } from "../src/mcp/server.js";
 import { createBuild } from "../src/mcp/build.js";
 import { correctConfigRules, type ServerConfig } from "../src/mcp/config.js";
@@ -223,7 +222,7 @@ describe("container mode through the command line (the image's start path, witho
         assert.equal((await post(state.mcp)).status, 401);
         const client = await connect(state.mcp, TOKEN);
         try {
-          assert.equal((await client.listTools()).tools.length, 16);
+          assert.equal((await client.listTools()).tools.length, 18, "the default profile's tools (0.1.0's 16 plus the lookup tools)");
         } finally {
           await client.close();
         }
@@ -236,42 +235,6 @@ describe("container mode through the command line (the image's start path, witho
         assert.equal(err?.code, "EADDRINUSE");
       });
       assert.ok(!r.stdout.includes(TOKEN) && !r.stderr.includes(TOKEN), "the token is never printed");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("a data dir only its owner can use (src/private-dir.ts, X5)", () => {
-  it("creates a missing directory 0700, nested too", { skip: !posix && "POSIX modes" }, () => {
-    const dir = tempDir();
-    try {
-      const data = join(dir, "a", "data");
-      ensurePrivateDir(data);
-      assert.equal(statSync(data).mode & 0o777, 0o700);
-      ensurePrivateDir(data); // an existing private dir is fine
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("refuses an existing directory open to others, a file and a symlink", { skip: !posix && "POSIX modes" }, () => {
-    const dir = tempDir();
-    try {
-      const open = join(dir, "open");
-      mkdirSync(open, { mode: 0o755 });
-      chmodSync(open, 0o755);
-      assert.throws(() => ensurePrivateDir(open), (e) => e instanceof PrivateDirError && /chmod 700/.test(e.message));
-      assert.equal(statSync(open).mode & 0o777, 0o755, "the mode is not changed behind the operator's back");
-      ensurePrivateDir(open, "the data dir", "win32");
-      const file = join(dir, "file");
-      writeFileSync(file, "");
-      assert.throws(() => ensurePrivateDir(file), /must name a directory/);
-      const priv = join(dir, "priv");
-      mkdirSync(priv, { mode: 0o700 });
-      const link = join(dir, "link");
-      symlinkSync(priv, link);
-      assert.throws(() => ensurePrivateDir(link), /symbolic link/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -26,6 +26,7 @@ import { CHECKS, type Verdict } from "./support/checks.js";
 import { startStack, type Era, type StackOptions } from "./support/stack.js";
 import { startStdioPair } from "./support/stdio-pair.js";
 import { ConfigError } from "../src/start.js";
+import { DEFAULT_RETENTION_MS, retentionSentence } from "../src/backend/expiry.js";
 
 const CLI = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const golden = JSON.parse(readFileSync(new URL("../../test/golden/surface-0.1.0.json", import.meta.url), "utf8")) as {
@@ -64,32 +65,54 @@ function runRefused(args: string[], env: Record<string, string> = {}): Promise<{
 }
 
 describe("tiny-tracker stdio: the command line", () => {
+  // The stdio golden over both protocol eras: --profile 0.1 is exactly the published 0.1.0 surface; the default profile
+  // is that surface plus the two read-only lookup tools (0.2.0 default) and the retention sentence (0.3.0 default:
+  // retention; from 0.4.0 the instructions state it too), as over HTTP (test/surface.test.ts).
+  const RETENTION = ` ${retentionSentence(DEFAULT_RETENTION_MS)}`;
   for (const era of ["2026-07-28", "2025-11-25"] as const) {
-    it(`serves the 0.1.0 tools, instructions and capabilities over stdio (${era})`, async () => {
-      const expected = goldenConfig(`correct, ${era}`);
-      const { client, stderr } = await connectCli([], {}, era);
-      try {
-        assert.equal(client.getServerVersion()?.name, expected.initialize.serverName);
-        assert.equal(client.getInstructions(), expected.initialize.instructions);
-        assert.deepEqual(client.getServerCapabilities(), expected.initialize.capabilities);
-        assert.deepEqual((await client.listTools()).tools, expected.tools);
-        const r = await client.callTool({ name: "create_ticket", arguments: { title: "over stdio", idempotency_key: "k-stdio-0001" } }) as any;
-        assert.equal(r.isError ?? false, false);
-        assert.equal(r.structuredContent.mws.outcome, "applied");
-        const again = await client.callTool({ name: "create_ticket", arguments: { title: "over stdio", idempotency_key: "k-stdio-0001" } }) as any;
-        assert.equal(again.structuredContent.id, r.structuredContent.id, "a keyed repeat over stdio returns the same ticket");
-      } finally {
-        await client.close();
-      }
-      const state = JSON.parse(stderr().trim().split("\n").at(-1)!);
-      assert.equal(state.transport, "stdio");
-      assert.match(state.backend, /^http:\/\/127\.0\.0\.1:\d+$/);
-      assert.deepEqual(state.defects, []);
-    });
+    for (const profile of ["0.1", "default"] as const) {
+      it(`--profile ${profile}: the 0.1.0 tools, instructions and capabilities over stdio${profile === "default" ? ", plus the lookup tools and the retention sentence" : ""} (${era})`, async () => {
+        const expected = goldenConfig(`correct, ${era}`);
+        const { client, stderr } = await connectCli(["--profile", profile], {}, era);
+        try {
+          assert.equal(client.getServerVersion()?.name, expected.initialize.serverName);
+          // The default's retention: the instructions and every key-accepting tool's description end with the sentence;
+          // taken back out, the rest is the 0.1.0 text.
+          const withoutRetention = (text: string | undefined) => {
+            if (profile === "0.1" || text === undefined) return text;
+            assert.ok(text.endsWith(RETENTION), `states the retention: ${text}`);
+            return text.slice(0, -RETENTION.length);
+          };
+          assert.equal(withoutRetention(client.getInstructions()), expected.initialize.instructions);
+          assert.deepEqual(client.getServerCapabilities(), expected.initialize.capabilities);
+          const tools = (await client.listTools()).tools as Array<{ name: string; description?: string; inputSchema?: { properties?: Record<string, unknown> } }>;
+          const lookup = ["get_operation", "get_execution"];
+          const keyed = (t: (typeof tools)[number]) => t.inputSchema?.properties?.idempotency_key !== undefined;
+          assert.deepEqual(tools.filter((t) => !lookup.includes(t.name)).map((t) => (keyed(t) ? { ...t, description: withoutRetention(t.description) } : t)), expected.tools);
+          assert.deepEqual(tools.filter((t) => lookup.includes(t.name)).map((t) => t.name).sort(), profile === "0.1" ? [] : [...lookup].sort());
+          const r = await client.callTool({ name: "create_ticket", arguments: { title: "over stdio", idempotency_key: "k-stdio-0001" } }) as any;
+          assert.equal(r.isError ?? false, false);
+          assert.equal(r.structuredContent.mws.outcome, "applied");
+          const again = await client.callTool({ name: "create_ticket", arguments: { title: "over stdio", idempotency_key: "k-stdio-0001" } }) as any;
+          assert.equal(again.structuredContent.id, r.structuredContent.id, "a keyed repeat over stdio returns the same ticket");
+          if (profile === "default") {
+            const op = await client.callTool({ name: "get_operation", arguments: { idempotency_key: "k-stdio-0001" } }) as any;
+            assert.equal(op.isError ?? false, false, JSON.stringify(op));
+          }
+        } finally {
+          await client.close();
+        }
+        const state = JSON.parse(stderr().trim().split("\n").at(-1)!);
+        assert.equal(state.transport, "stdio");
+        assert.equal(state.mcp, undefined, "no MCP listener");
+        assert.match(state.backend, /^http:\/\/127\.0\.0\.1:\d+$/);
+        assert.deepEqual(state.defects, []);
+      });
+    }
   }
 
   it("a defect build over stdio prints the banner on stderr and lists its defects", async () => {
-    const { client, stderr } = await connectCli(["--defect", "MWS-RETRY-2"]);
+    const { client, stderr } = await connectCli(["--profile", "0.1", "--defect", "MWS-RETRY-2"]);
     try {
       assert.deepEqual((await client.listTools()).tools, goldenConfig("MWS-RETRY-2 defects").tools);
     } finally {
@@ -131,9 +154,9 @@ describe("tiny-tracker stdio: the command line", () => {
 
 describe("tiny-tracker stdio: refusals (exit 2, nothing served)", () => {
   const cases: Array<[string, string[], Record<string, string>, RegExp]> = [
-    ["a fixture-layer feature (CMP-70)", ["--features", "evidence"], {}, /CMP-70|Streamable HTTP only/],
+    ["--supervise (CMP-70)", ["--supervise"], {}, /--supervise runs over Streamable HTTP only/],
     ["--port (no listener)", ["--port", "0"], {}, /--port has no effect over stdio/],
-    ["--fixture-control", ["--fixture-control"], {}, /--fixture-control has no effect over stdio/],
+    ["--fixture-control without a control token", ["--fixture-control"], {}, /TRACKER_CONTROL_TOKEN/],
     ["an MCP token (nothing to protect)", [], { TRACKER_MCP_TOKEN: "mcp-token-0123456789abcdef" }, /stdio has none/],
     ["--backend-url without a backend token", ["--backend-url", "http://127.0.0.1:9"], {}, /TRACKER_BACKEND_TOKEN is required/],
     ["--backend-port with --backend-url", ["--backend-url", "http://127.0.0.1:9", "--backend-port", "0"], { TRACKER_BACKEND_TOKEN: "tok-0123456789abcdef" }, /--backend-port has no effect/],
@@ -150,17 +173,56 @@ describe("tiny-tracker stdio: refusals (exit 2, nothing served)", () => {
     });
   }
 
-  it("CMP-70 is in the compatibility table and applies to stdio only", () => {
+  it("CMP-70 (narrowed at the 0.4.0 integration) refuses --supervise over stdio and nothing else", () => {
     const base = { layout: "all" as const, profile: "default" as const, defects: [], backendDefects: [], variants: [], faults: [] };
-    assert.equal(checkCompat({ ...base, features: ["evidence"], fixtureControl: false, transport: "stdio" }).length, 1);
-    assert.equal(checkCompat({ ...base, features: [], fixtureControl: true, transport: "stdio" }).filter((m) => /Streamable HTTP only/.test(m)).length, 1);
-    assert.deepEqual(checkCompat({ ...base, features: ["strict-input"], fixtureControl: false, transport: "stdio" }), []);
-    assert.deepEqual(checkCompat({ ...base, features: ["evidence"], fixtureControl: false, transport: "http" }), []);
-    assert.deepEqual(checkCompat({ ...base, features: ["evidence"], fixtureControl: false }), []);
+    const cmp70 = (c: Parameters<typeof checkCompat>[0]) => checkCompat(c).filter((m) => /Streamable HTTP only/.test(m)).length;
+    assert.equal(cmp70({ ...base, features: [], fixtureControl: false, supervise: true, transport: "stdio" }), 1);
+    assert.equal(cmp70({ ...base, features: [], fixtureControl: false, supervise: true, transport: "http" }), 0);
+    assert.deepEqual(checkCompat({ ...base, features: ["evidence"], fixtureControl: false, transport: "stdio" }), []);
+    assert.deepEqual(checkCompat({ ...base, features: ["evidence", "strict-input", "ledger", "faults"], fixtureControl: true, transport: "stdio" }), []);
   });
 
   it("the stdio message cap equals the HTTP body cap (X5)", () => {
     assert.equal(MAX_STDIO_MESSAGE, MCP_HTTP_CAPS.maxBodyBytes);
+  });
+});
+
+describe("tiny-tracker stdio: the fixture layer over stdio (CMP-70 narrowed)", () => {
+  it("evidence, the ledger, faults and the control listener work over stdio, with the descriptor mirrored in the instructions", async () => {
+    const evidence = `ev-${"e".repeat(8)}-0123456789abcdef`;
+    const control = `ct-${"c".repeat(8)}-0123456789abcdef`;
+    const features = "evidence,strict-input,execution-records,lookup,principals,ledger,faults";
+    const { client, stderr } = await connectCli(["--features", features, "--fixture-control"],
+      { TRACKER_EVIDENCE_TOKEN: evidence, TRACKER_CONTROL_TOKEN: control });
+    try {
+      // The server answers on stdin before the state line is written (after the control listener starts): wait for it.
+      for (let i = 0; i < 200 && !/"transport":"stdio"/.test(stderr()); i++) await new Promise((r) => setTimeout(r, 25));
+      const state = JSON.parse(stderr().trim().split("\n").at(-1)!);
+      assert.equal(state.transport, "stdio");
+      assert.match(state.control, /^http:\/\/127\.0\.0\.1:\d+$/);
+      const build = await (await fetch(`${state.backend}/build`, { headers: { authorization: `Bearer ${evidence}` } })).json() as any;
+      // The named features and the default profile's inflight and retention (0.3.0 default flip).
+      assert.deepEqual([...build.features].sort(), [...features.split(","), "inflight", "retention"].sort());
+      assert.match(client.getInstructions() ?? "", new RegExp(build.build_hash.slice(0, 12)), "the instructions mirror the build hash");
+      // A run from the control listener, a tagged write over stdio, and its ledger entry with the run and operation tags.
+      const alloc = await fetch(`${state.control}/_fixture/runs`, { method: "POST", headers: { authorization: `Bearer ${control}`, "content-type": "application/json" }, body: "{}" });
+      assert.ok(alloc.status === 200 || alloc.status === 201, `run allocation answered ${alloc.status}`);
+      const run = ((await alloc.json()) as any).run_id as string;
+      const r = await client.callTool({ name: "create_ticket", arguments: { title: "stdio ledger", idempotency_key: "k-stdio-ledger-1" },
+        _meta: { "dev.writesafety.tiny-tracker/run": run, "dev.writesafety.tiny-tracker/operation": "op-stdio-1" } } as any) as any;
+      assert.equal(r.structuredContent.mws.outcome, "applied", JSON.stringify(r));
+      assert.ok(r._meta && JSON.stringify(r._meta).includes(build.build_hash), "result _meta mirrors the descriptor");
+      const ledger = await (await fetch(`${state.backend}/ledger`, { headers: { authorization: `Bearer ${evidence}` } })).json() as any;
+      const entries = (ledger.entries ?? ledger) as any[];
+      const hit = entries.find((e) => e.kind === "execution" && e.request?.key === "k-stdio-ledger-1");
+      assert.ok(hit, `the write is in the ledger: ${JSON.stringify(ledger).slice(0, 600)}`);
+      assert.equal(hit.run, run, "attributed to the run from request _meta");
+      assert.equal(hit.operation_tag, "op-stdio-1");
+    } finally {
+      await client.close();
+    }
+    const out = stderr();
+    assert.ok(!out.includes(evidence) && !out.includes(control), "no token is printed");
   });
 });
 
