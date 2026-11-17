@@ -40,6 +40,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `cwd` | Working directory of a started server, relative to the manifest |
 | `processes` | `separate` or `shared`: whether the second connection of a concurrency test is a second server process |
 | `restart` | `{ stop: graceful \| kill }` (Annex E): the declaration's means to stop and start the server, for MWS-RETRY-2 step (e) and its crash form. The tester stops a server process it started for the step (`graceful`: closing stdin first for stdio, then SIGTERM; `kill`: SIGKILL) and starts it again with its own command and the same environment; a graceful stop after which the process did not exit by itself, and was killed, is recorded as a kill. Needs `stdio` or `launch`. Without it, both steps are `not tested` |
+| `decode` | `{ <tool>: json \| none }`: how each named tool's wrapped results (structuredContent `{"result": "<JSON as a string>"}`) are read; see [Wrapped results](#wrapped-results-decode) |
 
 ## target
 
@@ -47,7 +48,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 |---|---|
 | `environment` | `test`; the tester refuses anything else |
 | `confirm` | The name a person types (or passes as `--confirm-target`) before a run |
-| `guard` | `{ tool, args, path, pattern, read_only, decode }`: a read whose result at `path` must match `pattern`, or the run stops before any write. The tool must declare `readOnlyHint: true`; for a server that annotates no tool, `read_only: true` declares that it only reads (a tool that declares `readOnlyHint: false` or `destructiveHint: true` is refused either way). For a server whose only tool is a dispatcher (PostHog's `cli` mode, `exec`), `read_only_call: true` declares that this exact call (arguments written out in full, no templates) only reads: the guard then rests on the operator's declaration, which the results say; before any other write the same call is made three times and must answer identically, and the canaries and every declared list that needs no object must read the same before the first call and after the third; any error or difference refuses the run. Each of the three calls counts against `write_budget` and is recorded in the ledger and the results. Between checks the run asks `tools/list`, never the declared call. `plan` warns when the run would refuse the guard. `decode: json`: see [Wrapped results](#wrapped-results-decode) |
+| `guard` | `{ tool, args, path, pattern, read_only, decode }`: a read whose result at `path` must match `pattern`, or the run stops before any write. The tool must declare `readOnlyHint: true`; for a server that annotates no tool, `read_only: true` declares that it only reads (a tool that declares `readOnlyHint: false` or `destructiveHint: true` is refused either way). For a server whose only tool is a dispatcher (PostHog's `cli` mode, `exec`), `read_only_call: true` declares that this exact call (arguments written out in full, no templates) only reads: the guard then rests on the operator's declaration, which the results say; before any other write the same call is made three times and must answer identically, and the canaries and every declared list that needs no object must read the same before the first call and after the third; any error or difference refuses the run. Each of the three calls counts against `write_budget` and is recorded in the ledger and the results. Between checks the run asks `tools/list`, never the declared call. `plan` warns when the run would refuse the guard. `decode: json` or `none`: see [Wrapped results](#wrapped-results-decode) |
 | `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
 | `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
 
@@ -184,12 +185,24 @@ A write tool that accepts an idempotency key (MWS-RETRY-2). Each step of the tes
 
 ## Wrapped results (decode)
 
-Some servers (Python FastMCP with a wrap-result output schema, for example) answer every tool with structuredContent `{"result": "<a JSON document as a string>"}`: the data is the JSON inside that string. Paths (`read.object`, `read.items`, `read.match`, `list.items`, `target.guard.path`, and every other path read from that tool's answers) are read from the parsed document when both hold:
+Some servers (Python FastMCP with a wrap-result output schema, for example) answer every tool with structuredContent `{"result": "<a JSON document as a string>"}`: the data is the JSON inside that string. For such a tool the decoded document replaces structuredContent in every reading of the tool's structured answer, for reads and writes alike, not only paths:
 
-- the tool is marked: its `outputSchema` in `tools/list` carries `x-fastmcp-wrap-result: true`, or is an object schema whose only property is `result` (of type string, or untyped); or the manifest declares `decode: json` on the `read`, `list` or `target.guard` that names the tool (for a server that publishes no `outputSchema`);
+- paths: `read.object`, `read.items`, `read.match`, `list.items`, `list.next.path`, `target.guard.path`, a create's `id` and `find.items`, `multi[].report`, `version.read`, and the cleanup's reads;
+- the declared `outcome_field`;
+- the structured signals (a conflict, version-required or validation status or code at the top level or in `error`);
+- the conflict readings of MWS-CONC-2, CONC-4 and CONC-6 (the version and the other writer's value in the conflict, a conflict shown by a signal);
+- the text the patterns and `mentions` search (the answer's text plus its structured content), and an adopted result shape (`mws`), which is read from the decoded document, as the patterns are.
+
+The decode happens when both hold:
+
+- the tool is marked: its `outputSchema` in `tools/list` has `result` as its only property and either carries `x-fastmcp-wrap-result: true` or gives `result` the type string (or no type); or the manifest declares `decode: json` for it (for a server that publishes no `outputSchema`);
 - the answer is exactly that shape: structuredContent is an object whose only member is `result`, a string that parses as a JSON object or array.
 
-Anything else is read as before: a string that is not JSON (or is a JSON number, string or null), structuredContent with any other member, or a tool that is neither marked nor declared. `decode: json` applies to every call of that tool in the run, and `json` is its only value. The capture keeps each answer as received; each call record kept in `results.json` (the observations' call briefs) carries `decoded: { from: "structuredContent.result", basis: "outputSchema" | "manifest" }`, and `target.mcp.notes` says, once per tool, that its results were decoded and why. Adding `decode: json` changes the manifest's bytes, so the plan hash changes; a manifest without it keeps its hash.
+Anything else is read as before: a string that is not JSON (or is a JSON number, string or null), structuredContent with any other member, or a tool that is neither marked nor declared.
+
+`decode` is declared on `read`, `list` or `target.guard` (for the tool they name), or per tool under `server.decode: { <tool>: json | none }` (for any tool, a write tool included). `none` never decodes the tool's results, even where its `outputSchema` marks them: use it for a tool whose sole `result` property is a string meant to stay a string (a message that happens to be JSON). A mode applies to every call of that tool in the run; two different modes for one tool are refused.
+
+The record says what was decoded: each call record in `results.json` (the observations' call briefs and the experiments' call records) carries `decoded: { from: "structuredContent.result", basis: "outputSchema" | "manifest" }` and, beside the decoded `data`, `raw_structured`: structuredContent as received (clipped like `data`). `target.mcp.notes` says, once per tool, that its results were decoded and why, or that `decode: none` kept a marked tool's results as they are. The capture keeps every answer as received. Adding `decode` changes the manifest's bytes, so the plan hash changes; a manifest without it keeps its hash.
 
 ## resources
 

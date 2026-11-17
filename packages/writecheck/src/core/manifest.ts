@@ -42,16 +42,43 @@ export interface ToolTemplate {
 }
 
 /**
- * `decode: json` on a read, a list or the guard: the tool answers structuredContent `{"result": "<a JSON document as a string>"}`
- * (a wrapped result) without an outputSchema that says so; paths are read from the parsed document. Absent unless declared.
+ * How a tool's wrapped results (structuredContent `{"result": "<a JSON document as a string>"}`) are read, where the declaration
+ * says so: `json` decodes them for a tool whose outputSchema does not mark them; `none` never decodes them, even where the
+ * outputSchema marks them. Absent unless declared (the outputSchema decides).
  */
-export type Decode = { decode?: 'json' };
+export type DecodeMode = 'json' | 'none';
+export type Decode = { decode?: DecodeMode };
 
-/** Parse an optional `decode` member (only `json`). */
+const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it)';
+
+/** Parse an optional `decode` member. */
 function decodeOf(v: unknown, where: string): Decode {
   if (v === undefined) return {};
-  if (v !== 'json') throw fail(`${where}.decode`, 'json (paths are read from the JSON document a wrapped result carries as a string)');
-  return { decode: 'json' };
+  if (v !== 'json' && v !== 'none') throw fail(`${where}.decode`, DECODE_WHY);
+  return { decode: v };
+}
+
+/**
+ * Every tool the declaration names a decode for (server.decode, target.guard, each resource's read and list), one mode per tool;
+ * two different modes for one tool are refused.
+ */
+export function declaredDecodes(m: Pick<Manifest, 'server' | 'target' | 'resources'>): Map<string, DecodeMode> {
+  const out = new Map<string, DecodeMode>();
+  const where = new Map<string, string>();
+  const add = (tool: string, mode: DecodeMode | undefined, at: string) => {
+    if (!mode) return;
+    const had = out.get(tool);
+    if (had && had !== mode) throw fail(at, `decode: ${mode} for ${tool}, which ${where.get(tool)} declares decode: ${had} (one mode per tool: a wrapped result is decoded for every call of the tool or for none)`);
+    out.set(tool, mode);
+    where.set(tool, at);
+  };
+  for (const [tool, mode] of Object.entries(m.server?.decode ?? {})) add(tool, mode, `server.decode.${tool}`);
+  if (m.target?.guard) add(m.target.guard.tool, m.target.guard.decode, 'target.guard.decode');
+  (m.resources ?? []).forEach((r, i) => {
+    add(r.read.tool, r.read.decode, `resources[${i}].read.decode`);
+    if (r.list) add(r.list.tool, r.list.decode, `resources[${i}].list.decode`);
+  });
+  return out;
 }
 
 export interface FieldSpec {
@@ -267,6 +294,8 @@ export interface Manifest {
     processes: 'separate' | 'same';
     /** Annex E (R8-3): the declaration's means to stop and start the server (the tester's own launch command), and the kind of stop. */
     restart: { stop: 'graceful' | 'kill' } | null;
+    /** Per tool: how its wrapped results are read (`json` or `none`); absent unless declared. */
+    decode?: Record<string, DecodeMode>;
   };
   target: {
     environment: string;
@@ -1006,7 +1035,13 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
-  keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart'], 'server');
+  keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart', 'decode'], 'server');
+  let serverDecode: Record<string, DecodeMode> | null = null;
+  if (s['decode'] !== undefined) {
+    const d = obj(s['decode'], 'server.decode');
+    serverDecode = {};
+    for (const [tool, v] of Object.entries(d)) serverDecode[tool] = decodeOf(v, `server.decode.${tool}`).decode!;
+  }
   const stdio = s['stdio'] === undefined ? null : strList(s['stdio'], 'server.stdio');
   const url = optStr(s['url'], 'server.url');
   let launch: Manifest['server']['launch'] = null;
@@ -1118,10 +1153,10 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   // why: a pre-made object is written to; its name must carry the tester's own mark, never only a team prefix that real objects may share (review).
   for (const r of resources) if (r.fixture && !r.fixture.name.startsWith('mwsc-')) throw fail(`resources.${r.name}.fixture.name`, 'a pre-made fixture is accepted only if its name starts with mwsc-');
   for (const r of resources) if (r.scope && !resources.some((x) => x.name === r.scope!.resource && x.create && x.key)) throw fail(`resources.${r.name}.scope.resource`, `${r.scope.resource} must be a resource with create and key (the tester creates the scopes it uses)`);
-  return {
+  const m: Manifest = {
     mws,
     prefix,
-    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart },
+    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
       write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
@@ -1138,6 +1173,9 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     ...topLevel(o),
     source,
   };
+  // why: one decode mode per tool (refused here, before anything runs).
+  declaredDecodes(m);
+  return m;
 }
 
 /** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */

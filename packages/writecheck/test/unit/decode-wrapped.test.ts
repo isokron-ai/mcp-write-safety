@@ -8,9 +8,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { outcomeByField, usePatterns } from '../../src/checks/says.js';
+import { patternData, readShape, useShapes } from '../../src/checks/shape.js';
+import { conflictSignal } from '../../src/checks/signals.js';
+import { conflictState, shownBy, staleExperiment, staleVerdicts, versionIn } from '../../src/checks/stale.js';
 import { brief } from '../../src/checks/types.js';
 import { objectFrom } from '../../src/core/driver.js';
-import { parseManifestText } from '../../src/core/manifest.js';
+import type { ExperimentOutcome } from '../../src/core/exec.js';
+import { declaredDecodes, parseManifestText } from '../../src/core/manifest.js';
 import { marksWrappedResult, toCallResult, unwrapResult, type DecodeBasis } from '../../src/core/session.js';
 import { getPath } from '../../src/core/util.js';
 
@@ -127,4 +132,123 @@ resources:
   assert.equal('decode' in off.target.guard!, false);
   assert.throws(() => parseManifestText(text(', decode: yaml', '', ''), '/tmp/m.yaml'), /resources\[0\]\.read\.decode: json/);
   assert.throws(() => parseManifestText(text('', '', ', decode: true'), '/tmp/m.yaml'), /target\.guard\.decode: json/);
+});
+
+// ---------------------------------------------------------------- review of PR #7: opt-out, raw kept, shape, write tools
+
+test('manifest: decode: none, server.decode per tool, and one mode per tool', () => {
+  const text = (server: string, read: string) => `mws: "0.9"
+server: { stdio: [node, s.js]${server} }
+target: { environment: test, confirm: t }
+resources:
+  - name: row
+    create: { tool: c, args: {}, id: id }
+    read: { tool: get_rows, args: {}, items: rows, match: id${read} }
+    delete: { tool: d, args: { id: "{{id}}" } }
+    cleanup: delete
+`;
+  const m = parseManifestText(text(', decode: { set_row: json, get_rows: none }', ', decode: none'), '/tmp/m.yaml');
+  assert.deepEqual(m.server.decode, { set_row: 'json', get_rows: 'none' });
+  assert.equal(m.resources[0]!.read.decode, 'none');
+  assert.deepEqual([...declaredDecodes(m)].sort(), [['get_rows', 'none'], ['set_row', 'json']]);
+  assert.equal('decode' in parseManifestText(text('', ''), '/tmp/m.yaml').server, false, 'absent: no key');
+  assert.throws(() => parseManifestText(text(', decode: { get_rows: none }', ', decode: json'), '/tmp/m.yaml'), /resources\[0\]\.read\.decode: decode: json for get_rows, which server\.decode\.get_rows declares decode: none/);
+  assert.throws(() => parseManifestText(text(', decode: { set_row: yes }', ''), '/tmp/m.yaml'), /server\.decode\.set_row\.decode: json .* or none/);
+  assert.throws(() => parseManifestText(text(', decode: [set_row]', ''), '/tmp/m.yaml'), /server\.decode/);
+});
+
+test('raw kept: a decoded call keeps structuredContent as received beside the decoded data, in the result and the brief', () => {
+  const inner = JSON.stringify(DOC);
+  const r = call(wrapped(inner), 'outputSchema');
+  assert.deepEqual(r.raw_structured, { result: inner });
+  const b = brief(r);
+  assert.deepEqual(b.raw_structured, { result: inner });
+  assert.deepEqual(b.data, DOC);
+  // clipped like data where it is large
+  const big = JSON.stringify({ rows: Array.from({ length: 400 }, (_, i) => ({ id: `F${i}`, name: 'x'.repeat(20) })) });
+  const bb = brief(call(wrapped(big), 'outputSchema'));
+  assert.equal((bb.raw_structured as { clipped?: boolean }).clipped, true);
+  assert.equal('raw_structured' in brief(call(wrapped(inner), null)), false, 'not decoded: no raw_structured');
+});
+
+test('shape and patterns read the same thing: the decoded document where decoded, the raw answer where not', () => {
+  useShapes({ results: { shape: 'write-result/0.1', tools: {} } });
+  try {
+    const inner = JSON.stringify({ id: 'T1', mws: { shape: 'write-result/0.1', outcome: 'applied', message: 'Applied T1.' } });
+    const dec = brief(call(wrapped(inner), 'outputSchema'));
+    const rs = readShape(dec);
+    assert.equal(rs.status, 'ok', JSON.stringify(rs));
+    if (rs.status === 'ok') {
+      assert.equal(rs.v.outcome, 'applied');
+      assert.match(rs.where, /structuredContent\.result decoded/);
+    }
+    assert.deepEqual(patternData(dec), { id: 'T1', mws: ['Applied T1.'] }, 'the patterns read the same mws, reduced to its free words');
+    assert.doesNotMatch(dec.text ?? '', /"outcome"/, 'the serialized block is left out of the prose; its free words are kept');
+    assert.match(dec.text ?? '', /Applied T1\./);
+    // the twin, not marked: neither reads an mws in the wrapper (a JSON block is not the shape where structuredContent exists)
+    const raw = brief(call(wrapped(inner), null));
+    assert.equal(readShape(raw).status, 'unread');
+    assert.deepEqual(patternData(raw), { result: inner });
+  } finally {
+    useShapes(null);
+  }
+});
+
+test('a marked WRITE tool: the conflict signal, the declared outcome field and the CONC readings use the decoded answer; the unmarked twin reads as before', () => {
+  const m = parseManifestText(`mws: "0.9"
+server: { stdio: [node, s.js] }
+target: { environment: test, confirm: t }
+outcome_field: { path: outcome, applied: applied, not_applied: not_applied, unknown: unknown }
+resources:
+  - name: ticket
+    create: { tool: ticket_create, args: { title: "{{prefix}}t" }, id: id }
+    read: { tool: ticket_get, args: { id: "{{id}}" }, object: ticket, ignore: [updated_at] }
+    update: { tool: ticket_update, mode: field_patch, args: { id: "{{id}}", "{{field}}": "{{value}}" } }
+    fields: [ { path: assignee, values: [ann, bob] }, { path: status, values: [blocked, closed] } ]
+    version: { read: version }
+    cleanup: delete
+    delete: { tool: ticket_delete, args: { id: "{{id}}" } }
+`, '/tmp/m.yaml');
+  const res = m.resources[0]!;
+  const ctx = { manifest: m, tools: [] };
+  usePatterns(m);
+  try {
+    const inner = JSON.stringify({ status: 409, error: { code: 'conflict', message: 'version conflict' }, outcome: 'not_applied', current: { status: 'closed', version: 7 } });
+    const write = (basis: DecodeBasis | null) => toCallResult(wrapped(inner), 'test.write.00001', 'R', 'ticket_update', basis);
+    const marked = write('outputSchema');
+    const twin = write(null);
+    // the readers, one by one
+    assert.ok(conflictSignal(brief(marked)), 'a 409 in the decoded answer is a structured conflict signal');
+    assert.equal(conflictSignal(brief(twin)), null, 'the wrapper carries no signal');
+    assert.equal(outcomeByField(brief(marked))?.outcome, 'not_applied');
+    assert.equal(outcomeByField(brief(twin)), null);
+    assert.equal(shownBy(brief(marked)), 'signal');
+    assert.equal(shownBy(brief(twin)), 'default', 'only the built-in words read the twin as a conflict (decides nothing)');
+    assert.equal(versionIn(marked.data, 'version', 7), true);
+    assert.equal(versionIn(twin.data, 'version', 7), false);
+    // MWS-CONC-6: the conflict carries the current state (the other writer's value and the version)
+    const seen = (r: typeof marked) => [{ step: r.step, text: r.text, data: r.data, other: 'closed', version: 7, tool: r.tool, shape: r.shape ?? null }];
+    assert.equal(conflictState(ctx, { resource: 'ticket', tool: 'ticket_update', arm: 'mcp' }, res, seen(marked))[0]!.verdict, 'held');
+    // MWS-CONC-2: three stale writes answered without isError that applied nothing; held only where a signal shows the conflict
+    const exp = staleExperiment(res, 3);
+    const env = (r: typeof marked) => ({ write: { ok: r.ok, isError: r.isError, text: r.text, data: r.data, tool: r.tool, shape: r.shape ?? null }, final: { ok: true, obj: { assignee: 'ann', status: 'closed', version: 8 } } });
+    const out = (r: typeof marked): ExperimentOutcome => ({
+      experiment: exp,
+      arms: {
+        validity: { role: 'validity', description: '', reps_planned: 1, counts: { valid: 1, both_kept: 1 }, reps: [] },
+        test: { role: 'test', description: '', reps_planned: 3, counts: { valid: 3, silent_noop: 3, rejected: 0, stale_won: 0 }, reps: [0, 1, 2].map(() => ({ valid: true, env: env(r), steps: { write: r.step } })) },
+      },
+      verdict: { criterion: '', verdict: 'inconclusive', reproduced_rule: false, not_reproduced_rule: false, overlapping_rules: false, values: {} },
+      simulated: [],
+      stopped: null,
+    }) as never;
+    const conc2 = (r: typeof marked) => staleVerdicts(out(r), res, ctx).find((x) => x.requirement === 'MWS-CONC-2')!;
+    assert.equal(conc2(marked).verdict, 'held', conc2(marked).reason);
+    assert.equal(conc2(twin).verdict, 'not tested', 'the twin: no structured signal, only the built-in words (as before the change)');
+    // the twin is exactly what the tester read before: structuredContent as received, nothing added
+    assert.deepEqual(twin.data, { result: inner });
+    assert.equal('decoded' in twin || 'raw_structured' in twin, false);
+  } finally {
+    usePatterns(null);
+  }
 });

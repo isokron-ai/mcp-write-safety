@@ -56,13 +56,13 @@ rl.on('line', (l) => {
 });
 `;
 
-const manifestText = (decode: boolean) => {
-  const d = decode ? ', decode: json' : '';
+const manifestText = (decode: boolean | 'none', serverDecode = '') => {
+  const d = decode === 'none' ? ', decode: none' : decode ? ', decode: json' : '';
   return `mws: "0.9"
 server:
   stdio: [${JSON.stringify(process.execPath)}, srv.mjs]
   cwd: .
-  env_public: [MARK]
+  env_public: [MARK]${serverDecode ? `\n  decode: ${serverDecode}` : ''}
 target: { environment: test, confirm: wrap, guard: { tool: whoami, args: {}, path: tenant, pattern: "^mwsc-test-"${d} } }
 limits: { timeout_ms: 5000, writes_per_second: 1000 }
 resources:
@@ -79,11 +79,11 @@ resources:
 `;
 };
 
-async function withServer(mark: string, decode: boolean, body: (s: Session, m: ReturnType<typeof parseManifestText>) => Promise<void>): Promise<void> {
+async function withServer(mark: string, decode: boolean | 'none', body: (s: Session, m: ReturnType<typeof parseManifestText>) => Promise<void>, serverDecode = ''): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'mwsc-wrap-'));
   try {
     writeFileSync(join(dir, 'srv.mjs'), WRAP_SERVER);
-    const m = parseManifestText(manifestText(decode), join(dir, 'manifest.yaml'));
+    const m = parseManifestText(manifestText(decode, serverDecode), join(dir, 'manifest.yaml'));
     const s = new Session({ manifest: m, capture: NO_CAPTURE, redactor: new Redactor([]), egress: egressFor([]), env: { PATH: process.env['PATH'], MARK: mark }, write_budget: 10, min_interval_ms: 0 });
     try {
       await body(s, m);
@@ -113,6 +113,7 @@ for (const [mark, decode, basis] of [['fastmcp', false, 'outputSchema'], ['singl
       assert.equal(r.ok && r2.ok, true);
       assert.deepEqual(r.call?.decoded, { from: 'structuredContent.result', basis });
       assert.deepEqual(r2.call?.decoded, { from: 'structuredContent.result', basis });
+      assert.equal(typeof (r.call?.raw_structured as { result?: unknown }).result, 'string', 'structuredContent as received is kept beside the decoded data');
       // the evidence: one note per decoded tool, saying why
       const notes = s.notes.filter((n) => /wrapped result/.test(n));
       assert.deepEqual(notes.map((n) => /: (\w+) answers a wrapped result/.exec(n)?.[1]).sort(), ['get_row', 'get_rows', 'whoami']);
@@ -134,3 +135,27 @@ test('wrapped results with no outputSchema marker and no decode: json are read a
     assert.equal(s.notes.filter((n) => /wrapped result/.test(n)).length, 0);
   });
 });
+
+for (const [mark, how] of [['single', 'read, list and guard'], ['fastmcp', 'server.decode']] as const) {
+  test(`decode: none (${how}) keeps a marked tool's wrapped results as received (outputSchema ${mark}); the notes say so`, async () => {
+    await withServer(
+      mark,
+      how === 'server.decode' ? false : 'none',
+      async (s, m) => {
+        await s.catalog('MAIN');
+        await assert.rejects(tenantGuard(m, s, 'MAIN'), /target\.guard: whoami at tenant returned null/);
+        const list = new Driver(s, m, m.resources[0]!, 'mwsc-x-', {});
+        list.id = 'F1';
+        const r = await list.readOnce('MAIN', s.stepId('setup.row.fixture'));
+        assert.equal(r.ok, false);
+        assert.equal(r.call?.decoded, undefined);
+        assert.equal(r.call?.raw_structured, undefined);
+        assert.equal(typeof (r.call?.data as { result?: unknown }).result, 'string');
+        const notes = s.notes.filter((n) => /decode: none/.test(n));
+        assert.deepEqual(notes.map((n) => /: (\w+)'s outputSchema marks a wrapped result/.exec(n)?.[1]).sort(), ['get_rows', 'whoami']);
+        assert.equal(s.notes.filter((n) => /answers a wrapped result/.test(n)).length, 0);
+      },
+      how === 'server.decode' ? '{ whoami: none, get_rows: none, get_row: none }' : '',
+    );
+  });
+}
