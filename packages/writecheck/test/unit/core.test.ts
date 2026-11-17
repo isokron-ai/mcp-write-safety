@@ -15,7 +15,7 @@ import { adjustResults } from '../../src/checks/coverage.js';
 import { result } from '../../src/report/verdicts.js';
 import { catalogCommand, planCommand } from '../../src/cli/commands.js';
 import { Redactor, REDACTED } from '../../src/core/redact.js';
-import { checkTarget, confirm, productionReason } from '../../src/core/safety.js';
+import { checkTarget, confirm, productionReason, targetHosts } from '../../src/core/safety.js';
 import { ruleOfThree, wilson } from '../../src/core/stats.js';
 import { render } from '../../src/core/template.js';
 import { canonical, diff, getPath, setPath, withoutIgnored, WritecheckError } from '../../src/core/util.js';
@@ -142,6 +142,18 @@ test('safety: environment must be test; production-looking hosts are refused unl
   assert.throws(() => checkTarget(prod, {}), /declared as test/);
   assert.equal(productionReason('localhost:3000'), null);
   assert.equal(productionReason('staging-tracker.internal:443'), null);
+});
+
+test('safety: a backend URL in the server command line is a target host (shown and checked)', () => {
+  const base = parseManifestText(MIN, 'm.yaml');
+  const withArgv = (stdio: string[]) => ({ ...base, server: { ...base.server, stdio } });
+  const local = withArgv(['node', 'server.js', 'redis://127.0.0.1:6379']);
+  assert.deepEqual(targetHosts(local, {}).filter((h) => h.where.startsWith('server.stdio')), [{ host: '127.0.0.1:6379', where: 'server.stdio[2]' }]);
+  checkTarget(local, { TRACKER_URL: 'http://127.0.0.1:4100' });
+  const flag = withArgv(['node', 'server.js', '--url=postgres://u:p@db.prod.example.com:5432/x']);
+  assert.deepEqual(targetHosts(flag, {}).filter((h) => h.where.startsWith('server.stdio')).map((h) => h.host), ['db.prod.example.com:5432']);
+  assert.throws(() => checkTarget(flag, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.stdio\[2\].*production label/);
+  assert.deepEqual(targetHosts(withArgv(['node', 'server.js', '--verbose']), {}).filter((h) => h.where.startsWith('server.stdio')), []);
 });
 
 test('confirmation needs the target and the plan hash; without a terminal both must be flags', async () => {
