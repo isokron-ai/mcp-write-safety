@@ -170,12 +170,19 @@ export function checkCompat(c: Combination): string[] {
   return COMPAT_RULES.filter((r) => !(r.post01 && e.profile === "0.1")).map((r) => r.check(e)).filter((m): m is string => m !== undefined);
 }
 
-// ---- stream D: CMP-50 to CMP-59 (0.3.0 durability) ----
+// ---- stream D: CMP-50 to CMP-59 (0.3.0 durability; CMP-50 is seams v2.1's durable-needs-strict-input) ----
 const KEY_VARIANTS = ["key-store-honest", "key-store-durable", "settle-by-lookup", "settle-by-client-reference"];
 
 (COMPAT_RULES as CompatRule[]).push(
   {
+    // Seams v2.1 (INTERFACES section 3, decision 0003 section 7): every journal line is checksummed over RFC 8785 bytes,
+    // which a string with a lone surrogate does not have. Refused at start, not a 503 at the first such write.
     id: "CMP-50", post01: true,
+    check: (c) => has(c.features, "durable") && !has(c.features, "strict-input")
+      ? "the durable feature needs strict-input: every journal line is checksummed over RFC 8785 bytes, so the backend must refuse keys and strings that have none at the door (name it: --features durable,strict-input)" : undefined,
+  },
+  {
+    id: "CMP-54", post01: true,
     check: (c) => c.layout === "server" && c.features.some((f) => ["durable", "inflight", "retention"].includes(f))
       ? "durable, inflight and retention are backend features; name them where the backend runs (`all` or `backend`)" : undefined,
   },

@@ -100,6 +100,9 @@ export function parseFeatures(raw: string | undefined): FeatureName[] {
  */
 export const VARIANT_TURNS_OFF: ReadonlyArray<{ variant: string; feature: FeatureName; reason: string }> = [
   { variant: "key-store-honest", feature: "lookup", reason: "key-store-honest keeps keys in the MCP server" },
+  // 0.3.0 (stream D): these variants stand for a backend with no idempotency key (CMP-53), so the default lookup is off.
+  { variant: "key-store-durable", feature: "lookup", reason: "key-store-durable keeps keys in the MCP server's own journal" },
+  { variant: "settle-by-client-reference", feature: "lookup", reason: "settle-by-client-reference stands for a backend with no idempotency key" },
 ];
 
 export interface FeatureOff {

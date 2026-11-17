@@ -68,7 +68,8 @@
 
 | Rule | Refuses |
 |---|---|
-| CMP-50 | `durable`, `inflight` or `retention` with `server` |
+| CMP-50 | `durable` without `strict-input` (seams v2.1; added at the 0.3.0 integration) |
+| CMP-54 | `durable`, `inflight` or `retention` with `server` (was CMP-50 in the stream) |
 | CMP-51 | `settle-by-lookup` without `inflight` |
 | CMP-52 | Two key variants at once |
 | CMP-53 | `key-store-durable` or `settle-by-client-reference` with `lookup` or `inflight` |

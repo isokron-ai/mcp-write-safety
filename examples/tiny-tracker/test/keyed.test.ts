@@ -1,7 +1,7 @@
 // 0.3.0 (stream D) at the MCP layer: the keyed-state answers (rule 4, decision
 // 0004), the stated retention (FX-KEY-2), the variants key-store-durable,
 // settle-by-lookup (with the key fence, B9) and settle-by-client-reference (G6),
-// the compatibility rules CMP-50 to CMP-53, the command line, and the self-test
+// the compatibility rules CMP-50 to CMP-54, the command line, and the self-test
 // on the correct build with inflight and retention on.
 
 import { describe, it } from "node:test";
@@ -245,7 +245,7 @@ describe("variants (G6, B9)", () => {
   });
 });
 
-describe("compatibility rules CMP-50 to CMP-53 and the command line", () => {
+describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
   const base: Combination = { layout: "all", profile: "default", features: [], defects: [], backendDefects: [], variants: [], faults: [], fixtureControl: false };
   it("refuses what cannot work", () => {
     assert.match(checkCompat({ ...base, layout: "server", features: ["inflight"] }).join(), /backend features/);
@@ -253,6 +253,26 @@ describe("compatibility rules CMP-50 to CMP-53 and the command line", () => {
     assert.deepEqual(checkCompat({ ...base, variants: ["settle-by-lookup"], features: ["inflight"] }), []);
     assert.match(checkCompat({ ...base, variants: ["key-store-durable", "key-store-honest"] }).join(), /name one/);
     assert.match(checkCompat({ ...base, variants: ["settle-by-client-reference"], features: ["inflight"] }).join(), /no idempotency key/);
+    // The default profile's lookup is turned off by these variants (as with key-store-honest), not refused.
+    for (const v of ["key-store-durable", "settle-by-client-reference"]) {
+      assert.deepEqual(checkCompat({ ...base, variants: [v] }), [], v);
+      assert.match(checkCompat({ ...base, variants: [v], features: ["lookup"] }).join(), /no idempotency key/, `${v} with a named lookup`);
+    }
+  });
+
+  it("CMP-50: durable needs strict-input, refused at start with a clear message (seams v2.1)", async () => {
+    assert.match(checkCompat({ ...base, features: ["durable"], dataDir: "/x" }).join(), /durable feature needs strict-input/);
+    assert.deepEqual(checkCompat({ ...base, features: ["durable", "strict-input"], dataDir: "/x" }), []);
+    assert.deepEqual(checkCompat({ ...base, profile: "0.1", features: [] }), []);
+    const t = tempDir("cmp50");
+    try {
+      const r = await runCli(["backend", "--features", "durable", "--data-dir", t.dataDir, "--port", "0"], { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" });
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /the durable feature needs strict-input/);
+      assert.equal(r.stdout, "", "nothing started");
+    } finally {
+      t.cleanup();
+    }
   });
 
   it("starts durable with --data-dir and names the journal; a second start on the same dir is refused; retention flags need retention", async () => {
@@ -260,17 +280,17 @@ describe("compatibility rules CMP-50 to CMP-53 and the command line", () => {
     try {
       const env = { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" };
       let second: Awaited<ReturnType<typeof runCli>> | undefined;
-      const first = await runCli(["backend", "--features", "durable,inflight,retention", "--data-dir", t.dataDir, "--key-retention", "2d", "--port", "0"], env, async (state) => {
+      const first = await runCli(["backend", "--features", "durable,strict-input,inflight,retention", "--data-dir", t.dataDir, "--key-retention", "2d", "--port", "0"], env, async (state) => {
         assert.equal(state.journal.data_dir, t.dataDir);
         assert.match(state.journal.head, /^0:[0-9a-f]{16}$/);
         const rest = new Rest(state.backend, env.TRACKER_BACKEND_TOKEN);
         assert.equal((await rest.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "cli-key-000001" })).status, 201);
-        second = await runCli(["backend", "--features", "durable", "--data-dir", t.dataDir, "--port", "0"], env);
+        second = await runCli(["backend", "--features", "durable,strict-input", "--data-dir", t.dataDir, "--port", "0"], env);
       });
       assert.equal(first.code, 0, first.stderr);
       assert.equal(second!.code, 2);
       assert.match(second!.stderr, /locked by process/);
-      const again = await runCli(["backend", "--features", "durable,inflight,retention", "--data-dir", t.dataDir, "--port", "0"], env, async (state) => {
+      const again = await runCli(["backend", "--features", "durable,strict-input,inflight,retention", "--data-dir", t.dataDir, "--port", "0"], env, async (state) => {
         assert.match(state.journal.head, /^2:/, "header, pending, commit");
       });
       assert.equal(again.code, 0, again.stderr);
