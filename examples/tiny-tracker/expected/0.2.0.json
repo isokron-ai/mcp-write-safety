@@ -429,148 +429,6 @@
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults"
       ],
-      "writecheck": {
-        "version": "0.1.0",
-        "answers": {
-          "MWS-ANN-1": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-2": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-3": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-4": [
-            "held"
-          ],
-          "MWS-ANN-5": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ATOM-1": [
-            "held"
-          ],
-          "MWS-ATOM-2": [
-            "held"
-          ],
-          "MWS-CFG-1": [
-            "held"
-          ],
-          "MWS-CFG-2": [
-            "held"
-          ],
-          "MWS-CFG-3": [
-            "held"
-          ],
-          "MWS-CFG-4": [
-            "held"
-          ],
-          "MWS-CONC-1": [
-            "held"
-          ],
-          "MWS-CONC-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-CONC-3": [
-            "held",
-            "not observed"
-          ],
-          "MWS-CONC-4": [
-            "held",
-            "self-attested"
-          ],
-          "MWS-CONC-5": [
-            "not applicable",
-            "not tested",
-            "self-attested"
-          ],
-          "MWS-CONC-6": [
-            "held"
-          ],
-          "MWS-IN-1": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-IN-3": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-4": [
-            "held",
-            "not tested",
-            "self-attested"
-          ],
-          "MWS-IN-5": [
-            "not observed",
-            "not tested"
-          ],
-          "MWS-IN-6": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-7": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-1": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-3": [
-            "held"
-          ],
-          "MWS-RES-4": [
-            "held"
-          ],
-          "MWS-RETRY-1": [
-            "held"
-          ],
-          "MWS-RETRY-2": [
-            "held",
-            "not observed"
-          ],
-          "MWS-RETRY-3": [
-            "held",
-            "not observed"
-          ],
-          "MWS-SEC-1": [
-            "not observed"
-          ],
-          "MWS-TGT-1": [
-            "held",
-            "not tested"
-          ],
-          "MWS-TGT-2": [
-            "held"
-          ],
-          "MWS-TGT-3": [
-            "held"
-          ],
-          "MWS-UPD-1": [
-            "held",
-            "not applicable"
-          ],
-          "MWS-UPD-2": [
-            "held"
-          ]
-        }
-      },
       "contract": {
         "repo": "zambodotdev/lost-response-test-contract",
         "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
@@ -654,149 +512,6 @@
         "--defect",
         "idempotency-key-dropped"
       ],
-      "writecheck": {
-        "version": "0.1.0",
-        "answers": {
-          "MWS-ANN-1": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-2": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-3": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-4": [
-            "held"
-          ],
-          "MWS-ANN-5": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ATOM-1": [
-            "held"
-          ],
-          "MWS-ATOM-2": [
-            "held"
-          ],
-          "MWS-CFG-1": [
-            "held"
-          ],
-          "MWS-CFG-2": [
-            "held"
-          ],
-          "MWS-CFG-3": [
-            "held"
-          ],
-          "MWS-CFG-4": [
-            "held"
-          ],
-          "MWS-CONC-1": [
-            "held"
-          ],
-          "MWS-CONC-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-CONC-3": [
-            "held",
-            "not observed"
-          ],
-          "MWS-CONC-4": [
-            "held",
-            "self-attested"
-          ],
-          "MWS-CONC-5": [
-            "not applicable",
-            "not tested",
-            "self-attested"
-          ],
-          "MWS-CONC-6": [
-            "held"
-          ],
-          "MWS-IN-1": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-IN-3": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-4": [
-            "held",
-            "not tested",
-            "self-attested"
-          ],
-          "MWS-IN-5": [
-            "not observed",
-            "not tested"
-          ],
-          "MWS-IN-6": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-7": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-1": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-3": [
-            "held"
-          ],
-          "MWS-RES-4": [
-            "held"
-          ],
-          "MWS-RETRY-1": [
-            "held"
-          ],
-          "MWS-RETRY-2": [
-            "held",
-            "not observed",
-            "violated"
-          ],
-          "MWS-RETRY-3": [
-            "held",
-            "not observed"
-          ],
-          "MWS-SEC-1": [
-            "not observed"
-          ],
-          "MWS-TGT-1": [
-            "held",
-            "not tested"
-          ],
-          "MWS-TGT-2": [
-            "held"
-          ],
-          "MWS-TGT-3": [
-            "held"
-          ],
-          "MWS-UPD-1": [
-            "held",
-            "not applicable"
-          ],
-          "MWS-UPD-2": [
-            "held"
-          ]
-        }
-      },
       "contract": {
         "repo": "zambodotdev/lost-response-test-contract",
         "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
@@ -880,149 +595,6 @@
         "--defect",
         "idempotency-key-ignores-args"
       ],
-      "writecheck": {
-        "version": "0.1.0",
-        "answers": {
-          "MWS-ANN-1": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-2": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-3": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ANN-4": [
-            "held"
-          ],
-          "MWS-ANN-5": [
-            "not applicable",
-            "not observed"
-          ],
-          "MWS-ATOM-1": [
-            "held"
-          ],
-          "MWS-ATOM-2": [
-            "held"
-          ],
-          "MWS-CFG-1": [
-            "held"
-          ],
-          "MWS-CFG-2": [
-            "held"
-          ],
-          "MWS-CFG-3": [
-            "held"
-          ],
-          "MWS-CFG-4": [
-            "held"
-          ],
-          "MWS-CONC-1": [
-            "held"
-          ],
-          "MWS-CONC-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-CONC-3": [
-            "held",
-            "not observed"
-          ],
-          "MWS-CONC-4": [
-            "held",
-            "self-attested"
-          ],
-          "MWS-CONC-5": [
-            "not applicable",
-            "not tested",
-            "self-attested"
-          ],
-          "MWS-CONC-6": [
-            "held"
-          ],
-          "MWS-IN-1": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-IN-3": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-4": [
-            "held",
-            "not tested",
-            "self-attested"
-          ],
-          "MWS-IN-5": [
-            "not observed",
-            "not tested"
-          ],
-          "MWS-IN-6": [
-            "held",
-            "not applicable",
-            "not tested"
-          ],
-          "MWS-IN-7": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-1": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-2": [
-            "held",
-            "not tested"
-          ],
-          "MWS-RES-3": [
-            "held"
-          ],
-          "MWS-RES-4": [
-            "held"
-          ],
-          "MWS-RETRY-1": [
-            "held"
-          ],
-          "MWS-RETRY-2": [
-            "held",
-            "not observed",
-            "violated"
-          ],
-          "MWS-RETRY-3": [
-            "held",
-            "not observed"
-          ],
-          "MWS-SEC-1": [
-            "not observed"
-          ],
-          "MWS-TGT-1": [
-            "held",
-            "not tested"
-          ],
-          "MWS-TGT-2": [
-            "held"
-          ],
-          "MWS-TGT-3": [
-            "held"
-          ],
-          "MWS-UPD-1": [
-            "held",
-            "not applicable"
-          ],
-          "MWS-UPD-2": [
-            "held"
-          ]
-        }
-      },
       "contract": {
         "repo": "zambodotdev/lost-response-test-contract",
         "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
@@ -1175,6 +747,461 @@
         ],
         "FX-LOOK-4": [
           "not applicable"
+        ]
+      }
+    }
+  ],
+  "writecheck": [
+    {
+      "label": "mcp-writecheck demo (correct build)",
+      "start": [
+        "mcp-writecheck",
+        "demo"
+      ],
+      "measured_on": "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+      "version": "0.1.0",
+      "answers_are": "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+      "answers": {
+        "MWS-ANN-1": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-2": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-3": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-4": [
+          "held"
+        ],
+        "MWS-ANN-5": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ATOM-1": [
+          "held"
+        ],
+        "MWS-ATOM-2": [
+          "held"
+        ],
+        "MWS-CFG-1": [
+          "held"
+        ],
+        "MWS-CFG-2": [
+          "held"
+        ],
+        "MWS-CFG-3": [
+          "held"
+        ],
+        "MWS-CFG-4": [
+          "held"
+        ],
+        "MWS-CONC-1": [
+          "held"
+        ],
+        "MWS-CONC-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-CONC-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-CONC-4": [
+          "held",
+          "self-attested"
+        ],
+        "MWS-CONC-5": [
+          "not applicable",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-CONC-6": [
+          "held"
+        ],
+        "MWS-IN-1": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-IN-3": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-4": [
+          "held",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-IN-5": [
+          "not observed",
+          "not tested"
+        ],
+        "MWS-IN-6": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-7": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-3": [
+          "held"
+        ],
+        "MWS-RES-4": [
+          "held"
+        ],
+        "MWS-RETRY-1": [
+          "held"
+        ],
+        "MWS-RETRY-2": [
+          "held",
+          "not observed"
+        ],
+        "MWS-RETRY-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-SEC-1": [
+          "not observed"
+        ],
+        "MWS-TGT-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-TGT-2": [
+          "held"
+        ],
+        "MWS-TGT-3": [
+          "held"
+        ],
+        "MWS-UPD-1": [
+          "held",
+          "not applicable"
+        ],
+        "MWS-UPD-2": [
+          "held"
+        ]
+      }
+    },
+    {
+      "label": "mcp-writecheck demo with idempotency-key-dropped",
+      "start": [
+        "mcp-writecheck",
+        "demo",
+        "--defect",
+        "idempotency-key-dropped"
+      ],
+      "measured_on": "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+      "version": "0.1.0",
+      "answers_are": "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+      "answers": {
+        "MWS-ANN-1": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-2": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-3": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-4": [
+          "held"
+        ],
+        "MWS-ANN-5": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ATOM-1": [
+          "held"
+        ],
+        "MWS-ATOM-2": [
+          "held"
+        ],
+        "MWS-CFG-1": [
+          "held"
+        ],
+        "MWS-CFG-2": [
+          "held"
+        ],
+        "MWS-CFG-3": [
+          "held"
+        ],
+        "MWS-CFG-4": [
+          "held"
+        ],
+        "MWS-CONC-1": [
+          "held"
+        ],
+        "MWS-CONC-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-CONC-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-CONC-4": [
+          "held",
+          "self-attested"
+        ],
+        "MWS-CONC-5": [
+          "not applicable",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-CONC-6": [
+          "held"
+        ],
+        "MWS-IN-1": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-IN-3": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-4": [
+          "held",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-IN-5": [
+          "not observed",
+          "not tested"
+        ],
+        "MWS-IN-6": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-7": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-3": [
+          "held"
+        ],
+        "MWS-RES-4": [
+          "held"
+        ],
+        "MWS-RETRY-1": [
+          "held"
+        ],
+        "MWS-RETRY-2": [
+          "held",
+          "not observed",
+          "violated"
+        ],
+        "MWS-RETRY-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-SEC-1": [
+          "not observed"
+        ],
+        "MWS-TGT-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-TGT-2": [
+          "held"
+        ],
+        "MWS-TGT-3": [
+          "held"
+        ],
+        "MWS-UPD-1": [
+          "held",
+          "not applicable"
+        ],
+        "MWS-UPD-2": [
+          "held"
+        ]
+      }
+    },
+    {
+      "label": "mcp-writecheck demo with idempotency-key-ignores-args",
+      "start": [
+        "mcp-writecheck",
+        "demo",
+        "--defect",
+        "idempotency-key-ignores-args"
+      ],
+      "measured_on": "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+      "version": "0.1.0",
+      "answers_are": "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+      "answers": {
+        "MWS-ANN-1": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-2": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-3": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ANN-4": [
+          "held"
+        ],
+        "MWS-ANN-5": [
+          "not applicable",
+          "not observed"
+        ],
+        "MWS-ATOM-1": [
+          "held"
+        ],
+        "MWS-ATOM-2": [
+          "held"
+        ],
+        "MWS-CFG-1": [
+          "held"
+        ],
+        "MWS-CFG-2": [
+          "held"
+        ],
+        "MWS-CFG-3": [
+          "held"
+        ],
+        "MWS-CFG-4": [
+          "held"
+        ],
+        "MWS-CONC-1": [
+          "held"
+        ],
+        "MWS-CONC-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-CONC-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-CONC-4": [
+          "held",
+          "self-attested"
+        ],
+        "MWS-CONC-5": [
+          "not applicable",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-CONC-6": [
+          "held"
+        ],
+        "MWS-IN-1": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-IN-3": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-4": [
+          "held",
+          "not tested",
+          "self-attested"
+        ],
+        "MWS-IN-5": [
+          "not observed",
+          "not tested"
+        ],
+        "MWS-IN-6": [
+          "held",
+          "not applicable",
+          "not tested"
+        ],
+        "MWS-IN-7": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-2": [
+          "held",
+          "not tested"
+        ],
+        "MWS-RES-3": [
+          "held"
+        ],
+        "MWS-RES-4": [
+          "held"
+        ],
+        "MWS-RETRY-1": [
+          "held"
+        ],
+        "MWS-RETRY-2": [
+          "held",
+          "not observed",
+          "violated"
+        ],
+        "MWS-RETRY-3": [
+          "held",
+          "not observed"
+        ],
+        "MWS-SEC-1": [
+          "not observed"
+        ],
+        "MWS-TGT-1": [
+          "held",
+          "not tested"
+        ],
+        "MWS-TGT-2": [
+          "held"
+        ],
+        "MWS-TGT-3": [
+          "held"
+        ],
+        "MWS-UPD-1": [
+          "held",
+          "not applicable"
+        ],
+        "MWS-UPD-2": [
+          "held"
         ]
       }
     }

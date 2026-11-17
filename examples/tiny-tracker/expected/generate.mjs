@@ -8,6 +8,10 @@
 //              driver at the pinned commit (harness/contract.json) run with harness/adapters/tiny_tracker.py; A3 is
 //              listed as self-attested until the driver compares recovered digests (driver ask (b));
 //   writecheck with --writecheck CLI: mcp-writecheck demo's verdicts per requirement, for builds that ask for them.
+//              The demo starts its own build (the release default, backend and server as separate processes, no
+//              fixture features), so these rows are not keyed by a build_hash: they sit in the top-level `writecheck`
+//              list, labelled by the demo's own command. Each set lists the per-record verdicts the demo gave for that
+//              requirement (one record per write path), merged over the runs: it is not one answer per requirement.
 //
 // Answers are sets: with --repeat N every build runs N times and each answer is the union of what the runs gave, so a
 // step that can only be observed or not observed lists both. A build whose build_hash differs between runs stops the
@@ -116,6 +120,7 @@ const sortKeys = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, 
 export async function generate(o) {
   const list = JSON.parse(readFileSync(o.builds, "utf8"));
   const builds = [];
+  const writecheck = [];
   for (const b of list.builds) {
     if (o.only?.length && !o.only.includes(b.label)) continue;
     let hash;
@@ -149,7 +154,15 @@ export async function generate(o) {
         wc.version = r.version;
         for (const [id, s] of Object.entries(r.answers)) for (const v of s) (wc.answers[id] ??= new Set()).add(v);
       }
-      row.writecheck = { version: wc.version, answers: sortKeys(Object.fromEntries(Object.entries(wc.answers).map(([k, s]) => [k, sortedSet(s)]))) };
+      const defects = b.mcpDefects ?? [];
+      writecheck.push({
+        label: `mcp-writecheck demo${defects.length ? ` with ${defects.join(", ")}` : " (correct build)"}`,
+        start: ["mcp-writecheck", "demo", ...defects.flatMap((d) => ["--defect", d])],
+        measured_on: "the build the demo starts itself: the release default profile, backend and server as separate processes, no fixture features (not any build_hash in builds)",
+        version: wc.version,
+        answers_are: "per requirement, the set of record verdicts the demo gave (one record per write path), merged over the runs",
+        answers: sortKeys(Object.fromEntries(Object.entries(wc.answers).map(([k, s]) => [k, sortedSet(s)]))),
+      });
     }
     if (Object.keys(contract).length) {
       row.contract = { repo: PIN.contract.repo, commit: PIN.contract.commit, answers: sortKeys(Object.fromEntries(Object.entries(contract).map(([k, s]) => [k, sortedSet(s)]))), self_attested: ["LRT-A3"] };
@@ -158,7 +171,9 @@ export async function generate(o) {
     builds.push(row);
   }
   builds.sort((a, b) => a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
-  return { expected: "expected/1", package: { name: PACKAGE.name, version: list.release }, builds };
+  writecheck.sort((a, b) => a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
+  // expected/1 allows additional top-level members: the writecheck rows sit beside the builds, not in them.
+  return { expected: "expected/1", package: { name: PACKAGE.name, version: list.release }, builds, ...(writecheck.length ? { writecheck } : {}) };
 }
 
 export function table(doc) {
@@ -167,9 +182,15 @@ export function table(doc) {
     `Contract answers are the lost-response driver's own verdict strings at ${PIN.contract.commit.slice(0, 7)}; LRT-A3 is self-attested until the driver compares recovered digests.`, ""];
   for (const b of doc.builds) {
     lines.push(`## ${b.label}`, "", `- build_hash: \`${b.build_hash}\``, `- start: \`${b.start.join(" ")}\``, "", "| Property | Answers |", "|---|---|");
-    for (const [section, answers] of [["contract", b.contract?.answers], ["fixture", b.fixture], ["writecheck", b.writecheck?.answers]]) {
+    for (const [section, answers] of [["contract", b.contract?.answers], ["fixture", b.fixture]]) {
       for (const [id, set] of Object.entries(answers ?? {})) lines.push(`| ${id}${section === "contract" && b.contract.self_attested?.includes(id) ? " (self-attested)" : ""} | ${set.join(", ")} |`);
     }
+    lines.push("");
+  }
+  for (const w of doc.writecheck ?? []) {
+    lines.push(`## ${w.label}`, "", `- start: \`${w.start.join(" ")}\``, `- measured on: ${w.measured_on}`, `- mcp-writecheck ${w.version}; each cell: ${w.answers_are}`, "",
+      "| Requirement | Record verdicts seen |", "|---|---|");
+    for (const [id, set] of Object.entries(w.answers)) lines.push(`| ${id} | ${set.join(", ")} |`);
     lines.push("");
   }
   return `${lines.join("\n")}`;

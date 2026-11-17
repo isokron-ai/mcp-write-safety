@@ -44,7 +44,7 @@ TRACKER_EVIDENCE_TOKEN_FILE=~/.tt-tokens/evidence.token TRACKER_BACKEND_TOKEN=..
 
 - the FX- answers of `fx-check`;
 - the contract driver's own verdict strings for LRT-A1 to A5 (`--contract-dir`, a checkout at the pinned commit);
-- `mcp-writecheck demo`'s verdicts per requirement (`--writecheck`).
+- `mcp-writecheck demo`'s verdicts per requirement (`--writecheck`). The demo starts its own build (the release default, no fixture features), so these rows sit in a top-level `writecheck` list labelled by the demo's command, not under a `build_hash`; each set lists the per-record verdicts seen (one record per write path), not one answer per requirement.
 
 `--repeat N` merges N runs. `--check` regenerates and compares with the committed file byte for byte.
 
