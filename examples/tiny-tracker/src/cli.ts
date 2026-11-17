@@ -9,7 +9,7 @@ import { checkCompat, type ProcessLayout } from "./compat.js";
 import { checkArgv, checkDistinct, TokenError } from "./tokens.js";
 import { resolveDefects } from "./defects/index.js";
 import type { ServerExtras } from "./mcp/server.js";
-import type { BackendExtension } from "./backend/http.js";
+import type { BackendExtension, BackendFaultHooks } from "./backend/http.js";
 import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
 import type { Clock } from "./clock.js";
 
@@ -19,11 +19,17 @@ const USAGE = `usage:
   tiny-tracker backend [--port N] [--backend-defect lost-update]      (needs TRACKER_BACKEND_TOKEN)
   tiny-tracker server  [--port N] [--defect NAME]... [--backend-url URL] [--read-only VALUE] [--tools a,b]
                                                                       (needs TRACKER_BACKEND_TOKEN)
+  tiny-tracker stdio   [--defect NAME]... [--backend-url URL] [--read-only VALUE] [--tools a,b]
+                       MCP over stdin/stdout; the backend runs in-process unless a URL is given (stdio --help).
 Defect names are listed in the README; --defect also takes a requirement ID (e.g. MWS-CONC-3) or "all".
 Fixture options (see FIXTURE.md):
   --profile 0.1|default    0.1: exactly the surface of the published 0.1.0 (no features). Default: default.
   --features a,b           features to switch on (TRACKER_FEATURES); unknown or not-yet-built names stop the process.
   --fixture-control        start the control listener (needs TRACKER_CONTROL_TOKEN or _FILE); --control-port N.
+  --supervise              (all only) run the backend and the MCP server as two children and restart either one
+                           when it stops; a new state line follows every restart.
+  --fault POINT[:once]     arm a fault point at start (process/position/action, src/fault-points.ts); the
+                           supervisor keeps the arming, so a once fault does not re-arm on a restart.
 Tokens are read from the environment or a 0600 file, never from the command line.`;
 
 function fail(message: string): never {
@@ -32,8 +38,9 @@ function fail(message: string): never {
 }
 
 async function main(): Promise<void> {
-  const { positionals, values } = parseArgs({
+  const { positionals, values, tokens: argTokens } = parseArgs({
     allowPositionals: true,
+    tokens: true,
     options: {
       port: { type: "string" },
       "backend-port": { type: "string" },
@@ -54,6 +61,10 @@ async function main(): Promise<void> {
       "key-retention": { type: "string" },
       "key-expiry": { type: "string" },
       // ---- end stream D ----
+      // ---- stream E ----
+      supervise: { type: "boolean" },
+      fault: { type: "string", multiple: true },
+      // ---- end stream E ----
       help: { type: "boolean" },
     },
   });
@@ -90,6 +101,24 @@ async function main(): Promise<void> {
     throw e;
   }
   const fixtureControl = values["fixture-control"] === true;
+  // ---- stream E: the supervisor and its children ----
+  // A supervised child is a `tiny-tracker all` that starts one half; the supervisor has already checked the command line.
+  let child: import("./supervision.js").ChildContext | null = null;
+  if (env.TRACKER_SUPERVISED_CHILD) {
+    const supervision = await import("./supervision.js");
+    try {
+      child = supervision.childContext(env);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+    if (mode !== "all") fail("a supervised child runs as `tiny-tracker all`");
+  }
+  const supervise = values.supervise === true;
+  const faultArgs: Array<{ point: string; once: boolean }> = (values.fault ?? []).map((raw) => {
+    const once = raw.endsWith(":once");
+    return { point: once ? raw.slice(0, -":once".length) : raw, once };
+  });
+  // ---- end stream E ----
   let mcpDefects: string[] = [];
   if (layout !== "backend") {
     try {
@@ -99,8 +128,8 @@ async function main(): Promise<void> {
     }
   }
   const refusals = checkCompat({
-    layout, profile, features: named, defects: mcpDefects, backendDefects, variants: variantNames, faults: [],
-    fixtureControl, dataDir: values["data-dir"],
+    layout, profile, features: named, defects: mcpDefects, backendDefects, variants: variantNames, faults: faultArgs.map((f) => f.point),
+    fixtureControl, dataDir: values["data-dir"], supervise,
   });
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
@@ -159,6 +188,7 @@ async function main(): Promise<void> {
   }
   // ---- end stream D ----
   if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
+  if (child && (supervise || faultArgs.length > 0)) fail("a supervised child takes no --supervise or --fault");
 
   if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
 
@@ -174,6 +204,16 @@ async function main(): Promise<void> {
     throw e;
   }
 
+  // ---- stream E: --supervise hands over to the supervisor (src/supervisor.ts), which starts this command twice ----
+  if (supervise) {
+    const { runSupervisor } = await import("./supervisor.js");
+    const args = [...process.argv.slice(2)];
+    args.splice(argTokens.find((t) => t.kind === "positional")!.index, 1);
+    await runSupervisor({ cli: process.argv[1], args, env, faults: faultArgs });
+    return;
+  }
+  // ---- end stream E ----
+
   // The fixture layer is loaded only when asked for, so the teaching server never imports it (test/import-graph.test.ts).
   let fixture: Awaited<ReturnType<typeof import("./fixture/index.js")["createFixtureLayer"]>> | undefined;
   let backendExtension: BackendExtension | undefined;
@@ -185,7 +225,7 @@ async function main(): Promise<void> {
     // ---- stream E: the fixture clock ----
     if (features.includes("clock")) {
       const fc = await import("./fixture/clock.js");
-      clock = new fc.FixtureClock(fc.memoryOffset());
+      clock = new fc.FixtureClock(child ? fc.folderOffset(child.stateDir) : fc.memoryOffset());
     }
     // ---- end stream E ----
     try {
@@ -204,6 +244,20 @@ async function main(): Promise<void> {
     backendExtension = fixture.backendExtension;
     serverExtras = fixture.serverExtras;
   }
+  // ---- stream E: a supervised child's process state and crash points ----
+  /** The backend fault hooks (BackendOptions.faults). Stream B's controller passes its own hooks as `next` below. */
+  let backendFaults: BackendFaultHooks | undefined;
+  if (child && fixture) {
+    const supervision = await import("./supervision.js");
+    const crash = await import("./fixture/process.js");
+    const descriptor = fixture.descriptor;
+    descriptor.supervise(child);
+    descriptor.arming = supervision.folderArming(child.stateDir, () => descriptor.clock.wallNow());
+    const crashOptions = { arming: descriptor.arming, bootId: descriptor.bootId, wallNow: () => descriptor.clock.wallNow() };
+    if (child.role === "backend") backendFaults = crash.backendCrashHooks(crashOptions, fixture.backendOptions.faults);
+    else serverExtras = { ...serverExtras, onResult: crash.mcpCrashOnResult(crashOptions, serverExtras.onResult) };
+  }
+  // ---- end stream E ----
 
   const closers: Array<() => Promise<void>> = [];
   const shutdown = async () => {
@@ -215,7 +269,9 @@ async function main(): Promise<void> {
 
   const out: Record<string, unknown> = {};
   let backend: RunningBackend | undefined;
-  if (mode === "all" || mode === "backend") {
+  const runsBackend = (mode === "all" || mode === "backend") && child?.role !== "mcp";
+  const runsServer = (mode === "all" || mode === "server") && child?.role !== "backend";
+  if (runsBackend) {
     if (!env.TRACKER_BACKEND_TOKEN) fail("TRACKER_BACKEND_TOKEN is required");
     try {
       backend = await startBackend({
@@ -228,6 +284,8 @@ async function main(): Promise<void> {
         ...(fixture ? { bootId: fixture.descriptor.bootId, ...(fixtureControl ? { runOwner: fixture.runOwner } : {}) } : {}),
         ...(principals ? { principals } : {}), ...(evidenceListen ? { evidenceListen } : {}), // stream A
         ...(fixture ? fixture.backendOptions : {}), // ---- stream B: the ledger sink and the backend fault hooks ----
+        // ---- stream E: a supervised child's crash points, in front of stream B's hooks ----
+        ...(backendFaults ? { faults: backendFaults } : {}),
       });
     } catch (e) {
       fail((e as Error).message);
@@ -250,7 +308,7 @@ async function main(): Promise<void> {
     if (backend.durability?.journal) out.journal = { data_dir: values["data-dir"], head: backend.durability.journal.head() };
     // ---- end stream D ----
   }
-  if (mode === "all" || mode === "server") {
+  if (runsServer) {
     if (backend) env.TRACKER_BACKEND_URL = backend.url;
     try {
       const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras });
@@ -261,6 +319,11 @@ async function main(): Promise<void> {
           read_only: server.config.readOnly, tools: server.config.tools, deny_tools: server.config.deny,
           default_project: server.config.defaultProject, key_journal: server.variants.includes("key-store-honest"),
         };
+        // ---- stream E: the backend child serves GET /build, so it reads these settings from the state folder ----
+        if (child) {
+          const supervision = await import("./supervision.js");
+          supervision.writeJsonDurable(supervision.settingsPath(child.stateDir), fixture.descriptor.serverSettings);
+        }
       }
       out.defects = server.build.defects;
       out.read_only = server.config.readOnly;
@@ -276,7 +339,7 @@ async function main(): Promise<void> {
     out.features = features;
     if (backendExtension && out.backend) out.evidence = `${out.backend as string}/build`;
     if (tokenDir !== undefined) out.tokens = tokenDir;
-    if (fixtureControl) {
+    if (fixtureControl && child?.role !== "mcp") {
       try {
         const control = await fixture.startControl(port(values["control-port"]));
         closers.push(control.close);
@@ -287,9 +350,10 @@ async function main(): Promise<void> {
       }
     }
   }
-  if ((out.defects as string[] | undefined)?.length || backendDefects.length) {
+  const bannerBackend = runsBackend || !child ? backendDefects : [];
+  if ((out.defects as string[] | undefined)?.length || bannerBackend.length) {
     process.stderr.write("\n*** tiny-tracker BROKEN BUILD (teaching fixture): "
-      + `${[...((out.defects as string[]) ?? []), ...backendDefects.map((d) => `backend:${d}`)].join(", ")}.\n`
+      + `${[...((out.defects as string[]) ?? []), ...bannerBackend.map((d) => `backend:${d}`)].join(", ")}.\n`
       + "*** Deliberately unsafe. Loopback only. Never point it at data you care about. ***\n\n");
   }
   if (featuresOff.length) {
@@ -298,6 +362,12 @@ async function main(): Promise<void> {
       process.stderr.write(`tiny-tracker: ${featureOffText(o)}; this build runs without ${o.feature} (name --features ${o.feature} to be refused instead).\n`);
     }
   }
+  // ---- stream E: a supervised child tells the supervisor its boot id, and stops when the supervisor goes away ----
+  if (child) {
+    out.boot_id = fixture?.descriptor.bootId ?? null;
+    process.on("disconnect", () => void shutdown());
+  }
+  // ---- end stream E ----
   process.stdout.write(`${JSON.stringify(out)}\n`);
 }
 

@@ -26,6 +26,8 @@ export interface Combination {
   faults: readonly string[];
   fixtureControl: boolean;
   dataDir?: string;
+  /** `tiny-tracker all --supervise` (0.3.0): the backend and the MCP server as two restartable children. */
+  supervise?: boolean;
 }
 
 /**
@@ -163,6 +165,23 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     id: "CMP-60", post01: false,
     check: (c) => has(c.features, "clock") && !c.fixtureControl
       ? "the clock feature needs --fixture-control: the fixture clock moves only through the control listener (without both, the clock is wall time)" : undefined,
+  },
+  {
+    id: "CMP-61", post01: false,
+    check: (c) => c.profile === "0.1" && c.supervise ? "profile 0.1 takes no --supervise" : undefined,
+  },
+  {
+    id: "CMP-62", post01: true,
+    check: (c) => c.supervise && c.layout !== "all"
+      ? "--supervise runs with `tiny-tracker all` only: it starts the backend and the MCP server as two children" : undefined,
+  },
+  {
+    id: "CMP-63", post01: false,
+    check: (c) => {
+      const crash = c.faults.filter((f) => faultPoint(f)?.action === "crash");
+      return crash.length && !c.supervise
+        ? `crash fault point(s) ${crash.join(", ")} need tiny-tracker all --supervise: in one process a crash stops both layers and nothing restarts them` : undefined;
+    },
   },
 ];
 

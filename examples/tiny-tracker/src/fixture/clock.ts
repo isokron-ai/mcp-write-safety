@@ -14,9 +14,11 @@
 // listener is never part of a published delayed-recovery run.
 //
 // The offset only moves forward, in steps of at most MAX_STEP_MS, to at most
-// MAX_OFFSET_MS (X5). The offset is kept behind OffsetStore, so that under
-// --supervise (in progress) it can live in the supervisor's state folder.
+// MAX_OFFSET_MS (X5). Under --supervise the offset is kept in the supervisor's
+// state folder: the backend child writes it, the MCP child reads it, and it
+// survives a restart of either.
 
+import { clockPath, readJson, writeJsonDurable } from "../supervision.js";
 import type { Clock } from "../clock.js";
 
 export const MAX_STEP_MS = 366 * 24 * 3600 * 1000;
@@ -31,6 +33,18 @@ export interface OffsetStore {
 export function memoryOffset(initial = 0): OffsetStore {
   let v = initial;
   return { get: () => v, set: (n) => { v = n; } };
+}
+
+/** The offset in the supervisor's state folder (clock.json). Read on every call: it is one small file, and another process may move it. */
+export function folderOffset(stateDir: string): OffsetStore {
+  const path = clockPath(stateDir);
+  return {
+    get: () => {
+      const v = readJson<{ offset_ms?: unknown }>(path)?.offset_ms;
+      return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0;
+    },
+    set: (n) => writeJsonDurable(path, { offset_ms: n }),
+  };
 }
 
 export class ClockError extends Error {

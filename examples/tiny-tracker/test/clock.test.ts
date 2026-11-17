@@ -1,12 +1,15 @@
 // The fixture clock (0.3.0, feature `clock`; PLAN R4, review G7): named clock
 // domains, the offset on every event and in the build descriptor, moved only
 // on the control listener, and the scored-run posture (wall clock, offset 0,
-// control off). Ports 4664-4679 (stream E), used one test at a time.
+// control off). Every listener binds port 0.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { startBackend } from "../src/start.js";
-import { FixtureClock, memoryOffset, clockRoute, MAX_STEP_MS, MAX_OFFSET_MS } from "../src/fixture/clock.js";
+import { FixtureClock, folderOffset, memoryOffset, clockRoute, MAX_STEP_MS, MAX_OFFSET_MS } from "../src/fixture/clock.js";
 import { BuildDescriptor } from "../src/fixture/index.js";
 import { wallClock } from "../src/clock.js";
 import type { CommitSink, CommittedTransaction } from "../src/backend/commit.js";
@@ -54,6 +57,21 @@ describe("the fixture clock (unit)", () => {
     assert.equal(moves.length, 1, "listeners hear each move once");
   });
 
+  it("the folder offset is shared by two clocks (two processes) and survives a new instance (a restart)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-clock-"));
+    try {
+      const writer = new FixtureClock(folderOffset(dir));
+      const reader = new FixtureClock(folderOffset(dir));
+      assert.equal(reader.offsetMs(), 0, "no file yet: offset 0");
+      writer.advance(5 * DAY);
+      assert.equal(reader.offsetMs(), 5 * DAY);
+      assert.equal(new FixtureClock(folderOffset(dir)).offsetMs(), 5 * DAY);
+      assert.equal(statSync(join(dir, "clock.json")).mode & 0o777, 0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("the control route: GET and POST with a fixture clock; no answer (fall through) on the wall clock", async () => {
     const clock = new FixtureClock();
     const body = (v: unknown) => async () => v;
@@ -76,15 +94,18 @@ describe("clock domains in the evidence (G7)", () => {
     const clock = new FixtureClock();
     const seen: CommittedTransaction[] = [];
     const rec: CommitSink = { name: "rec", role: "observer", onCommit: (tx) => void seen.push(tx) };
-    const backend = await startBackend({ token: BACKEND, port: 4664, clock, sinks: [rec] });
+    const backend = await startBackend({ token: BACKEND, port: 0, clock, sinks: [rec], bootId: "0123456789abcdef" });
     try {
       const api = new Rest(backend.url, BACKEND);
       const a = await api.createTicket({ project: "inbox", title: "a" });
       clock.advance(7 * DAY);
       const b = await api.createTicket({ project: "inbox", title: "b" });
       assert.deepEqual(seen.map((t) => t.clockOffsetMs), [0, 7 * DAY]);
+      assert.deepEqual(seen.map((t) => t.bootId), ["0123456789abcdef", "0123456789abcdef"]);
       const shift = Date.parse(b.created_at) - Date.parse(a.created_at);
       assert.ok(shift >= 7 * DAY && shift < 7 * DAY + 60_000, `created_at moved by the offset (${shift})`);
+      assert.deepEqual(seen.map((t) => t.committedAt), [a.created_at, b.created_at], "committedAt is the one record-clock read the write stored");
+      assert.equal(b.updated_at, b.created_at);
       const wallShift = Date.parse(seen[1].at) - Date.parse(seen[0].at);
       assert.ok(wallShift >= 0 && wallShift < 60_000, "`at` is wall time");
     } finally {
@@ -115,7 +136,7 @@ describe("the clock feature on the command line", () => {
     const refused = await runCli(["all", "--features", "evidence,clock"], TOKENS);
     assert.equal(refused.code, 2);
     assert.match(refused.stderr, /the clock feature needs --fixture-control/);
-    const scored = await runCli(["all", "--features", "evidence", "--port", "4665", "--backend-port", "4666"], TOKENS, async (state) => {
+    const scored = await runCli(["all", "--features", "evidence", "--port", "0", "--backend-port", "0"], TOKENS, async (state) => {
       const d = (await call("GET", `${state.backend}/build`, EVIDENCE)).body;
       assert.deepEqual(d.clock, { domain: "wall", offset_ms: 0 });
       assert.equal(d.control.enabled, false);
@@ -125,7 +146,7 @@ describe("the clock feature on the command line", () => {
   });
 
   it("moves only on the control listener, with the control token; records, /build and the MCP mirror follow", async () => {
-    const r = await runCli(["all", "--features", "evidence,clock", "--fixture-control", "--port", "4667", "--backend-port", "4668", "--control-port", "4669"], TOKENS, async (state) => {
+    const r = await runCli(["all", "--features", "evidence,clock", "--fixture-control", "--port", "0", "--backend-port", "0", "--control-port", "0"], TOKENS, async (state) => {
       const c = `${state.control}/_fixture/clock`;
       const start = (await call("GET", c, CONTROL)).body;
       assert.equal(start.domain, "fixture");
