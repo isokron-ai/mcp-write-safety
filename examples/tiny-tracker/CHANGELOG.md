@@ -13,8 +13,15 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - Tokens for the evidence namespace and the control listener are read from the environment or a 0600 file, never from the command line, and never printed.
 - A compatibility table: illegal combinations of profile, features, defects, variants, faults and process layout stop the process (exit 2).
 - Defects carry a `requires` list; `--defect all` means every defect valid for the active features. The backend has its own defect registry (seams, banner, refusal rules), and a computed defect placement map.
+- `--token-dir`: a 0700 folder where evidence and control tokens are generated (0600) when not supplied; only its path is printed.
+- The backend's single commit path (validate, journal, apply, ledger, reply), an injected clock for every timestamp, typed backend seams, principals with key records scoped by principal, and frozen record field names (`docs/INTERFACES.md`).
 - RFC 8785 canonical bytes and domain-tagged SHA-256 digests, with cross-language vectors (`vectors/digest-1.json`) and a standard-library Python verifier (`verify/python`).
 - `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).
+
+### Changed in the default profile (ships with 0.2.0; `--profile 0.1` keeps the 0.1.0 behaviour except where noted)
+- `tiny-tracker server --backend-defect NAME` stops with exit 2 instead of starting with the backend defect silently unused (CMP-9).
+- The `evidence` feature runs with `tiny-tracker all` only (CMP-11).
+- A start whose command line holds one of its tokens (8 characters or more), or where two tokens are equal, stops with exit 2. This holds under every profile, `--profile 0.1` included.
 
 ### Fixed
 - The 0.1.0 entry below says "41 deliberate defects"; 0.1.0 shipped 47 MCP-layer defects and 1 backend defect.

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://writesafety.dev/schemas/tiny-tracker/served-digest-1.schema.json",
   "title": "Served digest",
-  "description": "What a record serves for one hashed object: the exact RFC 8785 canonical bytes, as a string, and SHA-256 over UTF-8(domain), one line feed and UTF-8(canonical). A verifier hashes the served bytes; it needs no canonicalizer of its own.",
+  "description": "What a record serves for one hashed object: the exact RFC 8785 canonical bytes, as a string, and SHA-256 over UTF-8(domain), one line feed and UTF-8(canonical). A verifier hashes the served bytes; it needs no canonicalizer of its own. Version 1 allows additional top-level members: a later release may add one without a new version; a consumer ignores members it does not know.",
   "type": "object",
   "properties": {
     "alg": {
@@ -28,6 +28,5 @@
     "domain",
     "canonical",
     "digest"
-  ],
-  "additionalProperties": false
+  ]
 }

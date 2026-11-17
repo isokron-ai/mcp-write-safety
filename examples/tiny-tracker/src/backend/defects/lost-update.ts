@@ -31,13 +31,17 @@ export const lostUpdate: BackendDefect = {
   seams: ["patchTicket"],
   requires: [],
   apply(ops) {
-    ops.patchTicket = async (store, id, fields, ifMatch) => {
+    // The read and the wait run before the commit section (BackendOps.beforePatch), the stale write inside it.
+    ops.beforePatch = async (store, id, _fields, ifMatch) => {
       const snapshot = store.getTicket(id); // a copy
       if (typeof ifMatch === "number" && ifMatch !== snapshot.version) {
         throw new ApiError(412, "precondition_failed", `ticket ${id} is at version ${snapshot.version}`, { current: snapshot });
       }
       await sleep(50); // DEFECT: another write can land here ...
-      store.tickets.set(id, snapshot); // ... and is overwritten by the stale copy
+      return snapshot;
+    };
+    ops.patchTicket = (store, id, fields, _ifMatch, prepared) => {
+      store.tickets.set(id, prepared as ReturnType<typeof store.getTicket>); // ... and is overwritten by the stale copy
       return store.patchTicket(id, fields);
     };
   },

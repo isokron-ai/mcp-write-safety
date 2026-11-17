@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { ConfigError, startBackend, startServer, type RunningBackend } from "./start.js";
 import { activeFeatures, needsFixtureLayer, parseFeatures, parseProfile, SettingError } from "./profile.js";
 import { checkCompat, type ProcessLayout } from "./compat.js";
+import { checkArgv, checkDistinct, TokenError } from "./tokens.js";
 import { resolveDefects } from "./defects/index.js";
 import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension } from "./backend/http.js";
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
       "fixture-control": { type: "boolean" },
       "control-port": { type: "string" },
       "data-dir": { type: "string" },
+      "token-dir": { type: "string" },
       help: { type: "boolean" },
     },
   });
@@ -93,9 +95,21 @@ async function main(): Promise<void> {
     fixtureControl, dataDir: values["data-dir"],
   });
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
+  const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
+  if (tokenDir !== undefined && !needsFixtureLayer(features, fixtureControl)) refusals.push("--token-dir has no effect without a fixture feature or --fixture-control");
   if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
 
   if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
+
+  // Token rules that hold with or without the fixture layer: all tokens differ, and none is on the command line.
+  try {
+    const tokens = { backend: env.TRACKER_BACKEND_TOKEN, evidence: env.TRACKER_EVIDENCE_TOKEN, control: env.TRACKER_CONTROL_TOKEN };
+    checkDistinct(tokens);
+    checkArgv(process.argv.slice(2), tokens);
+  } catch (e) {
+    if (e instanceof TokenError) fail(e.message);
+    throw e;
+  }
 
   // The fixture layer is loaded only when asked for, so the teaching server never imports it (test/import-graph.test.ts).
   let fixture: Awaited<ReturnType<typeof import("./fixture/index.js")["createFixtureLayer"]>> | undefined;
@@ -109,7 +123,7 @@ async function main(): Promise<void> {
         mcpDefects: layout === "backend" ? null : mcpDefects,
         backendDefects: layout === "server" ? null : backendDefects,
         variants: layout === "backend" ? null : variantNames,
-        env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN,
+        env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN, tokenDir,
       });
     } catch (e) {
       if (e instanceof layer.TokenError) fail(e.message);
@@ -149,6 +163,12 @@ async function main(): Promise<void> {
       const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras });
       closers.push(server.close);
       out.mcp = server.url;
+      if (fixture) {
+        fixture.descriptor.serverSettings = {
+          read_only: server.config.readOnly, tools: server.config.tools, deny_tools: server.config.deny,
+          default_project: server.config.defaultProject, key_journal: server.variants.includes("key-store-honest"),
+        };
+      }
       out.defects = server.build.defects;
       out.read_only = server.config.readOnly;
       if (server.variants.length) out.variants = server.variants;
@@ -162,6 +182,7 @@ async function main(): Promise<void> {
     out.profile = profile;
     out.features = features;
     if (backendExtension && out.backend) out.evidence = `${out.backend as string}/build`;
+    if (tokenDir !== undefined) out.tokens = tokenDir;
     if (fixtureControl) {
       try {
         const control = await fixture.startControl(port(values["control-port"]));

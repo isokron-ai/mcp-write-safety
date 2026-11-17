@@ -10,7 +10,7 @@
     "method": "POST",
     "path": "/tickets",
     "key": "lrt-example-key-0001",
-    "fingerprint_hash": "cc45890739209da58b0721aac85a98de94bfd2b1f2b8abba75b2750e5de5e14c"
+    "fingerprint_hash": "8ce2634fdf294777e7f088577d8cff8050ad46286b6422d329f1952ee8a867b3"
   },
   "objects": [
     {

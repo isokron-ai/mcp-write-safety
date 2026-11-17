@@ -16,6 +16,8 @@ const CHECK = fileURLToPath(new URL("../../verify/python/check_schemas.py", impo
 const BASE = "https://writesafety.dev/schemas/tiny-tracker/";
 
 const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"], { encoding: "utf8" }).status === 0;
+/** TT_GATE=1 (gate runs, CI): a missing jsonschema fails these tests instead of skipping them. */
+const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : "the Python jsonschema package is not installed";
 
 describe("JSON Schemas", () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".schema.json"));
@@ -33,23 +35,27 @@ describe("JSON Schemas", () => {
     }
   });
 
-  it("every schema is valid, every example and the digest vectors validate (python3 jsonschema)", { skip: jsonschema ? false : "the Python jsonschema package is not installed" }, () => {
+  it("every schema is valid, every example and the digest vectors validate (python3 jsonschema)", { skip: needJsonschema }, () => {
+    assert.ok(jsonschema, "TT_GATE=1 needs python3 with jsonschema and referencing");
     const r = spawnSync("python3", ["-I", CHECK], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /7 schemas, 5 examples, 0 problems/);
   });
 
-  it("a live GET /build validates against build-descriptor-1", { skip: jsonschema ? false : "the Python jsonschema package is not installed" }, async () => {
+  it("a live GET /build validates against build-descriptor-1", { skip: needJsonschema }, async () => {
+    assert.ok(jsonschema, "TT_GATE=1 needs python3 with jsonschema and referencing");
     const env = { TRACKER_BACKEND_TOKEN: "backend-token-schema-00000000000", TRACKER_EVIDENCE_TOKEN: "evidence-token-schema-0000000000", TRACKER_CONTROL_TOKEN: "control-token-schema-00000000000" };
     for (const [args, ports] of [[["all", "--features", "evidence,strict-input", "--defect", "all", "--backend-defect", "lost-update"], [4690, 4691]],
-      [["backend", "--features", "evidence"], [4692]]] as const) {
+      [["all", "--features", "evidence", "--read-only", "true", "--tools", "list_tickets,get_ticket"], [4690, 4691]]] as const) {
       const portArgs = args[0] === "all" ? ["--port", String(ports[0]), "--backend-port", String(ports[1])] : ["--port", String(ports[0])];
       const r = await runCli([...args, ...portArgs], env, async (state) => {
         const res = await fetch(`${state.backend}/build`, { headers: { authorization: `Bearer ${env.TRACKER_EVIDENCE_TOKEN}` } });
         const body = await res.text();
         const check = spawnSync("python3", ["-I", CHECK, "--instance", "build-descriptor"], { input: body, encoding: "utf8" });
         assert.equal(check.status, 0, `${args.join(" ")}: ${check.stdout}${check.stderr}`);
-        if (args[0] === "backend") assert.equal(JSON.parse(body).defects.mcp, null, "the backend process does not hold the MCP layer");
+        const d = JSON.parse(body);
+        assert.ok(d.config, "the server settings are in the descriptor once the state line is out");
+        if ((args as readonly string[]).includes("--read-only")) assert.deepEqual(d.config, { read_only: true, tools: ["get_ticket", "list_tickets"], deny_tools: null, default_project: "inbox", key_journal: false });
       });
       assert.equal(r.code, 0, r.stderr);
     }

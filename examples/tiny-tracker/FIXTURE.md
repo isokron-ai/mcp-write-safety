@@ -51,7 +51,7 @@ A **feature** is switched on with `--features a,b` or `TRACKER_FEATURES`. An unk
 
 ## Starting it
 
-Tokens come from the environment or from a file only the owner can read. They are never accepted on the command line and never printed.
+Tokens come from the environment, from a file only the owner can read, or from a token folder (`--token-dir DIR`, a 0700 directory where tiny-tracker generates any token you did not supply, as a 0600 file, and prints only the folder's path). They are never accepted on the command line and never printed. The `evidence` feature runs with `tiny-tracker all` only, so one build descriptor covers both layers.
 
 ```sh
 # a token file for the evidence namespace, readable by you only
@@ -95,21 +95,22 @@ A path not built yet answers `501 {"error":"not_built","available_from":"0.2.0"}
 | `GET /_fixture/runs` | The runs allocated since start | now |
 | `POST /_fixture/runs/:id/reset` | Reset one run's objects and key records | 0.2.0 |
 
-The control listener refuses a non-loopback `Host`, **any** request that carries an `Origin` header, a `POST` without `content-type: application/json`, and bodies over 64 KiB. Tokens are compared in constant time.
+The control listener refuses a non-loopback `Host`, **any** request that carries an `Origin` header, a `POST` without `content-type: application/json`, and bodies over 64 KiB. Tokens are compared in constant time. A run belongs to one principal (`{"principal": "p-..."}`, default `p-default`); at most 1000 runs are allocated per process (429 after that).
 
 **Token rules:**
 
 - 16 to 256 printable characters, no spaces.
 - A token file must be a regular file that no group or other user can read or write (`chmod 600`). Setting both the variable and the file is an error.
-- The backend, evidence and control tokens must all differ.
-- A process whose command line contains any of its tokens refuses to start.
+- The backend, principal, evidence and control tokens must all differ.
+- A process whose command line contains any of its tokens refuses to start. Both rules hold on every start, fixture layer or not.
+- With `--token-dir`, a token the environment or a file gives wins; otherwise it is generated in the folder and reused on restart. A folder that others can read is refused.
 - No token appears on stdout or stderr, in the build descriptor, in a record, in the instructions or in a result.
 
 ## The build descriptor
 
 `GET /build` answers what this process runs ([schema](schemas/build-descriptor-1.schema.json), [example](schemas/examples/build-descriptor.json), [decision 0005](docs/decisions/0005-build-descriptor.md)): package version, profile, features, defects of both layers, variants, control on or off, durability, the pinned contract commit, the process layout, boot id, restart count, journal head, armed faults and the clock.
 
-- **`build_hash`** covers the configuration and is the same on every start with the same settings. Known-answer files are keyed by it.
+- **`build_hash`** covers the configuration (including the MCP settings: read-only mode, the allow and deny lists, the default project, and whether a key journal is set) and is the same on every start with the same settings. Known-answer files are keyed by it.
 - **`descriptor_hash`** covers every field, including this process's state (boot id, restart count, journal head, armed faults, clock offset).
 
 Both are SHA-256 over RFC 8785 bytes, under the domain tags `dev.writesafety.tiny-tracker/build/1` and `dev.writesafety.tiny-tracker/build-descriptor/1`. With the `evidence` feature, the MCP instructions carry the descriptor's facts in one JSON line (with a banner when the backend runs defects), and every tool result carries `build_hash`, `descriptor_hash` and `boot_id` in `_meta` under `dev.writesafety.tiny-tracker/build`. A process that holds only one layer reports the other as `null`.
@@ -124,7 +125,7 @@ A harness allocates a **run id** on the control listener and tags each call with
 
 The server reads both tags before any tool handler runs and stamps them on every backend request the call makes, as `Tiny-Tracker-Run` and `Tiny-Tracker-Operation`. No handler and no defect sits on that path, so an effect is attributed to its run and operation even in a build that drops or mangles the idempotency key. A tag that is not 1 to 128 of `A-Z a-z 0-9 . _ : -` is dropped, never forwarded. Direct backend callers send the same headers.
 
-From 0.2.0, objects, key records and execution records are scoped by run, and `POST /_fixture/runs/:id/reset` removes one run's objects and key records. The ledger keeps every entry, and records the reset itself.
+From 0.2.0, objects, key records and execution records are tagged with their run, and `POST /_fixture/runs/:id/reset` removes one run's objects and key records. The ledger keeps every entry, and records the reset itself. A lookup by key is scoped to the principal only, never to the run: the contract's key-only recovery, and the delayed one, may come from a later run of the same caller ([INTERFACES.md](docs/INTERFACES.md), D5).
 
 ## Digests
 
@@ -137,7 +138,7 @@ From 0.2.0, objects, key records and execution records are scoped by run, and `P
 
 ```sh
 python3 -I verify/python/tt_digest.py --vectors vectors/digest-1.json
-# 17 vectors, 0 problems
+# 20 vectors, 0 problems
 
 printf '%s\n%s' 'dev.writesafety.tiny-tracker/execution-result/1' "$CANONICAL" | sha256sum
 ```
@@ -149,11 +150,11 @@ The records 0.2.0 serves, as draft schemas (`$id` under `https://writesafety.dev
 | Record | Schema | Served at |
 |---|---|---|
 | Execution record: one applied write, as committed, with its served digest | [`execution-record-1`](schemas/execution-record-1.schema.json) | `GET /executions/:id`, tool `get_execution` |
-| Operation record: one key's state, scoped to its principal and run | [`operation-record-1`](schemas/operation-record-1.schema.json) | `GET /operations/:key`, tool `get_operation` |
+| Operation record: one key's state, scoped to its principal | [`operation-record-1`](schemas/operation-record-1.schema.json) | `GET /operations/:key`, tool `get_operation` |
 | Ledger entry: one line of the append-only ledger | [`ledger-entry-1`](schemas/ledger-entry-1.schema.json) | `GET /ledger`, export |
 | Known-answer file | [`expected-1`](schemas/expected-1.schema.json) | `expected/<version>.json` in each release |
 
-Every record carries the principal (one constant value until there are two), `clock_offset_ms` and the `boot_id` of the process that wrote it. The ledger is written below every MCP-layer defect and is never edited; it records executions, replays, refusals, fault arming and firing, run allocation and reset. A replay serves the same execution record as the first answer.
+Every record carries the principal (one constant value until there are two), `clock_offset_ms` and the `boot_id` of the process that wrote it. An execution record's `seq` is the store's commit sequence (from 0.3.0, the journal line number); the ledger has its own sequence and links to it by `execution_id`. The ledger is written below every MCP-layer defect and is never edited; it records executions, replays, refusals, fault arming and firing, run allocation and reset. A replay serves the same execution record as the first answer.
 
 ## Answers on keyed calls
 
@@ -173,7 +174,8 @@ A refused first call (the backend answered 300 or above) stores nothing and does
 ## Clock, commits and keys
 
 - **Clock domains.** Wall time is the process clock. The fixture clock (0.3.0) moves only through the control listener and only for retention. Every record and the descriptor carry `clock_offset_ms`; a delayed-recovery run whose evidence is published shows offset 0 and control off.
-- **Commits stay synchronous.** Where a write has a pending state, the pending record is written first and the commit is one synchronous section after it. Conditional writes and batches are one section each. Fault delays sit between the two, never inside the commit.
+- **Commits stay synchronous, in a fixed order:** validate, append to the journal, apply in memory, ledger, reply. A journal error aborts the write with nothing applied (503); a ledger error stops the store. Where a write has a pending state, the pending record is written first and the commit is one synchronous section after it. Conditional writes and batches are one section each. Fault delays sit before the section, never inside it.
+- **Request fingerprints.** Every record's `fingerprint_hash` is SHA-256 under `dev.writesafety.tiny-tracker/request-fingerprint/1` over the RFC 8785 bytes of `{"body", "method", "path", "principal"}`.
 - **Keys.** With `strict-input`, the backend accepts an `Idempotency-Key` only as 8 to 128 of `A-Z a-z 0-9 . _ : -` (400 `bad_idempotency_key`), the same format the MCP tools declare, because other harnesses call the backend directly. It also refuses a body holding a string that is not well-formed Unicode (400 `not_well_formed`).
 - **One instance.** More than one server instance on the same data is a non-goal; from 0.3.0 the data-dir lock refuses a second writer.
 
@@ -232,20 +234,20 @@ Faults are named **process / position / action**. A fault's arming state lives i
 | `mcp/after-backend-reply/close` | As drop, with the connection closed without a body | 0.3.0 |
 | `mcp/after-backend-reply/crash` | The MCP process exits after the backend answered; needs `--supervise` (the backend stays up) | 0.3.0 |
 | `mcp/after-backend-reply/delay` | The answer is held for a set, capped time | 0.3.0 |
-| `backend/before-commit/crash` | The backend exits before the commit: nothing is written | 0.3.0 |
+| `backend/before-commit/crash` | After validate, before the journal append: the backend exits and nothing is written | 0.3.0 |
 | `backend/before-commit/delay` | A delay between the pending record and the commit: the in-flight window | 0.3.0 |
-| `backend/after-commit/crash` | The backend exits after the commit, before it answers: a reset connection, so the client sees `unknown` | 0.3.0 |
+| `backend/after-commit/crash` | After the ledger, before the reply: written, journalled and in the ledger; the backend exits, so the client sees `unknown` | 0.3.0 |
 | `backend/after-commit/error` | The backend commits, then answers 500 | 0.3.0 |
 | `backend/after-commit/drop` | The backend commits and never answers (capped hold) | 0.3.0 |
 
-A backend crash after commit and an MCP-process crash after the backend replied are different faults with different expected answers. Holds and delays are capped in time and count.
+A backend crash after commit and an MCP-process crash after the backend replied are different faults with different expected answers. Resource caps: holds and delays are capped in time and count, run allocation at 1000 per process, control bodies at 64 KiB, and the data dir is created 0700.
 
 ## Identifiers
 
 `src/fixture-properties.ts` is the only file that spells them.
 
 - **`FX-`** are properties of this fixture, not MWS requirements: FX-DIG (digests), FX-LOOK (lookup), FX-DUR (durability), FX-KEY (keys), FX-FLT (faults), FX-BLD (the build descriptor).
-- **`LRT-A1` to `LRT-A5`** refer to the assertions of the shared lost-response test contract, `zambodotdev/lost-response-test-contract`, pinned to commit `92bf1ba`.
+- **`LRT-A1` to `LRT-A5`** refer to the assertions of the shared lost-response test contract, `zambodotdev/lost-response-test-contract`, pinned to commit `92bf1ba5f8226a67409fd8a7a68411b5c4a7258d`.
 - **MWS IDs** stay in `src/requirements.ts`.
 - Wire names: `_meta` keys under `dev.writesafety.tiny-tracker/` (`idempotency-key`, `run`, `operation`, `build`); HTTP headers `Tiny-Tracker-*`.
 

@@ -15,6 +15,8 @@ import { META_KEYS } from "../src/fixture-properties.js";
 import { startBackend, startServer } from "../src/start.js";
 import { placementMap } from "../src/defect-placement.js";
 import { createFixtureLayer, BuildDescriptor } from "../src/fixture/index.js";
+import { RunRegistry, MAX_RUNS } from "../src/fixture/control.js";
+import { statSync, readFileSync, mkdirSync } from "node:fs";
 import { connectClient } from "./support/stack.js";
 import { runCli } from "./support/cli-run.js";
 
@@ -84,13 +86,13 @@ describe("the evidence namespace (rule 2, G3)", () => {
       const { descriptor_hash, ...body } = d;
       assert.equal(descriptor_hash, domainDigest(DOMAINS.buildDescriptor, canonicalize(body)));
       const config = { descriptor: d.descriptor, package: d.package, fixture_api: d.fixture_api, profile: d.profile, features: d.features, defects: d.defects,
-        variants: d.variants, control: d.control, durability: d.durability, contract: d.contract, layout: d.process.layout };
+        variants: d.variants, control: d.control, config: d.config, durability: d.durability, contract: d.contract, layout: d.process.layout };
       assert.equal(d.build_hash, domainDigest(DOMAINS.build, canonicalize(config)));
       assert.equal(d.descriptor, "build-descriptor/1");
       assert.deepEqual(d.clock, { domain: "wall", offset_ms: 0 });
       assert.deepEqual(d.faults, { armed: [] });
       assert.equal(d.process.restart_count, 0);
-      assert.deepEqual(d.contract, { repo: "zambodotdev/lost-response-test-contract", commit: "92bf1ba" });
+      assert.deepEqual(d.contract, { repo: "zambodotdev/lost-response-test-contract", commit: "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d" });
     }
     assert.equal(seen[0].build_hash, seen[1].build_hash);
     assert.notEqual(seen[0].process.boot_id, seen[1].process.boot_id);
@@ -168,6 +170,76 @@ describe("tokens (X2): environment or a 0600 file, never argv, never printed, ne
   });
 });
 
+describe("Phase 0 review fixes", () => {
+  it("build_hash covers the MCP settings (read-only, allow and deny lists, default project, key journal)", async () => {
+    const hashes: string[] = [];
+    for (const extra of [[], ["--read-only", "true"], ["--tools", "get_ticket"], ["--default-project", "other"]]) {
+      await runCli(["all", "--features", "evidence", "--port", "4662", "--backend-port", "4663", ...extra], TOKENS, async (state) => {
+        hashes.push((await get(`${state.backend}/build`, EVIDENCE)).body.build_hash);
+      });
+    }
+    assert.equal(new Set(hashes).size, 4, "each setting changes build_hash");
+    const d = new BuildDescriptor({ layout: "all", profile: "default", features: ["evidence"], mcpDefects: [], backendDefects: [], variants: [], control: false });
+    d.serverSettings = { read_only: false, tools: null, deny_tools: ["delete_project"], default_project: "inbox", key_journal: false };
+    const a = d.buildHash;
+    d.serverSettings = { ...d.serverSettings, key_journal: true };
+    assert.notEqual(d.buildHash, a);
+  });
+
+  it("evidence runs in `all` only (CMP-11); token rules hold without the fixture layer", async () => {
+    for (const layout of ["server", "backend"]) {
+      const r = await runCli([layout, "--features", "evidence"], { ...TOKENS, TRACKER_BACKEND_URL: "http://127.0.0.1:4661" });
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /evidence feature runs with `tiny-tracker all` only/);
+    }
+    const argv = await runCli(["all", "--default-project", BACKEND], { TRACKER_BACKEND_TOKEN: BACKEND });
+    assert.equal(argv.code, 2, "a token on the command line is refused in the default build too");
+    assert.ok(!argv.stderr.includes(BACKEND));
+    const shared = await runCli(["all"], { TRACKER_BACKEND_TOKEN: BACKEND, TRACKER_CONTROL_TOKEN: BACKEND });
+    assert.equal(shared.code, 2);
+    assert.match(shared.stderr, /must differ/);
+  });
+
+  it("--token-dir: generated 0600 tokens in a 0700 folder, only the path printed; a supplied token wins; a loose folder is refused", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-tokdir-"));
+    try {
+      const dir = join(root, "tokens");
+      const r = await runCli(["all", "--features", "evidence", "--fixture-control", "--control-port", "4664", "--port", "4665", "--backend-port", "4666", "--token-dir", dir],
+        { TRACKER_BACKEND_TOKEN: BACKEND, TRACKER_CONTROL_TOKEN: CONTROL }, async (state) => {
+          assert.equal(state.tokens, dir);
+          const evidence = readFileSync(join(dir, "evidence.token"), "utf8").trim();
+          assert.equal((await get(`${state.backend}/build`, evidence)).status, 200);
+          assert.equal((await get(`${state.control}/_fixture/clock`, CONTROL)).status, 200, "the supplied control token wins");
+        });
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+      assert.equal(statSync(join(dir, "evidence.token")).mode & 0o777, 0o600);
+      assert.ok(!r.stdout.includes(readFileSync(join(dir, "evidence.token"), "utf8").trim()));
+      assert.throws(() => statSync(join(dir, "control.token")), "no control token generated when one was supplied");
+      const loose = join(root, "loose");
+      mkdirSync(loose, { mode: 0o755 });
+      chmodSync(loose, 0o755);
+      const bad = await runCli(["all", "--features", "evidence", "--token-dir", loose], { TRACKER_BACKEND_TOKEN: BACKEND });
+      assert.equal(bad.code, 2);
+      assert.match(bad.stderr, /chmod 700/);
+      const noEffect = await runCli(["all", "--token-dir", dir], { TRACKER_BACKEND_TOKEN: BACKEND });
+      assert.equal(noEffect.code, 2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs belong to a principal and are capped (X5)", () => {
+    const fixed = new Date("2030-01-01T00:00:00.000Z");
+    const r = new RunRegistry("0123456789abcdef", { domain: "fixture", now: () => fixed, wallNow: () => new Date(), offsetMs: () => 5 });
+    const run = r.allocate("x", "p-alice");
+    assert.equal(run.principal, "p-alice");
+    assert.equal(run.created_at, "2030-01-01T00:00:00.000Z", "run times come from the injected clock");
+    for (let i = 1; i < MAX_RUNS; i++) r.allocate(null);
+    assert.throws(() => r.allocate(null), /at most 1000 runs/);
+  });
+});
+
 describe("the control listener (rule 2, X4)", () => {
   it("only with --fixture-control and its token, on its own loopback port, hardened", async () => {
     const noToken = await runCli(["all", "--fixture-control"], { TRACKER_BACKEND_TOKEN: BACKEND });
@@ -215,7 +287,7 @@ async function startSpy(target: string, port: number) {
   const server = createServer((req, res) => {
     seen.push({ method: req.method ?? "", path: req.url ?? "", headers: req.headers });
     const u = new URL(target);
-    const fwd = httpRequest({ host: u.hostname, port: u.port, method: req.method, path: req.url, headers: req.headers }, (up) => {
+    const fwd = httpRequest({ host: u.hostname, port: u.port, method: req.method, path: req.url, headers: req.headers, agent: false }, (up) => {
       res.writeHead(up.statusCode ?? 502, up.headers);
       up.pipe(res);
     });
@@ -234,12 +306,12 @@ describe("attribution outside the handlers (rule 3, B5)", () => {
   it(`every backend request a tagged call makes carries the run and operation tags, with each create-path defect on and with all of them (${createPath.length} defects)`, async () => {
     assert.ok(createPath.length >= 6, createPath.join(", "));
     const builds = [[], ...createPath.map((d) => [d]), createPath];
-    let port = 4680;
+    // OS-assigned ports (port 0): twelve builds, each closed before the next.
     for (const defects of builds) {
-      const backend = await startBackend({ token: BACKEND, port: port++ });
-      const spy = await startSpy(backend.url, port++);
+      const backend = await startBackend({ token: BACKEND, port: 0 });
+      const spy = await startSpy(backend.url, 0);
       const server = await startServer({
-        env: { TRACKER_BACKEND_URL: spy.url, TRACKER_BACKEND_TOKEN: BACKEND }, defects, port: port++, features: ["evidence"], extras: { attribution: true },
+        env: { TRACKER_BACKEND_URL: spy.url, TRACKER_BACKEND_TOKEN: BACKEND }, defects, port: 0, features: ["evidence"], extras: { attribution: true },
       });
       const mcp = await connectClient(server.url, "2026-07-28");
       try {

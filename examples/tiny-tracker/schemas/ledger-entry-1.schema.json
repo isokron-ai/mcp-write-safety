@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://writesafety.dev/schemas/tiny-tracker/ledger-entry-1.schema.json",
   "title": "Ledger entry (draft for 0.2.0)",
-  "description": "One line of the append-only execution ledger, written below every MCP-layer defect: GET /ledger (evidence token) and the export. Attribution (run, operation_tag) comes from request _meta through the server wrapper, never from a handler. Entries are never removed; a run reset is itself an entry.",
+  "description": "One line of the append-only execution ledger, written below every MCP-layer defect: GET /ledger (evidence token) and the export. Attribution (run, operation_tag) comes from request _meta through the server wrapper, never from a handler. Entries are never removed; a run reset is itself an entry. Version 1 allows additional top-level members: a later release may add one without a new version; a consumer ignores members it does not know.",
   "type": "object",
   "properties": {
     "entry": {
@@ -91,7 +91,8 @@
             },
             "fingerprint_hash": {
               "type": "string",
-              "pattern": "^[0-9a-f]{64}$"
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Lower-case hex SHA-256 under the domain dev.writesafety.tiny-tracker/request-fingerprint/1 over the RFC 8785 bytes of {\"body\": <request body or null>, \"method\", \"path\", \"principal\"} (src/digest.ts fingerprintHash)."
             }
           },
           "required": [
@@ -187,6 +188,5 @@
     "execution_id",
     "objects",
     "fault"
-  ],
-  "additionalProperties": false
+  ]
 }

@@ -31,6 +31,12 @@ export interface ServerExtras {
     instructions(): string;
     meta(): Record<string, unknown>;
   };
+  /**
+   * The MCP-layer fault point (frozen hook; the fault controller fills it in 0.2.0): called with every tool result after
+   * the handler, before the answer. It returns the result to send, or a promise that settles later (delay) or, within its
+   * cap, not at all (drop). It runs inside the attribution context, so it sees the call's run and operation tags.
+   */
+  onResult?(tool: string, result: unknown, ctx: unknown): Promise<unknown>;
 }
 
 /** Builds one McpServer instance with the tools this configuration enables. */
@@ -44,11 +50,15 @@ export function createMcpServer(build: Build, config: ServerConfig, deps: Deps, 
     ].join(" "),
   });
   // The wrapper every tool call goes through. With no extras it is the handler itself.
-  const wrap = (fn: (args: unknown, ctx: unknown) => Promise<unknown>) => {
-    if (!extras.attribution && !extras.mirror) return fn;
+  const wrap = (toolName: string, fn: (args: unknown, ctx: unknown) => Promise<unknown>) => {
+    if (!extras.attribution && !extras.mirror && !extras.onResult) return fn;
     return async (args: unknown, ctx: unknown) => {
       const meta = (ctx as { mcpReq?: { _meta?: unknown } } | undefined)?.mcpReq?._meta;
-      const result = extras.attribution ? await runWithAttribution(attributionFromMeta(meta), () => fn(args, ctx)) : await fn(args, ctx);
+      const call = async () => {
+        const r = await fn(args, ctx);
+        return extras.onResult ? extras.onResult(toolName, r, ctx) : r;
+      };
+      const result = extras.attribution ? await runWithAttribution(attributionFromMeta(meta), call) : await call();
       if (!extras.mirror || result === null || typeof result !== "object") return result;
       const r = result as { _meta?: Record<string, unknown> };
       return { ...r, _meta: { ...(r._meta ?? {}), ...extras.mirror.meta() } };
@@ -65,7 +75,7 @@ export function createMcpServer(build: Build, config: ServerConfig, deps: Deps, 
       description: readOnlyRefusal ? `${tool.description} (Unavailable: the server is in read-only mode.)` : tool.description,
       inputSchema: toolInputSchema(tool.input, build.validation),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
-    }, wrap(readOnlyRefusal
+    }, wrap(tool.name, readOnlyRefusal
       ? async () => fail(`${tool.name} is unavailable: this server runs in read-only mode (TRACKER_READ_ONLY). Nothing was written.`, { read_only: true },
         notApplied({ operation: tool.name, type: "tool", guard: null, read: { tool: "list_projects", arguments: {} } }, "not_permitted"))
       : (args: unknown, ctx: unknown) => tool.handler(args, deps, ctx)) as never);

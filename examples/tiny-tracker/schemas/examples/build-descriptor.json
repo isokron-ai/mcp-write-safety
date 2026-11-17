@@ -17,19 +17,26 @@
   "control": {
     "enabled": false
   },
+  "config": {
+    "read_only": false,
+    "tools": null,
+    "deny_tools": null,
+    "default_project": "inbox",
+    "key_journal": false
+  },
   "durability": {
     "mode": "memory",
     "journal_format": null
   },
   "contract": {
     "repo": "zambodotdev/lost-response-test-contract",
-    "commit": "92bf1ba"
+    "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d"
   },
   "process": {
     "layout": "all",
-    "boot_id": "08dfee0f23720bde",
+    "boot_id": "5e22fec86c4b05de",
     "restart_count": 0,
-    "started_at": "2026-11-17T03:55:29.622Z"
+    "started_at": "2026-11-17T04:34:29.254Z"
   },
   "journal": {
     "head": null
@@ -41,6 +48,6 @@
     "domain": "wall",
     "offset_ms": 0
   },
-  "build_hash": "a411387b99987d1bf15dc2a19e009d81dd44fb240e98f871343b77e851de6a34",
-  "descriptor_hash": "7e36a043416fb4a78ee66f754eec16a6145e76111255fad4a0974e469ceb70dc"
+  "build_hash": "38514fb2fa3073a768b3a8a413b603a35625cc91270241b0265b52fde66b7c0d",
+  "descriptor_hash": "e324a8325269f41c4b492134ba01fa25f2072571d62f767fdc4d66a1f62745ed"
 }

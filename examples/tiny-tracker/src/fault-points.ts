@@ -15,6 +15,15 @@ export type FaultProcess = (typeof FAULT_PROCESSES)[number];
 export type FaultPosition = (typeof FAULT_POSITIONS)[number];
 export type FaultAction = (typeof FAULT_ACTIONS)[number];
 
+/**
+ * The backend commit path (frozen order, src/backend/store.ts Store.commit): validate, journal append, apply in memory,
+ * ledger, reply. Fault positions are named against it:
+ *   backend before-commit  after validate, before the journal append: nothing is written;
+ *   backend after-commit   after the ledger, before the reply: written, journalled, in the ledger, unanswered;
+ *   mcp after-backend-reply  in the MCP process, after the backend's reply arrived, before the MCP answer.
+ */
+export const COMMIT_STEPS = ["validate", "journal", "apply", "ledger", "reply"] as const;
+
 export interface FaultPoint {
   /** process/position/action, e.g. "mcp/after-backend-reply/drop". */
   id: string;

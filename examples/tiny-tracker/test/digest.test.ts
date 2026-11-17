@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { canonicalize, CanonicalizationError, digestOf, domainDigest, DOMAINS, findIllFormedString, verifyServed } from "../src/digest.js";
+import { canonicalize, canonicalizeText, CanonicalizationError, digestOf, fingerprintHash, domainDigest, DOMAINS, findIllFormedString, verifyServed } from "../src/digest.js";
 
 const VECTORS_PATH = fileURLToPath(new URL("../../vectors/digest-1.json", import.meta.url));
 const PY = fileURLToPath(new URL("../../verify/python/tt_digest.py", import.meta.url));
@@ -19,6 +19,9 @@ interface Vector { name: string; input_json: string; domain: string; canonical?:
 const vectors = JSON.parse(readFileSync(VECTORS_PATH, "utf8")) as { vectors: string; cases: Vector[] };
 
 const python = spawnSync("python3", ["--version"], { encoding: "utf8" }).status === 0 ? "python3" : undefined;
+/** TT_GATE=1 (gate runs, CI): a missing python3 fails these tests instead of skipping them. */
+const GATE = process.env.TT_GATE === "1";
+const needPython = python || GATE ? false : "python3 is not on PATH";
 
 /** Seeded PRNG (mulberry32): the same seed gives the same values on every platform. */
 function prng(seed: number): () => number {
@@ -69,9 +72,9 @@ describe("digest: RFC 8785 canonical bytes under a domain tag", () => {
     assert.equal(vectors.vectors, "digest-vectors/1");
     for (const v of vectors.cases) {
       if (v.expect === "reject") {
-        assert.throws(() => canonicalize(JSON.parse(v.input_json)), CanonicalizationError, v.name);
+        assert.throws(() => canonicalizeText(v.input_json), CanonicalizationError, v.name);
       } else {
-        const canonical = canonicalize(JSON.parse(v.input_json));
+        const canonical = canonicalizeText(v.input_json);
         assert.equal(canonical, v.canonical, v.name);
         assert.equal(domainDigest(v.domain, canonical), v.digest, v.name);
       }
@@ -99,6 +102,14 @@ describe("digest: RFC 8785 canonical bytes under a domain tag", () => {
     assert.throws(() => domainDigest("no tag", "{}"));
   });
 
+  it("fingerprint_hash: the request-fingerprint/1 domain over principal, method, path and body", () => {
+    const v = vectors.cases.find((c) => c.name === "request fingerprint")!;
+    assert.equal(fingerprintHash("p-default", "POST", "/tickets", { project: "inbox", title: "First", priority: 2 }), v.digest);
+    assert.notEqual(fingerprintHash("p-other", "POST", "/tickets", { project: "inbox", title: "First", priority: 2 }), v.digest);
+    assert.throws(() => canonicalizeText('{"a":1,"a":2}'), /appears twice/);
+    assert.equal(canonicalizeText('{"a":{"a":1},"b":["a","a"]}'), '{"a":{"a":1},"b":["a","a"]}', "the same name in different objects is fine");
+  });
+
   it("refuses what is not JSON data, and finds ill-formed strings by path", () => {
     for (const bad of [Infinity, NaN, 1n, () => 1, new Date(0), [undefined]]) assert.throws(() => canonicalize(bad), CanonicalizationError);
     assert.equal(canonicalize({ a: undefined, b: 1 }), '{"b":1}');
@@ -106,7 +117,8 @@ describe("digest: RFC 8785 canonical bytes under a domain tag", () => {
     assert.equal(findIllFormedString({ "😀": "fine" }), undefined);
   });
 
-  it("the Python verifier agrees on every vector (python3 -I)", { skip: python ? false : "python3 is not on PATH" }, () => {
+  it("the Python verifier agrees on every vector (python3 -I)", { skip: needPython }, () => {
+    assert.ok(python, "TT_GATE=1 needs python3 on PATH");
     const r = spawnSync(python!, ["-I", PY, "--vectors", VECTORS_PATH], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, new RegExp(`^${vectors.cases.length} vectors, 0 problems`, "m"));
@@ -114,7 +126,8 @@ describe("digest: RFC 8785 canonical bytes under a domain tag", () => {
     assert.equal(unit.status, 0, unit.stderr);
   });
 
-  it("Node and Python give the same bytes for 2000 seeded random values", { skip: python ? false : "python3 is not on PATH" }, () => {
+  it("Node and Python give the same bytes for 2000 seeded random values", { skip: needPython }, () => {
+    assert.ok(python, "TT_GATE=1 needs python3 on PATH");
     const rand = prng(20261116);
     const items: Array<{ input_json: string; domain: string }> = [];
     const expected: string[] = [];

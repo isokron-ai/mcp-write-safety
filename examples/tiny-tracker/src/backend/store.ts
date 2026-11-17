@@ -6,6 +6,9 @@
 // rather than repeated, and batches are all-or-nothing. The MCP layer in
 // src/mcp talks to it over HTTP only.
 
+import { wallClock, type Clock } from "../clock.js";
+import { CommitSinkError, JournalError, objectsOf, type CommitSink, type CommittedTransaction, type RefusedTransaction, type ReplayedTransaction, type TxMeta } from "./commit.js";
+
 export type Status = "open" | "in_progress" | "closed" | "archived";
 export const STATUSES: readonly Status[] = ["open", "in_progress", "closed", "archived"];
 
@@ -88,7 +91,6 @@ interface AppliedWrite {
   fingerprint: string;
 }
 
-const now = () => new Date().toISOString();
 const clone = <T>(value: T): T => structuredClone(value);
 
 export function canonicalJson(value: unknown): string {
@@ -169,9 +171,122 @@ export class Store {
   readonly tickets = new Map<string, Ticket>();
   private readonly applied = new Map<string, AppliedWrite[]>();
   private seq = { ticket: 0, label: 0, comment: 0 };
+  /** The commit sequence: one per applied write, from 1 (the journal line number from 0.3.0). Replays and refusals take none. */
+  private commitSeq = 0;
+  private journal: CommitSink | undefined;
+  private readonly sinks: CommitSink[] = [];
+  /** Set when a sink after the journal failed: the store answers nothing more (fail-stop). */
+  private stopped: CommitSinkError | undefined;
 
-  constructor(seedProjects: string[] = ["inbox"]) {
+  constructor(seedProjects: string[] = ["inbox"], readonly clock: Clock = wallClock) {
     for (const key of seedProjects) this.createProject(key, key);
+  }
+
+  private now(): string {
+    return this.clock.now().toISOString();
+  }
+
+  // ---- the commit point (src/backend/commit.ts) ----
+
+  /** Adds a sink. At most one has role "journal"; it is told first, the others after the write is visible. */
+  addSink(sink: CommitSink): void {
+    if (sink.role === "journal") {
+      if (this.journal) throw new Error(`a journal sink is already set (${this.journal.name})`);
+      this.journal = sink;
+    } else {
+      this.sinks.push(sink);
+    }
+  }
+
+  /** The whole state, for undoing a write whose journal append failed. Taken only when a journal is set. */
+  private snapshot() {
+    return { projects: structuredClone([...this.projects]), tickets: structuredClone([...this.tickets]), applied: structuredClone([...this.applied]), seq: { ...this.seq } };
+  }
+
+  private restore(s: ReturnType<Store["snapshot"]>): void {
+    this.projects.clear();
+    for (const [k, v] of s.projects) this.projects.set(k, v);
+    this.tickets.clear();
+    for (const [k, v] of s.tickets) this.tickets.set(k, v);
+    this.applied.clear();
+    for (const [k, v] of s.applied) this.applied.set(k, v);
+    this.seq = s.seq;
+  }
+
+  /** Throws the stored sink failure once a sink has failed. */
+  checkRunning(): void {
+    if (this.stopped) throw this.stopped;
+  }
+
+  private event(meta: TxMeta, status: number) {
+    return { ...meta, at: this.clock.wallNow().toISOString(), clockOffsetMs: this.clock.offsetMs(), status };
+  }
+
+  private notify(fn: (sink: CommitSink) => void): void {
+    for (const sink of this.sinks) {
+      try {
+        fn(sink);
+      } catch (e) {
+        this.stopped = new CommitSinkError(sink.name, e);
+        throw this.stopped;
+      }
+    }
+  }
+
+  /**
+   * Runs one write, in one synchronous section, in this order (frozen; docs/INTERFACES.md):
+   *   1. validate and compute: `mutate` runs on the store; a refusal (an ApiError) changes nothing and is reported;
+   *   2. journal: the journal sink appends the committed post-state; if it throws, the store is put back as it was,
+   *      nothing is applied, and the caller gets a JournalError (503);
+   *   3. apply: the write is now in effect, and `afterJournal` records what goes with it (the key record);
+   *   4. ledger and other sinks: if one throws, the store stops (fail-stop: the journal and memory agree, the
+   *      evidence does not);
+   *   5. reply (the caller sends it).
+   * `mutate` receives the commit sequence number the write will get, and must not await.
+   */
+  commit<R extends { status: number; body?: unknown }>(meta: TxMeta, mutate: (seq: number) => R, afterJournal?: (tx: CommittedTransaction, reply: R) => void): { reply: R; tx?: CommittedTransaction } {
+    this.checkRunning();
+    const before = this.journal ? this.snapshot() : undefined;
+    let reply: R;
+    try {
+      reply = mutate(this.commitSeq + 1);
+    } catch (e) {
+      if (e instanceof ApiError) this.refuse(meta, e.status, e.code);
+      throw e;
+    }
+    if ((reply as unknown as { then?: unknown }).then !== undefined) throw new Error("a commit section must be synchronous (await in a before step instead)");
+    if (reply.status >= 300) {
+      this.refuse(meta, reply.status, "refused");
+      return { reply };
+    }
+    const tx: CommittedTransaction = { ...this.event(meta, reply.status), seq: this.commitSeq + 1, body: reply.body, objects: objectsOf(meta.request.path, reply.body) };
+    if (this.journal) {
+      try {
+        this.journal.onCommit(tx);
+      } catch (e) {
+        this.restore(before!);
+        throw new JournalError(this.journal.name, e);
+      }
+    }
+    this.commitSeq = tx.seq;
+    afterJournal?.(tx, reply);
+    this.notify((s) => s.onCommit(tx));
+    return { reply, tx };
+  }
+
+  /** A keyed repeat answered from its record: nothing applied. `originalSeq` is the commit that made the record. */
+  replay(meta: TxMeta, status: number, body: unknown, originalSeq: number): ReplayedTransaction {
+    this.checkRunning();
+    const tx: ReplayedTransaction = { ...this.event(meta, status), body, originalSeq };
+    this.notify((s) => s.onReplay?.(tx));
+    return tx;
+  }
+
+  /** A write refused before any effect. */
+  refuse(meta: TxMeta, status: number, code: string): RefusedTransaction {
+    const tx: RefusedTransaction = { ...this.event(meta, status), code };
+    this.notify((s) => s.onRefusal?.(tx));
+    return tx;
   }
 
   // projects
@@ -186,7 +301,7 @@ export class Store {
     if (this.projects.has(key)) {
       throw new ApiError(409, "exists", `project ${key} already exists`, { current: clone(this.projects.get(key)) });
     }
-    const t = now();
+    const t = this.now();
     const project: Project = { key, name, version: 1, created_at: t, updated_at: t };
     this.projects.set(key, project);
     return clone(project);
@@ -201,7 +316,7 @@ export class Store {
     }
     existing.name = name;
     existing.version += 1;
-    existing.updated_at = now();
+    existing.updated_at = this.now();
     return { project: clone(existing), created: false };
   }
 
@@ -245,7 +360,7 @@ export class Store {
     if (comment !== undefined && (typeof comment !== "string" || comment.length < 1 || comment.length > 5000)) {
       throw fieldError("comment", "must be a string of 1 to 5000 characters");
     }
-    const t = now();
+    const t = this.now();
     const ticket: Ticket = {
       id: `T-${++this.seq.ticket}`,
       project,
@@ -318,7 +433,7 @@ export class Store {
 
   private bump(ticket: Ticket): void {
     ticket.version += 1;
-    ticket.updated_at = now();
+    ticket.updated_at = this.now();
   }
 
   /** Per-field update. Only the fields present are touched. */
@@ -373,7 +488,7 @@ export class Store {
     if (typeof body !== "string" || body.length < 1 || body.length > 5000) {
       throw fieldError("body", "must be a string of 1 to 5000 characters");
     }
-    const comment: Comment = { id: `C-${++this.seq.comment}`, body, created_at: now() };
+    const comment: Comment = { id: `C-${++this.seq.comment}`, body, created_at: this.now() };
     ticket.comments.push(comment);
     this.bump(ticket);
     return { ticket: clone(ticket), comment: clone(comment) };

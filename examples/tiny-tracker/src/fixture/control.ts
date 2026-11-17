@@ -17,6 +17,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { FAULT_POINTS } from "../fault-points.js";
+import { wallClock, type Clock } from "../clock.js";
 import type { BuildDescriptor } from "./descriptor.js";
 import { bearerMatches } from "./tokens.js";
 
@@ -25,22 +26,35 @@ const MAX_BODY = 64 * 1024;
 
 export interface Run {
   run_id: string;
+  /** The principal the run belongs to: run tags are scoped per principal, and a reset touches only its records. */
+  principal: string;
   created_at: string;
   label: string | null;
 }
 
+/** At most this many runs per process (X5): POST /_fixture/runs answers 429 beyond it. */
+export const MAX_RUNS = 1000;
+
 /**
  * Fixture-allocated run ids. A harness allocates one per run and sends it as the run tag in request _meta
  * (dev.writesafety.tiny-tracker/run) and as Tiny-Tracker-Run on direct backend calls. From 0.2.0 objects, key
- * records and execution records are scoped by run, and a reset removes one run's data and keys; the ledger keeps
+ * records and execution records are tagged with their run (lookups stay scoped to the principal only), and a
+ * reset removes one run's data and keys; the ledger keeps
  * every entry, and records the reset itself.
  */
+class ControlError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string, readonly extra: Record<string, unknown> = {}) {
+    super(message);
+  }
+}
+
 export class RunRegistry {
   private readonly runs: Run[] = [];
-  constructor(private readonly bootId: string) {}
+  constructor(private readonly bootId: string, private readonly clock: Clock = wallClock) {}
 
-  allocate(label: string | null): Run {
-    const run: Run = { run_id: `run-${this.bootId.slice(0, 8)}-${this.runs.length + 1}`, created_at: new Date().toISOString(), label };
+  allocate(label: string | null, principal = "p-default"): Run {
+    if (this.runs.length >= MAX_RUNS) throw new ControlError(429, "too_many_runs", `at most ${MAX_RUNS} runs per process`);
+    const run: Run = { run_id: `run-${this.bootId.slice(0, 8)}-${this.runs.length + 1}`, principal, created_at: this.clock.now().toISOString(), label };
     this.runs.push(run);
     return run;
   }
@@ -59,11 +73,6 @@ export interface RunningControl {
   close(): Promise<void>;
 }
 
-class ControlError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string, readonly extra: Record<string, unknown> = {}) {
-    super(message);
-  }
-}
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -99,9 +108,11 @@ export async function startControl(options: { token: string; port: number; descr
     if (path === "/_fixture/runs") {
       if (method === "GET") return { status: 200, body: { runs: runs.list() } };
       if (method === "POST") {
-        const body = (await readBody(req)) as { label?: unknown };
+        const body = (await readBody(req)) as { label?: unknown; principal?: unknown };
         const label = body && typeof body === "object" && typeof body.label === "string" ? body.label.slice(0, 200) : null;
-        return { status: 201, body: runs.allocate(label) };
+        const principal = body && typeof body === "object" && body.principal !== undefined ? body.principal : "p-default";
+        if (typeof principal !== "string" || !/^p-[a-z0-9-]{1,62}$/.test(principal)) throw new ControlError(400, "bad_principal", "principal must match ^p-[a-z0-9-]{1,62}$");
+        return { status: 201, body: runs.allocate(label, principal) };
       }
     }
     const reset = /^\/_fixture\/runs\/([^/]+)\/reset$/.exec(path);

@@ -12,6 +12,7 @@ import { BuildDescriptor, type DescriptorInput } from "./descriptor.js";
 import { evidenceExtension } from "./evidence.js";
 import { RunRegistry, startControl, type RunningControl } from "./control.js";
 import { checkArgv, checkDistinct, loadToken } from "./tokens.js";
+import { wallClock, type Clock } from "../clock.js";
 
 export { BuildDescriptor } from "./descriptor.js";
 export { TokenError } from "./tokens.js";
@@ -21,6 +22,9 @@ export interface FixtureOptions extends DescriptorInput {
   argv: readonly string[];
   /** The backend token, when this process holds it: every token must differ from it. */
   backendToken?: string;
+  /** The token folder (--token-dir): tokens the environment does not give are generated there. */
+  tokenDir?: string;
+  clock?: Clock;
 }
 
 export interface FixtureLayer {
@@ -36,12 +40,13 @@ export interface FixtureLayer {
 /** Loads tokens and builds the descriptor. Throws TokenError (start nothing) when a token is missing, unsafe or shared. */
 export function createFixtureLayer(options: FixtureOptions): FixtureLayer {
   const evidence = options.features.includes("evidence");
-  const evidenceToken = evidence ? loadToken("evidence", options.env) : undefined;
-  const controlToken = options.control ? loadToken("control", options.env) : undefined;
+  const evidenceToken = evidence ? loadToken("evidence", options.env, process.platform, options.tokenDir) : undefined;
+  const controlToken = options.control ? loadToken("control", options.env, process.platform, options.tokenDir) : undefined;
   checkDistinct({ backend: options.backendToken, evidence: evidenceToken, control: controlToken });
   checkArgv(options.argv, { backend: options.backendToken, evidence: evidenceToken, control: controlToken });
-  const descriptor = new BuildDescriptor(options);
-  const runs = new RunRegistry(descriptor.bootId);
+  const clock = options.clock ?? wallClock;
+  const descriptor = new BuildDescriptor(options, clock);
+  const runs = new RunRegistry(descriptor.bootId, clock);
   return {
     descriptor,
     backendExtension: evidenceToken && options.layout !== "server" ? evidenceExtension(evidenceToken, descriptor) : undefined,

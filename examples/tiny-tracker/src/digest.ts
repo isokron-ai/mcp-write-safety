@@ -26,6 +26,7 @@ export const DOMAINS = {
   build: "dev.writesafety.tiny-tracker/build/1",
   buildDescriptor: "dev.writesafety.tiny-tracker/build-descriptor/1",
   testVector: "dev.writesafety.tiny-tracker/test-vector/1",
+  requestFingerprint: "dev.writesafety.tiny-tracker/request-fingerprint/1",
 } as const;
 
 const DOMAIN_PATTERN = /^[a-z0-9.-]+(\/[a-z0-9-]+)+\/[0-9]+$/;
@@ -122,6 +123,53 @@ export interface ServedDigest {
   canonical: string;
   /** Lower-case hex. */
   digest: string;
+}
+
+/**
+ * fingerprint_hash in every record (frozen): SHA-256 under dev.writesafety.tiny-tracker/request-fingerprint/1 over the
+ * RFC 8785 bytes of {"body": <the request body as parsed, or null>, "method": "POST", "path": "/tickets",
+ * "principal": "p-default"}. The principal is in it, so the same request from two principals has two fingerprints.
+ */
+export function fingerprintHash(principal: string, method: string, path: string, body: unknown): string {
+  return domainDigest(DOMAINS.requestFingerprint, canonicalize({ body: body ?? null, method, path, principal }));
+}
+
+/**
+ * JSON text to canonical bytes, refusing what JSON.parse lets through silently: a member name that appears twice in one
+ * object (JSON.parse keeps the last; RFC 8785 input must be I-JSON, so the text is refused).
+ */
+export function canonicalizeText(text: string): string {
+  const dup = findDuplicateMember(text);
+  if (dup !== undefined) throw new CanonicalizationError(`a member name appears twice in one object: ${JSON.stringify(dup)}`);
+  return canonicalize(JSON.parse(text));
+}
+
+/** The first member name that appears twice in one object of a JSON text, or undefined. Assumes the text otherwise parses. */
+export function findDuplicateMember(text: string): string | undefined {
+  const stack: Array<Set<string> | null> = [];
+  let expectKey = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\"") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== "\"") j += text[j] === "\\" ? 2 : 1;
+      const raw = text.slice(i, j + 1);
+      i = j;
+      const top = stack[stack.length - 1];
+      if (expectKey && top) {
+        const name = JSON.parse(raw) as string;
+        if (top.has(name)) return name;
+        top.add(name);
+        expectKey = false;
+      }
+      continue;
+    }
+    if (c === "{") { stack.push(new Set()); expectKey = true; }
+    else if (c === "[") { stack.push(null); expectKey = false; }
+    else if (c === "}" || c === "]") { stack.pop(); expectKey = false; }
+    else if (c === ",") expectKey = stack[stack.length - 1] instanceof Set;
+  }
+  return undefined;
 }
 
 export function digestOf(domain: string, value: unknown): ServedDigest {

@@ -23,6 +23,12 @@ import { Rest } from "./support/stack.js";
 import { runCli } from "./support/cli-run.js";
 
 describe("profiles and features", () => {
+  it("PACKAGE_VERSION is the package.json version", async () => {
+    const { PACKAGE_VERSION } = await import("../src/profile.js");
+    const { readFileSync } = await import("node:fs");
+    assert.equal(PACKAGE_VERSION, JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version);
+  });
+
   it("profile 0.1 and the Phase 0 default turn on no feature", () => {
     assert.deepEqual(PROFILE_FEATURES["0.1"], []);
     assert.deepEqual(PROFILE_FEATURES.default, []);

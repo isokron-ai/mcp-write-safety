@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://writesafety.dev/schemas/tiny-tracker/build-descriptor-1.schema.json",
   "title": "Build descriptor",
-  "description": "What a tiny-tracker process runs: served read-only at GET /build (evidence token), mirrored in the MCP instructions and, as its hashes, in every tool result's _meta under dev.writesafety.tiny-tracker/build. build_hash covers the configuration and keys known-answer files; descriptor_hash covers every field.",
+  "description": "What a tiny-tracker process runs: served read-only at GET /build (evidence token), mirrored in the MCP instructions and, as its hashes, in every tool result's _meta under dev.writesafety.tiny-tracker/build. build_hash covers the configuration and keys known-answer files; descriptor_hash covers every field. Version 1 allows additional top-level members: a later release may add one without a new version; a consumer ignores members it does not know.",
   "type": "object",
   "properties": {
     "descriptor": {
@@ -88,6 +88,50 @@
       },
       "required": [
         "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "config": {
+      "description": "The MCP-layer settings that change what a run sees; null until the MCP server has started. Part of build_hash.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "read_only": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny_tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_project": {
+          "type": "string"
+        },
+        "key_journal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "read_only",
+        "tools",
+        "deny_tools",
+        "default_project",
+        "key_journal"
       ],
       "additionalProperties": false
     },
@@ -214,7 +258,7 @@
     "build_hash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "SHA-256 under dev.writesafety.tiny-tracker/build/1 over the canonical configuration: descriptor, package, fixture_api, profile, features, defects, variants, control, durability, contract and process.layout."
+      "description": "SHA-256 under dev.writesafety.tiny-tracker/build/1 over the canonical configuration: descriptor, package, fixture_api, profile, features, defects, variants, control, config, durability, contract and process.layout."
     },
     "descriptor_hash": {
       "type": "string",
@@ -231,6 +275,7 @@
     "defects",
     "variants",
     "control",
+    "config",
     "durability",
     "contract",
     "process",
@@ -239,6 +284,5 @@
     "clock",
     "build_hash",
     "descriptor_hash"
-  ],
-  "additionalProperties": false
+  ]
 }

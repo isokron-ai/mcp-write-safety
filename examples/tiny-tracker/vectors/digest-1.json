@@ -107,6 +107,14 @@
       "note": "Whitespace in the input is not part of the canonical bytes."
     },
     {
+      "name": "request fingerprint",
+      "input_json": "{\"body\":{\"project\":\"inbox\",\"title\":\"First\",\"priority\":2},\"method\":\"POST\",\"path\":\"/tickets\",\"principal\":\"p-default\"}",
+      "domain": "dev.writesafety.tiny-tracker/request-fingerprint/1",
+      "canonical": "{\"body\":{\"priority\":2,\"project\":\"inbox\",\"title\":\"First\"},\"method\":\"POST\",\"path\":\"/tickets\",\"principal\":\"p-default\"}",
+      "digest": "8ce2634fdf294777e7f088577d8cff8050ad46286b6422d329f1952ee8a867b3",
+      "note": "fingerprint_hash: the request-fingerprint/1 domain over {body, method, path, principal}."
+    },
+    {
       "name": "lone high surrogate in a value",
       "input_json": "{\"title\":\"\\ud800\"}",
       "domain": "dev.writesafety.tiny-tracker/test-vector/1",
@@ -133,6 +141,20 @@
       "domain": "dev.writesafety.tiny-tracker/test-vector/1",
       "expect": "reject",
       "note": "Parses to an infinity, which JSON cannot carry. Refused."
+    },
+    {
+      "name": "duplicate member name",
+      "input_json": "{\"a\":1,\"b\":2,\"a\":3}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "A name twice in one object is refused, not resolved to the last value."
+    },
+    {
+      "name": "integer out of the double range",
+      "input_json": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "An integer literal above the largest double is refused, as an infinity is."
     }
   ]
 }

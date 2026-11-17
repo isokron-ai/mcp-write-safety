@@ -3,8 +3,12 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { timingSafeEqual } from "node:crypto";
 import { ApiError, canonicalJson, Store, type TicketFields } from "./store.js";
+import { CommitSinkError, JournalError, type CommitSink, type TxMeta } from "./commit.js";
+import { memoryKeyRecords, type KeyRecordSeam } from "./seams.js";
+import type { Clock } from "../clock.js";
+import { defaultPrincipals, principalFor, type Principal } from "../principals.js";
+import { HEADERS, TAG_PATTERN } from "../fixture-properties.js";
 import { applyBackendDefects } from "./defects/index.js";
 import { correctInputRules, type InputRules } from "./input.js";
 
@@ -21,6 +25,12 @@ export interface BackendOptions {
    * Asked first for every request; when it answers false the request goes to the API as usual.
    */
   extension?: BackendExtension;
+  /** The clock every stored time comes from (default: the wall clock). */
+  clock?: Clock;
+  /** Commit sinks (the ledger, the journal): told of every commit, replay and refusal, inside the commit section. */
+  sinks?: CommitSink[];
+  /** Principals and their tokens (default: one, p-default, with `token`). */
+  principals?: Principal[];
 }
 
 export interface BackendExtension {
@@ -38,22 +48,27 @@ export interface RunningBackend {
  * defect may replace one of them.
  */
 export interface BackendOps {
-  patchTicket(store: Store, id: string, fields: TicketFields, ifMatch?: number | "*"):
-    ReturnType<Store["patchTicket"]> | Promise<ReturnType<Store["patchTicket"]>>;
+  /**
+   * The write, inside the synchronous commit section. `prepared` is what beforePatch returned, if it ran.
+   */
+  patchTicket(store: Store, id: string, fields: TicketFields, ifMatch?: number | "*", prepared?: unknown): ReturnType<Store["patchTicket"]>;
+  /**
+   * An optional step before the commit section, the only place a PATCH may await. The correct build has none; a
+   * backend defect that "waits mid-write" does its read and its wait here (rule 9: the commit itself stays synchronous).
+   */
+  beforePatch?(store: Store, id: string, fields: TicketFields, ifMatch?: number | "*"): Promise<unknown>;
   /** Seam inputRules: used only with the strict-input feature. */
   inputRules: InputRules;
+  /** Seam keyRecord: the records that answer keyed repeats, scoped by principal. */
+  keyRecord: KeyRecordSeam;
 }
 
-const correctOps: BackendOps = {
-  patchTicket: (store, id, fields, ifMatch) => store.patchTicket(id, fields, ifMatch),
-  inputRules: correctInputRules,
-};
-
-interface Stored {
-  fingerprint: string;
-  status: number;
-  body: unknown;
-  headers: Record<string, string>;
+function correctOps(): BackendOps {
+  return {
+    patchTicket: (store, id, fields, ifMatch) => store.patchTicket(id, fields, ifMatch),
+    inputRules: correctInputRules,
+    keyRecord: memoryKeyRecords(),
+  };
 }
 
 function parseIfMatch(header: string | undefined): number | "*" | undefined {
@@ -83,23 +98,25 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function tokenMatches(header: string | undefined, token: string): boolean {
-  const presented = Buffer.from(header?.startsWith("Bearer ") ? header.slice(7) : "");
-  const expected = Buffer.from(token);
-  return presented.length === expected.length && timingSafeEqual(presented, expected);
+/** A run or operation tag from its header; anything not in the tag format is ignored. */
+function tag(value: string | string[] | undefined): string | null {
+  return typeof value === "string" && TAG_PATTERN.test(value) ? value : null;
 }
 
+const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 export async function startBackend(options: BackendOptions): Promise<RunningBackend> {
-  const store = new Store();
-  const ops: BackendOps = { ...correctOps };
+  const store = new Store(undefined, options.clock);
+  for (const sink of options.sinks ?? []) store.addSink(sink);
+  const principals = options.principals ?? defaultPrincipals(options.token);
+  const ops: BackendOps = correctOps();
   const features = options.features ?? [];
   applyBackendDefects(options.defects ?? [], ops, features);
   const strictInput = features.includes("strict-input");
-  const idempotency = new Map<string, Stored>();
-
   type Reply = { status: number; body?: unknown; headers?: Record<string, string> };
 
-  async function route(method: string, url: URL, req: IncomingMessage, body: unknown): Promise<Reply> {
+  /** Synchronous for every correct route (rule 9); a promise only where a backend defect awaits inside its write. */
+  function route(method: string, url: URL, req: IncomingMessage, body: unknown, prepared?: unknown): Reply {
     const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     const ifMatch = parseIfMatch(req.headers["if-match"] as string | undefined);
     const b = (body ?? {}) as Record<string, unknown>;
@@ -141,7 +158,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       }
       if (parts.length === 2 && method === "GET") return ticketReply(200, { ticket: store.getTicket(id) });
       if (parts.length === 2 && method === "PATCH") {
-        const r = await ops.patchTicket(store, id, b as TicketFields, ifMatch);
+        const r = ops.patchTicket(store, id, b as TicketFields, ifMatch, prepared);
         return { ...ticketReply(200, { ticket: r.ticket, changed: r.changed }),
           headers: { etag: etag(r.ticket.version), ...(r.replayed ? { "idempotent-replayed": "true" } : {}) } };
       }
@@ -183,9 +200,11 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     };
     try {
       if (options.extension && await options.extension.handle(req, res, new URL(req.url ?? "/", "http://backend.invalid"), store)) return;
-      if (!tokenMatches(req.headers.authorization, options.token)) {
+      const principal = principalFor(req.headers.authorization, principals);
+      if (principal === undefined) {
         throw new ApiError(401, "unauthorized", "missing or wrong bearer token");
       }
+      store.checkRunning();
       const method = req.method ?? "GET";
       const url = new URL(req.url ?? "/", "http://backend.invalid");
       const body = await readJson(req);
@@ -197,27 +216,58 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         ops.inputRules.checkKey(key);
         ops.inputRules.checkStrings(body);
       }
-      if (key !== undefined && method === "POST") {
-        // A keyed POST is applied once. The same key with a different request is refused.
-        // Store operations for POST are synchronous, so no second request can run between
-        // this lookup and the set below.
-        const fingerprint = `${method} ${url.pathname} ${canonicalJson(body ?? null)}`;
-        const seen = idempotency.get(key);
+      if (!MUTATING.has(method)) {
+        const reply = await route(method, url, req, body);
+        return send(reply.status, reply.body, reply.headers);
+      }
+      const keyed = key !== undefined && method === "POST";
+      const fingerprint = keyed ? `${method} ${url.pathname} ${canonicalJson(body ?? null)}` : null;
+      const meta: TxMeta = {
+        principal,
+        attribution: { run: tag(req.headers[HEADERS.run.toLowerCase()]), operation: tag(req.headers[HEADERS.operation.toLowerCase()]) },
+        request: { method, path: url.pathname, key: key ?? null, fingerprint },
+      };
+      if (keyed) {
+        // A keyed POST is applied once. The same key with a different request is refused. From this lookup to the
+        // commit below nothing awaits, so no second request runs between them (rule 9).
+        const scope = { principal };
+        const seen = ops.keyRecord.get(scope, key);
         if (seen && seen.fingerprint !== fingerprint) {
+          store.refuse(meta, 422, "idempotency_key_reused");
           throw new ApiError(422, "idempotency_key_reused",
             "this Idempotency-Key was already used for a different request");
         }
-        if (seen) return send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
-        const reply = await route(method, url, req, body);
-        if (reply.status < 300) {
-          idempotency.set(key, { fingerprint, status: reply.status, body: reply.body, headers: reply.headers ?? {} });
+        if (seen) {
+          store.replay(meta, seen.status, seen.body, seen.seq);
+          return send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
         }
+        // Only a result below 300 is kept, and only once the journal has it: a refused first call stores nothing and
+        // does not hold the key (decision 0004).
+        const { reply } = store.commit(meta, () => route(method, url, req, body), (tx, r) => {
+          ops.keyRecord.put(scope, key, { fingerprint: fingerprint!, status: tx.status, body: tx.body, headers: r.headers ?? {},
+            run: meta.attribution.run, seq: tx.seq, committedAt: store.clock.now().toISOString(), clockOffsetMs: store.clock.offsetMs() });
+        });
         return send(reply.status, reply.body, reply.headers);
       }
-      const reply = await route(method, url, req, body);
+      // The one await a write may have comes before its commit section (BackendOps.beforePatch).
+      const parts = url.pathname.split("/").filter(Boolean);
+      let prepared: unknown;
+      if (method === "PATCH" && parts[0] === "tickets" && parts.length === 2 && ops.beforePatch) {
+        try {
+          prepared = await ops.beforePatch(store, decodeURIComponent(parts[1]), (body ?? {}) as TicketFields, parseIfMatch(req.headers["if-match"] as string | undefined));
+        } catch (e) {
+          if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
+          throw e;
+        }
+      }
+      const { reply } = store.commit(meta, () => route(method, url, req, body, prepared));
       send(reply.status, reply.body, reply.headers);
     } catch (error) {
-      if (error instanceof ApiError) {
+      if (error instanceof JournalError) {
+        send(503, { error: "journal_unavailable", message: error.message });
+      } else if (error instanceof CommitSinkError) {
+        send(503, { error: "stopped", message: error.message });
+      } else if (error instanceof ApiError) {
         send(error.status, { error: error.code, message: error.message, ...error.extra });
       } else {
         send(500, { error: "internal", message: "internal error" });

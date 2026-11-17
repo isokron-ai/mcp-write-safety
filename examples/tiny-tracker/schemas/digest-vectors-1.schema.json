@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://writesafety.dev/schemas/tiny-tracker/digest-vectors-1.schema.json",
   "title": "Digest test vectors",
-  "description": "Cross-language vectors for RFC 8785 canonical bytes and domain-tagged SHA-256 (vectors/digest-1.json).",
+  "description": "Cross-language vectors for RFC 8785 canonical bytes and domain-tagged SHA-256 (vectors/digest-1.json). Version 1 allows additional top-level members: a later release may add one without a new version; a consumer ignores members it does not know.",
   "type": "object",
   "properties": {
     "vectors": {
@@ -67,6 +67,5 @@
     "vectors",
     "rule",
     "cases"
-  ],
-  "additionalProperties": false
+  ]
 }

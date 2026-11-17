@@ -15,6 +15,7 @@
 import { randomBytes } from "node:crypto";
 import { canonicalize, domainDigest, DOMAINS } from "../digest.js";
 import { CONTRACT, META_KEYS } from "../fixture-properties.js";
+import { wallClock, type Clock } from "../clock.js";
 import { PACKAGE_VERSION, type ProfileName } from "../profile.js";
 import type { ProcessLayout } from "../compat.js";
 
@@ -32,6 +33,15 @@ export interface DescriptorInput {
   control: boolean;
 }
 
+/** The MCP-layer settings that change what a run sees (review fix 1). The key journal's path is a machine detail: only whether one is set. */
+export interface ServerSettings {
+  read_only: boolean;
+  tools: string[] | null;
+  deny_tools: string[] | null;
+  default_project: string;
+  key_journal: boolean;
+}
+
 export interface BuildDescriptorJson {
   descriptor: typeof DESCRIPTOR_VERSION;
   package: { name: string; version: string };
@@ -41,6 +51,7 @@ export interface BuildDescriptorJson {
   defects: { mcp: string[] | null; backend: string[] | null };
   variants: string[] | null;
   control: { enabled: boolean };
+  config: ServerSettings | null;
   durability: { mode: "memory" | "journal"; journal_format: string | null };
   contract: { repo: string; commit: string };
   process: { layout: ProcessLayout; boot_id: string; restart_count: number; started_at: string };
@@ -53,13 +64,17 @@ export interface BuildDescriptorJson {
 
 export class BuildDescriptor {
   readonly bootId = randomBytes(8).toString("hex");
-  readonly startedAt = new Date().toISOString();
+  readonly startedAt: string;
   restartCount = 0;
   armedFaults: string[] = [];
   clockOffsetMs = 0;
   journalHead: string | null = null;
+  /** Set by the command line once the MCP server has loaded its settings (before the state line is printed). */
+  serverSettings: ServerSettings | null = null;
 
-  constructor(private readonly input: DescriptorInput) {}
+  constructor(private readonly input: DescriptorInput, readonly clock: Clock = wallClock) {
+    this.startedAt = clock.wallNow().toISOString();
+  }
 
   /** The configuration part, hashed into build_hash. */
   private configuration() {
@@ -73,6 +88,11 @@ export class BuildDescriptor {
       defects: { mcp: sorted(this.input.mcpDefects), backend: sorted(this.input.backendDefects) },
       variants: sorted(this.input.variants),
       control: { enabled: this.input.control },
+      config: this.serverSettings === null ? null : {
+        ...this.serverSettings,
+        tools: this.serverSettings.tools === null ? null : [...this.serverSettings.tools].sort(),
+        deny_tools: this.serverSettings.deny_tools === null ? null : [...this.serverSettings.deny_tools].sort(),
+      },
       durability: { mode: "memory" as const, journal_format: null },
       contract: { repo: CONTRACT.repo, commit: CONTRACT.commit },
       layout: this.input.layout,

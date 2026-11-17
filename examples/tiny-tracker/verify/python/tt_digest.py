@@ -31,9 +31,19 @@ def _reject_constant(name):
     raise CanonicalizationError("not JSON: " + name)
 
 
+def _no_duplicates(pairs):
+    seen = set()
+    for name, _ in pairs:
+        if name in seen:
+            raise CanonicalizationError("a member name appears twice in one object: %r" % name)
+        seen.add(name)
+    return dict(pairs)
+
+
 def loads(text):
-    """Parses JSON text. NaN and Infinity literals are refused; an out-of-range number parses to an infinity, which canonicalize refuses."""
-    return json.loads(text, parse_constant=_reject_constant)
+    """Parses JSON text. NaN and Infinity literals and duplicate member names are refused; an out-of-range number
+    (float or integer) is refused by canonicalize."""
+    return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_no_duplicates)
 
 
 def _check_string(s):
@@ -62,7 +72,10 @@ def _string(s):
 
 def _number(x):
     """ECMAScript Number::toString for a finite double (RFC 8785 section 3.2.2.3)."""
-    x = float(x)
+    try:
+        x = float(x)
+    except OverflowError:
+        raise CanonicalizationError("a number out of the double range")
     if math.isnan(x) or math.isinf(x):
         raise CanonicalizationError("not a finite number")
     if x == 0:
@@ -116,6 +129,12 @@ def canonicalize(value):
         names = sorted(value, key=_utf16_key)
         return "{" + ",".join(_string(k) + ":" + canonicalize(value[k]) for k in names) + "}"
     raise CanonicalizationError("not JSON data: %s" % type(value).__name__)
+
+
+def fingerprint_hash(principal, method, path, body):
+    """fingerprint_hash in every record: SHA-256 under the request-fingerprint/1 domain (see src/digest.ts)."""
+    return domain_digest("dev.writesafety.tiny-tracker/request-fingerprint/1",
+                         canonicalize({"body": body, "method": method, "path": path, "principal": principal}))
 
 
 def domain_digest(domain, canonical):

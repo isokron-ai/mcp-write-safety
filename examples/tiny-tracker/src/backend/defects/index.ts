@@ -28,7 +28,7 @@ export const BACKEND_SEAMS = {
   patchTicket: { wired: true, since: "0.1.0", note: "PATCH /tickets/:id: read, check the version, write, with no await between" },
   inputRules: { wired: true, since: "0.2.0", note: "Idempotency-key format and well-formed strings (feature strict-input)" },
   digest: { wired: false, since: "0.2.0", note: "The canonical bytes and digest of a committed result (execution records)" },
-  keyRecord: { wired: false, since: "0.2.0", note: "Writing, reading and replaying a key record" },
+  keyRecord: { wired: true, since: "0.1.0", note: "Reading and completing a key record, scoped by principal (src/backend/seams.ts); pending and tombstone states from 0.3.0" },
   lookup: { wired: false, since: "0.2.0", note: "GET /operations/:key" },
   journal: { wired: false, since: "0.3.0", note: "The JSONL journal: one commit line per transaction, flushed before the answer" },
   keyExpiry: { wired: false, since: "0.3.0", note: "Key retention and tombstones" },

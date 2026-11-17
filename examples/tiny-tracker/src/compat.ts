@@ -96,6 +96,11 @@ export const COMPAT_RULES: readonly CompatRule[] = [
       ? "--backend-defect has no effect in `tiny-tracker server` (the backend is another process); start the backend with it" : undefined,
   },
   {
+    id: "CMP-11", post01: true,
+    check: (c) => has(c.features, "evidence") && c.layout !== "all"
+      ? "the evidence feature runs with `tiny-tracker all` only in this version (the build descriptor must cover both layers)" : undefined,
+  },
+  {
     id: "CMP-10", post01: true,
     check: (c) => has(c.features, "strict-input") && c.layout === "server"
       ? "strict-input is a backend feature; name it where the backend runs (`all` or `backend`)" : undefined,
