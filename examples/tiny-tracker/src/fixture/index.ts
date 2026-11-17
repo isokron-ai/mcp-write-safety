@@ -38,6 +38,8 @@ export interface FixtureOptions extends DescriptorInput {
    */
   principals?: Principal[];
   clock?: Clock;
+  /** The MCP bearer token (0.4.0, src/transport.ts), when set: the evidence and control tokens must differ from it too. */
+  mcpToken?: string;
 }
 
 export interface FixtureLayer {
@@ -81,7 +83,7 @@ export function createFixtureLayer(options: FixtureOptions): FixtureLayer {
   const backendTokens: Record<string, string | undefined> = options.principals
     ? Object.fromEntries(options.principals.map((p) => [`principal ${p.id}`, p.token]))
     : { backend: options.backendToken };
-  checkDistinct({ ...backendTokens, evidence: evidenceToken, control: controlToken });
+  checkDistinct({ ...backendTokens, evidence: evidenceToken, control: controlToken, mcp: options.mcpToken });
   checkArgv(options.argv, { ...backendTokens, evidence: evidenceToken, control: controlToken });
   const principalIds = options.principals?.map((p) => p.id) ?? ["p-default"];
   const clock = options.clock ?? wallClock;

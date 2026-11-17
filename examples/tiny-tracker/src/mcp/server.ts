@@ -58,6 +58,7 @@ export function createMcpServer(build: Build, config: ServerConfig, deps: Deps, 
       build.defects.length > 0 ? `TEACHING BUILD WITH DELIBERATE DEFECTS (${build.defects.join(", ")}). Do not use for real data.` : "A small issue tracker.",
       config.readOnly ? "READ-ONLY MODE: every write tool refuses its calls; only list and get tools work."
         : "Read a ticket's version with get_ticket and pass it as expected_version when you write.",
+      ...(build.retention ? [build.retention] : []),
       ...(extras.mirror ? [extras.mirror.instructions()] : []),
     ].join(" "),
   });

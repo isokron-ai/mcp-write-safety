@@ -1,8 +1,6 @@
 // The stdio transport (R19; the SDK exports ./stdio, review G11).
 //
-//   tiny-tracker stdio [--defect NAME]... [--backend-defect NAME]... [--backend-url URL]
-//                      [--backend-port N] [--read-only VALUE] [--tools a,b] [--default-project KEY]
-//                      [--profile 0.1|default] [--features a,b]
+//   tiny-tracker stdio [the options of `all`, except --port and --supervise]   (STDIO_USAGE below)
 //
 // The same server factory as the HTTP transport (createMcpServer), served
 // with the SDK's serveStdio, which settles the protocol era on the opening
@@ -12,11 +10,12 @@
 // stdout carries only protocol messages. The state line, the broken-build
 // banner and every refusal go to stderr. The process exits when stdin closes.
 //
-// Not in this version: fixture-layer features and --fixture-control over
-// stdio (CMP-70). A held answer over stdio (a dropped reply line) arrives with
-// the fault controller.
+// The command line (src/cli.ts) runs `stdio` through the same start as `all`,
+// so fixture-layer features, the evidence and control listeners and the fault
+// controller work over stdio too; a held answer (mcp/after-backend-reply/drop)
+// is a reply line written late or never. Refused over stdio: --supervise
+// (CMP-70: its MCP child is a separate process with no stdin of the client's).
 
-import { randomBytes } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import { serveStdio, StdioServerTransport, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { createBuild } from "./mcp/build.js";
@@ -25,12 +24,6 @@ import { TrackerApi } from "./mcp/api.js";
 import { createMcpServer, MCP_HTTP_CAPS, type ServerExtras } from "./mcp/server.js";
 import type { Build, Deps } from "./mcp/types.js";
 import { applyVariants } from "./variants/index.js";
-import { startBackend, type RunningBackend } from "./backend/http.js";
-import { resolveDefects } from "./defects/index.js";
-import { activeFeatures, parseFeatures, parseProfile, SettingError } from "./profile.js";
-import { checkCompat } from "./compat.js";
-import { checkArgv, checkDistinct, TokenError } from "./tokens.js";
-import { resolveTransport, TransportError } from "./transport.js";
 
 /** The largest single stdio message accepted, the same as the HTTP body cap (X5). */
 export const MAX_STDIO_MESSAGE = MCP_HTTP_CAPS.maxBodyBytes;
@@ -41,6 +34,8 @@ export interface StartStdioOptions {
   defects?: string[];
   features?: readonly string[];
   extras?: ServerExtras;
+  /** The configured key retention, stated with the retention feature (as StartServerOptions.retentionMs). */
+  retentionMs?: number;
   /** Default: this process's stdin and stdout. */
   stdin?: Readable;
   stdout?: Writable;
@@ -68,7 +63,7 @@ function isLoopbackUrl(raw: string): boolean {
 export function startStdioServer(options: StartStdioOptions): StartedStdioServer {
   let build: Build;
   try {
-    build = createBuild(options.defects ?? [], options.features ?? []);
+    build = createBuild(options.defects ?? [], options.features ?? [], options.retentionMs);
   } catch (e) {
     throw new ConfigError((e as Error).message);
   }
@@ -102,122 +97,15 @@ export function startStdioServer(options: StartStdioOptions): StartedStdioServer
   };
 }
 
-const STDIO_USAGE = `usage:
-  tiny-tracker stdio [--defect NAME]... [--backend-defect NAME]... [--backend-url URL] [--backend-port N]
+export const STDIO_USAGE = `usage:
+  tiny-tracker stdio [--backend-port N] [--defect NAME]... [--backend-defect NAME]... [--backend-url URL]
                      [--read-only VALUE] [--tools a,b] [--default-project KEY] [--profile 0.1|default] [--features a,b]
-The MCP server over stdin and stdout. The backend runs in this process unless TRACKER_BACKEND_URL or --backend-url
-names one (then TRACKER_BACKEND_TOKEN is required). The state line goes to stderr; stdout carries only protocol messages.`;
-
-/** The parsed command line, as cli.ts gives it (the same options as the HTTP layouts). */
-export interface StdioCliValues {
-  [name: string]: string | boolean | string[] | undefined;
-}
-
-/** Runs `tiny-tracker stdio`. Exits 2 with a message on stderr for any refused setting, as the other layouts do. */
-export async function runStdioCli(values: StdioCliValues, positionals: readonly string[], argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  const fail = (message: string): never => {
-    process.stderr.write(`tiny-tracker: ${message}\n`);
-    process.exit(2);
-  };
-  if (values.help) {
-    process.stderr.write(`${STDIO_USAGE}\n`);
-    process.exit(0);
-  }
-  if (positionals.length > 1) fail(`stdio takes no positional arguments (got ${positionals.slice(1).join(" ")}). Not starting.`);
-  const noListener = ["port", "control-port", "fixture-control", "token-dir"].filter((k) => values[k] !== undefined);
-  if (noListener.length > 0) fail(`${noListener.map((k) => `--${k}`).join(", ")} has no effect over stdio. Not starting.`);
-
-  const env: Record<string, string | undefined> = { ...process.env };
-  const str = (k: string) => (typeof values[k] === "string" ? (values[k] as string) : undefined);
-  if (str("read-only") !== undefined) env.TRACKER_READ_ONLY = str("read-only");
-  if (str("tools") !== undefined) env.TRACKER_TOOLS = str("tools");
-  if (str("default-project") !== undefined) env.TRACKER_DEFAULT_PROJECT = str("default-project");
-  if (str("backend-url") !== undefined) env.TRACKER_BACKEND_URL = str("backend-url");
-  const defects = [
-    ...((values.defect as string[] | undefined) ?? []),
-    ...(str("defects") ?? env.TRACKER_DEFECTS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
-  ];
-  const backendDefects = (values["backend-defect"] as string[] | undefined) ?? [];
-  const inProcessBackend = env.TRACKER_BACKEND_URL === undefined;
-
-  let profile: ReturnType<typeof parseProfile>, named: ReturnType<typeof parseFeatures>, features: string[];
-  try {
-    profile = parseProfile(str("profile") ?? env.TRACKER_PROFILE);
-    named = parseFeatures(str("features") ?? env.TRACKER_FEATURES);
-    features = activeFeatures(profile, named);
-  } catch (e) {
-    if (e instanceof SettingError) fail(e.message);
-    throw e;
-  }
-  let mcpDefects: string[] = [];
-  try {
-    mcpDefects = resolveDefects(defects, features).map((d) => d.name);
-  } catch (e) {
-    fail((e as Error).message);
-  }
-  const variantNames = (env.TRACKER_VARIANTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const refusals = checkCompat({
-    layout: inProcessBackend ? "all" : "server", transport: "stdio", profile, features: named, defects: mcpDefects, backendDefects,
-    variants: variantNames, faults: [], fixtureControl: false, dataDir: str("data-dir"),
-  });
-  if (str("data-dir") !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
-  if (!inProcessBackend && str("backend-port") !== undefined) refusals.push("--backend-port has no effect with --backend-url (the backend is another process)");
-  if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
-
-  try {
-    resolveTransport("stdio", env, argv);
-  } catch (e) {
-    if (e instanceof TransportError) fail(e.message);
-    throw e;
-  }
-  if (inProcessBackend && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
-  if (!env.TRACKER_BACKEND_TOKEN) fail("TRACKER_BACKEND_TOKEN is required with --backend-url. Not starting.");
-  try {
-    const tokens = { backend: env.TRACKER_BACKEND_TOKEN, evidence: env.TRACKER_EVIDENCE_TOKEN, control: env.TRACKER_CONTROL_TOKEN };
-    checkDistinct(tokens);
-    checkArgv(argv, tokens);
-  } catch (e) {
-    if (e instanceof TokenError) fail(e.message);
-    throw e;
-  }
-
-  const out: Record<string, unknown> = { transport: "stdio" };
-  let backend: RunningBackend | undefined;
-  if (inProcessBackend) {
-    const port = str("backend-port") === undefined ? 0 : Number(str("backend-port"));
-    try {
-      backend = await startBackend({ token: env.TRACKER_BACKEND_TOKEN!, port, defects: backendDefects, features });
-    } catch (e) {
-      fail((e as Error).message);
-    }
-    env.TRACKER_BACKEND_URL = backend!.url;
-    out.backend = backend!.url;
-    if (backendDefects.length) out.backend_defects = backendDefects;
-  }
-  let finished = false;
-  const finish = async () => {
-    if (finished) return;
-    finished = true;
-    await backend?.close().catch(() => {});
-    process.exit(0);
-  };
-  let server: StartedStdioServer;
-  try {
-    server = startStdioServer({ env, defects, features, onClose: () => void finish() });
-  } catch (e) {
-    await backend?.close().catch(() => {});
-    if (e instanceof ConfigError) fail(e.message);
-    throw e;
-  }
-  process.on("SIGINT", () => void server.close().then(finish));
-  process.on("SIGTERM", () => void server.close().then(finish));
-  out.defects = server.build.defects;
-  out.read_only = server.config.readOnly;
-  if (server.variants.length) out.variants = server.variants;
-  if (server.build.defects.length || backendDefects.length) {
-    process.stderr.write("\n*** tiny-tracker BROKEN BUILD (teaching fixture): "
-      + `${[...server.build.defects, ...backendDefects.map((d) => `backend:${d}`)].join(", ")}.\n`
-      + "*** Deliberately unsafe. Never point it at data you care about. ***\n\n");
-  }
-  process.stderr.write(`${JSON.stringify(out)}\n`);
-}
+                     [--fixture-control] [--control-port N] [--token-dir DIR] [--data-dir DIR] [--key-retention D]
+                     [--key-expiry POLICY] [--fault POINT[:once]]
+The MCP server over stdin and stdout, with the same features, fixture layer and evidence as \`tiny-tracker all\`.
+The backend runs in this process on a loopback port unless TRACKER_BACKEND_URL or --backend-url names one (then
+TRACKER_BACKEND_TOKEN is required and the options of \`tiny-tracker server\` apply). The evidence routes are on the
+backend listener (and TRACKER_EVIDENCE_LISTEN), the control listener on its own port, as with \`all\`.
+stdout carries only protocol messages: the state line, the banner and every refusal go to stderr.
+Not over stdio: --port (there is no MCP listener), --supervise (CMP-70) and an MCP bearer token.
+The process exits 0 when stdin closes.`;
