@@ -6,11 +6,13 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { startBackend } from "../../src/start.js";
-import { JOURNAL_FILE } from "../../src/backend/journal.js";
+import { JOURNAL_FILE, leaseTiming } from "../../src/backend/journal.js";
 
 const TOKEN = "backend-token-durable-000000000";
+// The lease tests (test/crash.test.ts) shorten the lease timing: LEASE_TIMING={"heartbeatMs":..,"selfFenceMs":..,"staleMs":..}.
+if (process.env.LEASE_TIMING) Object.assign(leaseTiming, JSON.parse(process.env.LEASE_TIMING));
 const dataDir = process.env.DATA_DIR!;
-const want = { point: process.env.CRASH_POINT!, line: process.env.CRASH_LINE!, key: process.env.CRASH_KEY! };
+const want = { point: process.env.CRASH_POINT ?? "", line: process.env.CRASH_LINE ?? "", key: process.env.CRASH_KEY ?? "" };
 const features = ["durable", "inflight", "retention"];
 const clockStart = Date.UTC(2030, 0, 1);
 const clock = { domain: "fixture" as const, now: () => new Date(clockStart), wallNow: () => new Date(), offsetMs: () => 0 };

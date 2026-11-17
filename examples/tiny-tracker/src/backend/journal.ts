@@ -5,7 +5,9 @@
 // Files in the data dir (created 0700; an existing one must be private, owned by
 // this user, not a symlink, and either empty or made by tiny-tracker):
 //   tiny-tracker.data   marker: this directory was created by tiny-tracker
-//   lock                the pid lock {"pid": N, "started_at": ...}: one writer per data dir
+//   lock.d              the lease (0.4.0): a directory holding `owner` {"pid", "host", "nonce", ...}, whose mtime
+//                       the holder refreshes (heartbeat); the holder checks it still owns it before every append
+//   lock                the pid lock {"pid": N, "started_at": ..., "nonce": ...}: kept as a second check for 0.4.0
 //   journal.jsonl       one JSON object per line, each with `jseq` (its own number, 0 for
 //                       the header, contiguous) and `checksum` (SHA-256 of the line's
 //                       RFC 8785 bytes without the checksum member)
@@ -31,7 +33,9 @@
 // that no commit or aborted line names is ended at start by an aborted line
 // (reason orphan_at_start), written before the backend serves.
 
-import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync, writeSync } from "node:fs";
+import { hostname } from "node:os";
+import { performance } from "node:perf_hooks";
 import { createHash, randomBytes } from "node:crypto";
 import { isMainThread } from "node:worker_threads";
 import { join, resolve } from "node:path";
@@ -70,6 +74,9 @@ export interface RunRestorer {
 export const JOURNAL_FORMAT = "journal-format/1";
 export const JOURNAL_FILE = "journal.jsonl";
 export const LOCK_FILE = "lock";
+/** The lease directory (0.4.0, coordinator note 19 item 11) and the owner file inside it. */
+export const LEASE_DIR = "lock.d";
+export const LEASE_OWNER = "owner";
 export const MARKER_FILE = "tiny-tracker.data";
 
 export class JournalCorruptError extends Error {}
@@ -378,7 +385,7 @@ export function sweepLockLeftovers(dir: string, log: (m: string) => void): numbe
   return removed;
 }
 
-export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) => void): void {
+export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) => void, fencedPid?: number): void {
   const path = join(dir, LOCK_FILE);
   const real = heldKey(dir);
   // The own-process checks (HELD, WRITTEN) are module state, which a worker thread does not share (the reviewer's probe 1).
@@ -432,7 +439,9 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     if (pid === process.pid && ownLockText(text)) {
       throw new DataDirError(`the data dir ${dir} is already open in this process (its lock names this process); one writer per data dir`);
     }
-    if (Number.isSafeInteger(pid) && pid !== process.pid && alive(pid)) {
+    // fencedPid (0.4.0): a holder on this host whose lease this start took over because it stopped beating; the lease
+    // fences it, so its live pid does not hold the pid lock either.
+    if (Number.isSafeInteger(pid) && pid !== process.pid && alive(pid) && pid !== fencedPid) {
       throw new DataDirError(`the data dir ${dir} is locked by process ${pid}; one server per data dir (more than one instance is not supported)`);
     }
     lockHooks.beforeTakeover?.(path);
@@ -471,6 +480,317 @@ export function releaseLock(dir: string): void {
   } catch {
     // Gone already.
   }
+}
+
+
+// ---- the data-dir lease (0.4.0, coordinator note 19 item 11) ----
+//
+// An mkdir lease with a heartbeat, the proper-lockfile pattern, without the dependency. The lease is the directory
+// lock.d with an owner file in it. It is created whole: a private temp directory gets the owner file (flushed), then is
+// renamed to lock.d, which fails while a lock.d exists (it is never empty), so of several starters exactly one gets it.
+// The holder refreshes lock.d's mtime every heartbeatMs. A starter takes a lease over when it is stale:
+//   - its mtime is older than staleMs (the holder stopped beating: killed on another host, paused, or hung), or
+//   - on this host (same hostname), its pid is gone, or it names this pid with a text this process did not write (a
+//     container's pid 1 after an unclean stop): the fast paths, so a restart does not wait staleMs.
+// The takeover is a compare-and-rename: lock.d is renamed aside, and removed only if the moved directory is the one
+// judged stale (same inode, same owner text, same mtime); otherwise it is renamed back, or left aside and the start
+// refuses. The holder checks before every journal append that lock.d is still its own (inode and owner text) and that
+// its last heartbeat is younger than selfFenceMs (< staleMs): a holder that was paused past that, or whose lease was
+// taken over or moved, is fenced: it appends nothing more (writes answer 503 journal_unavailable) and must be
+// restarted. So two servers on one data dir can both run in the residual races, but only the lease holder appends.
+// The pid lock below stays as a second check for this release.
+
+/** Lease timing. Tests shorten it (a child process sets it before it opens the journal). */
+export const leaseTiming = { heartbeatMs: 2_000, selfFenceMs: 10_000, staleMs: 20_000 };
+
+/** Test seams: after a lease was judged stale and before it is taken over; after it was moved aside. */
+export const leaseHooks: { beforeTakeover?: (path: string) => void; afterAside?: (path: string) => void } = {};
+
+/** The lease is no longer this holder's: nothing more is appended. */
+export class LeaseLostError extends Error {}
+
+interface HeldLease {
+  path: string;
+  ino: number;
+  text: string;
+  /** performance.now() of the last heartbeat that found the lease this holder's own. */
+  lastBeat: number;
+  timer: ReturnType<typeof setInterval>;
+  lost?: string;
+}
+
+/** Leases this process holds, by the data dir's real path, and the owner texts it wrote and holds. */
+const LEASES = new Map<string, HeldLease>();
+const LEASE_TEXTS = new Set<string>();
+
+function readOwner(dirPath: string): string | undefined {
+  try {
+    return readFileSync(join(dirPath, LEASE_OWNER), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether lock.d is still this holder's lease: the same directory (inode) with the same owner text. */
+function leaseIsOwnOnce(held: HeldLease): boolean | "missing" {
+  try {
+    return statSync(held.path).ino === held.ino && readOwner(held.path) === held.text;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : false;
+  }
+}
+
+const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Whether the lease is still this holder's. A missing lock.d is looked at again for up to 50 ms: a starter that judged
+ * a lease stale moves it aside and, when it finds it is not the one it judged (this live one), puts it back at once.
+ */
+function leaseIsOwn(held: HeldLease): boolean {
+  for (let i = 0; i < 10; i++) {
+    const own = leaseIsOwnOnce(held);
+    if (own !== "missing") return own;
+    pause(5);
+  }
+  return false;
+}
+
+/** Creates the lease whole (temp directory with the owner file, renamed into place). Returns its inode, or false when one exists. */
+function createLease(path: string, text: string): number | false {
+  const tmp = `${path}.new-${process.pid}-${randomBytes(6).toString("hex")}`;
+  mkdirSync(tmp, { mode: 0o700 });
+  try {
+    const fd = openSync(join(tmp, LEASE_OWNER), "wx", 0o600);
+    try {
+      writeSync(fd, text);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    const ino = statSync(tmp).ino;
+    try {
+      renameSync(tmp, path);
+    } catch (e) {
+      // A lease is there (ENOTEMPTY or EEXIST on POSIX, EPERM or EACCES on Windows): not ours.
+      if (existsSync(path)) return false;
+      throw e;
+    }
+    return ino;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/** Removes a moved-aside lease only when it is proven to be the one judged stale; else puts it back or leaves it. */
+function removeStaleLease(path: string, seen: { ino: number; text: string | undefined; mtimeMs: number }): { result: "removed" | "restored" | "left"; aside: string } {
+  const aside = `${path}.stale-${process.pid}-${randomBytes(6).toString("hex")}`;
+  // Looked at again right before the move: a lease that is no longer the one judged stale (another start took it over
+  // meanwhile) is not moved at all; the caller reads it again.
+  try {
+    const now = statSync(path);
+    if (now.ino !== seen.ino || now.mtimeMs !== seen.mtimeMs || readOwner(path) !== seen.text) return { result: "restored", aside };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { result: "removed", aside };
+    throw e;
+  }
+  try {
+    renameSync(path, aside);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { result: "removed", aside };
+    throw e;
+  }
+  leaseHooks.afterAside?.(path);
+  let proven = false;
+  try {
+    const st = statSync(aside);
+    proven = st.ino === seen.ino && st.mtimeMs === seen.mtimeMs && readOwner(aside) === seen.text;
+  } catch {
+    // unreadable: not proven stale
+  }
+  if (proven) {
+    rmSync(aside, { recursive: true, force: true });
+    return { result: "removed", aside };
+  }
+  try {
+    // Only into a free name: a lease created meanwhile is never empty, so the rename fails over it.
+    if (existsSync(path)) return { result: "left", aside };
+    renameSync(aside, path);
+    return { result: "restored", aside };
+  } catch {
+    return { result: "left", aside };
+  }
+}
+
+/** Removes leftover lease directories (a crashed start's temp, a lease moved aside) older than staleMs. */
+export function sweepLeaseLeftovers(dir: string, log: (m: string) => void): number {
+  let removed = 0;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    const kind = [".new-", ".stale-", ".released-"].find((k) => name.startsWith(`${LEASE_DIR}${k}`));
+    if (!kind) continue;
+    const path = join(dir, name);
+    try {
+      const st = lstatSync(path);
+      if (!st.isDirectory() || Date.now() - st.mtimeMs < leaseTiming.staleMs) continue;
+      // A temp directory names its writer: while that process runs it may still be creating its lease.
+      const writer = kind === ".new-" ? Number(name.slice(`${LEASE_DIR}.new-`.length).split("-")[0]) : NaN;
+      if (Number.isSafeInteger(writer) && writer !== process.pid && alive(writer)) continue;
+      rmSync(path, { recursive: true, force: true });
+      removed++;
+    } catch {
+      // Gone meanwhile: leave it.
+    }
+  }
+  if (removed) log(`tiny-tracker: removed ${removed} leftover lease folder(s)`);
+  return removed;
+}
+
+/**
+ * Takes the data-dir lease or throws DataDirError. Returns the pid of a holder on this host whose lease was taken over
+ * because it stopped beating while its process still runs (a paused or hung holder): that holder is fenced by the
+ * lease, so the pid lock may take over its lock too.
+ */
+export function acquireLease(dir: string, log: (m: string) => void): { fencedPid?: number } {
+  const path = join(dir, LEASE_DIR);
+  const real = heldKey(dir);
+  if (!isMainThread) throw new DataDirError(`the data dir ${dir}: the durable journal opens on the main thread only`);
+  if (LEASES.has(real)) throw new DataDirError(`the data dir ${dir} is already open in this process; one writer per data dir`);
+  const host = hostname();
+  let fencedPid: number | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const text = JSON.stringify({ pid: process.pid, host, nonce: randomBytes(8).toString("hex") });
+    const ino = createLease(path, text);
+    if (ino !== false) {
+      const held: HeldLease = { path, ino, text, lastBeat: performance.now(), timer: setInterval(() => beat(held), leaseTiming.heartbeatMs) };
+      held.timer.unref?.();
+      LEASES.set(real, held);
+      LEASE_TEXTS.add(text);
+      sweepLeaseLeftovers(dir, log);
+      return fencedPid !== undefined ? { fencedPid } : {};
+    }
+    let st;
+    try {
+      st = statSync(path);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw e;
+    }
+    const seenText = readOwner(path);
+    let owner: { pid?: unknown; host?: unknown } = {};
+    try {
+      owner = JSON.parse(seenText ?? "");
+    } catch {
+      // no owner file or a torn one: judged by its age below
+    }
+    const pid = Number(owner.pid);
+    const sameHost = owner.host === host && Number.isSafeInteger(pid);
+    const age = Date.now() - st.mtimeMs;
+    let why: string | undefined;
+    if (sameHost && pid === process.pid) {
+      if (seenText !== undefined && LEASE_TEXTS.has(seenText)) throw new DataDirError(`the data dir ${dir} is already open in this process (its lease names this process); one writer per data dir`);
+      why = `it names this process id but an earlier process wrote it`;
+    } else if (sameHost && !alive(pid)) {
+      why = `process ${pid} is gone`;
+    } else if (age > leaseTiming.staleMs) {
+      why = `its heartbeat stopped ${Math.round(age / 1000)} s ago`;
+      if (sameHost) fencedPid = pid;
+    }
+    if (why === undefined) {
+      throw new DataDirError(`the data dir ${dir} is locked by ${Number.isSafeInteger(pid) ? `process ${pid}` : "another start"}${owner.host !== undefined && owner.host !== host ? ` on host ${String(owner.host)}` : ""} (its lease heartbeat is ${Math.round(age / 1000)} s old); one server per data dir (more than one instance is not supported)`);
+    }
+    leaseHooks.beforeTakeover?.(path);
+    const taken = removeStaleLease(path, { ino: st.ino, text: seenText, mtimeMs: st.mtimeMs });
+    if (taken.result === "left") {
+      throw new DataDirError(`the data dir ${dir}: other starts took the lease over at the same moment; this start moved a lease aside and left it as ${taken.aside} (another start may since have removed it); one server per data dir`);
+    }
+    if (taken.result === "restored") {
+      fencedPid = undefined;
+      continue;
+    }
+    log(`tiny-tracker: taking over a stale data-dir lease (${why})`);
+  }
+  throw new DataDirError(`could not take the data-dir lease in ${dir}`);
+}
+
+/** The heartbeat: refreshes the lease's mtime while it is this holder's; a late or lost lease fences the holder. */
+function beat(held: HeldLease): void {
+  if (held.lost) return;
+  const late = performance.now() - held.lastBeat;
+  if (late > leaseTiming.selfFenceMs) {
+    held.lost = `no heartbeat for ${Math.round(late)} ms (the process was paused or blocked longer than ${leaseTiming.selfFenceMs} ms); another start may have taken the lease over`;
+    return;
+  }
+  if (!leaseIsOwn(held)) {
+    held.lost = "the lease was taken over or moved by another start";
+    return;
+  }
+  try {
+    const now = new Date();
+    utimesSync(held.path, now, now);
+    held.lastBeat = performance.now();
+  } catch {
+    // Not refreshed: the next beat tries again; the self-fence time bounds how long that can go on.
+  }
+}
+
+/**
+ * The fence (before every journal append): throws LeaseLostError unless the lease is this holder's and its heartbeat
+ * is recent. A lost lease stays lost.
+ */
+export function checkLease(dir: string): void {
+  const held = LEASES.get(heldKey(dir));
+  if (!held) throw new LeaseLostError(`the data dir ${dir}: this process holds no lease on it`);
+  if (!held.lost) {
+    const late = performance.now() - held.lastBeat;
+    if (late > leaseTiming.selfFenceMs) held.lost = `no heartbeat for ${Math.round(late)} ms (the process was paused or blocked longer than ${leaseTiming.selfFenceMs} ms); another start may have taken the lease over`;
+    else if (!leaseIsOwn(held)) held.lost = "the lease was taken over or moved by another start";
+  }
+  if (held.lost) throw new LeaseLostError(`the data-dir lease is lost (${held.lost}); this server appends nothing more to the journal: restart it`);
+}
+
+/** Releases the lease this process holds: moved aside and removed only if it is still its own; a lease another start put in its place is left alone. */
+export function releaseLease(dir: string): void {
+  const real = heldKey(dir);
+  const held = LEASES.get(real);
+  if (!held) return;
+  clearInterval(held.timer);
+  LEASES.delete(real);
+  LEASE_TEXTS.delete(held.text);
+  if (!leaseIsOwn(held)) return;
+  const aside = `${held.path}.released-${process.pid}-${randomBytes(6).toString("hex")}`;
+  try {
+    renameSync(held.path, aside);
+  } catch {
+    return;
+  }
+  try {
+    if (statSync(aside).ino === held.ino && readOwner(aside) === held.text) {
+      rmSync(aside, { recursive: true, force: true });
+      return;
+    }
+  } catch {
+    // unreadable: put back below
+  }
+  try {
+    if (!existsSync(held.path)) renameSync(aside, held.path);
+  } catch {
+    // Left aside: its holder is fenced by its own check; the sweep removes the folder later.
+  }
+}
+
+/** Tests only: as a killed process, the lease stays on disk and this process no longer holds it. */
+export function abandonLease(dir: string): void {
+  const real = heldKey(dir);
+  const held = LEASES.get(real);
+  if (!held) return;
+  clearInterval(held.timer);
+  LEASES.delete(real);
+  LEASE_TEXTS.delete(held.text);
 }
 
 export interface LoadReport {
@@ -566,7 +886,14 @@ export class Journal implements JournalSeam, KeyLineWriter {
   /** Opens the data dir, takes the lock, and replays the journal into the store and the key records. */
   load(): void {
     prepareDataDir(this.options.dataDir, this.options.platform);
-    acquireLock(this.options.dataDir, this.options.wallNow ?? (() => new Date()), (m) => this.log(m));
+    // 0.4.0: the lease first; the pid lock stays as a second check for this release.
+    const { fencedPid } = acquireLease(this.options.dataDir, (m) => this.log(m));
+    try {
+      acquireLock(this.options.dataDir, this.options.wallNow ?? (() => new Date()), (m) => this.log(m), fencedPid);
+    } catch (e) {
+      releaseLease(this.options.dataDir);
+      throw e;
+    }
     const limit = flushLimit(this.options.platform ?? process.platform);
     if (limit) this.log(limit);
     try {
@@ -575,6 +902,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
       if (this.fd !== undefined) closeSync(this.fd);
       this.fd = undefined;
       releaseLock(this.options.dataDir);
+      releaseLease(this.options.dataDir);
       throw e;
     }
   }
@@ -749,6 +1077,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
     if (this.dead) throw new SimulatedCrash("after a simulated crash");
     if (this.broken) throw new Error(`the journal stopped after a failed append it could not cut back: ${this.broken.message}`);
     if (this.fd === undefined) throw new Error("the journal is not open");
+    // 0.4.0: the fence. Nothing is appended unless the data-dir lease is still this process's.
+    checkLease(this.options.dataDir);
     const line = { jseq: this.jseq + 1, ...body } as Omit<JournalLine, "checksum">;
     const text = encodeLine(line);
     const bytes = Buffer.from(`${text}\n`, "utf8");
@@ -852,6 +1182,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
       this.fd = undefined;
     }
     releaseLock(this.options.dataDir);
+    releaseLease(this.options.dataDir);
   }
 
   /** Tests only: the process is taken as dead. The descriptor is closed; the lock file stays, as a killed process leaves it. */
@@ -867,6 +1198,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
     const created = CREATED.get(real);
     CREATED.delete(real);
     if (created) WRITTEN.delete(created.text);
+    abandonLease(this.options.dataDir);
   }
 }
 

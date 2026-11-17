@@ -110,7 +110,7 @@ const CHECKED = new Set<FixturePropertyId>(["FX-BLD-1", "FX-DIG-1", "FX-DIG-2", 
   "FX-DUR-1", "FX-DUR-2", "FX-DUR-3", "FX-KEY-1", "FX-KEY-2", "FX-KEY-3"]);
 
 /** The files journal-format/1 keeps in a data dir (decision 0003, src/backend/journal.ts); anything else is not the format. */
-export const DATA_DIR_FILES = ["tiny-tracker.data", "lock", "journal.jsonl"] as const;
+export const DATA_DIR_FILES = ["tiny-tracker.data", "lock", "lock.d", "journal.jsonl"] as const;
 
 /**
  * What --durability-plant writes and --durability-verify reads (FX-DUR-1): one keyed create made before a restart.
