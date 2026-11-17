@@ -39,12 +39,12 @@ function run(args: string[], env: Record<string, string> = {}, whileUp?: (out: a
 }
 
 describe("tiny-tracker command line", () => {
-  it("all: starts backend and server on loopback, serves 16 tools, stops on SIGTERM", async () => {
+  it("all: starts backend and server on loopback, serves 18 tools (the 16 of 0.1.0 and, from 0.2.0, the two lookup tools), stops on SIGTERM", async () => {
     const r = await run(["all"], {}, async (out) => {
       assert.match(out.mcp, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
       assert.match(out.backend, /^http:\/\/127\.0\.0\.1:\d+$/);
       const mcp = await connectClient(out.mcp, "2026-07-28");
-      assert.equal((await mcp.tools()).length, 16);
+      assert.equal((await mcp.tools()).length, 18);
       await mcp.close();
     });
     assert.equal(r.code, 0);

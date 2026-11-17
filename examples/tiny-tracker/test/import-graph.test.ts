@@ -101,7 +101,7 @@ describe("import graph: the teaching server never imports the fixture layer", ()
     try {
       const r = await runAndLog(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN_FILE: tokenFile }, 4632);
       assert.ok(r.urls.some((u) => u.endsWith("/src/fixture/index.js")), r.stderr);
-      assert.deepEqual(r.stateLine.features, ["evidence"]);
+      assert.deepEqual(r.stateLine.features, ["execution-records", "lookup", "principals", "evidence"], "the 0.2.0 default's features and the named one");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

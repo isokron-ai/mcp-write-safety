@@ -271,9 +271,11 @@ describe("principals (rule 7, G8): two tokens, the principal in every record", (
       assert.equal(r.code, 0, r.stderr);
       assert.ok(![ALICE, BOB].some((t) => r.stdout.includes(t) || r.stderr.includes(t)), "no token is printed");
 
-      const noFeature = await runCli(["all", "--port", "0", "--backend-port", "0"], env);
-      assert.equal(noFeature.code, 2);
-      assert.match(noFeature.stderr, /TRACKER_BACKEND_TOKENS_FILE needs the principals feature/);
+      // The 0.2.0 default has the principals feature: the file is read with no feature named.
+      const byDefault = await runCli(["all", "--port", "0", "--backend-port", "0"], env, async (state) => {
+        assert.equal((await new Rest(state.backend, BOB).send("GET", "/tickets")).status, 200);
+      });
+      assert.equal(byDefault.code, 0, byDefault.stderr);
       const stranger = await runCli(["all", "--features", "principals", "--port", "0", "--backend-port", "0"], { ...env, TRACKER_BACKEND_TOKEN: "stranger-token-000000000000" });
       assert.equal(stranger.code, 2);
       assert.match(stranger.stderr, /must be one of its principals' tokens/);
@@ -294,7 +296,9 @@ describe("principals (rule 7, G8): two tokens, the principal in every record", (
 
   it("the compatibility rules: lookup needs execution-records (CMP-20); principals runs where the backend runs (CMP-21)", () => {
     const base: Combination = { layout: "all", profile: "default", features: [], defects: [], backendDefects: [], variants: [], faults: [], fixtureControl: false };
-    assert.match(checkCompat({ ...base, features: ["lookup"] }).join(), /lookup feature needs execution-records/);
+    // The default profile has execution-records, so the rule shows under profile 0.1 (which also refuses any feature).
+    assert.match(checkCompat({ ...base, profile: "0.1", features: ["lookup"] }).join(), /lookup feature needs execution-records/);
+    assert.deepEqual(checkCompat({ ...base, features: ["lookup"] }), [], "naming lookup under the default is fine");
     assert.deepEqual(checkCompat({ ...base, features: ["lookup", "execution-records", "principals"] }), []);
     assert.match(checkCompat({ ...base, layout: "server", features: ["principals"] }).join(), /principals is a backend feature/);
     assert.deepEqual(checkCompat({ ...base, layout: "server", features: ["execution-records", "lookup"] }), [], "the lookup tools belong to the MCP server");

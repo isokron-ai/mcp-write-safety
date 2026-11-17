@@ -60,4 +60,4 @@ Each backend defect wraps the seam it replaces, so with all six on none hides an
 
 ## Default profile (0.2.0)
 
-`default` turns on `execution-records`, `lookup` and `principals`. `--profile 0.1` is unchanged and keeps the 0.1.0 surface call for call.
+`default` turns on `execution-records`, `lookup` and `principals`. Its surface is the 0.1.0 surface plus the two lookup tools, plus `lookup-reexecutes` under `--defect all`; `test/surface.test.ts` spells that difference out. `TRACKER_VARIANTS=key-store-honest` is refused in the default profile (CMP-5) and runs under `--profile 0.1`. `--profile 0.1` is unchanged and keeps the 0.1.0 surface call for call.

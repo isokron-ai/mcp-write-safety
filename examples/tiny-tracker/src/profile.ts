@@ -5,7 +5,8 @@
 // transcript captured from the 0.1.0 tarball (test/surface.test.ts). It never
 // gains a feature. `default` is what runs when no profile is named; from 0.2.0
 // it turns on the features each release ships once they meet that release's
-// gate. Until then `default` has the same surface as `0.1`.
+// gate. In 0.2.0 that is execution-records, lookup and principals: the 0.1
+// surface plus the two read-only lookup tools (test/surface.test.ts).
 //
 // A feature is named with --features or TRACKER_FEATURES (comma-separated).
 // An unknown name, or a name for a feature this version does not build yet,
@@ -61,8 +62,10 @@ export const FEATURE_NAMES = FEATURES.map((f) => f.name) as FeatureName[];
 /** The features each profile turns on when none are named. */
 export const PROFILE_FEATURES: Record<ProfileName, readonly FeatureName[]> = {
   "0.1": [],
-  // Phase 0: nothing is default yet. 0.2.0 adds the features that meet its gate (owner decision 1).
-  default: [],
+  // 0.2.0 (owner decision 1): the core features 0.2.0 ships. The fixture-layer features (evidence, ledger, faults) stay
+  // named, since they need tokens the operator gives, and strict-input stays named so the backend keeps accepting what
+  // 0.1.0 accepted unless asked.
+  default: ["execution-records", "lookup", "principals"],
 };
 
 export function featureInfo(name: string): FeatureInfo | undefined {

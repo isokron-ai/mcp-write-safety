@@ -773,7 +773,9 @@ describe("seams v2: compatibility rules see the effective feature set", () => {
     } finally {
       def.splice(0, def.length, ...saved);
     }
-    assert.deepEqual(checkCompat({ ...base, profile: "default", features: [] }), []);
+    // 0.2.0 flipped lookup into the default for real, so the pair is refused there too; profile 0.1 still runs it.
+    assert.ok(checkCompat({ ...base, profile: "default", features: [] }).some((m) => /key-store-honest/.test(m)));
+    assert.deepEqual(checkCompat({ ...base, profile: "0.1", features: [] }), []);
   });
 });
 

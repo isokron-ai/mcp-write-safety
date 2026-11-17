@@ -112,7 +112,7 @@ describe("the evidence namespace (rule 2, G3)", () => {
         assert.match(instructions, new RegExp(d.build_hash));
         assert.match(instructions, /backend:lost-update/);
         assert.ok(allTokensAbsent(instructions));
-        assert.equal((await mcp.tools()).length, 16);
+        assert.equal((await mcp.tools()).length, 18, "the 16 of 0.1.0 and the 0.2.0 default's two lookup tools");
         const res = await mcp.client.callTool({ name: "list_projects", arguments: {} }) as { _meta?: Record<string, any> };
         assert.equal(res._meta?.[META_KEYS.build]?.build_hash, d.build_hash);
         assert.equal(res._meta?.[META_KEYS.build]?.boot_id, d.process.boot_id);

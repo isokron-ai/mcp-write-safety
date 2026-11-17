@@ -21,6 +21,7 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).
 
 ### Changed in the default profile (ships with 0.2.0; `--profile 0.1` keeps the 0.1.0 behaviour except where noted)
+- The default profile turns on `execution-records`, `lookup` and `principals` (owner decision 1). `tools/list` gains `get_operation` and `get_execution` (18 tools), every committed write's answer carries `Tiny-Tracker-Execution`, and `--defect all` includes `lookup-reexecutes`; every other text and structured result is the 0.1.0 one. `TRACKER_VARIANTS=key-store-honest` is refused in the default profile (CMP-5: lookup cannot see the keys the variant keeps); it runs under `--profile 0.1`.
 - `tiny-tracker server --backend-defect NAME` stops with exit 2 instead of starting with the backend defect silently unused (CMP-9).
 - The `evidence` feature runs with `tiny-tracker all` only (CMP-11).
 - A start whose command line holds one of its tokens (8 characters or more), or where two tokens are equal, stops with exit 2. This holds under every profile, `--profile 0.1` included.
