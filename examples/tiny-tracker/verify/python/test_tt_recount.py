@@ -96,17 +96,59 @@ class Recount(unittest.TestCase):
         self.assertEqual(tt_recount.operation_count(entries, "op-2", "key-00000002")["external_effect_count"], 1, "a dropped key still counts")
         self.assertEqual(tt_recount.operation_count(entries, "op-5", "key-other")["external_effect_count"], 0)
 
-    def test_journal_reader_skips_the_header_and_a_torn_last_line(self):
-        _, _, records = history()
-        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
-            f.write(json.dumps({"journal": "journal-format/1", "writer": "0.3.0"}) + "\n")
-            for r in records:
-                f.write(json.dumps({"seq": r["seq"], "tx": {"execution": r}}) + "\n")
-            f.write('{"seq": 6, "tx": {"exec')
+    def write_journal(self, records, tamper=None, torn=True, other_principal=False):
+        """A journal-format/1 file shaped as tiny-tracker writes it (INTERFACES 1.9): jseq and checksum on every line."""
+        import hashlib
+        lines = [{"jseq": 0, "line": "header", "journal": "journal-format/1", "writer": "0.3.0", "boot_id": "0123456789abcdef", "seed": {}}]
+        for r in records:
+            tx = {"kind": "write", "seq": r["seq"], "principal": r["principal"],
+                  "attribution": {"run": r["run"], "operation": r["operation_tag"]},
+                  "request": {"method": r["request"]["method"], "path": r["request"]["path"], "key": r["request"]["key"]},
+                  "objects": r["objects"], "body": tt_digest.loads(r["result"]["canonical"])}
+            lines.append({"jseq": len(lines), "line": "commit", "commit_seq": r["seq"], "pending_jseq": None, "tx": tx})
+        if other_principal:
+            lines.append({"jseq": len(lines), "line": "commit", "commit_seq": 99, "pending_jseq": None,
+                          "tx": {"kind": "write", "seq": 99, "principal": "p-second", "attribution": {"run": None, "operation": None},
+                                 "request": {"method": "POST", "path": "/tickets", "key": None}, "objects": [], "body": {}}})
+        lines.append({"jseq": len(lines), "line": "run-alloc", "run_id": "run-0123abcd-0123456789ab", "principal": "p-default", "created_at": "t", "label": None})
+        text = ""
+        for i, l in enumerate(lines):
+            l["checksum"] = hashlib.sha256(tt_digest.canonicalize(l).encode("utf-8")).hexdigest()
+            if tamper == i:
+                l["tx"]["body"] = {"changed": True}
+            text += json.dumps(l) + "\n"
+        if torn:
+            text += '{"jseq": %d, "line": "comm' % len(lines)
+        f = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8")
+        f.write(text)
+        f.close()
+        return f.name
+
+    def test_journal_reader_reads_commit_lines_and_tolerates_only_a_torn_last_line(self):
+        export, entries, records = history()
+        path = self.write_journal(records, other_principal=True)
         try:
-            self.assertEqual([r["id"] for r in tt_recount.journal_executions(f.name)], ["X-1", "X-2", "X-3", "X-4", "X-5"])
+            got, problems = tt_recount.journal_executions(path, "p-default")
+            self.assertEqual(problems, [])
+            self.assertEqual([r["id"] for r in got], ["X-1", "X-2", "X-3", "X-4", "X-5"])
+            self.assertEqual([r["result"]["digest"] for r in got], [r["result"]["digest"] for r in records], "digests recomputed from the bodies")
+            out = tt_recount.recount(export, entries, records, *tt_recount.journal_executions(path, "p-default"))
+            self.assertEqual(out["problems"], [])
+            self.assertEqual(len(tt_recount.journal_executions(path)[0]), 6, "without --principal every principal's writes")
         finally:
-            os.unlink(f.name)
+            os.unlink(path)
+
+    def test_journal_reader_catches_a_line_changed_without_its_checksum(self):
+        export, entries, records = history()
+        path = self.write_journal(records, tamper=2)
+        try:
+            got, problems = tt_recount.journal_executions(path, "p-default")
+            self.assertEqual(problems, ["journal: line jseq 2 has a bad jseq or checksum"])
+            out = tt_recount.recount(export, entries, records, got, problems)
+            self.assertIn("journal: line jseq 2 has a bad jseq or checksum", out["problems"])
+            self.assertTrue(any("journal and ledger name different executions" in p for p in out["problems"]))
+        finally:
+            os.unlink(path)
 
     def test_batch_writes_limit_the_object_comparison(self):
         export, entries, records = history()

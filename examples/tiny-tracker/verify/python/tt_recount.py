@@ -13,10 +13,13 @@ the raw files:
               the ledger (creations minus deletions minus run resets), must be exactly the tickets
               and comments the export holds;
   digests     every execution record's served digest is SHA-256 over its domain tag and served
-              canonical bytes, and the bytes are RFC 8785 (tt_digest.py).
+              canonical bytes, and the bytes are RFC 8785 (tt_digest.py); from the journal, the digest is
+              recomputed from each committed body and must equal the record's served digest;
+  journal     every line's jseq is contiguous and its checksum holds (only a torn last line is tolerated).
+              The journal holds every principal's writes: --principal keeps the one the ledger was read for.
 
   python3 -I tt_recount.py --export export.json --ledger ledger.json [--executions executions.json]
-                           [--journal journal.jsonl] [--operation TAG [--key K]] [--json]
+                           [--journal journal.jsonl [--principal P]] [--operation TAG [--key K]] [--json]
 
 Exit 0: every derivation agrees. Exit 1: a disagreement (each one is listed). Exit 2: a file is missing or
 unreadable. --operation prints the effect count of one operation (the contract's counter: executions
@@ -26,6 +29,7 @@ What it cannot recount: a batch write (POST /batch) names its objects but not wh
 batch writes present the object comparison covers only tickets no batch write touched, and says so.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -79,22 +83,54 @@ def find_records(value, kind, out=None, depth=0):
     return out
 
 
-def journal_executions(path):
-    """Execution records in a journal-format/1 file: every execution-record/1 object on every line but the header."""
-    records = []
+def journal_executions(path, principal=None):
+    """Execution records derived from a journal-format/1 file (tiny-tracker decision 0003, INTERFACES 1.9).
+
+    The journal keeps post-state, not records: each commit line holds the committed transaction. A write's record
+    is derived from it here: id X-<commit_seq>, principal, run and operation tag, key, objects, and the result
+    digest recomputed from the committed body (RFC 8785 bytes under the execution-result domain tag). Every line's
+    jseq and checksum (SHA-256 of the line's RFC 8785 bytes without the checksum member) are checked; only a torn
+    last line is tolerated. Returns (records, problems). `principal` keeps one principal's writes (the ledger and
+    the export a third party reads are filtered by ?principal=; the journal holds every principal's).
+    """
+    records, problems = [], []
     with open(path, encoding="utf-8") as f:
-        lines = [l for l in f.read().splitlines() if l.strip()]
-    for i, line in enumerate(lines):
+        lines = [l for l in f.read().split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    for i, text in enumerate(lines):
+        last = i == len(lines) - 1
         try:
-            value = json.loads(line)
-        except ValueError:
-            if i == len(lines) - 1:
-                continue  # a torn last line is tolerated (decision 0003)
-            raise
-        if isinstance(value, dict) and value.get("journal"):
+            line = json.loads(text)
+            body = {k: v for k, v in line.items() if k != "checksum"}
+            ok = isinstance(line, dict) and line.get("jseq") == i and \
+                hashlib.sha256(tt_digest.canonicalize(body).encode("utf-8")).hexdigest() == line.get("checksum")
+        except (ValueError, AttributeError, tt_digest.CanonicalizationError):
+            ok = False
+        if not ok:
+            if last:
+                break  # a torn last line is tolerated (decision 0003)
+            problems.append("journal: line jseq %d has a bad jseq or checksum" % i)
             continue
-        records.extend(find_records(value, "execution-record/1"))
-    return records
+        if line.get("line") != "commit":
+            continue
+        tx = line.get("tx") or {}
+        if tx.get("kind") != "write" or not tx.get("request"):
+            continue
+        if principal is not None and tx.get("principal") != principal:
+            continue
+        if line.get("commit_seq") != tx.get("seq"):
+            problems.append("journal: line jseq %d has commit_seq %r for transaction %r" % (i, line.get("commit_seq"), tx.get("seq")))
+        canonical = tt_digest.canonicalize(tx.get("body"))
+        attribution_ = tx.get("attribution") or {}
+        records.append({
+            "record": "execution-record/1", "id": "X-%s" % tx.get("seq"), "principal": tx.get("principal"),
+            "run": attribution_.get("run"), "operation_tag": attribution_.get("operation"),
+            "request": {"key": (tx.get("request") or {}).get("key")},
+            "objects": tx.get("objects") or [],
+            "result": {"domain": EXECUTION_DOMAIN, "canonical": canonical, "digest": tt_digest.domain_digest(EXECUTION_DOMAIN, canonical)},
+        })
+    return records, problems
 
 
 def attribution(principal, run, operation_tag, key):
@@ -186,9 +222,9 @@ def live_from_export(export):
     return ids, comments
 
 
-def recount(export, entries, executions=None, journal=None):
+def recount(export, entries, executions=None, journal=None, journal_problems=None):
     """The comparison, as a dict: sources, counts, problems."""
-    problems = []
+    problems = list(journal_problems or [])
     out = {"sources": ["ledger", "export"] + (["executions"] if executions is not None else []) + (["journal"] if journal is not None else [])}
     ledger_ids, ledger_counts = from_ledger(entries)
     out["executions"] = {"ledger": len(ledger_ids)}
@@ -210,6 +246,12 @@ def recount(export, entries, executions=None, journal=None):
             if counts[t] != ledger_counts[t]:
                 problems.append("%s: %d execution(s) for %s, the ledger %d" % (name, counts[t], label(t), ledger_counts[t]))
         problems.extend(check_digests(records, name))
+    if executions is not None and journal is not None:
+        # The journal's digest is recomputed from the committed body: it must equal the digest the record serves.
+        served = {r.get("id"): (r.get("result") or {}).get("digest") for r in executions}
+        for r in journal:
+            if r["id"] in served and served[r["id"]] != r["result"]["digest"]:
+                problems.append("journal %s: the result digest recomputed from the committed body is not the served one" % r["id"])
     live_tickets, live_comments, batch = live_from_ledger(entries)
     exp_tickets, exp_comments = live_from_export(export)
     compared_tickets = {t for t in exp_tickets | live_tickets if t not in batch}
@@ -242,7 +284,7 @@ def main(argv):
     opts = {"--json": False}
     while args:
         a = args.pop(0)
-        if a in ("--export", "--ledger", "--executions", "--journal", "--operation", "--key") and args:
+        if a in ("--export", "--ledger", "--executions", "--journal", "--principal", "--operation", "--key") and args:
             opts[a] = args.pop(0)
         elif a == "--json":
             opts["--json"] = True
@@ -256,11 +298,11 @@ def main(argv):
         export = read_json_or_lines(opts["--export"])
         entries = as_list(read_json_or_lines(opts["--ledger"]), "entries", "ledger")
         executions = as_list(read_json_or_lines(opts["--executions"]), "executions") if "--executions" in opts else None
-        journal = journal_executions(opts["--journal"]) if "--journal" in opts else None
+        journal, journal_problems = journal_executions(opts["--journal"], opts.get("--principal")) if "--journal" in opts else (None, [])
     except (OSError, ValueError) as e:
         sys.stderr.write("tt_recount: %s\n" % e)
         return 2
-    result = recount(export, entries, executions, journal)
+    result = recount(export, entries, executions, journal, journal_problems)
     if "--operation" in opts:
         result["operation"] = operation_count(entries, opts["--operation"], opts.get("--key"))
     if opts["--json"]:

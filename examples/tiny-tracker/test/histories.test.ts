@@ -25,6 +25,7 @@ import { durableBackend, movableClock, prng, tempDir } from "./support/durable.j
 import { JOURNAL_FILE, JournalCorruptError, readJournal, lineChecksum } from "../src/backend/journal.js";
 import { DAY_MS } from "../src/backend/expiry.js";
 import type { CommitSink, CommittedTransaction, JournalCommitLine } from "../src/backend/commit.js";
+import { Ledger } from "../src/fixture/ledger.js";
 
 const POINTS = [
   { point: "before-append", line: "pending" }, { point: "after-fsync", line: "pending" },
@@ -305,6 +306,96 @@ describe("T3: the oracles tested against each other", () => {
       assert.deepEqual(py.tickets, Object.fromEntries(live.tickets.map((x) => [x.id, [x.version, x.title]])));
       assert.equal(py.commits, recount(join(t.dataDir, JOURNAL_FILE)).commits);
       assert.deepEqual(Object.values(py.keyed_effects), [1, 1]);
+    } finally {
+      t.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------- T3 with the real oracles (0.3.0 integration, G2)
+//
+// Stream B's ledger (src/fixture/ledger.ts) replaces the fake ledger, and stream C's independent recount
+// (verify/python/tt_recount.py) reads the journal as tiny-tracker writes it: four sources (ledger, export,
+// execution records, journal) must agree, and each sabotage is caught by the recount.
+
+describe("T3 with stream B's ledger and stream C's tt_recount.py (ledger, export, executions, journal)", () => {
+  const python = spawnSync("python3", ["-I", "-c", "import json"], { encoding: "utf8" }).status === 0;
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const RECOUNT = join(root, "verify", "python", "tt_recount.py");
+  const BOOT = "d0d0d0d0d0d0d0d0";
+
+  async function realRun(t: { dir: string; dataDir: string }) {
+    const clock = movableClock();
+    const ledger = new Ledger(BOOT, clock);
+    const b = await durableBackend({ dataDir: t.dataDir, clock, sinks: [ledger], bootId: BOOT, features: ["durable", "inflight", "retention", "execution-records", "strict-input"] });
+    const send = (method: string, path: string, body: unknown, key?: string, op?: string) =>
+      b.api.send(method, path, body, { ...(key ? { "idempotency-key": key } : {}), ...(op ? { "tiny-tracker-operation": op } : {}) });
+    await send("POST", "/tickets", { project: "inbox", title: "a" }, "t3r-key-000001", "op-1");
+    await send("POST", "/tickets", { project: "inbox", title: "a" }, "t3r-key-000001", "op-1");
+    await send("POST", "/tickets", { project: "inbox", title: "b" }, "t3r-key-000002", "op-2");
+    await send("POST", "/tickets/T-1/comments", { body: "c" }, "t3r-key-000003", "op-3");
+    await send("PATCH", "/tickets/T-1", { title: "a2" }, undefined, "op-4");
+    await send("DELETE", "/tickets/T-2", undefined, undefined, "op-5");
+    const files = {
+      export: join(t.dir, "export.json"), ledger: join(t.dir, "ledger.json"), executions: join(t.dir, "executions.json"), journal: join(t.dataDir, JOURNAL_FILE),
+    };
+    writeFileSync(files.export, JSON.stringify(await b.api.export()));
+    writeFileSync(files.ledger, JSON.stringify({ entries: ledger.list() }));
+    writeFileSync(files.executions, JSON.stringify({ executions: [...b.backend.evidence!.executions()] }));
+    await b.close();
+    return files;
+  }
+
+  const recountOf = (f: Record<string, string>) => {
+    const r = spawnSync("python3", ["-I", RECOUNT, "--export", f.export, "--ledger", f.ledger, "--executions", f.executions, "--journal", f.journal, "--principal", "p-default", "--json"], { encoding: "utf8" });
+    return { code: r.status, out: r.stdout ? JSON.parse(r.stdout) : null, err: r.stderr };
+  };
+
+  it("clean: four sources, no disagreement; the counts agree", { skip: python || process.env.TT_GATE === "1" ? false : "python3 is not installed" }, async () => {
+    const t = tempDir("t3r");
+    try {
+      const r = recountOf(await realRun(t));
+      assert.equal(r.code, 0, JSON.stringify(r.out?.problems ?? r.err));
+      assert.deepEqual(r.out.sources, ["ledger", "export", "executions", "journal"]);
+      assert.deepEqual(r.out.executions, { ledger: 5, executions: 5, journal: 5 });
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("sabotage: a ledger that loses an execution, a journal line forged with a valid checksum, a line changed without its checksum: each is caught", { skip: python || process.env.TT_GATE === "1" ? false : "python3 is not installed" }, async () => {
+    const t = tempDir("t3rs");
+    try {
+      const f = await realRun(t);
+      const cleanLedger = readFileSync(f.ledger, "utf8");
+      const cleanJournal = readFileSync(f.journal, "utf8");
+
+      const doc = JSON.parse(cleanLedger);
+      const i = doc.entries.findIndex((e: any) => e.kind === "execution" && e.execution_id === "X-3");
+      doc.entries.splice(i, 1);
+      writeFileSync(f.ledger, JSON.stringify(doc));
+      let r = recountOf(f);
+      assert.equal(r.code, 1);
+      assert.ok(r.out.problems.some((p: string) => /only in the ledger: none; only in executions: \['X-3'\]/.test(p)), r.out.problems.join("; "));
+      writeFileSync(f.ledger, cleanLedger);
+
+      // A forged body with a recomputed checksum: the checksum cannot see it; the digest recomputed from the body
+      // no longer equals the execution record's served digest.
+      const lines = cleanJournal.split("\n");
+      const j = lines.findIndex((x) => x.includes('"commit_seq":2,'));
+      const l = JSON.parse(lines[j]);
+      l.tx.body.ticket.title = "forged";
+      delete l.checksum;
+      lines[j] = JSON.stringify({ ...l, checksum: lineChecksum(l) });
+      writeFileSync(f.journal, lines.join("\n"));
+      r = recountOf(f);
+      assert.equal(r.code, 1);
+      assert.ok(r.out.problems.some((p: string) => /journal X-2: the result digest recomputed from the committed body is not the served one/.test(p)), r.out.problems.join("; "));
+
+      writeFileSync(f.journal, cleanJournal.replace('"title":"a2"', '"title":"zz"'));
+      r = recountOf(f);
+      assert.equal(r.code, 1);
+      assert.ok(r.out.problems.some((p: string) => /journal: line jseq \d+ has a bad jseq or checksum/.test(p)), r.out.problems.join("; "));
     } finally {
       t.cleanup();
     }
