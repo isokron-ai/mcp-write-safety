@@ -87,7 +87,8 @@ export interface InflightKeyRecordSeam extends KeyRecordSeam {
   /**
    * Writes the pending record (a journal `pending` line under durable) before the commit section, before the
    * backend/before-commit fault hook. A same-key call meanwhile finds { state: "pending" } and answers 409 in_progress.
-   * `put` completes it. If begin throws, the keyed path still calls abort (which must tolerate a key with no pending record).
+   * `put` completes it. A begin that throws leaves no pending record of its own: the keyed path does not call abort for
+   * it (abort could end another request's record). abort must still tolerate a key with no pending record.
    */
   begin(scope: KeyScope, key: string, fingerprint: string, run: string | null): void;
   /**

@@ -210,7 +210,7 @@ export class Store {
   /** The applied-write log keeps this many entries per ticket (INTERFACES 1.1). */
   static readonly APPLIED_CAP = 20;
   /** Fields that are configuration or bookkeeping, not state: never snapshotted. */
-  static readonly WIRING_FIELDS = ["clock", "bootId", "seed", "journal", "sinks", "stopped", "section", "keyRecords", "runOwner", "evidence"] as const;
+  static readonly WIRING_FIELDS = ["clock", "bootId", "seed", "journal", "sinks", "stopped", "section", "keyRecords", "runOwner", "evidence", "resets"] as const;
 
   readonly projects = new TrackedMap<string, Project>();
   readonly tickets = new TrackedMap<string, Ticket>();
@@ -238,6 +238,17 @@ export class Store {
    * with `evidence.serve(url.pathname, url.searchParams)`.
    */
   evidence: EvidenceReader | undefined = undefined;
+  /**
+   * How many run resets this process committed, per principal and run (key `principal NUL run`). Not state: it lets a
+   * write that awaited before its commit section see that its run was reset meanwhile (409 run_reset, http.ts). It
+   * counts only resets that committed (bumped after the journal has the reset), so nothing undoes it.
+   */
+  private readonly resets = new Map<string, number>();
+
+  /** The number of committed resets of one principal's run (see `resets`). */
+  resetCount(principal: string, run: string): number {
+    return this.resets.get(`${principal}\u0000${run}`) ?? 0;
+  }
 
   constructor(seedProjects: string[] = ["inbox"], readonly clock: Clock = wallClock, readonly bootId: string = randomBytes(8).toString("hex")) {
     for (const key of seedProjects) this.createProject(key, key);
@@ -486,6 +497,8 @@ export class Store {
       }
       return { status: 200, body: { run, principal: scope.principal, objects: removed } };
     }, (t) => {
+      const k = `${scope.principal}\u0000${run}`;
+      this.resets.set(k, (this.resets.get(k) ?? 0) + 1);
       t.reset!.keys = this.keyRecords?.dropRun(scope, run) ?? 0;
     }, "run-reset");
     return { objects: removed.length, keys: tx!.reset!.keys!, tx: tx! };

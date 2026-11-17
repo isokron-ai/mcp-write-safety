@@ -375,6 +375,31 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
           throw new ApiError(403, "run_not_owned", `run ${runTag} belongs to another principal`);
         }
       }
+      /**
+       * Every answer reaches the ledger (INTERFACES §1.1). A throw that is not an ApiError (recorded where it is
+       * thrown), a JournalError (recorded as journal_unavailable) or a CommitSinkError (the store has stopped) would
+       * otherwise answer 500 with nothing recorded: it is recorded here as a refusal, 500 internal.
+       */
+      const recordInternal = (e: unknown) => {
+        if (e instanceof ApiError || e instanceof JournalError || e instanceof CommitSinkError) return;
+        try {
+          store.refuse(meta, 500, "internal");
+        } catch {
+          // A ledger that cannot record stops the store; the answer is the 500 either way.
+        }
+      };
+      /**
+       * Run reset during the awaits before the commit section (coordinator note 11, item 2). Without a pending-record
+       * seam nothing fences a write that is held at BackendOps.beforePatch or the before-commit hook while its run is
+       * reset, so the store counts the resets of each (principal, run): the count is read before the awaits and compared
+       * after them, and a write whose run was reset meanwhile is refused 409 run_reset (recorded, nothing applied).
+       */
+      const resetsBefore = runTag === null ? 0 : store.resetCount(principal, runTag);
+      const checkNotReset = () => {
+        if (runTag === null || store.resetCount(principal, runTag) === resetsBefore) return;
+        store.refuse(meta, 409, "run_reset");
+        throw new ApiError(409, "run_reset", `run ${runTag} was reset while this request was waiting to commit; nothing was applied`);
+      };
       /** Sends a committed reply, after the backend/after-commit fault hook. */
       const sendCommitted = async (reply: Reply, tx: CommittedTransaction | undefined) => {
         const outcome = tx && faults.afterCommit ? await faults.afterCommit({ meta, tx }) : undefined;
@@ -439,9 +464,11 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
           if (answerFromRecord(ops.keyRecord.get(scope, key))) return;
           // 0.3.0 (inflight): the pending record goes first; every way out that commits nothing aborts it.
           if (inflight) {
-            began = true;
             try {
               inflight.begin(scope, key, fingerprint!, meta.attribution.run);
+              // Only once begin returned: a begin that throws left no pending record of its own, and abort must not end
+              // another request's record (coordinator note 11, item 3).
+              began = true;
             } catch (e) {
               if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
               else if (e instanceof JournalError) store.refuse(meta, 503, "journal_unavailable");
@@ -469,6 +496,8 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
             }
             if (own?.state !== "pending") throw new Error(`the pending record of this key ended without a commit (${own?.state ?? "none"})`);
           }
+          // Without a pending record nothing fenced this write: refuse it if its run was reset during the awaits.
+          checkNotReset();
           // Only a result below 300 is kept, and only once the journal has it: a refused first call stores nothing and
           // does not hold the key (decision 0004). A journal failure aborts the pending record too.
           result = store.commit(meta, () => route(method, url, req, body), (tx) => {
@@ -476,6 +505,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
             ops.keyRecord.put(scope, key, storedReplyOf(tx));
           });
         } catch (e) {
+          recordInternal(e);
           if (began && !committed) {
             const reason: AbortReason = hookFault ? "fault" : e instanceof ApiError ? "refused" : e instanceof JournalError ? "journal_unavailable" : "internal_error";
             safeAbort(scope, key, reason);
@@ -495,12 +525,20 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
           prepared = await ops.beforePatch(store, decodeURIComponent(parts[1]), (body ?? {}) as TicketFields, parseIfMatch(req.headers["if-match"] as string | undefined));
         }
         if (faults.beforeCommit) await faults.beforeCommit({ meta });
+        checkNotReset();
       } catch (e) {
-        if (e instanceof ApiError) store.refuse(meta, e.status, e.code);
+        if (e instanceof ApiError && e.code !== "run_reset") store.refuse(meta, e.status, e.code);
+        recordInternal(e);
         throw e;
       }
-      const { reply, tx } = store.commit(meta, () => route(method, url, req, body, prepared));
-      await sendCommitted(reply, tx);
+      let committedWrite: { reply: Reply; tx?: CommittedTransaction };
+      try {
+        committedWrite = store.commit(meta, () => route(method, url, req, body, prepared));
+      } catch (e) {
+        recordInternal(e);
+        throw e;
+      }
+      await sendCommitted(committedWrite.reply, committedWrite.tx);
     } catch (error) {
       if (error instanceof JournalError) {
         send(503, { error: "journal_unavailable", message: error.message });

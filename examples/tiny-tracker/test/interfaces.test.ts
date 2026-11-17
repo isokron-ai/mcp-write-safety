@@ -531,7 +531,7 @@ describe("seams v2: journal failure, the snapshot, sink order", () => {
 });
 
 /** A key-record seam with the 0.3.0 pending and expired states, logging the calls the keyed path makes. */
-function loggingInflight(log: string[], opts: { abortThrows?: boolean; putThrows?: boolean } = {}): InflightKeyRecordSeam & { expired: Map<string, KeyTombstone> } {
+function loggingInflight(log: string[], opts: { abortThrows?: boolean; putThrows?: boolean; beginThrows?: boolean } = {}): InflightKeyRecordSeam & { expired: Map<string, KeyTombstone> } {
   const done = new Map<string, StoredReply>();
   const pending = new Map<string, { since: string; run: string | null }>();
   const fences = new Map<string, string>();
@@ -564,6 +564,7 @@ function loggingInflight(log: string[], opts: { abortThrows?: boolean; putThrows
     },
     begin(s, k, _f, run) {
       log.push(`begin ${k}`);
+      if (opts.beginThrows) throw new Error("begin failed");
       pending.set(id(s, k), { since: "2030-01-01T00:00:00.000Z", run });
     },
     abort(s, k, reason: AbortReason) {
@@ -984,4 +985,64 @@ describe("seams v2.1: run ids and the token folder", () => {
       rmSync(base, { recursive: true, force: true });
     }
   });
+});
+
+// ---- G1 fold-ins (coordinator note 11), in the integration ----
+
+describe("G1 fold-ins: every answer reaches the ledger; a run reset during the awaits commits nothing; begin", () => {
+  const codes = (rec: Recorder) => rec.events.map((e) => `${e.kind}${(e.tx as RefusedTransaction).code ? ` ${(e.tx as RefusedTransaction).code}` : ""} ${e.tx.status}`);
+
+  it("a throw that is no ApiError, JournalError or CommitSinkError answers 500 and is a refusal 500 internal (keyed and unkeyed hook, begin)", async () => {
+    const rec = new Recorder();
+    const backend = await startBackend({ token: TOKEN, port: 0, sinks: [rec], faults: { async beforeCommit() { throw new Error("hook broke"); } } });
+    try {
+      const api = new Rest(backend.url, TOKEN);
+      assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "a" })).status, 500);
+      assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "b" }, { "idempotency-key": "internal-key-0001" })).status, 500);
+      assert.deepEqual(codes(rec), ["refusal internal 500", "refusal internal 500"]);
+      assert.equal((await api.export()).tickets.length, 0);
+    } finally {
+      await backend.close();
+    }
+    const log: string[] = [];
+    const rec2 = new Recorder();
+    const b = await inflightBackend(log, { sinks: [rec2], beginThrows: true });
+    try {
+      const r = await new Rest(b.backend.url, TOKEN).send("POST", "/tickets", { project: "inbox", title: "c" }, { "idempotency-key": "internal-key-0002" });
+      assert.equal(r.status, 500);
+      assert.deepEqual(codes(rec2), ["refusal internal 500"]);
+      assert.deepEqual(log, ["begin internal-key-0002"], "a begin that threw left no pending record of its own: no abort");
+    } finally {
+      await b.close();
+    }
+  });
+
+  for (const keyed of [false, true]) {
+    it(`without a pending-record seam, a ${keyed ? "keyed" : "unkeyed"} write held at before-commit while its run is reset is refused 409 run_reset and applies nothing`, async () => {
+      const rec = new Recorder();
+      let release!: () => void;
+      let arrived!: () => void;
+      const atHook = new Promise<void>((r) => { arrived = r; });
+      const backend = await startBackend({
+        token: TOKEN, port: 0, sinks: [rec], runOwner: () => "p-default",
+        faults: { async beforeCommit({ meta }) { if (meta.attribution.run === "run-held") { arrived(); await new Promise<void>((r) => { release = r; }); } } },
+      });
+      try {
+        const api = new Rest(backend.url, TOKEN);
+        const headers: Record<string, string> = { "tiny-tracker-run": "run-held", ...(keyed ? { "idempotency-key": "reset-key-0001" } : {}) };
+        const held = api.send("POST", "/tickets", { project: "inbox", title: "held" }, headers);
+        await atHook;
+        backend.dropRun({ principal: "p-default" }, "run-held");
+        release();
+        const r = await held;
+        assert.deepEqual([r.status, r.body.error], [409, "run_reset"]);
+        assert.equal((await api.export()).tickets.length, 0, "nothing applied after the reset");
+        assert.deepEqual(codes(rec), ["commit 200", "refusal run_reset 409"], "the reset's commit, then the refusal");
+        // The next write in the same run (no reset meanwhile) commits.
+        assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "after" }, { "tiny-tracker-run": "run-other" })).status, 201);
+      } finally {
+        await backend.close();
+      }
+    });
+  }
 });
