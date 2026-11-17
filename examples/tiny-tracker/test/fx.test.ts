@@ -407,7 +407,12 @@ describe("evidence reads across principals (INTERFACES §1.4) and container mode
       assert.match((miss.body as any).message, /^no record of this key now/);
       const x = ev.serve(`/executions/${c.headers.get(XH)}`, q("principal=p-alice"))!;
       assert.equal((x.body as ExecutionRecord).principal, "p-alice");
-      assert.equal(ev.serve(`/executions/${c.headers.get(XH)}`, q("principal=p-bob"))!.status, 404);
+      // Seams v2.1: optional on an execution id; another principal's or an unconfigured id answers as an unknown id.
+      const bobs = ev.serve(`/executions/${c.headers.get(XH)}`, q("principal=p-bob"))!;
+      const unknown = ev.serve("/executions/X-999", q(""))!;
+      assert.deepEqual([bobs.status, bobs.body], [404, { ...(unknown.body as object), message: (unknown.body as any).message.replace("X-999", c.headers.get(XH)!) }]);
+      assert.equal(ev.serve(`/executions/${c.headers.get(XH)}`, q("principal=p-carol"))!.status, 404);
+      assert.equal((ev.serve(`/executions/${c.headers.get(XH)}`, q(""))!.body as ExecutionRecord).principal, "p-alice", "no parameter, two principals");
       assert.equal(ev.serve("/ledger", q("")), undefined, "other paths are not the reader's");
       // One principal: the parameter may be left out.
       await new Rest(one.url, ALICE).send("POST", "/tickets", { project: "inbox", title: "e" }, keyed("evid-key-00002"));

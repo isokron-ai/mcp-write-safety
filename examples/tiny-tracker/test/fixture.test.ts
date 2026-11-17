@@ -64,11 +64,11 @@ describe("the evidence namespace (rule 2, G3)", () => {
       assert.equal((await post(`${state.backend}/build`, EVIDENCE, {})).status, 405, "read-only");
       assert.equal((await post(`${state.backend}/tickets`, EVIDENCE, { project: "inbox", title: "x" })).status, 401, "the evidence token cannot write");
       assert.equal((await get(`${state.backend}/projects`, EVIDENCE)).status, 401, "nor read the API");
-      for (const path of ["/ledger", "/executions/X-1", "/operations/some-key-0001"]) {
-        const planned = await get(`${state.backend}${path}`, EVIDENCE);
-        assert.equal(planned.status, 501, path);
-        assert.equal(planned.body.available_from, "0.2.0");
-      }
+      // The 0.2.0 default profile runs execution-records and lookup, so their routes answer (404 here: nothing
+      // written); the ledger is not on, so /ledger is 501 and names the feature.
+      const ledger = await get(`${state.backend}/ledger`, EVIDENCE);
+      assert.deepEqual([ledger.status, ledger.body.feature, ledger.body.available_from], [501, "ledger", "0.2.0"]);
+      assert.deepEqual([(await get(`${state.backend}/executions/X-1`, EVIDENCE)).status, (await get(`${state.backend}/operations/some-key-0001`, EVIDENCE)).body.error], [404, "no_record"]);
       assert.equal(await rawGet(`${state.backend}/build`, "evil.example:80", EVIDENCE), 403, "loopback Host only");
     });
     assert.equal(r.code, 0, r.stderr);

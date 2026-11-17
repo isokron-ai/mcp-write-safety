@@ -66,6 +66,9 @@ interface Stack {
   close(): Promise<void>;
 }
 
+/** The fixed run ids the in-process tests tag writes with (registered for p-default in every stack). */
+const FIXED_RUNS = ["run-scn-1", "run-scn-2", "run-drop-1", "run-be-1"];
+
 /** One `tiny-tracker all` stack in this process, wired as the command line wires it (stream B block in src/cli.ts). */
 async function stack(options: { features?: string[]; principals?: Principal[]; attach?: (b: RunningBackend) => AttachedBackend } = {}): Promise<Stack> {
   const features = options.features ?? ALL;
@@ -73,6 +76,9 @@ async function stack(options: { features?: string[]; principals?: Principal[]; a
     layout: "all", profile: "default", features, mcpDefects: [], backendDefects: [], variants: [], control: true,
     env: { TRACKER_EVIDENCE_TOKEN: EVIDENCE, TRACKER_CONTROL_TOKEN: CONTROL }, argv: [], backendToken: BACKEND, principals: options.principals,
   });
+  // Seams v2.1: with the run registry wired, a run tag must be one it holds. The fixed run ids these tests use are put
+  // back into the registry the way the 0.3.0 journal restores allocated runs at load (RunRegistry.restore).
+  for (const run_id of FIXED_RUNS) layer.runs.restore({ run_id, principal: "p-default", created_at: "2026-11-16T00:00:00.000Z", label: "test" });
   // As src/cli.ts starts it: the descriptor's boot id, the run registry, the ledger sink and the backend fault hooks.
   const backend = await startBackend({ token: BACKEND, port: 0, features, extension: layer.backendExtension, principals: options.principals,
     bootId: layer.descriptor.bootId, runOwner: layer.runOwner, ...layer.backendOptions });
@@ -659,7 +665,7 @@ describe("the compatibility rules of stream B (CMP-30 to CMP-33) and the command
     let held: Promise<unknown> | undefined;
     let mcp: Mcp | undefined;
     const t0 = Date.now();
-    const r = await runCli(["all", "--features", ALL.join(","), "--fixture-control", "--port", "4624", "--backend-port", "4625", "--control-port", "4626"], env, async (state) => {
+    const r = await runCli(["all", "--features", ALL.join(","), "--fixture-control", "--port", "0", "--backend-port", "0", "--control-port", "0"], env, async (state) => {
       // The default profile (0.2.0) adds execution-records, lookup and principals ahead of the named features.
       assert.deepEqual(state.features, [...activeFeatures("default", []), ...ALL]);
       const entries = (await call("GET", `${state.backend}/ledger`, EVIDENCE)).body.entries;
@@ -667,8 +673,10 @@ describe("the compatibility rules of stream B (CMP-30 to CMP-33) and the command
       assert.deepEqual([entries[0].seq, entries[0].kind, entries[0].boot_id], [1, "start", build.process.boot_id]);
       assert.deepEqual(build.features, [...state.features].sort());
       assert.equal((await call("POST", `${state.control}/_fixture/faults`, CONTROL, { point: DROP, selector: { tool: "create_ticket", hold_ms: 600_000 } })).status, 201);
+      // Seams v2.1: with the control listener a run tag must be one it allocated.
+      const run = (await call("POST", `${state.control}/_fixture/runs`, CONTROL, {})).body.run_id as string;
       mcp = await connectClient(state.mcp, "2026-07-28");
-      held = mcp.client.callTool({ name: "create_ticket", arguments: { title: "held", idempotency_key: "cli-key-00000001" }, _meta: tagged("run-cli-1", "op-1") }).catch((e) => e);
+      held = mcp.client.callTool({ name: "create_ticket", arguments: { title: "held", idempotency_key: "cli-key-00000001" }, _meta: tagged(run, "op-1") }).catch((e) => e);
       for (let i = 0; i < 50; i++) {
         if ((await call("GET", `${state.control}/_fixture/faults`, CONTROL)).body.held === 1) break;
         await new Promise((res) => setTimeout(res, 20));

@@ -227,16 +227,18 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
         if (d.descriptorHashWrong) json.descriptor_hash = "0".repeat(64);
         return [200, json, { "tiny-tracker-build": json.build_hash }];
       }
+      if (p === "/executions" && parts.length === 2) {
+        // Seams v2.1 (§1.4): ?principal= optional on an execution id; a mismatch answers as an unknown id.
+        const asked = url.searchParams.get("principal");
+        const rec = executions.find((e) => e.id === decodeURIComponent(parts[1]));
+        return rec && (asked === null || rec.principal === asked) ? [200, executionView(rec)] : [404, { error: "not_found", message: `no execution record ${decodeURIComponent(parts[1])}` }];
+      }
       const who = principalOf(url.searchParams);
       if (typeof who !== "string") return who as [number, unknown];
       const mine = (x: { principal: string | null }) => x.principal === who;
       if (p === "/export") return [200, { principal: who, projects: [{ key: "inbox", name: "Inbox" }], tickets: [...tickets.values()].map((t) => ({ ...publicTicket(t), run: t.run })) }];
       if (p === "/ledger") return [200, { principal: who, entries: ledger.filter((e) => e.principal === null || mine(e)), next_after: null }];
       if (p === "/executions" && parts.length === 1) return [200, { principal: who, executions: executions.filter(mine).map(executionView) }];
-      if (p === "/executions" && parts.length === 2) {
-        const rec = executions.find((e) => e.id === decodeURIComponent(parts[1]));
-        return rec && mine(rec) ? [200, executionView(rec)] : [404, { error: "not_found", message: `no execution record ${decodeURIComponent(parts[1])} of principal ${who}`, principal: who }];
-      }
       if (p === "/operations" && parts.length === 2) {
         const key = decodeURIComponent(parts[1]);
         const k = findKey(who, key);

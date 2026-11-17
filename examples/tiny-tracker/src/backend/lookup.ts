@@ -89,10 +89,11 @@ export interface EvidenceReader extends EvidenceSource {
   readonly principals: readonly string[];
   /**
    * Answers GET /executions/:id and GET /operations/:key for the evidence token, or undefined for any other path.
-   * The principal is `?principal=<id>`: required when more than one principal is configured (400 principal_required),
-   * the single configured one otherwise; an id that is not configured is 400 unknown_principal. Every answer names
-   * `principal`. An execution record of another principal is 404, as is a key with no record in that principal's
-   * scope ("no record of this key now"). The evidence token may read any principal's records; it names which.
+   * Operations: the principal is `?principal=<id>`, required when more than one principal is configured (400
+   * principal_required), the single configured one otherwise; an id that is not configured is 400 unknown_principal;
+   * the answer names `principal`, and a key with no record in that scope is 404 ("no record of this key now").
+   * Executions (seams v2.1): `?principal=` is optional; when given and not the record's principal (or not configured)
+   * the answer is the unknown-id 404 not_found. The evidence token may read any principal's records.
    */
   serve(pathname: string, query: URLSearchParams): EvidenceAnswer | undefined;
 }
@@ -128,13 +129,16 @@ export function evidenceSource(parts: EvidenceParts): EvidenceReader {
       if (!m) return undefined;
       const id = decodeURIComponent(m[2]);
       if (m[1] === "operations" && !parts.lookupOn) return undefined;
+      if (m[1] === "executions") {
+        // Seams v2.1 (§1.4): execution ids are global, so ?principal= is optional here under any number of principals.
+        // A record of another principal, or an id that is not configured, answers exactly as an unknown id: nothing leaks.
+        const asked = query.get("principal");
+        const x = source.execution(id);
+        return x && (asked === null || x.principal === asked) ? { status: 200, body: x }
+          : { status: 404, body: { error: "not_found", message: `no execution record ${id}` } };
+      }
       const principal = evidencePrincipal(query, parts.principals);
       if (typeof principal !== "string") return principal;
-      if (m[1] === "executions") {
-        const x = source.execution(id);
-        return x && x.principal === principal ? { status: 200, body: x }
-          : { status: 404, body: { error: "not_found", message: `no execution record ${id} of principal ${principal}`, principal } };
-      }
       const op = source.operation({ principal }, id);
       return op ? { status: 200, body: op }
         : { status: 404, body: { error: "no_record", message: `${NO_RECORD}; ${NO_RECORD_NOTE}`, key: id, principal } };
