@@ -201,6 +201,42 @@ test('held request: a trial whose answer shows a conflict (declared patterns.con
   assert.equal(dflt.numbers['needs_reading'], 4);
 });
 
+test('CONC-3: an answer that showed a conflict while its own change took effect and the other writer lost is recorded, not counted (review item 3)', () => {
+  const res = M().resources[0]!;
+  // assignee (writer A, field 0) = bob is in effect; status (writer B, field 1) stays blocked, so B's change is lost.
+  const exp = pairsExperiment(res, 40, 'separate');
+  const half = (text: string) => ({ ok: true, isError: false, text, data: null, tool: 'ticket_update', shape: null });
+  const pairs = (aText: string, bText: string) => {
+    const reps = Array.from({ length: 40 }, (_, i) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half(aText), b: half(bText) }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } }));
+    const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: {}, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps } }, [], null);
+    out.arms['validity']!.counts = { valid: 1, both_kept: 1 };
+    return pairsVerdicts(out, res, false)[0]!;
+  };
+  // Held request: the holder's change is absent, the other's present.
+  const cb = (step: string, text: string) => ({ step, ok: true, isError: false, rpc_error: null, text, data: null, indeterminate: false, tool: 'ticket_update', shape: null });
+  const held = (holderText: string, otherText: string) => {
+    const trials = [0, 1, 2, 3].map((i) => ({ schedule: (i % 2 ? 'hold B, run A' : 'hold A, run B') as 'hold A, run B' | 'hold B, run A', held: { seq: i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: cb(`h${i}`, holderText), other: cb(`o${i}`, otherText), kept: { holder: false, other: true }, steps: [] }));
+    return gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const truthful = pairs('modified 1', 'matched 0');
+    assert.equal(truthful.numbers['conflict_shown_own_applied'], 0, 'B said refused and its change is absent');
+    const falseRefusal = pairs('matched 0', 'ok');
+    assert.equal(falseRefusal.verdict, 'not observed', 'not a CONC-3 loss under the spec text');
+    assert.equal(falseRefusal.numbers['conflict_shown'], 40);
+    assert.equal(falseRefusal.numbers['conflict_shown_own_applied'], 40);
+    assert.ok(falseRefusal.notes.some((n) => /false refusal/.test(n)));
+    assert.equal(held('matched 0', 'ok').numbers['conflict_shown_own_applied'], 0);
+    const h = held('ok', 'matched 0');
+    assert.equal(h.verdict, 'held');
+    assert.equal(h.numbers['conflict_shown_own_applied'], 4);
+    assert.ok(h.notes.some((n) => /false refusal/.test(n)));
+  } finally {
+    usePatterns(null);
+  }
+});
+
 test('recount re-derives the counters from recorded repetitions', () => {
   const res = M().resources[0]!;
   const exp = pairsExperiment(res, 2, 'separate');

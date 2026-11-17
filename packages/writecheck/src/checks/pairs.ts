@@ -10,11 +10,12 @@
  * interleaving (the backend gate, tier 3) can give that.
  */
 
-import { hasControl, needsBase } from '../core/driver.js';
+import { hasControl, needsBase, valueAt } from '../core/driver.js';
 import { recount, repsWhere, runExperiment, witness, type ExperimentOutcome } from '../core/exec.js';
 import { validateExperiment, type Experiment } from '../core/experiment.js';
 import type { ResourceSpec } from '../core/manifest.js';
 import { ruleOfThree, wilson } from '../core/stats.js';
+import { deepEqual } from '../core/util.js';
 import { NOT_OBSERVED_SENTENCE, result, VIOLATED_CAVEAT, type Result } from '../report/verdicts.js';
 import { ruleNote } from './rules.js';
 import { objRef, shownBy } from './stale.js';
@@ -155,9 +156,23 @@ export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateCon
   };
   const conflictShown = lossReps.filter((r) => shownIn(r.env) === 'signal');
   const needsReading = lossReps.filter((r) => shownIn(r.env) === 'default');
+  // why: review item 3: an answer that showed a conflict while its own change is in effect afterwards, and the other writer's
+  // (reported as a success) is the one lost, said "refused" for a write that took effect. Both calls did not report success,
+  // so it is not a CONC-3 loss under the spec text, but it is recorded, as the stale-write check records a refusal that left
+  // the object changed (MWS-CONC-4 applied).
+  const ownApplied = conflictShown.filter((r) => {
+    const race = (r.env['race'] ?? {}) as Record<string, { text?: string | null; data?: unknown; tool?: string | null; shape?: ShapeCapture | null } | undefined>;
+    const fin = (r.env['final'] ?? {}) as { ok?: boolean; obj?: unknown };
+    if (!fin.ok) return false;
+    const kept = [deepEqual(valueAt(fin.obj, res.fields![0].path), res.fields![0].values[1]), deepEqual(valueAt(fin.obj, res.fields![1].path), res.fields![1].values[1])];
+    return (['a', 'b'] as const).some((k, i) => {
+      const h = race[k];
+      return !!h && shownBy({ text: h.text ?? null, data: h.data, tool: h.tool ?? undefined, shape: h.shape ?? null }) === 'signal' && kept[i] && !kept[1 - i];
+    });
+  });
   const loss = c('test', 'silent_loss') - conflictShown.length - needsReading.length;
-  const numbers: Record<string, unknown> = { pairs: valid, pairs_overlapped: overlapped, both_ok: c('test', 'both_ok'), one_error: c('test', 'one_error'), lost: loss, ...(lossReps.length ? { conflict_shown: conflictShown.length, needs_reading: needsReading.length } : {}) };
-  const conflictNote = conflictShown.length ? [`In ${conflictShown.length} pair(s) one change was absent afterwards but its answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is MWS-CONC-4's to judge in its own trials.`] : [];
+  const numbers: Record<string, unknown> = { pairs: valid, pairs_overlapped: overlapped, both_ok: c('test', 'both_ok'), one_error: c('test', 'one_error'), lost: loss, ...(lossReps.length ? { conflict_shown: conflictShown.length, conflict_shown_own_applied: ownApplied.length, needs_reading: needsReading.length } : {}) };
+  const conflictNote = conflictShown.length ? [`In ${conflictShown.length} pair(s) one change was absent afterwards but its answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is MWS-CONC-4's to judge in its own trials.`, ...(ownApplied.length ? [`In ${ownApplied.length} of them the answer that showed a conflict had its own change in effect afterwards, and the change lost was the other writer's, reported as a success: that answer said refused for a write that took effect (a false refusal). Both calls did not report success, so it is not counted as a loss here.`] : [])] : [];
   if (out.arms['control']) Object.assign(numbers, { control_pairs: c('control', 'valid'), control_lost: c('control', 'silent_loss') });
   if (valid < 1) return [result('MWS-CONC-3', w, sc, 'not tested', `no valid pair (${c('test', 'setup_failures')} setup failures, ${c('test', 'exceptions')} exceptions)`, { numbers })];
   if (loss < 1 && needsReading.length) {
