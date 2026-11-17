@@ -20,6 +20,7 @@ import { ListenError, MCP_HTTP_CAPS, startMcpServer } from "../src/mcp/server.js
 import { createBuild } from "../src/mcp/build.js";
 import { correctConfigRules, type ServerConfig } from "../src/mcp/config.js";
 import { ConfigError, startBackend, startServer } from "../src/start.js";
+import { bearerMatches } from "../src/tokens.js";
 import { runCli } from "./support/cli-run.js";
 
 const posix = process.platform !== "win32";
@@ -93,6 +94,15 @@ describe("transport settings (src/transport.ts)", () => {
   });
 });
 
+describe("bearerMatches (src/tokens.ts): every listener's token check", () => {
+  it("matches the scheme without regard to case (RFC 7235) and the token exactly", () => {
+    for (const scheme of ["Bearer", "bearer", "BEARER", "bEARER"]) assert.equal(bearerMatches(`${scheme} ${TOKEN}`, TOKEN), true, scheme);
+    for (const header of [undefined, "", TOKEN, `Basic ${TOKEN}`, `Bearer ${TOKEN}x`, `Bearer  ${TOKEN}`, `Bearer${TOKEN}`, `bearer ${TOKEN.toUpperCase()}`]) {
+      assert.equal(bearerMatches(header, TOKEN), false, String(header));
+    }
+  });
+});
+
 describe("the MCP listener (src/mcp/server.ts)", () => {
   const config: ServerConfig = { backendUrl: "http://127.0.0.1:9", backendToken: "unused-backend-token", readOnly: false, tools: null, deny: null, defaultProject: "inbox" };
 
@@ -113,6 +123,11 @@ describe("the MCP listener (src/mcp/server.ts)", () => {
       assert.equal((await post(server.url, { authorization: `Bearer ${TOKEN}x` })).status, 401);
       assert.equal((await post(server.url, { authorization: `Bearer ${backendToken}` })).status, 401, "the backend token opens nothing here");
       assert.equal((await post(server.url, { authorization: TOKEN })).status, 401, "the Bearer scheme is required");
+      // RFC 7235: the scheme name is case-insensitive (note 27 item 5); the token is not.
+      for (const scheme of ["bearer", "BEARER", "bEaReR"]) {
+        assert.equal((await post(server.url, { authorization: `${scheme} ${TOKEN}` })).status, 200, `${scheme} is the Bearer scheme`);
+      }
+      assert.equal((await post(server.url, { authorization: `bearer ${TOKEN.toUpperCase()}` })).status, 401, "the token is compared exactly");
       const client = await connect(server.url, TOKEN);
       try {
         const tools = (await client.listTools()).tools;
