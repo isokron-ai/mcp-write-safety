@@ -348,10 +348,15 @@ async function main(): Promise<void> {
   // ---- end stream E ----
 
   const closers: Array<() => Promise<void>> = [];
-  const shutdown = async () => {
-    for (const close of closers.reverse()) await close().catch(() => {});
-    process.exit(0);
-  };
+  // One shutdown per process (note 27 item 1): a signal, stdin closing over stdio and a supervisor going away may all
+  // ask for it, and a closer may ask again while it runs (closing the stdio server fires its onClose). Every caller gets
+  // the same promise, and the closers run last-started first without reordering the array, so each runs exactly once
+  // and the backend (the lease and the pid lock) is closed before the process exits.
+  let stopping: Promise<never> | undefined;
+  const shutdown = (code = 0): Promise<never> => stopping ??= (async () => {
+    for (const close of [...closers].reverse()) await close().catch(() => {});
+    process.exit(code);
+  })();
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 

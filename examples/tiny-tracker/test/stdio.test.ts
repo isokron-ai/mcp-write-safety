@@ -13,7 +13,9 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -150,6 +152,52 @@ describe("tiny-tracker stdio: the command line", () => {
     assert.equal(r.stdout, "");
     assert.match(r.stderr, /tiny-tracker stdio/);
   });
+});
+
+/** Starts `tiny-tracker stdio` as a child; resolves once its state line is on stderr. */
+async function startStdioChild(args: string[], env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, [CLI, "stdio", ...args], { env: { PATH: process.env.PATH ?? "", ...env } });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (d) => { stdout += d; });
+  child.stderr.on("data", (d) => { stderr += d; });
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
+    child.on("exit", (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
+  });
+  await new Promise<void>((resolve, reject) => {
+    const t = setInterval(() => {
+      if (/"transport":"stdio"/.test(stderr)) { clearInterval(t); resolve(); }
+      if (child.exitCode !== null) { clearInterval(t); reject(new Error(`exited before its state line: ${stderr}`)); }
+    }, 20);
+  });
+  return { child, exited, stdout: () => stdout, stderr: () => stderr };
+}
+
+// Note 27 item 1: SIGTERM or SIGINT over stdio used to exit 0 before the backend closed, leaving the lease (lock.d) and
+// the pid lock (lock) behind. shutdown() is now one promise, and the closers run in reverse without reordering them.
+describe("tiny-tracker stdio: a signal or stdin closing releases the data dir", () => {
+  for (const how of ["SIGTERM", "SIGINT", "stdin closed"] as const) {
+    it(`${how}: exit 0, and lock and lock.d are gone`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "tt-stdio-sig-"));
+      const data = join(dir, "data");
+      try {
+        const run = await startStdioChild(["--features", "durable,strict-input", "--data-dir", data]);
+        assert.ok(existsSync(join(data, "lock")), "the pid lock is held while running");
+        assert.ok(existsSync(join(data, "lock.d")), "the lease is held while running");
+        if (how === "stdin closed") run.child.stdin.end();
+        else run.child.kill(how);
+        const { code, signal } = await run.exited;
+        assert.equal(signal, null, run.stderr());
+        assert.equal(code, 0, run.stderr());
+        assert.ok(!existsSync(join(data, "lock")), "the pid lock is released");
+        assert.ok(!existsSync(join(data, "lock.d")), "the lease is released");
+        assert.equal(run.stdout(), "", "nothing but protocol messages on stdout");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 describe("tiny-tracker stdio: refusals (exit 2, nothing served)", () => {
