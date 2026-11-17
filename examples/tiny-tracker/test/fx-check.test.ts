@@ -8,10 +8,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { fxCheck, main, recomputeDescriptorHashes, type FxCheckReport } from "../src/fx-check.js";
 import { startFakeFixture, type FakeDefects, type FakeFixture } from "./support/fake-fixture.js";
-import { runCli } from "./support/cli-run.js";
 import { py } from "./support/python.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -48,7 +47,8 @@ describe("fx-check", () => {
   const cases: Array<[Partial<FakeDefects>, string[]]> = [
     [{ digestOfCurrentState: true }, ["FX-DIG-1"]],
     [{ replayDigestMismatch: true }, ["FX-DIG-2"]],
-    [{ digestNotCanonical: true }, ["FX-DIG-1", "FX-DIG-2", "FX-DIG-3"]],
+    // FX-DIG-1 and FX-DIG-2 compare values; the form of the bytes is FX-DIG-3's alone (as the real defect trips).
+    [{ digestNotCanonical: true }, ["FX-DIG-3"]],
     [{ digestWithoutDomain: true }, ["FX-DIG-3"]],
     [{ lookupWrongRecord: true }, ["FX-LOOK-1", "FX-LOOK-3"]],
     [{ lookupExecutes: true }, ["FX-LOOK-2"]],
@@ -120,16 +120,19 @@ describe("fx-check", () => {
     }
   });
 
-  it("today's build (evidence only): the descriptor and its MCP mirror held, nothing else applicable", async () => {
-    const env = { TRACKER_BACKEND_TOKEN: "backend-token-fxcheck-00000000000", TRACKER_EVIDENCE_TOKEN: "evidence-token-fxcheck-0000000000", TRACKER_CONTROL_TOKEN: "control-token-fxcheck-00000000000" };
+  it("the real 0.2.0 correct build with two principals: every 0.2.0 property held (--probe)", async () => {
+    const { startBuild } = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);
+    const run = await startBuild(["--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults"]);
     let r: FxCheckReport | undefined;
-    const cli = await runCli(["all", "--features", "evidence", "--fixture-control"], env, async (state) => {
-      r = await fxCheck({ backend: state.backend, mcp: state.mcp, control: state.control, tokens: { evidence: env.TRACKER_EVIDENCE_TOKEN, backend: env.TRACKER_BACKEND_TOKEN, control: env.TRACKER_CONTROL_TOKEN } });
-    });
-    assert.equal(cli.code, 0, cli.stderr);
+    try {
+      r = await fxCheck({ backend: run.state.backend, mcp: run.state.mcp, control: run.state.control, tokens: run.tokens, probe: true });
+    } finally {
+      await run.stop();
+    }
     const v = verdicts(r!);
-    assert.equal(v["FX-BLD-1"], "held", r!.findings[0].reason);
-    assert.deepEqual(Object.entries(v).filter(([id]) => id !== "FX-BLD-1").map(([, x]) => x).filter((x) => x !== "not applicable"), []);
+    for (const id of ["FX-BLD-1", "FX-DIG-1", "FX-DIG-2", "FX-DIG-3", "FX-LOOK-1", "FX-LOOK-2", "FX-LOOK-3", "FX-FLT-1"]) assert.equal(v[id], "held", `${id}: ${r!.findings.find((f) => f.id === id)?.reason}`);
+    assert.equal(r!.probes.principal, "p-default");
+    assert.equal(r!.probes.reset, "reset");
   });
 });
 
@@ -139,7 +142,7 @@ describe("Python recount over what the evidence API serves (three-way recount re
     const dir = mkdtempSync(join(tmpdir(), "tt-recount-"));
     try {
       await run(f);
-      const get = async (p: string) => (await fetch(`${f.backend}${p}`, { headers: { authorization: `Bearer ${f.tokens.evidence}` } })).json();
+      const get = async (p: string) => (await fetch(`${f.backend}${p}?principal=p-default`, { headers: { authorization: `Bearer ${f.tokens.evidence}` } })).json();
       const files: Record<string, string> = {};
       for (const name of ["export", "ledger", "executions"]) { files[name] = join(dir, `${name}.json`); writeFileSync(files[name], JSON.stringify(await get(`/${name}`))); }
       const script = join(ROOT, "verify", "python", "tt_recount.py");

@@ -102,7 +102,8 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
   const keys = new Map<string, KeyRecord>();
   let lastKey: KeyRecord | undefined;
   const runs: Array<{ run_id: string; principal: string; label: string | null; created_at: string }> = [];
-  const armed: Array<{ point: string; selector: Record<string, unknown>; once: boolean }> = [];
+  const armed: Array<{ id: string; point: string; selector: Record<string, unknown>; once: boolean }> = [];
+  let armedSeq = 0;
   const mcpCache = new Map<string, unknown>(); // ignoresArgs
   const now = () => new Date().toISOString();
 
@@ -202,7 +203,16 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
       result_digest: executionView(exec).result.digest, status: k.status };
   }
 
-  const NO_RECORD = { error: "not_found", message: "no record of this key now" };
+  // As the real build (stream A's EvidenceReader): a miss names the key and the principal.
+  const noRecord = (key: string, principal?: string) => ({ error: "no_record", message: "no record of this key now; this does not mean nothing was written: a request still on its way can land later", key, ...(principal ? { principal } : {}) });
+  const PRINCIPAL_IDS = [...principals.values()];
+  /** The frozen ?principal= rule (INTERFACES §1.4): required here, since the double configures two principals. */
+  const principalOf = (q: URLSearchParams): string | [number, unknown] => {
+    const asked = q.get("principal");
+    if (asked === null) return [400, { error: "principal_required", message: "more than one principal is configured; name one with ?principal=<id>", principals: PRINCIPAL_IDS }];
+    if (!PRINCIPAL_IDS.includes(asked)) return [400, { error: "unknown_principal", message: `no principal ${asked} is configured`, principal: asked }];
+    return asked;
+  };
 
   // ---- backend listener: the API (principal tokens) and the evidence namespace (evidence token) ----
   async function backendHandle(req: IncomingMessage, res: ServerResponse, url: URL, body: any): Promise<[number, unknown, Record<string, string>?]> {
@@ -211,22 +221,26 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
     const parts = url.pathname.split("/").filter(Boolean);
     if (bearer === tokens.evidence && req.method === "GET") {
       const p = `/${parts[0] ?? ""}`;
-      if (notBuilt.has(p)) return [501, { error: "not_built", available_from: "0.2.0", message: "not built" }];
+      if (notBuilt.has(p)) return [501, { error: "not_enabled", feature: p.slice(1), available_from: "0.2.0", message: "not built" }];
       if (p === "/build") {
         const json = descriptor.toJSON();
         if (d.descriptorHashWrong) json.descriptor_hash = "0".repeat(64);
         return [200, json, { "tiny-tracker-build": json.build_hash }];
       }
-      if (p === "/export") return [200, { projects: [{ key: "inbox", name: "Inbox" }], tickets: [...tickets.values()].map((t) => ({ ...publicTicket(t), run: t.run })) }];
-      if (p === "/ledger") return [200, { entries: ledger }];
-      if (p === "/executions" && parts.length === 1) return [200, { executions: executions.map(executionView) }];
+      const who = principalOf(url.searchParams);
+      if (typeof who !== "string") return who as [number, unknown];
+      const mine = (x: { principal: string | null }) => x.principal === who;
+      if (p === "/export") return [200, { principal: who, projects: [{ key: "inbox", name: "Inbox" }], tickets: [...tickets.values()].map((t) => ({ ...publicTicket(t), run: t.run })) }];
+      if (p === "/ledger") return [200, { principal: who, entries: ledger.filter((e) => e.principal === null || mine(e)), next_after: null }];
+      if (p === "/executions" && parts.length === 1) return [200, { principal: who, executions: executions.filter(mine).map(executionView) }];
       if (p === "/executions" && parts.length === 2) {
         const rec = executions.find((e) => e.id === decodeURIComponent(parts[1]));
-        return rec ? [200, executionView(rec)] : [404, { error: "not_found", message: "no execution record with this id" }];
+        return rec && mine(rec) ? [200, executionView(rec)] : [404, { error: "not_found", message: `no execution record ${decodeURIComponent(parts[1])} of principal ${who}`, principal: who }];
       }
       if (p === "/operations" && parts.length === 2) {
-        const k = findKey(url.searchParams.get("principal") ?? "p-default", decodeURIComponent(parts[1]));
-        return k ? [200, operationRecord(k)] : [404, NO_RECORD];
+        const key = decodeURIComponent(parts[1]);
+        const k = findKey(who, key);
+        return k ? [200, operationRecord(k)] : [404, noRecord(key, who)];
       }
     }
     const principal = principals.get(bearer);
@@ -256,7 +270,7 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
     }
     if (parts[0] === "operations" && parts.length === 2 && req.method === "GET") {
       const k = findKey(principal, decodeURIComponent(parts[1]), a);
-      return k ? [200, operationRecord(k)] : [404, NO_RECORD];
+      return k ? [200, operationRecord(k)] : [404, noRecord(decodeURIComponent(parts[1]))];
     }
     if (parts[0] === "export" && req.method === "GET") return [200, { projects: [{ key: "inbox", name: "Inbox" }], tickets: [...tickets.values()].map(publicTicket) }];
     return [404, { error: "no_route", message: `no route for ${req.method} ${url.pathname}` }];
@@ -275,10 +289,13 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
     if (url.pathname === "/_fixture/faults" && req.method === "POST") {
       if (body?.point !== "mcp/after-backend-reply/drop") return [400, { error: "bad_point", message: "only mcp/after-backend-reply/drop is built" }];
       const selector = (body.selector ?? {}) as Record<string, unknown>;
-      const f = { point: body.point as string, selector, once: selector.once !== false };
+      // As the real controller (fixture-api/1): selectors are tool, run, operation, nth, count, once and hold_ms; no key.
+      const unknown = Object.keys(selector).filter((k) => !["tool", "run", "operation", "nth", "count", "once", "hold_ms"].includes(k));
+      if (unknown.length) return [400, { error: "bad_selector", message: `unknown selector member(s): ${unknown.join(", ")}` }];
+      const f = { id: `F-${++armedSeq}`, point: body.point as string, selector, once: selector.once !== false };
       armed.push(f);
-      descriptor.armedFaults = armed.map((x) => x.point);
-      ledgerAdd({ kind: "fault-armed", principal: null, run: tag(selector.run), operation_tag: null, request: null, status: null, execution_id: null, objects: [], fault: { point: f.point, selector, fired_on_seq: null } });
+      descriptor.armedFaults = armed.map((x) => `${x.id} ${x.point} ${canonicalize(x.selector)}`);
+      ledgerAdd({ kind: "fault-armed", principal: null, run: null, operation_tag: null, request: null, status: null, execution_id: null, objects: [], fault: { point: f.point, selector, fired_on_seq: null } });
       return [201, { armed: { point: f.point, selector } }];
     }
     const reset = /^\/_fixture\/runs\/([^/]+)\/reset$/.exec(url.pathname);
@@ -314,7 +331,8 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
       const reqBody = { ...fields, project: fields.project ?? "inbox" };
       if (d.ignoresArgs && typeof idempotency_key === "string" && mcpCache.has(idempotency_key)) return { result: mcpCache.get(idempotency_key) };
       const r = createTicket(a, d.keyDropped ? null : (idempotency_key ?? null), reqBody);
-      const fault = armed.find((f) => (f.selector.tool === undefined || f.selector.tool === name) && (f.selector.key === undefined || f.selector.key === idempotency_key));
+      const fault = armed.find((f) => (f.selector.tool === undefined || f.selector.tool === name)
+        && (f.selector.operation === undefined || f.selector.operation === a.operation) && (f.selector.run === undefined || f.selector.run === a.run));
       let result: unknown;
       if (r.status === 422) result = toolResult("This idempotency_key was already used with different arguments; nothing was written.", { error: "idempotency_key_reused", mws: { outcome: "not_applied", code: "idempotency_key_reused" } }, true);
       else if (r.status >= 300) result = toolResult(`Not applied: ${r.body?.message}`, { error: r.body?.error, mws: { outcome: "not_applied", code: r.body?.error } }, true);
@@ -326,7 +344,7 @@ export async function startFakeFixture(options: FakeOptions = {}): Promise<FakeF
       if (d.ignoresArgs && typeof idempotency_key === "string") mcpCache.set(idempotency_key, result);
       if (fault && r.status < 300) {
         if (fault.once) armed.splice(armed.indexOf(fault), 1);
-        descriptor.armedFaults = armed.map((x) => x.point);
+        descriptor.armedFaults = armed.map((x) => `${x.id} ${x.point} ${canonicalize(x.selector)}`);
         ledgerAdd({ kind: "fault-fired", principal: a.principal, run: a.run, operation_tag: a.operation, request: null, status: null, execution_id: r.execution ?? null, objects: [], fault: { point: fault.point, selector: fault.selector, fired_on_seq: commitSeq } });
         return { result, drop: true };
       }

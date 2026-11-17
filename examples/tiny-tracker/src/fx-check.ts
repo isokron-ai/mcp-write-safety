@@ -11,6 +11,12 @@
 //   TRACKER_CONTROL_TOKEN  (or _FILE, or DIR/control.token)     for run allocation and the fault probe
 //   FX_CHECK_SECOND_TOKEN  (or _FILE)                           a second principal's backend token, for FX-LOOK-3
 //
+// With more than one principal configured, every evidence read names one
+// (?principal=<id>, docs/INTERFACES.md §1.4). fx-check reads as --principal
+// (or FX_CHECK_PRINCIPAL) when given; otherwise as the principal its probe run
+// was allocated for (the control listener's answer); otherwise as the first
+// principal the evidence namespace lists.
+//
 // Each property gets one answer: held, violated, not checked (with the
 // reason: an endpoint not built, a token not given) or not applicable (the
 // build does not run the feature it needs). By default fx-check is read-only:
@@ -51,13 +57,15 @@ export interface FxCheckOptions {
   probe?: boolean;
   /** How long the fault probe waits for an answer that should never come. */
   dropWaitMs?: number;
+  /** The principal evidence reads name (?principal=), when more than one is configured. */
+  principal?: string;
 }
 
 export interface FxCheckReport {
   fx_check: typeof FX_CHECK_FORMAT;
   target: { backend: string; mcp: string | null; control: string | null };
   build: { build_hash: string; descriptor_hash: string; features: string[]; defects: unknown } | null;
-  probes: { run: string | null; keys: string[]; reset: string | null };
+  probes: { run: string | null; principal: string | null; keys: string[]; reset: string | null };
   findings: Finding[];
 }
 
@@ -114,6 +122,20 @@ function listOf(body: any, ...members: string[]): any[] | undefined {
   if (Array.isArray(body)) return body;
   for (const m of members) if (body && Array.isArray(body[m])) return body[m];
   return undefined;
+}
+
+/**
+ * Whether served canonical bytes hold the same JSON value as `value`. FX-DIG-1 and FX-DIG-2 compare values: whether
+ * the bytes are in RFC 8785 form is FX-DIG-3's property, so a build that serves the right value in another form
+ * violates FX-DIG-3 only.
+ */
+export function sameValue(servedCanonical: unknown, value: unknown): boolean {
+  if (typeof servedCanonical !== "string") return false;
+  try {
+    return canonicalize(JSON.parse(servedCanonical)) === canonicalize(value ?? null);
+  } catch {
+    return false;
+  }
 }
 
 /** build_hash and descriptor_hash recomputed from a served descriptor (schemas/build-descriptor-1, decision 0005). */
@@ -178,12 +200,15 @@ class Mcp {
 
 export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
   const base = o.backend.replace(/\/+$/, "");
-  const ev = (path: string) => request(`${base}${path}`, { headers: { authorization: `Bearer ${o.tokens.evidence}`, accept: "application/json" } });
+  // The principal evidence reads name (§1.4); null until known, and then only sent where more than one is configured.
+  let principal: string | null = o.principal ?? null;
+  const withPrincipal = (path: string) => principal === null || path === "/build" ? path : `${path}${path.includes("?") ? "&" : "?"}principal=${encodeURIComponent(principal)}`;
+  const ev = (path: string) => request(`${base}${withPrincipal(path)}`, { headers: { authorization: `Bearer ${o.tokens.evidence}`, accept: "application/json" } });
   const findings = new Map<FixturePropertyId, Finding>();
   const set = (id: FixturePropertyId, verdict: Verdict, reason: string, evidence?: Record<string, unknown>) => {
     if (!findings.has(id)) findings.set(id, { id, verdict, reason, ...(evidence ? { evidence } : {}) });
   };
-  const report: FxCheckReport = { fx_check: FX_CHECK_FORMAT, target: { backend: base, mcp: o.mcp ?? null, control: o.control ?? null }, build: null, probes: { run: null, keys: [], reset: null }, findings: [] };
+  const report: FxCheckReport = { fx_check: FX_CHECK_FORMAT, target: { backend: base, mcp: o.mcp ?? null, control: o.control ?? null }, build: null, probes: { run: null, principal: null, keys: [], reset: null }, findings: [] };
 
   // ---- the build descriptor ----
   const build = await ev("/build");
@@ -227,8 +252,19 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
   if (writes && control) {
     const r = await ctl("POST", "/_fixture/runs", { label: "fx-check" });
     if (r.status === 201 && typeof r.body?.run_id === "string") run = r.body.run_id;
+    // The run belongs to the principal the control listener allocated it for (the backend token's, by default).
+    if (principal === null && r.status === 201 && typeof r.body?.principal === "string") principal = r.body.principal;
   }
   report.probes.run = run;
+  if (principal === null) {
+    // Only needed when more than one principal is configured: the namespace then answers 400 principal_required.
+    const asked = await ev("/executions/X-0");
+    if (asked.status === 400 && asked.body?.error === "principal_required") {
+      const listed = Array.isArray(asked.body.principals) ? asked.body.principals.filter((p: unknown) => typeof p === "string") : [];
+      if (listed.length) principal = listed[0];
+    }
+  }
+  report.probes.principal = principal;
   const post = (key: string | null, body: unknown, token = o.tokens.backend!) => request(`${base}/tickets`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json", [HEADERS.operation]: opTag(), ...(run ? { [HEADERS.run]: run } : {}), ...(key ? { "idempotency-key": key } : {}) },
@@ -287,7 +323,6 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
     } else if (!x1) {
       for (const id of digIds) set(id, "violated", `no execution record names the probe create (key ${k1}) in the ledger or in /executions`);
     } else {
-      const committed = canonicalize(created.body);
       if (dig1) {
         const ticketId = created.body?.ticket?.id;
         const patch = ticketId ? await request(`${base}/tickets/${encodeURIComponent(ticketId)}`, {
@@ -296,10 +331,11 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
         }) : undefined;
         const later = await execution(x1.id);
         const problems: string[] = [];
-        if (x1.result?.canonical !== committed) problems.push("the served canonical bytes are not the committed response body");
+        if (!sameValue(x1.result?.canonical, created.body)) problems.push("the served canonical bytes are not the committed response body");
         if (!patch || patch.status !== 200) problems.push(`the probe change answered ${patch?.status ?? "nothing"}`);
         else if (!later) problems.push(`GET /executions/${x1.id} did not answer after the change`);
         else if (later.result?.digest !== x1.result?.digest || later.result?.canonical !== x1.result?.canonical) problems.push("the execution record's digest changed when the object changed");
+        else if (!sameValue(later.result?.canonical, created.body)) problems.push("the execution record no longer serves the committed response body");
         set("FX-DIG-1", problems.length ? "violated" : "held", problems.length ? problems.join("; ") : `${x1.id} serves the committed response body, and its digest stayed the same after the ticket changed`, { execution: x1.id, key: k1 });
       }
       if (dig2) {
@@ -307,7 +343,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
         const problems: string[] = [];
         if (replay.status !== created.status) problems.push(`the replay answered ${replay.status}, the first call ${created.status}`);
         if (replay.headers.get("idempotent-replayed") !== "true") problems.push("the replay carries no Idempotent-Replayed: true");
-        if (canonicalize(replay.body ?? null) !== x1.result?.canonical) problems.push("the replay's body is not the execution record's canonical bytes");
+        if (!sameValue(x1.result?.canonical, replay.body)) problems.push("the replay's body is not the execution record's result");
         const l = await ledger();
         const replayEntry = l?.filter((e) => e.kind === "replay" && e.request?.key === k1).pop();
         if (l && !replayEntry) problems.push("the ledger has no replay entry for the key");
@@ -369,20 +405,26 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
   if (lookNeeds("FX-LOOK-2")) {
     const before = { executions: await executionCount(), tickets: listOf((await ev("/export")).body, "tickets")?.length };
     const looked: string[] = [];
-    for (let i = 0; i < 2; i++) {
-      await ev(`/operations/${encodeURIComponent(k1!)}`); looked.push("evidence");
-      await backendGet(`/operations/${encodeURIComponent(k1!)}`); looked.push("backend");
+    // A hit (k1) and a miss (a key never used): a lookup must not write in either case.
+    const miss = `fxc-${tag}-never-written`;
+    for (const key of [k1!, miss]) {
+      for (let i = 0; i < 2; i++) {
+        await ev(`/operations/${encodeURIComponent(key)}`); looked.push("evidence");
+        await backendGet(`/operations/${encodeURIComponent(key)}`); looked.push("backend");
+      }
     }
     if (o.mcp) {
       const mcp = new Mcp(o.mcp);
       await mcp.initialize();
-      if ((await mcp.tools()).includes("get_operation")) for (let i = 0; i < 2; i++) { await mcp.call("get_operation", { idempotency_key: k1 }); looked.push("get_operation"); }
+      if ((await mcp.tools()).includes("get_operation")) {
+        for (const key of [k1!, miss]) for (let i = 0; i < 2; i++) { await mcp.call("get_operation", { idempotency_key: key }); looked.push("get_operation"); }
+      }
     }
     const after = { executions: await executionCount(), tickets: listOf((await ev("/export")).body, "tickets")?.length };
     if (before.executions === undefined) set("FX-LOOK-2", "not checked", "neither /executions nor /ledger answers, so executions cannot be counted");
     else {
       const same = before.executions === after.executions && before.tickets === after.tickets;
-      set("FX-LOOK-2", same ? "held" : "violated", same ? `${looked.length} lookups (${[...new Set(looked)].join(", ")}) made no execution and no object`
+      set("FX-LOOK-2", same ? "held" : "violated", same ? `${looked.length} lookups (${[...new Set(looked)].join(", ")}; of a key written and of a key never written) made no execution and no object`
         : `lookups changed the record: executions ${before.executions} to ${after.executions}, tickets ${before.tickets} to ${after.tickets}`, { before, after, lookups: looked.length });
     }
   }
@@ -409,17 +451,20 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
       const k3 = newKey();
       const k4 = newKey();
       const point = "mcp/after-backend-reply/drop";
-      const arm = await ctl("POST", "/_fixture/faults", { point, selector: { tool: "create_ticket", key: k3, once: true, ...(run ? { run } : {}) } });
+      // The dropped call has its own operation tag, and the fault is selected by it (fixture-api/1 has no key
+      // selector: where the key travels depends on the code under test). Its effect is counted by that tag too, so
+      // an MCP-layer key defect is not read as a fault defect.
+      const droppedTag = opTag();
+      const arm = await ctl("POST", "/_fixture/faults", { point, selector: { tool: "create_ticket", operation: droppedTag, once: true, ...(run ? { run } : {}) } });
       if (arm.status === 501 || arm.status === 404) set("FX-FLT-1", "not checked", `POST /_fixture/faults answered ${arm.status}`);
       else if (arm.status !== 200 && arm.status !== 201) set("FX-FLT-1", "violated", `arming ${point} answered ${arm.status}`);
       else {
         const problems: string[] = [];
         const armedNow = await ev("/build");
-        if (wants("FX-BLD-1") && !(armedNow.body?.faults?.armed ?? []).includes(point)) bld.push(`the descriptor does not name the armed fault ${point}`);
+        // The descriptor names each armed fault as "<id> <point> <selector>".
+        if (wants("FX-BLD-1") && !(armedNow.body?.faults?.armed ?? []).some((a: unknown) => typeof a === "string" && (a === point || a.split(" ").includes(point)))) bld.push(`the descriptor does not name the armed fault ${point}`);
         const runMeta: Record<string, string> = run ? { [META_KEYS.run]: run } : {};
         const other = await mcp.call("create_ticket", { title: `fx-check probe ${k4}`, idempotency_key: k4 }, { [META_KEYS.operation]: opTag(), ...runMeta }, 10000);
-        // The dropped call has its own operation tag: its effect is counted by tag, so an MCP-layer key defect is not read as a fault defect.
-        const droppedTag = opTag();
         const meta: Record<string, string> = { [META_KEYS.operation]: droppedTag, ...runMeta };
         if (!other.message?.result) problems.push(`a call outside the selector got no answer (${other.error ?? other.status})`);
         const wait = o.dropWaitMs ?? 3000;
@@ -429,10 +474,10 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
         const retry = await mcp.call("create_ticket", { title: `fx-check probe ${k3}`, idempotency_key: k3 }, { [META_KEYS.operation]: opTag(), ...runMeta }, 10000);
         if (!retry.message?.result) problems.push("the repeat after a once fault got no answer");
         const l = (await ledger()) ?? [];
-        const armedEntry = l.find((e) => e.kind === "fault-armed" && e.fault?.point === point && e.fault?.selector?.key === k3);
+        const armedEntry = l.find((e) => e.kind === "fault-armed" && e.fault?.point === point && e.fault?.selector?.operation === droppedTag);
         const fired = l.filter((e) => e.kind === "fault-fired" && e.fault?.point === point);
         if (!armedEntry) problems.push("the ledger has no fault-armed entry for the arming");
-        const firedHere = fired.filter((e) => e.fault?.selector?.key === k3);
+        const firedHere = fired.filter((e) => e.fault?.selector?.operation === droppedTag);
         if (firedHere.length !== 1) problems.push(`${firedHere.length} fault-fired entries for the armed selector, not 1`);
         else if (typeof firedHere[0].fault.fired_on_seq !== "number") problems.push("the fault-fired entry names no sequence number it fired on");
         if (execs.length !== 1) problems.push(`${execs.length} executions for the dropped call's operation tag, not 1 (the backend commits before the drop)`);
@@ -496,7 +541,7 @@ export function formatReport(r: FxCheckReport): string {
   return `${lines.join("\n")}\n`;
 }
 
-const USAGE = `usage: fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--probe] [--json]
+const USAGE = `usage: fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--principal ID] [--probe] [--json]
 Read-only by default; --probe writes probe tickets in a run of its own and resets it afterwards.
 Tokens from the environment or a file: TRACKER_EVIDENCE_TOKEN (needed), TRACKER_BACKEND_TOKEN, TRACKER_CONTROL_TOKEN,
 FX_CHECK_SECOND_TOKEN (each also as NAME_FILE). Exit 0: nothing violated; 1: a property violated; 2: unusable setup.`;
@@ -505,7 +550,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   let values: Record<string, string | boolean | undefined>;
   try {
     ({ values } = parseArgs({ args: argv, options: {
-      backend: { type: "string" }, mcp: { type: "string" }, control: { type: "string" }, "token-dir": { type: "string" },
+      backend: { type: "string" }, mcp: { type: "string" }, control: { type: "string" }, "token-dir": { type: "string" }, principal: { type: "string" },
       probe: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean" },
     } }));
   } catch (e) {
@@ -526,7 +571,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
   if (!tokens.evidence) { err.write("fx-check: no evidence token (TRACKER_EVIDENCE_TOKEN, TRACKER_EVIDENCE_TOKEN_FILE or --token-dir)\n"); return 2; }
   try {
     const report = await fxCheck({ backend: values.backend, mcp: values.mcp as string | undefined, control: values.control as string | undefined,
-      tokens: { ...tokens, evidence: tokens.evidence }, probe: values.probe === true });
+      tokens: { ...tokens, evidence: tokens.evidence }, probe: values.probe === true,
+      ...((values.principal ?? env.FX_CHECK_PRINCIPAL) ? { principal: (values.principal ?? env.FX_CHECK_PRINCIPAL) as string } : {}) });
     out.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
     return report.findings.some((f) => f.verdict === "violated") ? 1 : 0;
   } catch (e) {

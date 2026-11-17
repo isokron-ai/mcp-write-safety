@@ -8,7 +8,7 @@ Our adapter for the shared lost-response test contract lives in `harness/adapter
 
 ```sh
 umask 077; mkdir -p ~/.tt-tokens
-TRACKER_BACKEND_TOKEN=... node dist/src/cli.js all --features evidence,execution-records,lookup,ledger,faults \
+TRACKER_BACKEND_TOKEN=... node dist/src/cli.js all --features evidence,strict-input,ledger,faults \
     --fixture-control --token-dir ~/.tt-tokens | head -1 > state.json &
 python3 -I harness/adapter_config.py --state state.json > config.tiny-tracker.json
 # in a checkout of the contract at the pinned commit, with harness/adapters/tiny_tracker.py copied into fixtures/harness/adapters/:
@@ -18,7 +18,7 @@ python3 -I harness/selfcheck.py --config config.tiny-tracker.json --driver /path
 ```
 
 - **The counter** is the execution ledger: one `execution` entry per committed write, attributed by the operation tag the adapter sends in request `_meta` (the driver's session identity), whether or not the build forwarded the key.
-- **The lost response** is server-side: the adapter arms `mcp/after-backend-reply/drop` for exactly the tool and key, once, on the control listener. Without a control listener it discards the answer client-side, as 0.1.0 runs did.
+- **The lost response** is server-side: the adapter arms `mcp/after-backend-reply/drop` for exactly the tool, the session's operation tag and the adapter's run, once, on the control listener (the control API selects calls by tag, never by key). Without a control listener it discards the answer client-side, as 0.1.0 runs did.
 - **Digests.** A record serves exactly one digest, `result_digest`. The adapter recomputes it from the served canonical bytes with the domain tag (SHA-256 over the domain, a line feed and the bytes; decision 0002). A bare SHA-256 of the bytes does not match, by design.
 - **Recovery by key alone** goes through `get_operation` in a fresh MCP session with no run tag. The A5 delayed leg reads `GET /operations/<K>`.
 - **Self-attested.** The contract driver at the pinned commit takes the committed digest as the recovered digest when an attempt says `found`, without comparing them. Until it compares, the A3 key-only result rests on our adapter's classification, and we label it self-attested. The adapter reports the digest it recovered; `harness/selfcheck.py` compares it with the committed digest.
@@ -35,6 +35,7 @@ TRACKER_EVIDENCE_TOKEN_FILE=~/.tt-tokens/evidence.token TRACKER_BACKEND_TOKEN=..
 - Each property gets one answer: `held`, `violated`, `not checked` (with the reason) or `not applicable` (the build does not run the feature it needs).
 - It is read-only by default: it writes nothing and checks only what is already recorded, so the properties that need a write are `not checked`. With `--probe` it writes a few tickets titled `fx-check probe ...` under its own keys, in a run of its own, and resets that run at the end.
 - FX-LOOK-3 needs a second principal's token in `FX_CHECK_SECOND_TOKEN`.
+- With more than one principal configured, evidence reads name one (`?principal=`): `--principal` (or `FX_CHECK_PRINCIPAL`), else the principal of the probe run, else the first one the namespace lists. The adapter does the same (config key `principal`).
 - Exit codes: 0 when nothing is violated, 1 when a property is violated, 2 when the setup cannot be used.
 
 ## Known answers

@@ -8,9 +8,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { startFakeFixture, type FakeFixture, type FakeOptions } from "./support/fake-fixture.js";
-import { runCli } from "./support/cli-run.js";
 import { py } from "./support/python.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -140,25 +139,41 @@ describe("contract adapter (harness/)", { skip: needPython }, () => {
     });
   });
 
-  it("today's build (evidence only): the adapter falls back and reports what it could not do", async () => {
-    const env = { TRACKER_BACKEND_TOKEN: "backend-token-harness-000000000000", TRACKER_EVIDENCE_TOKEN: "evidence-token-harness-00000000000", TRACKER_CONTROL_TOKEN: "control-token-harness-000000000000" };
+  it("the real 0.2.0 correct build: ledger counter, server-side drop, one digest, K-only recovery (the double's shapes hold)", async () => {
+    const { startBuild } = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);
+    const run = await startBuild(["--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults"]);
     let out: any;
-    const r = await runCli(["all", "--features", "evidence", "--fixture-control"], env, async (state) => {
-      out = await selfcheck(await configFor(state, env), env);
-    });
-    assert.equal(r.code, 0, r.stderr);
-    assert.equal(out.initialize.get_operation_listed, false);
-    assert.equal(out.A1.attempt1.fault.fallback_used, true, "arming answers 501, so the drop is client-side");
-    assert.equal(out.A1.counter, "title-prefix (0.1.0 fallback)");
-    assert.equal(out.A1.count_final, 1);
-    assert.equal(out.A3_k_only_leg.cross_check.found_attempts, 0);
+    try {
+      const env = { ...run.env, TRACKER_EVIDENCE_TOKEN: run.tokens.evidence, TRACKER_CONTROL_TOKEN: run.tokens.control, TRACKER_BACKEND_TOKEN: run.tokens.backend };
+      const config = await configFor(run.state, env);
+      config.adapter_config.drop_timeout_s = 2;
+      out = await selfcheck(config, env);
+    } finally {
+      await run.stop();
+    }
+    assert.equal(out.initialize.get_operation_listed, true);
+    assert.equal(out.initialize.evidence_principal, "p-default", "two principals: the evidence reads name the run's principal");
+    for (const a of [out.A1, out.A2]) {
+      assert.equal(a.counter, "ledger");
+      assert.equal(a.attempt1.fault.mode, "server", "the drop fired server-side");
+      assert.equal(a.count_after_attempt1, 1);
+      assert.equal(a.count_final, 1);
+    }
+    assert.equal(out.A1.retry_replayed, true);
+    assert.equal(out.A2.refusal_records, 1);
+    assert.deepEqual(out.A3_run_id_leg.digest_keys, ["result_digest"]);
+    assert.equal(out.A3_run_id_leg.recomputation, "matched");
+    assert.equal(out.A3_k_only_leg.attempts[0].response_class, "found");
+    assert.equal(out.A3_k_only_leg.cross_check.digest_equal, true);
+    assert.equal(out.A5_k_lookup_now.http_status, 200);
   });
 
   it("the fake's records validate against the frozen schemas (what streams A and B must serve)", { skip: needJsonschema }, async () => {
     assert.ok(jsonschema, "TT_GATE=1 needs python3 with jsonschema and referencing");
     await withFake({}, async (f, env) => {
       await selfcheck(await configFor(f.stateLine, env), env);
-      const get = async (path: string) => (await fetch(`${f.backend}${path}`, { headers: { authorization: `Bearer ${f.tokens.evidence}` } })).json() as any;
+      // Two principals are configured, so every evidence read names one (INTERFACES §1.4).
+      const get = async (path: string) => (await fetch(`${f.backend}${path}${path === "/build" ? "" : `${path.includes("?") ? "&" : "?"}principal=p-default`}`, { headers: { authorization: `Bearer ${f.tokens.evidence}` } })).json() as any;
       const check = join(ROOT, "verify", "python", "check_schemas.py");
       const items: Array<[string, unknown]> = [["build-descriptor", await get("/build")]];
       for (const e of (await get("/ledger")).entries) items.push(["ledger-entry", e]);

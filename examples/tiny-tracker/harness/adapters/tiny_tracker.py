@@ -47,7 +47,9 @@ session (that needs the backend token and K in the title).
 Fault point: by default the lost response is server-side, where the
 contract's common setup puts it. Before attempt 1 the adapter arms
 mcp/after-backend-reply/drop on the control listener for exactly this
-tool and K, once; the backend commits and answers, the MCP server never
+tool, this session's operation tag and the adapter's run, once (the
+fixture's control API selects calls by their tags, not by key: where the
+key travels depends on the code under test); the backend commits and answers, the MCP server never
 answers, and the caller gives up after drop_timeout_s. If the fault does
 not fire (the call is answered), the answer is read and discarded
 client-side and the attempt records that the fallback was used. With
@@ -117,6 +119,11 @@ Adapter config keys (the config's adapter_config object):
                        2025-11-25).
   operation_path       Evidence path of a key's record (default
                        /operations/{K}).
+  principal            The principal the evidence reads name
+                       (?principal=<id>), needed when more than one is
+                       configured. Default: the principal the adapter's run
+                       was allocated for; without a control listener, the
+                       first principal the evidence namespace lists.
   expected_build_hash  Optional: the build_hash the run must be against;
                        initialize records whether GET /build matches.
   build                Informational: what was started, recorded with the
@@ -543,6 +550,13 @@ class Adapter(SystemAdapter):
         self.operation_path = c.get("operation_path", "/operations/{K}")
         self.client = McpClient(self.endpoint, self.protocol_version)
         self.run_id = None
+        self.principal = c.get("principal")
+
+    def _ev(self, path):
+        """GET on the evidence namespace, naming the principal when one is set (INTERFACES §1.4)."""
+        if self.principal:
+            path += ("&" if "?" in path else "?") + "principal=" + quote(self.principal, safe="")
+        return self.evidence.call("GET", path)
 
     def _args(self, session_id, operation_key, mismatched):
         template = dict(self.config["args_template"])
@@ -570,6 +584,14 @@ class Adapter(SystemAdapter):
             evidence["run_allocation"] = {k: v for k, v in run.items() if k != "body_text"}
             if run.get("http_status") == 201 and isinstance(run.get("body_json"), dict):
                 self.run_id = run["body_json"].get("run_id")
+                if not self.principal and isinstance(run["body_json"].get("principal"), str):
+                    self.principal = run["body_json"]["principal"]
+        if not self.principal:
+            probe, _ = self.evidence.call("GET", "/executions/X-0")
+            body = probe.get("body_json") if isinstance(probe.get("body_json"), dict) else {}
+            if probe.get("http_status") == 400 and body.get("error") == "principal_required" and body.get("principals"):
+                self.principal = body["principals"][0]
+        evidence["evidence_principal"] = self.principal
         init_body = evidence["initialize"]["body"] or {}
         result = init_body.get("result") or {}
         tools = ((body or {}).get("result") or {}).get("tools") or []
@@ -598,14 +620,15 @@ class Adapter(SystemAdapter):
             "expected_build_hash": expected,
             "build_matches": None if not expected else (descriptor or {}).get("build_hash") == expected,
             "run_id": self.run_id,
+            "evidence_principal": self.principal,
             "fault_mode": self.fault_mode,
             "lrt_a3_k_only": SELF_ATTESTED_NOTE,
             "build": self.config.get("build"),
         }
         return evidence, summary
 
-    def _arm_drop(self, operation_key):
-        selector = {"tool": self.tool_name, "key": operation_key, "once": True}
+    def _arm_drop(self, session_id):
+        selector = {"tool": self.tool_name, "operation": session_id, "once": True}
         if self.run_id:
             selector["run"] = self.run_id
         armed, _ = self.control.call("POST", "/_fixture/faults",
@@ -624,7 +647,7 @@ class Adapter(SystemAdapter):
             fault = None
             timeout = 60
             if self.fault_mode == "server" and self.control:
-                fault = self._arm_drop(operation_key)
+                fault = self._arm_drop(session_id)
                 if fault["armed"]:
                     timeout = self.drop_timeout
             payload, meta, body = self.client.request("tools/call", params, timeout=timeout)
@@ -654,7 +677,7 @@ class Adapter(SystemAdapter):
 
     # -- the counter ------------------------------------------------------
     def _ledger_count(self, session_id, operation_key):
-        served, _ = self.evidence.call("GET", "/ledger")
+        served, _ = self._ev("/ledger")
         entries = ledger_entries(served.get("body_json")) if served.get("http_status") == 200 else None
         if entries is None:
             return served, None
@@ -732,7 +755,7 @@ class Adapter(SystemAdapter):
     def fetch_record(self, record_id):
         rid = str(record_id)
         if EXECUTION_ID.match(rid):
-            served, _ = self.evidence.call("GET", "/executions/" + quote(rid, safe=""))
+            served, _ = self._ev("/executions/" + quote(rid, safe=""))
             record = served.get("body_json") if served.get("http_status") == 200 else None
             record = find_record(record, "execution-record/1") if record is not None else None
             result = (record or {}).get("result")
@@ -746,7 +769,7 @@ class Adapter(SystemAdapter):
                     "body_text": served["body_text"], "record_json": served.get("body_json"),
                     "digests": digests, "recomputation": recomp}
         path = self.operation_path.replace("{K}", quote(rid, safe=""))
-        served, _ = self.evidence.call("GET", path)
+        served, _ = self._ev(path)
         op = find_record(served.get("body_json"), "operation-record/1") if served.get("http_status") == 200 else None
         digests = {"result_digest": op["result_digest"]} if op and op.get("result_digest") else {}
         if not op:
@@ -754,7 +777,7 @@ class Adapter(SystemAdapter):
         elif not op.get("execution_id"):
             recomp = {"status": "not_computable", "reason": "the operation record names no execution record (state %s)" % op.get("state")}
         else:
-            ex, _ = self.evidence.call("GET", "/executions/" + quote(op["execution_id"], safe=""))
+            ex, _ = self._ev("/executions/" + quote(op["execution_id"], safe=""))
             exrec = find_record(ex.get("body_json"), "execution-record/1") if ex.get("http_status") == 200 else None
             inner = recompute_served((exrec or {}).get("result"))
             equal = inner.get("status") == "matched" and inner.get("served_digest") == op.get("result_digest")
