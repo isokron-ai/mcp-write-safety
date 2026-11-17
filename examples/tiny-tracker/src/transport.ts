@@ -76,10 +76,10 @@ export function loadMcpToken(env: Record<string, string | undefined>, platform: 
  *   - container mode for `backend` (its listener is loopback-only inside the container: run `all` there);
  *   - container mode for an MCP listener without a bearer token (X1);
  *   - an MCP token over stdio, where there is no listener to protect;
- *   - an MCP token equal to another token, or one that appears on the command line.
+ *   - an MCP token equal to another token (a principal's too, given in otherTokens), or one on the command line.
  */
 export function resolveTransport(layout: TransportLayout, env: Record<string, string | undefined>, argv: readonly string[] = [],
-  platform: string = process.platform): McpListenOptions | undefined {
+  platform: string = process.platform, otherTokens: Record<string, string | undefined> = {}): McpListenOptions | undefined {
   const container = containerMode(env);
   const token = loadMcpToken(env, platform);
   if (container && layout === "backend") {
@@ -94,7 +94,8 @@ export function resolveTransport(layout: TransportLayout, env: Record<string, st
   }
   if (token !== undefined) {
     try {
-      checkDistinct({ mcp: token, backend: env.TRACKER_BACKEND_TOKEN, evidence: env.TRACKER_EVIDENCE_TOKEN, control: env.TRACKER_CONTROL_TOKEN });
+      // otherTokens: the principals' tokens from TRACKER_BACKEND_TOKENS_FILE (the command line passes them).
+      checkDistinct({ ...otherTokens, mcp: token, backend: env.TRACKER_BACKEND_TOKEN, evidence: env.TRACKER_EVIDENCE_TOKEN, control: env.TRACKER_CONTROL_TOKEN });
       checkArgv(argv, { mcp: token });
     } catch (e) {
       if (e instanceof TokenError) throw new TransportError(e.message);

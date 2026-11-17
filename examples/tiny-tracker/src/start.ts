@@ -24,7 +24,7 @@ export interface StartServerOptions {
   features?: readonly string[];
   /** What the fixture layer adds (attribution, the build descriptor mirror). */
   extras?: ServerExtras;
-  /** The backend's key retention in ms (feature retention; --key-retention), stated in the tools. Default: 7 days. */
+  /** The backend's key retention in ms (feature retention; --key-retention), stated in the tools and (0.4.0) the instructions. Default: 7 days. */
   retentionMs?: number;
   /**
    * Where the MCP listener accepts connections and whether /mcp needs a bearer token. Default: from `env`

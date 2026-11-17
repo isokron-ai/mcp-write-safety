@@ -213,13 +213,13 @@ export const COMPAT_RULES: readonly CompatRule[] = [
   },
   // ---- stream F (CMP-70 to CMP-79) ----
   {
+    // 0.4.0 integration: narrowed. stdio runs through the same start as `all`, so fixture-layer features, the evidence
+    // listener and --fixture-control work over stdio. What is left: --supervise runs the MCP layer as a separate child
+    // process, which cannot hold the client's stdin and stdout across a restart.
     id: "CMP-70", post01: false,
-    check: (c) => {
-      if (c.transport !== "stdio") return undefined;
-      const fixture = c.features.filter((f) => featureInfo(f)?.layer === "fixture");
-      if (fixture.length === 0 && !c.fixtureControl) return undefined;
-      return `fixture-layer features and --fixture-control run over Streamable HTTP only in this version (stdio named: ${[...fixture, ...(c.fixtureControl ? ["--fixture-control"] : [])].join(", ")})`;
-    },
+    check: (c) => c.transport === "stdio" && c.supervise
+      ? "--supervise runs over Streamable HTTP only: its MCP child is a separate process that a restart replaces, and the client's stdin and stdout cannot move with it"
+      : undefined,
   },
   // ---- end stream F ----
 ];
