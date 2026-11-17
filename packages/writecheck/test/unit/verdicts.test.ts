@@ -138,6 +138,38 @@ test('barrier pairs: a pair whose answer shows a conflict (declared patterns.con
   assert.match(dflt.reason, /needs reading/);
 });
 
+test('barrier pairs, mixed runs (review): one silent loss among shown conflicts stays violated; a structured conflict: true is a signal (MWS-CONC-3)', () => {
+  const res = M().resources[0]!;
+  const exp = pairsExperiment(res, 40, 'separate');
+  const half = (text: string, data: unknown = null) => ({ ok: true, isError: false, text, data, tool: 'ticket_update', shape: null });
+  const run = (texts: (string | Record<string, unknown>)[]) => {
+    const reps = texts.map((t, i) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half('modified 1'), b: typeof t === 'string' ? half(t) : half('ok', t) }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } }));
+    const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: {}, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps } }, [], null);
+    out.arms['validity']!.counts = { valid: 1, both_kept: 1 };
+    return pairsVerdicts(out, res, false)[0]!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const r = run([...Array<string>(39).fill('matched 0'), 'ok']);
+    assert.equal(r.verdict, 'violated');
+    assert.equal(r.numbers['lost'], 1);
+    assert.equal(r.numbers['conflict_shown'], 39);
+    assert.equal(r.steps[0], 'test.r39.race', 'the witness is the counted loss, not a shown conflict');
+    assert.match(r.reason, /1 of 40 pairs/);
+  } finally {
+    usePatterns(null);
+  }
+  const d = run([...Array<string>(39).fill('nothing was written'), 'ok']);
+  assert.equal(d.verdict, 'violated');
+  assert.equal(d.numbers['lost'], 1);
+  assert.equal(d.numbers['needs_reading'], 39);
+  assert.ok(d.notes.some((n) => /39 further pair\(s\).*built-in words/.test(n)));
+  const s = run(Array.from({ length: 40 }, () => ({ conflict: true })));
+  assert.equal(s.verdict, 'not observed', 'a structured conflict: true shows the conflict without any pattern');
+  assert.equal(s.numbers['conflict_shown'], 40);
+  assert.equal(s.numbers['lost'], 0);
+});
+
 test('held request: a trial whose answer shows a conflict (declared patterns.conflict) is not "both reported success" (MWS-CONC-3)', () => {
   const res = M().resources[0]!;
   // Raw-statement tool: the held writer's version precondition matched 0 rows on release; the answer has no isError.
