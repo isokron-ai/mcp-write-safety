@@ -7,7 +7,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { fxCheck, statedRetentionMs, type FxCheckReport } from "../src/fx-check.js";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { DATA_DIR_LEFTOVER_PREFIXES, fxCheck, isDataDirFile, statedRetentionMs, type FxCheckReport } from "../src/fx-check.js";
 
 const GENERATE = pathToFileURL(fileURLToPath(new URL("../../expected/generate.mjs", import.meta.url))).href;
 const L3 = "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock";
@@ -90,6 +92,38 @@ describe("fx-check 0.4.0: durability across a restart (FX-DUR-1) and one journal
       }
     });
   }
+});
+
+// Note 26 item 2: the pid lock's and the lease's leftovers can live through a whole run; they are not key records.
+describe("fx-check 0.4.0: FX-DUR-2 ignores the lock and lease leftovers", () => {
+  it("knows every leftover name the journal makes (src/backend/journal.ts), and nothing else beside the format's files", () => {
+    const source = readFileSync(fileURLToPath(new URL("../../src/backend/journal.ts", import.meta.url)), "utf8");
+    // The names a lock or lease path gets when it is made, moved aside or released: `${path}.new-…`, `${held.path}.released-…`.
+    const suffixes = new Set([...source.matchAll(/`\$\{(?:path|held\.path|LOCK_FILE|LEASE_DIR)\}(\.[a-z]+-)/g)].map((m) => m[1]));
+    assert.ok(suffixes.size >= 3, [...suffixes].join(" "));
+    for (const suffix of suffixes) {
+      assert.ok(DATA_DIR_LEFTOVER_PREFIXES.some((p) => p.endsWith(suffix)), `${suffix} is a leftover fx-check does not know`);
+    }
+    for (const name of ["lock.new-12-a1b2c3", "lock.stale-12-a1b2c3", "lock.d.new-12-a1b2c3", "lock.d.stale-12-a1b2c3", "lock.d.released-12-a1b2c3",
+      "journal.jsonl", "lock", "lock.d", "tiny-tracker.data"]) assert.equal(isDataDirFile(name), true, name);
+    for (const name of ["keys.jsonl", "after-effect.jsonl", "lock.old", "journal.jsonl.bak", "lockfile"]) assert.equal(isDataDirFile(name), false, name);
+  });
+
+  it("a correct durable build with leftovers in its data dir: FX-DUR-2 held; another file beside them: violated", async () => {
+    const run = await start(["--features", `${L3.replace(",clock", "")},durable`, "--data-dir", "{DATA_DIR}"]);
+    try {
+      for (const d of ["lock.d.stale-999999-a1b2c3", "lock.d.released-999999-a1b2c3", "lock.d.new-999999-a1b2c3"]) mkdirSync(join(run.dataDir, d), { mode: 0o700 });
+      for (const f of ["lock.new-999999-a1b2c3", "lock.stale-999999-a1b2c3"]) writeFileSync(join(run.dataDir, f), "999999\n", { mode: 0o600 });
+      const held = await check(run, { dataDir: run.dataDir });
+      assert.equal(verdict(held, "FX-DUR-2").verdict, "held", verdict(held, "FX-DUR-2").reason);
+      writeFileSync(join(run.dataDir, "keys.jsonl"), "", { mode: 0o600 });
+      const violated = await check(run, { dataDir: run.dataDir });
+      assert.equal(verdict(violated, "FX-DUR-2").verdict, "violated");
+      assert.match(verdict(violated, "FX-DUR-2").reason, /the data dir holds keys\.jsonl beside the journal/);
+    } finally {
+      await run.stop();
+    }
+  });
 });
 
 describe("fx-check 0.4.0: durable with the fixture clock (the journal keeps its offset, note 19 item 7)", () => {

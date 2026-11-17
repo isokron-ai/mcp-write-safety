@@ -113,6 +113,19 @@ const CHECKED = new Set<FixturePropertyId>(["FX-BLD-1", "FX-DIG-1", "FX-DIG-2", 
 export const DATA_DIR_FILES = ["tiny-tracker.data", "lock", "lock.d", "journal.jsonl"] as const;
 
 /**
+ * Name prefixes of the pid lock's and the lease's own leftovers (src/backend/journal.ts): a temp made before it is
+ * linked or renamed into place (`.new-`), a lock or lease moved aside to judge or take it over (`.stale-`), a lease
+ * moved aside on release (`.released-`). A crash or a lost race can leave one for a whole run; it holds no key record,
+ * so FX-DUR-2 does not count it (note 26 item 2).
+ */
+export const DATA_DIR_LEFTOVER_PREFIXES = ["lock.new-", "lock.stale-", "lock.d.new-", "lock.d.stale-", "lock.d.released-"] as const;
+
+/** Whether a data-dir entry is one of journal-format/1's files or a lock or lease leftover. */
+export function isDataDirFile(name: string): boolean {
+  return (DATA_DIR_FILES as readonly string[]).includes(name) || DATA_DIR_LEFTOVER_PREFIXES.some((p) => name.startsWith(p));
+}
+
+/**
  * What --durability-plant writes and --durability-verify reads (FX-DUR-1): one keyed create made before a restart.
  * No token is kept in it.
  */
@@ -627,7 +640,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
       }
       if (wants("FX-DUR-2")) {
         const problems: string[] = [];
-        const extra = names.filter((n) => !(DATA_DIR_FILES as readonly string[]).includes(n));
+        const extra = names.filter((n) => !isDataDirFile(n));
         if (extra.length) problems.push(`the data dir holds ${extra.join(", ")} beside the journal: key records kept in another file are written apart from their effect`);
         const keyed = lines.filter((l) => l?.line === "commit" && l?.tx?.request?.key);
         // A key record is rebuilt from its commit line: the request's key, the status, the committed body and headers.
