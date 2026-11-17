@@ -70,6 +70,12 @@ async function main(): Promise<void> {
     },
   });
   const mode = positionals[0];
+  // ---- stream F: the stdio transport (src/stdio.ts) ----
+  if (mode === "stdio") {
+    const { runStdioCli } = await import("./stdio.js");
+    return runStdioCli(values, positionals);
+  }
+  // ---- end stream F ----
   if (values.help || !["all", "backend", "server"].includes(mode ?? "")) {
     process.stdout.write(`${USAGE}\n`);
     process.exit(values.help ? 0 : 2);

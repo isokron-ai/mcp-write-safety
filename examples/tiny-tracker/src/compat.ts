@@ -30,6 +30,8 @@ export interface Combination {
   supervise?: boolean;
   /** --key-expiry or TRACKER_KEY_EXPIRY as given (0.3.0, feature retention): refuse (the default) or forget. */
   keyExpiry?: string;
+  /** How the MCP layer is reached (stream F, 0.4.0). Absent: Streamable HTTP. */
+  transport?: "http" | "stdio";
 }
 
 /**
@@ -209,6 +211,17 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     check: (c) => has(c.features, "durable") && has(c.features, "clock")
       ? "the durable feature does not run with the fixture clock: the journal does not keep the clock offset, so after a restart record time would move back and expired keys would read as live again (run durable on the wall clock: drop clock)" : undefined,
   },
+  // ---- stream F (CMP-70 to CMP-79) ----
+  {
+    id: "CMP-70", post01: false,
+    check: (c) => {
+      if (c.transport !== "stdio") return undefined;
+      const fixture = c.features.filter((f) => featureInfo(f)?.layer === "fixture");
+      if (fixture.length === 0 && !c.fixtureControl) return undefined;
+      return `fixture-layer features and --fixture-control run over Streamable HTTP only in this version (stdio named: ${[...fixture, ...(c.fixtureControl ? ["--fixture-control"] : [])].join(", ")})`;
+    },
+  },
+  // ---- end stream F ----
 ];
 
 /** The rules a combination breaks, as messages. Empty: it may start. */
