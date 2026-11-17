@@ -204,9 +204,10 @@ export const lockHooks: { beforeTakeover?: (path: string) => void; afterAside?: 
  * renamed aside (atomic: of several starters only one moves a given file). Only when the moved file is proven to be the
  * stale lock this starter read (the same inode and the same text) is it removed: "removed". Otherwise another starter
  * took the lock over in between, and the moved file is that starter's live lock: it is linked back ("restored"; the
- * caller reads the lock again, and its live pid refuses this start). If a lock exists again (a third starter, EEXIST),
- * or link is not supported and the slot is taken, the moved file is left where it is, never unlinked: "left", and the
- * caller refuses to start, naming it. Where link is not supported and the slot is free, it is renamed back.
+ * caller reads the lock again, and its live pid refuses this start). If link fails for any reason (a third starter's
+ * lock is there, EEXIST; or link is not supported) the moved file is left where it is, never unlinked and never renamed
+ * back over the lock path (a rename would replace a lock created in between; G2 round 3, F2): "left", and the caller
+ * refuses to start, naming it.
  */
 function removeStaleLock(path: string, stale: { text: string; ino: number }): { result: "removed" | "restored" | "left"; aside: string } {
   const aside = `${path}.stale-${process.pid}-${randomBytes(6).toString("hex")}`;
@@ -229,20 +230,15 @@ function removeStaleLock(path: string, stale: { text: string; ino: number }): { 
   }
   try {
     linkSync(aside, path);
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code !== "EEXIST" && !existsSync(path)) {
-      try {
-        renameSync(aside, path);
-        return { result: "restored", aside };
-      } catch {
-        // left below
-      }
-    }
+  } catch {
     return { result: "left", aside };
   }
   // Linked back: the lock is in place under its own name again; the aside name is only a second link to it.
-  unlinkSync(aside);
+  try {
+    unlinkSync(aside);
+  } catch {
+    // A second name of a lock that is in place: harmless if it stays.
+  }
   return { result: "restored", aside };
 }
 

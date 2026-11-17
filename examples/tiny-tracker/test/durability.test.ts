@@ -7,6 +7,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { durableBackend, movableClock, tempDir, TOKEN } from "./support/durable.js";
 import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit, LOCK_UNREADABLE_GRACE_MS, processStartMs } from "../src/backend/journal.js";
 import { startBackend } from "../src/start.js";
@@ -387,6 +389,35 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       // Written after this process started: this process's own lock, still held.
       writeFileSync(path, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
       await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /its lock names this process/);
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("round 3, F2: without link(2), the lock moved aside is never renamed back over the lock path; it is kept and the start refuses", async () => {
+    const t = tempDir("locknolink");
+    try {
+      prepareDataDir(t.dataDir);
+      const path = join(t.dataDir, LOCK_FILE);
+      writeFileSync(path, JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "dead" }));
+      const A = JSON.stringify({ pid: process.ppid, started_at: "A" });
+      lockHooks.beforeTakeover = (p) => { unlinkSync(p); writeFileSync(p, A); };
+      const link = fs.linkSync;
+      (fs as any).linkSync = () => { const e: NodeJS.ErrnoException = new Error("link not supported"); e.code = "EPERM"; throw e; };
+      syncBuiltinESMExports();
+      try {
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /a lock this start moved aside is kept at/);
+      } finally {
+        (fs as any).linkSync = link;
+        syncBuiltinESMExports();
+        lockHooks.beforeTakeover = undefined;
+      }
+      // Before the fix it was renamed back when the slot looked free: an exists-then-rename that could replace a lock
+      // a third starter created in between.
+      const aside = readdirSync(t.dataDir).filter((f) => f.startsWith("lock.stale-"));
+      assert.equal(aside.length, 1);
+      assert.equal(readFileSync(join(t.dataDir, aside[0]), "utf8"), A);
+      assert.equal(existsSync(path), false, "nothing was renamed over the lock path");
     } finally {
       t.cleanup();
     }
