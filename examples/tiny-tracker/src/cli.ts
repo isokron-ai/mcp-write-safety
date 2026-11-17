@@ -267,7 +267,11 @@ async function main(): Promise<void> {
         // The ledger refused (cap or stopped): the firing stays in the arming store.
       }
     } : undefined;
-    if (child.role === "backend") backendFaults = crash.backendCrashHooks({ ...crashOptions, ...(onFire ? { onFire } : {}) }, fixture.backendOptions.faults);
+    if (child.role === "backend") {
+      backendFaults = crash.backendCrashHooks({ ...crashOptions, ...(onFire ? { onFire } : {}) }, fixture.backendOptions.faults);
+      // G2 fold-in 11: the point between a keyed write's effect and its key record (inside the section).
+      if (durability) durability.afterEffect = crash.afterEffectCrash({ ...crashOptions, ...(onFire ? { onFire } : {}) });
+    }
     else serverExtras = { ...serverExtras, onResult: crash.mcpCrashOnResult(crashOptions, serverExtras.onResult) };
   }
   // ---- end stream E ----

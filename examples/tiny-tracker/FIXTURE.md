@@ -196,7 +196,7 @@ Defects live in two registries: the MCP layer's (`src/defects`, 47 today) and th
 | `lookup-reexecutes` | FX-LOOK-2, MWS-ANN-1 | `get_operation` | `lookup` | 0.2.0 |
 | `lookup-unscoped` | FX-LOOK-3 | backend `lookup` | `lookup`, `principals` | 0.2.0 |
 | `key-record-not-durable` | FX-DUR-1, MWS-RETRY-2 | backend `journal` | `durable` | 0.3.0 |
-| `key-record-after-effect` | FX-DUR-2 | backend `journal` | `durable` | 0.3.0 |
+| `key-record-after-effect` | FX-DUR-2 | backend `journal` | `durable` | 0.3.0 (built; shown from outside the process by `backend/after-effect-before-key/crash` under `--supervise`: the retry applies a second time) |
 | `journal-without-fsync` | FX-DUR-3 | backend `journal` | `durable` | 0.3.0 |
 | `key-expires-early` | FX-KEY-1 | backend `keyExpiry` | `retention` | 0.3.0 |
 | `retention-unstated` | FX-KEY-2 | `create_ticket`, `create_project`, `add_comment` | `retention` | 0.3.0 |
@@ -237,6 +237,7 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-63 | A crash fault point without `--supervise`: in one process a crash stops both layers and nothing restarts them. On the control listener the same arming is refused 409 `needs_supervise` |
 | CMP-64 | Under `--supervise`, `--fault` naming a point that is not a crash point (the supervisor's arming store is read by the crash checks only; arm the others on the control listener) |
 | CMP-65 | `durable` with `clock`: the journal does not keep the fixture clock's offset (it lives in memory, or in the supervisor's state folder, which goes with the supervisor), so after a restart record time would move back and tombstones would read as live records again. Refused rather than journalled (G2 fold-in 9): a durable run is a wall-clock run. Journalling the offset (a new line kind) is listed for 0.4.0 |
+| CMP-66 | `--fault backend/after-effect-before-key/crash` without `durable` (the point lies between the journalled effect and the key record) |
 
 Tests check the command line against the table on a pairwise set of combinations, not the full product.
 
@@ -255,8 +256,9 @@ Faults are named **process / position / action**. A fault's arming state lives i
 | `backend/after-commit/crash` | After the ledger, before the reply: written, journalled and in the ledger; the backend exits, so the client sees `unknown` | 0.3.0 |
 | `backend/after-commit/error` | The backend commits, then answers 500 | 0.3.0 |
 | `backend/after-commit/drop` | The backend commits and never answers (capped hold) | 0.3.0 |
+| `backend/after-effect-before-key/crash` | Keyed writes with `durable` (CMP-66): after the write is journalled and applied, before its key record is kept apart from it. The correct build keeps the key record in the commit line, so the retry replays; under `key-record-after-effect` the record is lost and the retry applies a second time. The client sees `unknown` | 0.3.0 (G2 fold-in 11) |
 
-A backend crash after commit and an MCP-process crash after the backend replied are different faults with different expected answers. **Built in 0.3.0:** the three crash points, under `tiny-tracker all --supervise` only. They are armed at start (`--fault POINT[:once]`) or on the control listener, into the supervisor's arming store, which both children read; a crash point fires once and takes no other selector. `/build` lists them in `faults.armed` as `S-<n> <point> {"once":true}`, after the fault controller's own `F-<n>` entries. Resource caps: holds and delays are capped in time and count, run allocation at 1000 per process, control bodies at 64 KiB, and the data dir is created 0700.
+A backend crash after commit and an MCP-process crash after the backend replied are different faults with different expected answers. **Built in 0.3.0:** the four crash points, under `tiny-tracker all --supervise` only. They are armed at start (`--fault POINT[:once]`) or on the control listener, into the supervisor's arming store, which both children read; a crash point fires once and takes no other selector. `/build` lists them in `faults.armed` as `S-<n> <point> {"once":true}`, after the fault controller's own `F-<n>` entries. Resource caps: holds and delays are capped in time and count, run allocation at 1000 per process, control bodies at 64 KiB, and the data dir is created 0700.
 
 ## Identifiers
 
@@ -284,6 +286,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - **Time.** Rehearsals with the fixture clock prove nothing about elapsed time. Only a wall-clock run with offset 0 and control off is published as a delayed-recovery result.
 - **`lookup-reexecutes` is detected by fx-check only.** Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches.
 - **Durability.** Until 0.3.0 everything is in memory. From 0.3.0, with `durable`, data, key records, tombstones, fences, run allocations and execution records survive a restart through the journal. **The ledger is still kept in memory, for one boot:** after a restart it holds only that boot's entries, so a recount that includes the ledger covers one boot (the durable A5 plan recounts before its restart; `docs/a5-durable.md`).
+- **Crash points between the effect and the key record.** `key-record-after-effect` shows from outside the process only through `backend/after-effect-before-key/crash`, which needs `tiny-tracker all --supervise` and `durable`; a run with no crash between the two (the restart leg of a planted A5, say) passes against it. The in-process T1 shows it too.
 - **One instance.** Behaviour with more than one server instance on the same data is out of scope.
 - **Forced overlaps are not guaranteed.** A simultaneous same-key repeat can only be observed or not observed; known answers list both where both can happen.
 

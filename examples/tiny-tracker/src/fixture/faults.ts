@@ -131,6 +131,8 @@ export const FAULT_ACTIONS: Record<string, FaultAction> = {
   "backend/before-commit/crash": { position: "before-commit", fire: async () => undefined, ...CRASH_ACTION },
   "backend/after-commit/crash": { position: "after-commit", fire: async () => undefined, ...CRASH_ACTION },
   "mcp/after-backend-reply/crash": { position: "after-backend-reply", fire: async (result) => result, ...CRASH_ACTION },
+  // G2 fold-in 11: fires inside the commit section (DurabilityOptions.afterEffect), never through the controller's hooks.
+  "backend/after-effect-before-key/crash": { position: "after-commit", fire: async () => undefined, ...CRASH_ACTION },
 };
 
 /** Validates an arming request. Unknown members are refused, never ignored. */

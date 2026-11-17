@@ -12,6 +12,11 @@
 //                                    reset connection
 //   mcp/after-backend-reply/crash    in the MCP process, after the backend
 //                                    answered: the lost response, server-side
+//   backend/after-effect-before-key/crash
+//                                    keyed writes with durable: after the write
+//                                    is journalled and applied, before its key
+//                                    record is kept (inside the section, through
+//                                    DurabilityOptions.afterEffect; G2 fold-in 11)
 //
 // A crash point can be armed only under `tiny-tracker all --supervise` (CMP-63):
 // in the one-process layout it would stop both layers, and nothing would
@@ -37,7 +42,13 @@ export const CRASH_POINTS = {
   backendBeforeCommit: "backend/before-commit/crash",
   backendAfterCommit: "backend/after-commit/crash",
   mcpAfterBackendReply: "mcp/after-backend-reply/crash",
+  backendAfterEffectBeforeKey: "backend/after-effect-before-key/crash",
 } as const;
+
+/** The after-effect point, as DurabilityOptions.afterEffect: synchronous, inside the commit section (G2 fold-in 11). */
+export function afterEffectCrash(options: CrashOptions): (seq: number) => void {
+  return (seq) => crashCheck(options, CRASH_POINTS.backendAfterEffectBeforeKey, seq);
+}
 
 export interface CrashOptions {
   arming: ArmingStore;

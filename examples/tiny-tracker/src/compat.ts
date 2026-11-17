@@ -195,6 +195,12 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     },
   },
   {
+    // G2 fold-in 11: the point between a keyed write's effect and its key record exists only on the durable path.
+    id: "CMP-66", post01: false,
+    check: (c) => c.faults.includes("backend/after-effect-before-key/crash") && !has(c.features, "durable")
+      ? "fault point backend/after-effect-before-key/crash needs the durable feature: without a journal there is no key record to keep after the effect" : undefined,
+  },
+  {
     // G2 fold-in 9 (refused, not journalled): the fixture clock's offset lives in memory, or under --supervise in the
     // supervisor's state folder, which goes when the supervisor stops; the journal does not keep it. After a restart
     // the record time would move back, and tombstones would read as completed records again. Journalling the offset

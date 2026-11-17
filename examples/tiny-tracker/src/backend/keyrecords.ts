@@ -94,6 +94,8 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
   private readonly journalFailed = new Set<string>();
   /** The journal (feature durable), or none. */
   lines: KeyLineWriter | undefined;
+  /** The point backend/after-effect-before-key (G2 fold-in 11): told of each keyed write before its record is kept. */
+  beforeKeep: ((reply: StoredReply) => void) | undefined;
   /** Under the key-record-after-effect defect: told of each completed record after the write is applied. */
   afterPut: ((scope: KeyScope, key: string, reply: KeptReply) => void) | undefined;
 
@@ -160,6 +162,7 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
   replaying = false;
 
   put(scope: KeyScope, key: string, reply: StoredReply): void {
+    this.beforeKeep?.(reply);
     this.journalFailed.delete(id(scope, key));
     this.states.set(id(scope, key), { state: "completed", reply });
     this.afterPut?.(scope, key, reply);

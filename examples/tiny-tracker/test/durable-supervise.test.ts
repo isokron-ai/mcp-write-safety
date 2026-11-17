@@ -61,13 +61,13 @@ describe("the data-dir lock and a dead supervised child (stream E's note)", () =
 });
 
 describe("tiny-tracker all --supervise with durable (G2 restart tests)", () => {
-  async function supervised(fn: (sup: Supervisor, first: any, dataDir: string) => Promise<void>) {
+  async function supervised(fn: (sup: Supervisor, first: any, dataDir: string) => Promise<void>, extra: string[] = []) {
     const dir = mkdtempSync(join(tmpdir(), "tt-dsup-"));
     const dataDir = join(dir, "data");
     const lines: Record<string, unknown>[] = [];
     const sup = await startSupervisor({
       cli: CLI, env: ENV, onLine: (l) => void lines.push(l), onStderr: () => {},
-      args: ["--features", FEATURES, "--fixture-control", "--data-dir", dataDir, "--port", "0", "--backend-port", "0", "--control-port", "0"],
+      args: ["--features", FEATURES, "--fixture-control", "--data-dir", dataDir, "--port", "0", "--backend-port", "0", "--control-port", "0", ...extra],
     });
     try {
       await fn(sup, lines[0], dataDir);
@@ -143,6 +143,34 @@ describe("tiny-tracker all --supervise with durable (G2 restart tests)", () => {
       assert.ok(kinds.includes("run-alloc"), kinds.join(","));
     });
   });
+
+  // G2 fold-in 11: key-record-after-effect seen from outside the process. The point fires between a keyed write's effect
+  // and its key record; the correct build keeps the record in the same journal line, the defect keeps it after.
+  for (const defect of [null, "key-record-after-effect"] as const) {
+    it(`crash at backend/after-effect-before-key, armed on the control listener: ${defect ? "under key-record-after-effect the retry applies a second time" : "the correct build replays the retry"}`, async () => {
+      await supervised(async (sup, first) => {
+        const api = new Rest(first.backend, BACKEND);
+        // An unkeyed write does not reach the point.
+        const armed = await call("POST", `${first.control}/_fixture/faults`, CONTROL, { point: CRASH_POINTS.backendAfterEffectBeforeKey, selector: { once: true } });
+        assert.equal(armed.status, 201, JSON.stringify(armed.body));
+        assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "plain" })).status, 201, "an unkeyed write passes the point");
+        await lost(api.send("POST", "/tickets", { project: "inbox", title: "keyed" }, keyed("dsup-aeff-0001")));
+        await sup.restarted("backend", 1);
+        const d = (await call("GET", `${first.backend}/build`, EVIDENCE)).body;
+        assert.deepEqual(d.faults.armed, [], "consumed");
+        const retry = await api.send("POST", "/tickets", { project: "inbox", title: "keyed" }, keyed("dsup-aeff-0001"));
+        assert.equal(retry.status, 201);
+        const titles = (await api.export()).tickets.map((t) => t.title);
+        if (defect) {
+          assert.equal(retry.headers.get("idempotent-replayed"), null, "the key record was lost with the process");
+          assert.deepEqual(titles, ["plain", "keyed", "keyed"], "the defect, seen from outside: two tickets for one key");
+        } else {
+          assert.equal(retry.headers.get("idempotent-replayed"), "true");
+          assert.deepEqual(titles, ["plain", "keyed"], "one effect");
+        }
+      }, defect ? ["--backend-defect", defect] : []);
+    });
+  }
 
   it("a real SIGKILL of the backend child: the next child takes over the lock, the store is whole; a before-commit crash leaves an orphan the next start aborts", async () => {
     await supervised(async (sup, first, dataDir) => {

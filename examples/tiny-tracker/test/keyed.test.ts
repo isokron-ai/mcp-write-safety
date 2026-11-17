@@ -347,6 +347,13 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     }
   });
 
+  it("CMP-66 (G2 fold-in 11): the after-effect crash point needs durable; with it (and --supervise) it may be armed at start", () => {
+    const f = { ...base, faults: ["backend/after-effect-before-key/crash"], fixtureControl: true, supervise: true };
+    assert.match(checkCompat({ ...f, features: ["evidence", "strict-input", "ledger", "faults"] }).join(), /needs the durable feature/);
+    assert.deepEqual(checkCompat({ ...f, features: ["evidence", "strict-input", "ledger", "faults", "durable"], dataDir: "/x" }), []);
+    assert.match(checkCompat({ ...f, supervise: false, features: ["evidence", "strict-input", "ledger", "faults", "durable"], dataDir: "/x" }).join(), /need tiny-tracker all --supervise/);
+  });
+
   it("CMP-65 (G2 fold-in 9): durable with the fixture clock is refused at start, supervised or not; each alone starts", async () => {
     const d = { ...base, features: ["durable", "strict-input"], dataDir: "/x", fixtureControl: true };
     assert.deepEqual(checkCompat(d), []);
