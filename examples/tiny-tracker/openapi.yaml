@@ -660,7 +660,7 @@ paths:
         Arms a fault point (feature `faults`), `process/position/action`. Built: `mcp/after-backend-reply/drop` (the
         MCP answer is held after the backend committed: the lost response, server-side) and the crash points
         `backend/before-commit/crash`, `backend/after-commit/crash`, `mcp/after-backend-reply/crash` and
-        `backend/after-effect-before-key/crash` (keyed writes, with `durable`). A crash point
+        `backend/after-effect-before-key/crash` (keyed writes; without `durable`, 400 `needs_feature`). A crash point
         takes no selector but `{"once": true}` and needs `--supervise` (409 `needs_supervise` in one process). Every
         arming and firing is a ledger entry. At most 32 armed faults.
       security: [{ controlToken: [] }]
@@ -1030,7 +1030,7 @@ components:
             precondition_required (428), journal_unavailable and stopped (503), internal (500). Evidence: bad query
             parameters, principal_required and unknown_principal (400), forbidden (403), read_only (405), not_enabled
             (501). Control: bad_json, bad_body, bad_request, bad_selector, bad_principal, unknown_principal,
-            unknown_point and not_planned (400), unauthorized (401), forbidden (403), no_route and no_such_run (404),
+            unknown_point, not_planned and needs_feature (400), unauthorized (401), forbidden (403), no_route and no_such_run (404),
             method_not_allowed (405), needs_supervise (409), too_large (413), unsupported_media_type (415),
             too_many_runs and too_many_faults (429), not_enabled and not_built (501), ledger_stopped, stopped and
             journal_unavailable (503).
