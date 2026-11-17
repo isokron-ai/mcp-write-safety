@@ -332,7 +332,7 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
     const lost = candidates.filter((t) => shownIn(t) === null);
     const schedules = new Set(valid.map((t) => t.schedule));
     const numbers = { trials: valid.length, lost: lost.length, serialized: valid.filter((t) => t.released.startsWith('after the hold timeout')).length, refused: valid.filter((t) => !t.holder!.ok || !t.other!.ok).length, ...(candidates.length ? { conflict_shown: conflictShown.length, needs_reading: needsReading.length } : {}), ...(o.control ? { control_pairs: o.control.pairs, control_lost: o.control.lost } : {}) };
-    const conflictNote = conflictShown.length ? [`In ${conflictShown.length} trial(s) one change was absent afterwards but an answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is judged by MWS-CONC-4.`] : [];
+    const conflictNote = conflictShown.length ? [`In ${conflictShown.length} trial(s) one change was absent afterwards but an answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is MWS-CONC-4's to judge in its own trials.`] : [];
     const readingNote = lost.length && needsReading.length ? [`${needsReading.length} further trial(s) lost a change where only the built-in words read an answer as a conflict; they are not counted (spec 7.3, rule 11).`] : [];
     const notes = [route, ...learnedNote, ...valid.map(trialNote), ...conflictNote, ...readingNote];
     if (!lost.length && needsReading.length) {

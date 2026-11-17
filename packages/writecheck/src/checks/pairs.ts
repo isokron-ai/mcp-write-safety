@@ -157,7 +157,7 @@ export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateCon
   const needsReading = lossReps.filter((r) => shownIn(r.env) === 'default');
   const loss = c('test', 'silent_loss') - conflictShown.length - needsReading.length;
   const numbers: Record<string, unknown> = { pairs: valid, pairs_overlapped: overlapped, both_ok: c('test', 'both_ok'), one_error: c('test', 'one_error'), lost: loss, ...(lossReps.length ? { conflict_shown: conflictShown.length, needs_reading: needsReading.length } : {}) };
-  const conflictNote = conflictShown.length ? [`In ${conflictShown.length} pair(s) one change was absent afterwards but its answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is judged by MWS-CONC-4.`] : [];
+  const conflictNote = conflictShown.length ? [`In ${conflictShown.length} pair(s) one change was absent afterwards but its answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is MWS-CONC-4's to judge in its own trials.`] : [];
   if (out.arms['control']) Object.assign(numbers, { control_pairs: c('control', 'valid'), control_lost: c('control', 'silent_loss') });
   if (valid < 1) return [result('MWS-CONC-3', w, sc, 'not tested', `no valid pair (${c('test', 'setup_failures')} setup failures, ${c('test', 'exceptions')} exceptions)`, { numbers })];
   if (loss < 1 && needsReading.length) {

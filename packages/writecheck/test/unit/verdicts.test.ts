@@ -124,7 +124,7 @@ test('barrier pairs: a pair whose answer shows a conflict (declared patterns.con
     assert.equal(shown.verdict, 'not observed');
     assert.equal(shown.numbers['lost'], 0);
     assert.equal(shown.numbers['conflict_shown'], 40);
-    assert.ok(shown.notes.some((n) => /judged by MWS-CONC-4/.test(n)));
+    assert.ok(shown.notes.some((n) => /is MWS-CONC-4's to judge in its own trials/.test(n)));
     // An answer the declared pattern does not match is still a reported success: the loss stays violated.
     const silent = run('ok');
     assert.equal(silent.verdict, 'violated');
@@ -153,7 +153,7 @@ test('held request: a trial whose answer shows a conflict (declared patterns.con
     assert.equal(shown.verdict, 'held', 'the declared conflict pattern reads the answer as a refusal, not a success');
     assert.equal(shown.numbers['lost'], 0);
     assert.equal(shown.numbers['conflict_shown'], 4);
-    assert.ok(shown.notes.some((n) => /judged by MWS-CONC-4/.test(n)));
+    assert.ok(shown.notes.some((n) => /is MWS-CONC-4's to judge in its own trials/.test(n)));
     assert.ok(shown.notes.some((n) => /holder answered without isError but showed a conflict/.test(n)));
     // An answer the declared pattern does not match is still a reported success: the loss stays violated.
     const silent = run('ok');
