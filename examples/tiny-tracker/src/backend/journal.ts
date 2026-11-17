@@ -270,13 +270,14 @@ export function processStartMs(): number {
 function createLock(path: string, content: string): boolean {
   const tmp = `${path}.new-${process.pid}-${randomBytes(6).toString("hex")}`;
   const fd = openSync(tmp, "wx", 0o600);
+  // From here every way out removes the temp file, a failed write or fsync included (G2 round 3, F3).
   try {
-    writeSync(fd, content);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
+    try {
+      writeSync(fd, content);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     linkSync(tmp, path);
     return true;
   } catch (e) {
@@ -301,6 +302,55 @@ function createLock(path: string, content: string): boolean {
   }
 }
 
+/** Whether a lock text naming this pid is one this process wrote (until G2 round 3, F4: any such text). */
+function ownLockText(_text: string): boolean {
+  return true;
+}
+
+/** Whether a leftover lock file's content names a process that can still hold anything. */
+function leftoverOwnerAlive(text: string): boolean {
+  let pid = NaN;
+  try {
+    pid = Number(JSON.parse(text).pid);
+  } catch {
+    return false;
+  }
+  if (!Number.isSafeInteger(pid)) return false;
+  if (pid === process.pid) return ownLockText(text);
+  return alive(pid);
+}
+
+/**
+ * Removes lock.new-* (a temp file a crashed start left before linking it) and lock.stale-* (a lock a start moved aside
+ * and kept) once this start holds the lock (G2 round 3, F3). Only files older than LOCK_UNREADABLE_GRACE_MS whose
+ * content names a process that is gone, or names none, are removed: a kept lock.stale-* of a live process is a running
+ * server's lock and stays. Returns how many were removed.
+ */
+export function sweepLockLeftovers(dir: string, log: (m: string) => void): number {
+  let removed = 0;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.startsWith(`${LOCK_FILE}.new-`) && !name.startsWith(`${LOCK_FILE}.stale-`)) continue;
+    const file = join(dir, name);
+    try {
+      const st = lstatSync(file);
+      if (!st.isFile() || Date.now() - st.mtimeMs < LOCK_UNREADABLE_GRACE_MS) continue;
+      if (leftoverOwnerAlive(readFileSync(file, "utf8"))) continue;
+      unlinkSync(file);
+      removed++;
+    } catch {
+      // Gone meanwhile, or unreadable: leave it.
+    }
+  }
+  if (removed) log(`tiny-tracker: removed ${removed} leftover lock file(s) of processes that are gone`);
+  return removed;
+}
+
 export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) => void): void {
   const path = join(dir, LOCK_FILE);
   const real = heldKey(dir);
@@ -310,6 +360,7 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     if (createLock(path, JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString() }))) {
       HELD.add(real);
       ABANDONED.delete(real);
+      sweepLockLeftovers(dir, log);
       return;
     }
     let text: string;

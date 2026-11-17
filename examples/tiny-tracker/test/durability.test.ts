@@ -394,6 +394,41 @@ describe("the lock takeover (G2 fold-in 7)", () => {
     }
   });
 
+  it("round 3, F3: a failed write or fsync leaves no lock.new-* file; leftovers of gone processes are swept at start, a live one's are kept", async () => {
+    const t = tempDir("lockleft");
+    try {
+      prepareDataDir(t.dataDir);
+      const fsync = fs.fsyncSync;
+      (fs as any).fsyncSync = () => { const e: NodeJS.ErrnoException = new Error("EIO"); e.code = "EIO"; throw e; };
+      syncBuiltinESMExports();
+      try {
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /EIO/);
+      } finally {
+        (fs as any).fsyncSync = fsync;
+        syncBuiltinESMExports();
+      }
+      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock")), [], "no temp file leaked (the reviewer's probe 2)");
+      const old = new Date(Date.now() - 2 * LOCK_UNREADABLE_GRACE_MS);
+      const put = (name: string, text: string, age = old) => { writeFileSync(join(t.dataDir, name), text); utimesSync(join(t.dataDir, name), age, age); };
+      const dead = JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "x" });
+      const live = JSON.stringify({ pid: process.ppid, started_at: "x" });
+      put("lock.new-4194999-aaaaaaaaaaaa", dead);
+      put("lock.stale-4194999-bbbbbbbbbbbb", dead);
+      put("lock.stale-4194999-cccccccccccc", "{torn");
+      put("lock.stale-4194999-dddddddddddd", live);
+      put("lock.stale-4194999-eeeeeeeeeeee", dead, new Date());
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      try {
+        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")).sort(),
+          ["lock.stale-4194999-dddddddddddd", "lock.stale-4194999-eeeeeeeeeeee"], "a live process's kept lock and a young file stay");
+      } finally {
+        await b.close();
+      }
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("round 3, F2: without link(2), the lock moved aside is never renamed back over the lock path; it is kept and the start refuses", async () => {
     const t = tempDir("locknolink");
     try {
