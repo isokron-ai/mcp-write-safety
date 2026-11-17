@@ -6,7 +6,7 @@
 // No container runtime is needed: the start refusal is the same code path the
 // image runs (TRACKER_CONTAINER=1), tested here in Node.
 //
-// Ports: 4683-4689 (stream F's slice) or 0.
+// Ports: every listener takes an OS-assigned port (port 0).
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -187,31 +187,27 @@ describe("the MCP listener (src/mcp/server.ts)", () => {
 
 describe("container mode through the command line (the image's start path, without a container runtime)", () => {
   it("TRACKER_CONTAINER=1 without a token exits 2 before anything listens", async () => {
-    const r = await runCli(["all", "--port", "4683"], { TRACKER_CONTAINER: "1" });
+    const r = await runCli(["all", "--port", "0"], { TRACKER_CONTAINER: "1" });
     assert.equal(r.code, 2);
-    assert.equal(r.stateLine, undefined);
+    assert.equal(r.stateLine, undefined, "no state line: nothing was started");
     assert.equal(r.stdout, "");
     assert.match(r.stderr, /container mode listens on every interface and needs a bearer token/);
-    // Port 4683 was never bound: a listener can take it now.
-    const probe = (await import("node:net")).createServer();
-    await new Promise<void>((resolve, reject) => { probe.once("error", reject); probe.listen(4683, "0.0.0.0", () => resolve()); });
-    await new Promise<void>((resolve) => probe.close(() => resolve()));
   });
 
   it("TRACKER_CONTAINER=1 refuses the backend layout and an invalid value", async () => {
-    const a = await runCli(["backend", "--port", "4684"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: TOKEN, TRACKER_BACKEND_TOKEN: `be-${randomBytes(12).toString("hex")}` });
+    const a = await runCli(["backend", "--port", "0"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: TOKEN, TRACKER_BACKEND_TOKEN: `be-${randomBytes(12).toString("hex")}` });
     assert.equal(a.code, 2);
     assert.match(a.stderr, /container mode runs/);
-    const b = await runCli(["all", "--port", "4684"], { TRACKER_CONTAINER: "yes", TRACKER_MCP_TOKEN: TOKEN });
+    const b = await runCli(["all", "--port", "0"], { TRACKER_CONTAINER: "yes", TRACKER_MCP_TOKEN: TOKEN });
     assert.equal(b.code, 2);
     assert.match(b.stderr, /TRACKER_CONTAINER="yes" is not recognized/);
   });
 
   it("a token on the command line, or equal to another token, stops the start", async () => {
-    const a = await runCli(["all", "--port", "4685", "--default-project", TOKEN], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: TOKEN });
+    const a = await runCli(["all", "--port", "0", "--default-project", TOKEN], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: TOKEN });
     assert.equal(a.code, 2);
     assert.match(a.stderr, /command line/);
-    const b = await runCli(["all", "--port", "4685"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: TOKEN, TRACKER_BACKEND_TOKEN: TOKEN });
+    const b = await runCli(["all", "--port", "0"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: TOKEN, TRACKER_BACKEND_TOKEN: TOKEN });
     assert.equal(b.code, 2);
     assert.match(b.stderr, /must differ/);
   });
@@ -221,8 +217,9 @@ describe("container mode through the command line (the image's start path, witho
     const file = join(dir, "mcp.token");
     writeFileSync(file, `${TOKEN}\n`, { mode: 0o600 });
     try {
-      const r = await runCli(["all", "--port", "4686"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN_FILE: file }, async (state) => {
-        assert.equal(state.mcp, "http://127.0.0.1:4686/mcp");
+      const r = await runCli(["all", "--port", "0"], { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN_FILE: file }, async (state) => {
+        assert.match(state.mcp, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+        const port = Number(new URL(state.mcp).port);
         assert.equal((await post(state.mcp)).status, 401);
         const client = await connect(state.mcp, TOKEN);
         try {
@@ -234,7 +231,7 @@ describe("container mode through the command line (the image's start path, witho
         const probe = (await import("node:net")).createServer();
         const err = await new Promise<NodeJS.ErrnoException | undefined>((resolve) => {
           probe.once("error", (e) => resolve(e as NodeJS.ErrnoException));
-          probe.listen(4686, "0.0.0.0", () => probe.close(() => resolve(undefined)));
+          probe.listen(port, "0.0.0.0", () => probe.close(() => resolve(undefined)));
         });
         assert.equal(err?.code, "EADDRINUSE");
       });
