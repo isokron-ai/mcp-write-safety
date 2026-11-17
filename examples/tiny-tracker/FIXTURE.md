@@ -271,6 +271,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - **Classification is trusted.** Until the contract driver compares recovered digests itself, its K-only recovery verdict trusts the adapter's classification; we label that verdict self-attested.
 - **The contract is a draft.** The lost-response contract is under joint review. Runs before it freezes are historical baselines and are repeated after the freeze.
 - **Time.** Rehearsals with the fixture clock prove nothing about elapsed time. Only a wall-clock run with offset 0 and control off is published as a delayed-recovery result.
+- **`lookup-reexecutes` is detected by fx-check only.** Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches.
 - **Not durable yet.** Until 0.3.0 everything is in memory: a restart loses data and keys.
 - **One instance.** Behaviour with more than one server instance on the same data is out of scope.
 - **Forced overlaps are not guaranteed.** A simultaneous same-key repeat can only be observed or not observed; known answers list both where both can happen.

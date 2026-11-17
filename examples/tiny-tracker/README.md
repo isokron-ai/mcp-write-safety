@@ -176,7 +176,7 @@ Defects that need a feature (`requires`). A defect listed here runs only with th
 
 | Flag | Requirement | Requires | What goes wrong | What the self-test sees |
 |---|---|---|---|---|
-| `lookup-reexecutes` | MWS-ANN-1 | execution-records, lookup | `get_operation` (declared read-only) sends a create with the key when the backend has no record of it, so a lookup writes (fixture property FX-LOOK-2) | MWS-ANN-1: calling the read-only lookup tool changed the state |
+| `lookup-reexecutes` | MWS-ANN-1 | execution-records, lookup | `get_operation` (declared read-only) sends a create with the key when the backend has no record of it, so a lookup writes (fixture property FX-LOOK-2) | MWS-ANN-1: calling the read-only lookup tool changed the state. Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches. |
 
 Backend defect:
 
