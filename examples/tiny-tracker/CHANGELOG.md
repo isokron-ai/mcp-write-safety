@@ -26,6 +26,7 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 ### 0.4.0 additions (coordinator note 19)
 - The fixture clock with `durable`: each clock move is an additive journal `clock` line (`from_ms`, `to_ms`, `at`), written before the offset is stored; the offset is restored at load, and a data dir with clock lines refuses to start without the `clock` feature. CMP-65 (`durable` with `clock` refused) is retired, and the 0.4.0 matrix's durable level runs with the fixture clock, so FX-KEY-1 is checked on durable rows. `tt_recount.py` knows the kind.
 - `TRACKER_CONTAINER_ALLOW_DEFECTS=1` (R23): see the container item under 0.4.0 integration.
+- The data-dir lease: `lock.d` in the data dir, an mkdir lease with a 2 s heartbeat and a 20 s stale time, taken over by compare-and-rename. Before every journal append the holder checks it still owns the lease and beat within 10 s; otherwise it is fenced (writes answer 503 `journal_unavailable`; restart it). The 0.3.0 pid lock stays as a second check for this release. `fx-check` FX-DUR-2 counts `lock.d` among the data dir's files.
 - The known-answer generator writes the second principal's file whenever principals are in effect (the profile included), so FX-LOOK-3 is checked on the matrix's Lv rows.
 
 ## 0.3.0 (unreleased) for MWS 0.9
