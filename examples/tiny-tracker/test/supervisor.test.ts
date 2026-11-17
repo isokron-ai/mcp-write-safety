@@ -80,7 +80,10 @@ describe("the supervisor's command line handling (unit)", () => {
       [["backend", "--supervise"], /--supervise runs with `tiny-tracker all` only/],
       [["all", "--profile", "0.1", "--supervise"], /profile 0.1 takes no --supervise/],
       [["all", "--fault", "backend/after-commit/crash:once"], /need tiny-tracker all --supervise/],
-      [["all", "--supervise", "--fault", "backend/after-commit/crash:once"], /no fault can be armed in this version/],
+      // 0.3.0: the crash points are built; arming at start needs the faults feature (CMP-7), and under --supervise
+      // --fault names crash points only (CMP-64).
+      [["all", "--supervise", "--fault", "backend/after-commit/crash:once"], /a fault armed at start needs the faults feature/],
+      [["all", "--supervise", "--features", "evidence,strict-input,ledger,faults", "--fixture-control", "--fault", "mcp/after-backend-reply/drop"], /--fault names crash points only/],
     ] as const) {
       const r = await runCli([...args], TOKENS);
       assert.equal(r.code, 2, args.join(" "));
@@ -246,7 +249,7 @@ describe("tiny-tracker all --supervise", () => {
       // after-commit: written, then the process stops before the answer.
       sup.arming.arm({ point: CRASH_POINTS.backendAfterCommit, once: true });
       let d = (await get(`${first.backend}/build`, EVIDENCE)).body;
-      assert.deepEqual(d.faults.armed, [CRASH_POINTS.backendAfterCommit], "/build shows the arming");
+      assert.deepEqual(d.faults.armed, [`S-1 ${CRASH_POINTS.backendAfterCommit} {"once":true}`], "/build shows the arming (id point selector)");
       await lost(api.send("POST", "/tickets", { project: "inbox", title: "a" }));
       const second = await sup.restarted("backend", 1) as any;
       assert.equal(second.restarted, "backend");
@@ -370,7 +373,7 @@ describe("tiny-tracker all --supervise", () => {
       if (out.includes("\n")) resolve(JSON.parse(out.split("\n")[0]));
     }));
     assert.deepEqual(line.supervise.restarts, { backend: 0, mcp: 0 });
-    assert.equal(line.features[0], "evidence");
+    assert.ok(line.features.includes("evidence"), "the 0.2.0 default features come first");
     const d = (await get(`${line.backend}/build`, EVIDENCE)).body;
     assert.equal(d.supervision.supervisor_boot_id, line.supervise.boot_id);
     const code = await new Promise<number | null>((resolve) => { child.on("exit", resolve); child.kill("SIGTERM"); });

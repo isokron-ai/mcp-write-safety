@@ -254,7 +254,18 @@ async function main(): Promise<void> {
     descriptor.supervise(child);
     descriptor.arming = supervision.folderArming(child.stateDir, () => descriptor.clock.wallNow());
     const crashOptions = { arming: descriptor.arming, bootId: descriptor.bootId, wallNow: () => descriptor.clock.wallNow() };
-    if (child.role === "backend") backendFaults = crash.backendCrashHooks(crashOptions, fixture.backendOptions.faults);
+    // 0.3.0 integration: in the backend child a firing reaches the ledger (synchronously, before the process stops),
+    // naming the execution entry it fired on at after-commit. The firing is kept durably in the arming store too.
+    const ledger = fixture.ledger;
+    const onFire = ledger ? (f: import("./supervision.js").FaultFiring) => {
+      try {
+        const on = f.seq === null ? undefined : ledger.list({ kind: "execution" }).findLast((e) => e.execution_id === `X-${f.seq}`);
+        ledger.faultFired({ point: f.point, selector: { once: true } }, { run: null, operation: null }, on);
+      } catch {
+        // The ledger refused (cap or stopped): the firing stays in the arming store.
+      }
+    } : undefined;
+    if (child.role === "backend") backendFaults = crash.backendCrashHooks({ ...crashOptions, ...(onFire ? { onFire } : {}) }, fixture.backendOptions.faults);
     else serverExtras = { ...serverExtras, onResult: crash.mcpCrashOnResult(crashOptions, serverExtras.onResult) };
   }
   // ---- end stream E ----
@@ -347,6 +358,19 @@ async function main(): Promise<void> {
       } catch (e) {
         for (const close of closers) await close();
         fail(`the control listener did not start: ${(e as Error).message}`);
+      }
+    }
+    // 0.3.0 integration: --fault at start without --supervise arms through the fault controller, as the control
+    // listener would (a ledger entry per arming). CMP-7 has checked the feature and the point; crash points need
+    // --supervise (CMP-63), where the supervisor arms them in its state folder instead.
+    if (!child && faultArgs.length > 0 && fixture.faults) {
+      for (const f of faultArgs) {
+        try {
+          fixture.faults.arm({ point: f.point, selector: f.once ? { once: true } : {} });
+        } catch (e) {
+          for (const close of closers) await close();
+          fail(`--fault ${f.point}: ${(e as Error).message}. Not starting.`);
+        }
       }
     }
   }

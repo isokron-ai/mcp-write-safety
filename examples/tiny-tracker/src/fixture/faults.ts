@@ -116,9 +116,21 @@ export type FaultAction =
   | { position: "before-commit"; fire(ctx: FaultContext, arm: ArmedFault, kit: FaultActionKit): Promise<void> }
   | { position: "after-commit"; fire(ctx: FaultContext & { tx: CommittedTransaction }, arm: ArmedFault, kit: FaultActionKit): Promise<undefined | "drop" | { status: number; body: unknown }> };
 
-/** The actions this version defines, by point id (stream E adds the crash points' actions here in 0.3.0). */
+/**
+ * A crash point (0.3.0, stream E, src/fixture/process.ts). The controller does not fire it: arming one writes it to the
+ * descriptor's arming store (the supervisor's state folder, shared by both children), and the crash check in front of
+ * these hooks takes it there and stops the process. The entry exists so the point can be armed on this listener.
+ */
+const CRASH_ACTION = { crash: true } as const;
+export const isCrashPoint = (point: string): boolean => point.endsWith("/crash");
+
+/** The actions this version defines, by point id. */
 export const FAULT_ACTIONS: Record<string, FaultAction> = {
   "mcp/after-backend-reply/drop": { position: "after-backend-reply", fire: (result, _arm, kit) => kit.hold(result) },
+  // ---- 0.3.0 integration: crash points fire in src/fixture/process.ts, never here ----
+  "backend/before-commit/crash": { position: "before-commit", fire: async () => undefined, ...CRASH_ACTION },
+  "backend/after-commit/crash": { position: "after-commit", fire: async () => undefined, ...CRASH_ACTION },
+  "mcp/after-backend-reply/crash": { position: "after-backend-reply", fire: async (result) => result, ...CRASH_ACTION },
 };
 
 /** Validates an arming request. Unknown members are refused, never ignored. */
@@ -146,6 +158,13 @@ export function parseArming(body: unknown, actions: Record<string, FaultAction> 
     count: s.count === undefined ? 1 : intIn(s.count, "count", 1, FAULT_CAPS.maxCount),
     hold_ms: s.hold_ms === undefined ? FAULT_CAPS.defaultHoldMs : intIn(s.hold_ms, "hold_ms", 1, FAULT_CAPS.maxHoldMs),
   };
+  if (isCrashPoint(p.id)) {
+    // The crash check reads the arming store, which keeps `once` and nothing else: refuse what it would ignore.
+    const ignored = ["tool", "run", "operation", "nth", "hold_ms"].filter((k) => s[k] !== undefined);
+    if (ignored.length || (s.count !== undefined && s.count !== 1) || s.once === false) {
+      throw new FaultError(400, "bad_selector", `a crash point fires once on the next call that reaches it; it takes no selector${ignored.length ? ` (got ${ignored.join(", ")})` : ""}`);
+    }
+  }
   if (s.tool !== undefined) {
     if (p.process !== "mcp") throw new FaultError(400, "bad_selector", "selector.tool applies to mcp points only (the backend does not know the tool)");
     if (typeof s.tool !== "string" || !/^[a-z_]{1,64}$/.test(s.tool)) throw new FaultError(400, "bad_selector", "selector.tool must be a tool name");
@@ -176,12 +195,22 @@ export class FaultController {
 
   /** What the descriptor names (FX-BLD-1): each armed fault as `id point selector`, so descriptor_hash changes with them. */
   private publish(): void {
-    this.descriptor.armedFaults = this.active().map((a) => `${a.id} ${a.point} ${canonicalize(a.selector)}`);
+    // Crash points are listed by the descriptor from its arming store (they may fire in the other child).
+    this.descriptor.armedFaults = this.active().filter((a) => !isCrashPoint(a.point)).map((a) => `${a.id} ${a.point} ${canonicalize(a.selector)}`);
   }
 
   arm(body: unknown): ArmedFault {
     const { point, selector } = parseArming(body, this.actions);
     if (this.active().length >= FAULT_CAPS.maxArmed) throw new FaultError(429, "too_many_faults", `at most ${FAULT_CAPS.maxArmed} faults armed at once`);
+    if (isCrashPoint(point)) {
+      // In memory (one process) the store refuses a crash point (needs --supervise); in a supervised child it is the
+      // supervisor's folder, so the point fires in whichever child reaches it, and a fired point stays spent.
+      try {
+        this.descriptor.arming.arm({ point, once: true, selector: { once: true } });
+      } catch (e) {
+        throw new FaultError(409, "needs_supervise", (e as Error).message);
+      }
+    }
     const entry = this.ledger.faultArmed({ point, selector: selectorRecord(selector) });
     const arm: ArmedFault = {
       id: `F-${this.arms.length + 1}`, point, selector, armed_at: this.clock.wallNow().toISOString(), ledger_seq: entry.seq,
@@ -193,6 +222,9 @@ export class FaultController {
   }
 
   list(): { armed: ArmedFault[]; spent: ArmedFault[]; held: number; caps: typeof FAULT_CAPS } {
+    // A crash arming is spent once the arming store no longer holds it (it fired, perhaps in the other child).
+    const inStore = new Set(this.descriptor.arming.list().map((f) => f.point));
+    for (const a of this.arms) if (a.state === "armed" && isCrashPoint(a.point) && !inStore.has(a.point)) { a.state = "spent"; a.fired = 1; }
     const copy = (a: ArmedFault) => ({ ...a, selector: { ...a.selector } });
     return { armed: this.active().map(copy), spent: this.arms.filter((a) => a.state === "spent").map(copy), held: this.held.size, caps: FAULT_CAPS };
   }
@@ -205,6 +237,7 @@ export class FaultController {
     on: () => LedgerEntry | undefined, holds: boolean): ArmedFault | undefined {
     if (this.closed) return undefined;
     const arm = this.active().find((a) => {
+      if (isCrashPoint(a.point)) return false; // fired by the crash check (src/fixture/process.ts)
       const p = faultPoint(a.point)!;
       return p.process === process && p.position === position
         && (a.selector.tool === undefined || a.selector.tool === call.tool)

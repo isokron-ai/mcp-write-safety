@@ -102,15 +102,21 @@ export class BuildDescriptor {
     this.arming = memoryArming(() => clock.wallNow());
   }
 
-  /** The armed fault points, as ids. Assigning replaces the in-memory arming (one process only). */
+  /** What the fault controller (stream B) published: `<id> <point> <selector>` for each armed non-crash fault. */
+  private published: string[] = [];
+
+  /**
+   * The armed faults, each `<id> <point> <selector>` (FX-BLD-1): the controller's, then the arming store's crash points
+   * (`S-<n>`, armed at start by the supervisor or on the control listener; shared by both supervised children).
+   */
   get armedFaults(): string[] {
-    return this.arming.list().map((f) => f.point);
+    const stored = this.arming.list().map((f, i) => `S-${i + 1} ${f.point} ${JSON.stringify({ once: f.once })}`);
+    return [...this.published, ...stored];
   }
 
-  set armedFaults(points: string[]) {
-    const fresh = memoryArming(() => this.clock.wallNow());
-    for (const point of points) fresh.arm({ point, once: false });
-    this.arming = fresh;
+  /** Set by the fault controller when its armed set changes. The arming store is not touched. */
+  set armedFaults(entries: string[]) {
+    this.published = [...entries];
   }
 
   /** The clock's offset (0 on the wall clock). */

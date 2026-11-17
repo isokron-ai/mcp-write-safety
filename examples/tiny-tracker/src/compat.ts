@@ -183,6 +183,15 @@ export const COMPAT_RULES: readonly CompatRule[] = [
         ? `crash fault point(s) ${crash.join(", ")} need tiny-tracker all --supervise: in one process a crash stops both layers and nothing restarts them` : undefined;
     },
   },
+  {
+    // 0.3.0 integration: under --supervise the supervisor arms --fault points in its state folder, which only the crash
+    // checks read; the other points are armed on the control listener in the child that runs them.
+    id: "CMP-64", post01: false,
+    check: (c) => {
+      const other = c.supervise ? c.faults.filter((f) => faultPoint(f)?.action !== "crash") : [];
+      return other.length ? `under --supervise, --fault names crash points only; arm ${other.join(", ")} on the control listener` : undefined;
+    },
+  },
 ];
 
 /** The rules a combination breaks, as messages. Empty: it may start. */

@@ -71,7 +71,11 @@ export const FAULT_POINTS: readonly FaultPoint[] = [
  * The points this version can arm (on the control listener, or at start once stream E's --fault lands). Each needs an
  * action in src/fixture/faults.ts (FAULT_ACTIONS). Stream E appends the 0.3.0 points.
  */
-export const BUILT_FAULT_POINTS: readonly string[] = ["mcp/after-backend-reply/drop"];
+export const BUILT_FAULT_POINTS: readonly string[] = [
+  "mcp/after-backend-reply/drop",
+  // ---- 0.3.0 integration (stream E): the crash points, under `tiny-tracker all --supervise` only (CMP-63) ----
+  "backend/before-commit/crash", "backend/after-commit/crash", "mcp/after-backend-reply/crash",
+];
 // ---- end stream B ----
 
 export function faultPoint(id: string): FaultPoint | undefined {
