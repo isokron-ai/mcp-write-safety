@@ -685,6 +685,7 @@ class Adapter(SystemAdapter):
     """The tiny-tracker 0.2.0 adapter. See the module docstring."""
 
     name = "tiny_tracker"
+    stdio = None  # the StdioMcpClient with mcp_command (0.4.0); a class default, so an adapter built without __init__ has it
 
     def __init__(self, config):
         super().__init__(config)
