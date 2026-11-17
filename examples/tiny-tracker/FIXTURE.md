@@ -203,7 +203,7 @@ Defects live in two registries: the MCP layer's (`src/defects`, 47 today) and th
 | `in-flight-key-race` | MWS-RETRY-2 | backend `keyRecord` | `inflight` | 0.3.0 |
 | `in-flight-phantom-success` | FX-KEY-3, MWS-RES-1 | backend `keyRecord` | `inflight` | 0.3.0 |
 | `in-progress-reported-not-applied` | MWS-RES-2 | `create_ticket` | `inflight` | 0.3.0 |
-| `settle-miss-reported-not-applied` | MWS-RES-1 | `create_ticket` | `lookup`, variant `settle-by-lookup` | 0.3.0 |
+| `settle-miss-reported-not-applied` | MWS-RES-1 | `create_ticket` | `inflight` (built in 0.3.0 against the settle-by-lookup leg of the self-test) | 0.3.0 |
 | `settled-reported-unknown` | FX-LOOK-4 | `create_ticket` | `lookup`, variant `settle-by-lookup` | 0.3.0 |
 
 The ledger, the fixture clock and the fault controller are the instruments other harnesses trust, so they get no defects. They are tested against each other instead: the ledger, a journal replay and the export must agree, a second recount is written independently in the tests, and the Python side recounts from the exported file.
@@ -217,7 +217,7 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-4 | `durable` without `--data-dir` (and `--data-dir` without `durable`) |
 | CMP-5 | The `key-store-honest` variant with a `lookup` named with `--features` or `TRACKER_FEATURES`: its keys live in the MCP server, where a backend lookup cannot see them. A `lookup` that comes only from the default profile is not refused: the build turns it off and says so (owner decision, 16 Nov 2026). The state line carries `"features_off": ["lookup off: key-store-honest keeps keys in the MCP server"]`, a notice goes to stderr, and the build descriptor's `features` and `build_hash` are those of the build without `lookup`. |
 | CMP-6 | A fault demonstration without the defect or variant that makes it meaningful (for example a crash between effect and key record needs `key-record-after-effect` or `key-store-honest`); a fault name the point table replaced; an unknown point |
-| CMP-7 | A fault armed at start without the `faults` feature, or at a point this build cannot arm (the answer names the release that builds the point, or says it is not planned). Faults are armed on the control listener (`POST /_fixture/faults`); in 0.2.0 the armable point is `mcp/after-backend-reply/drop` |
+| CMP-7 | A fault armed at start without the `faults` feature, or at a point this build cannot arm (the answer names the release that builds the point, or says it is not planned). Faults are armed on the control listener (`POST /_fixture/faults`); in 0.2.0 the armable point is `mcp/after-backend-reply/drop`, and 0.3.0 adds the three crash points |
 | CMP-8 | `--fixture-control` outside `tiny-tracker all` (this version) |
 | CMP-9 | `--backend-defect` in `tiny-tracker server`, where no backend runs |
 | CMP-10 | `strict-input` in `tiny-tracker server` |
@@ -226,6 +226,15 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-21 | `principals` named in `tiny-tracker server` (it is a backend feature) |
 | CMP-30, CMP-31 | `ledger` without `evidence`, or without `strict-input` (the ledger hashes every request) |
 | CMP-32, CMP-33 | `faults` without the `ledger`, or without `--fixture-control` (faults are armed on the control listener only) |
+| CMP-50 | `durable` without `strict-input`: every journal line is checksummed over RFC 8785 bytes, so a string with a lone surrogate must be refused at the door (decision 0003 §7) |
+| CMP-51 | The `settle-by-lookup` variant without `inflight` (it fences keys through the backend's key states) |
+| CMP-52 | Two key variants at once (`key-store-honest`, `key-store-durable`, `settle-by-lookup`, `settle-by-client-reference`) |
+| CMP-53 | `key-store-durable` or `settle-by-client-reference` with a named `lookup` or `inflight` (they stand for a backend with no idempotency key). As with CMP-5, a `lookup` that comes only from the default profile is turned off for the build, not refused |
+| CMP-54 | `durable`, `inflight` or `retention` in `tiny-tracker server` (backend features) |
+| CMP-60 | `clock` without `--fixture-control` (the fixture clock moves only through the control listener) |
+| CMP-61, CMP-62 | `--supervise` under profile 0.1, or outside `tiny-tracker all` |
+| CMP-63 | A crash fault point without `--supervise`: in one process a crash stops both layers and nothing restarts them. On the control listener the same arming is refused 409 `needs_supervise` |
+| CMP-64 | Under `--supervise`, `--fault` naming a point that is not a crash point (the supervisor's arming store is read by the crash checks only; arm the others on the control listener) |
 
 Tests check the command line against the table on a pairwise set of combinations, not the full product.
 
@@ -239,13 +248,13 @@ Faults are named **process / position / action**. A fault's arming state lives i
 | `mcp/after-backend-reply/close` | As drop, with the connection closed without a body | 0.3.0 |
 | `mcp/after-backend-reply/crash` | The MCP process exits after the backend answered; needs `--supervise` (the backend stays up) | 0.3.0 |
 | `mcp/after-backend-reply/delay` | The answer is held for a set, capped time | 0.3.0 |
-| `backend/before-commit/crash` | After validate, before the journal append: the backend exits and nothing is written | 0.3.0 |
+| `backend/before-commit/crash` | After the pending key record, before the commit section: the backend exits and nothing is written; at the next start the pending line is ended `aborted` (`orphan_at_start`) | 0.3.0 |
 | `backend/before-commit/delay` | A delay between the pending record and the commit: the in-flight window | 0.3.0 |
 | `backend/after-commit/crash` | After the ledger, before the reply: written, journalled and in the ledger; the backend exits, so the client sees `unknown` | 0.3.0 |
 | `backend/after-commit/error` | The backend commits, then answers 500 | 0.3.0 |
 | `backend/after-commit/drop` | The backend commits and never answers (capped hold) | 0.3.0 |
 
-A backend crash after commit and an MCP-process crash after the backend replied are different faults with different expected answers. Resource caps: holds and delays are capped in time and count, run allocation at 1000 per process, control bodies at 64 KiB, and the data dir is created 0700.
+A backend crash after commit and an MCP-process crash after the backend replied are different faults with different expected answers. **Built in 0.3.0:** the three crash points, under `tiny-tracker all --supervise` only. They are armed at start (`--fault POINT[:once]`) or on the control listener, into the supervisor's arming store, which both children read; a crash point fires once and takes no other selector. `/build` lists them in `faults.armed` as `S-<n> <point> {"once":true}`, after the fault controller's own `F-<n>` entries. Resource caps: holds and delays are capped in time and count, run allocation at 1000 per process, control bodies at 64 KiB, and the data dir is created 0700.
 
 ## Identifiers
 
@@ -272,7 +281,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - **The contract is a draft.** The lost-response contract is under joint review. Runs before it freezes are historical baselines and are repeated after the freeze.
 - **Time.** Rehearsals with the fixture clock prove nothing about elapsed time. Only a wall-clock run with offset 0 and control off is published as a delayed-recovery result.
 - **`lookup-reexecutes` is detected by fx-check only.** Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches.
-- **Not durable yet.** Until 0.3.0 everything is in memory: a restart loses data and keys.
+- **Durability.** Until 0.3.0 everything is in memory. From 0.3.0, with `durable`, data, key records, tombstones, fences, run allocations and execution records survive a restart through the journal. **The ledger is still kept in memory, for one boot:** after a restart it holds only that boot's entries, so a recount that includes the ledger covers one boot (the durable A5 plan recounts before its restart; `docs/a5-durable.md`).
 - **One instance.** Behaviour with more than one server instance on the same data is out of scope.
 - **Forced overlaps are not guaranteed.** A simultaneous same-key repeat can only be observed or not observed; known answers list both where both can happen.
 
