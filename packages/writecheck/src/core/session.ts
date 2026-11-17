@@ -53,8 +53,14 @@ export interface CallResult {
   http_status: number | null;
   /** First text content (raw). */
   text: string | null;
-  /** structuredContent when present, else the text parsed as JSON or YAML. */
+  /** structuredContent when present, else the text parsed as JSON or YAML; for a wrapped result that was decoded, the parsed document (see `decoded`). */
   data: unknown;
+  /**
+   * Set where `data` is not structuredContent itself but the JSON document its only member `result` carried as a string (a
+   * wrapped result, as Python FastMCP returns): `basis` says why it was decoded (the tool's outputSchema marks a wrapped
+   * result, or the manifest declares `decode: json`). Absent for every other result.
+   */
+  decoded?: { from: 'structuredContent.result'; basis: DecodeBasis };
   /** The shape fields of structuredContent and of each JSON text block that carry an `mws` field (spec 7.3, rule 11; src/checks/shape.ts), or null. */
   shape?: ShapeCapture | null;
   /** Whether the call carried an idempotency key and a version (B-9: same_key / same_version on a call that carried none is read as yes); set by the driver for the writes it builds, absent where not recorded. */
@@ -66,6 +72,43 @@ export interface CallResult {
   rpc_id: number | null;
   t_start_ms: number;
   t_end_ms: number;
+}
+
+/** Why a wrapped result is decoded: the tool's declared outputSchema marks it, or the manifest opts in (`decode: json`). */
+export type DecodeBasis = 'outputSchema' | 'manifest';
+
+/**
+ * Does a tool's outputSchema mark a wrapped result: Python FastMCP's `x-fastmcp-wrap-result: true`, or an object schema whose
+ * only property is `result` (the MCP Python SDK wraps a non-object return the same way)? A `result` schema whose declared
+ * type excludes string never carries a JSON document as a string, so it does not count.
+ */
+export function marksWrappedResult(schema: unknown): boolean {
+  if (!isObj(schema)) return false;
+  const props = isObj(schema['properties']) ? schema['properties'] : null;
+  if (!props || Object.keys(props).length !== 1 || !Object.hasOwn(props, 'result')) return false;
+  if (schema['x-fastmcp-wrap-result'] === true) return true;
+  const r = props['result'];
+  const t = isObj(r) ? r['type'] : undefined;
+  return t === undefined || t === 'string' || (Array.isArray(t) && t.includes('string'));
+}
+
+/**
+ * The JSON document a wrapped result carries: structuredContent is an object whose only member is `result`, a string that
+ * parses as a JSON object or array. Anything else (other members, a string that is not JSON, JSON that is a scalar) gives
+ * undefined, and the result is read as it is.
+ */
+export function unwrapResult(sc: unknown): unknown {
+  if (!isObj(sc)) return undefined;
+  const ks = Object.keys(sc);
+  if (ks.length !== 1 || ks[0] !== 'result' || typeof sc['result'] !== 'string') return undefined;
+  const s = sc['result'].trim();
+  if (!s.startsWith('{') && !s.startsWith('[')) return undefined;
+  try {
+    const v: unknown = JSON.parse(s);
+    return v !== null && typeof v === 'object' ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface HttpResult {
@@ -189,9 +232,15 @@ export class Session {
   private modern: boolean | null = null;
   /** Facts about the connection that are not verdicts (for the results' `target.mcp.notes`): e.g. a server that failed on server/discover. */
   readonly notes: string[] = [];
+  /** Tools whose wrapped results are decoded, and why: the manifest's `decode: json`, or an outputSchema in tools/list that marks one. */
+  private readonly decodeTools = new Map<string, DecodeBasis>();
+  /** Tools a decode was already noted for (one note per tool). */
+  private readonly decodeNoted = new Set<string>();
 
   constructor(readonly o: SessionOptions) {
     if (o.min_interval_ms > 0 && o.throttle_file) this.throttle = new Throttle(o.throttle_file, o.min_interval_ms);
+    const m = o.manifest;
+    for (const t of [m?.target?.guard, ...(m?.resources ?? []).flatMap((r) => [r.read, r.list])]) if (t?.decode === 'json') this.decodeTools.set(t.tool, 'manifest');
   }
 
   /** A new step id, unique in the run: `<prefix>.<seq>`. */
@@ -579,7 +628,10 @@ export class Session {
       const res = r.message && isObj(r.message['result']) ? r.message['result'] : null;
       if (!res && optional && i === 0 && r.message && isObj(r.message['error']) && r.message['error']['code'] === -32601) return [];
       if (!res) throw new WritecheckError(`${method} failed on ${label}: ${r.transport_error ?? JSON.stringify(r.message).slice(0, 300)}`, 4);
-      out.push(...((res[key] as Record<string, unknown>[] | undefined) ?? []));
+      const page = (res[key] as Record<string, unknown>[] | undefined) ?? [];
+      out.push(...page);
+      // why: t17: a tool whose outputSchema marks a wrapped result has its structuredContent.result decoded where it is JSON.
+      if (method === 'tools/list') for (const t of page) if (isObj(t) && typeof t['name'] === 'string' && !this.decodeTools.has(t['name']) && marksWrappedResult(t['outputSchema'])) this.decodeTools.set(t['name'], 'outputSchema');
       cursor = res['nextCursor'];
       if (!cursor) return out;
       const k = JSON.stringify(cursor);
@@ -650,7 +702,11 @@ export class Session {
         /* a scanner failure never changes the call's outcome */
       }
     }
-    const out = toCallResult(r, step, label, tool);
+    const out = toCallResult(r, step, label, tool, this.decodeTools.get(tool) ?? null);
+    if (out.decoded && !this.decodeNoted.has(tool)) {
+      this.decodeNoted.add(tool);
+      this.note(label, step, `${tool} answers a wrapped result (structuredContent {"result": "<JSON as a string>"}); paths are read from the decoded JSON document (basis: ${out.decoded.basis === 'manifest' ? 'the manifest declares decode: json' : "the tool's outputSchema marks a wrapped result"}); the capture keeps the result as received.`);
+    }
     if (out.result_type === 'input_required') this.inputRequests.push({ step, tool, method: 'input_required result', answer: 'not answered in this call: only the MWS-RETRY-3 check retries, with the answers the declaration gives; elsewhere the call is judged as an unknown outcome' });
     this.hist({ op, phase: out.ok ? 'ok' : out.timed_out || out.transport_error ? 'info' : 'fail', kind: 'call', label, step, name: tool, write, ...(out.timed_out ? { detail: 'client timeout: the outcome is unknown' } : out.transport_error ? { detail: out.transport_error } : {}) });
     if (out.http_status === 429 || (!out.ok && RATE_TEXT.test(out.text ?? out.rpc_error?.message ?? ''))) throw new RateLimited(`tools/call ${tool} (${step})`);
@@ -720,7 +776,7 @@ export class Session {
   }
 }
 
-export function toCallResult(r: RpcOutcome, step: string, label: string, tool: string): CallResult {
+export function toCallResult(r: RpcOutcome, step: string, label: string, tool: string, decode: DecodeBasis | null = null): CallResult {
   const body = r.message ?? {};
   const res = isObj(body['result']) ? body['result'] : null;
   const err = isObj(body['error']) ? { code: Number(body['error']['code']), message: String(body['error']['message']) } : null;
@@ -729,7 +785,11 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   const texts: string[] = [];
   for (const c of (res?.['content'] as Record<string, unknown>[] | undefined) ?? []) if (isObj(c) && c['type'] === 'text' && typeof c['text'] === 'string') texts.push(c['text']);
   const text: string | null = texts.length ? texts.join('\n') : null;
-  const data = res && res['structuredContent'] !== undefined ? res['structuredContent'] : texts.length ? parseStructured(texts[0]!) : null;
+  let data = res && res['structuredContent'] !== undefined ? res['structuredContent'] : texts.length ? parseStructured(texts[0]!) : null;
+  // why: t17: a wrapped result carries its data as a JSON document in a string; decoded only where the tool is marked (its
+  // outputSchema, or the manifest's decode: json) and the value is exactly {"result": "<JSON object or array>"}.
+  const unwrapped = decode && res ? unwrapResult(res['structuredContent']) : undefined;
+  if (unwrapped !== undefined) data = unwrapped;
   // why: an adopted result shape is read at evaluation, from what is captured here for every call (cheap; null for most servers).
   const shape = res ? captureShape(res['structuredContent'], texts) : null;
   // why: B-9 v2 ("Free words and the serialized block"): where the result carries a shape, the text the patterns read leaves out
@@ -749,7 +809,7 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   // why: an input_required result (2026-07-28), or any other non-complete result type, is neither a success nor an error (spec MWS-RES-2).
   const resultType = res && typeof res['resultType'] === 'string' ? res['resultType'] : null;
   const pending = resultType !== null && resultType !== 'complete';
-  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
+  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, ...(unwrapped !== undefined ? { decoded: { from: 'structuredContent.result' as const, basis: decode! } } : {}), shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
 }
 
 /** Is a text block a JSON object that carries an `mws` member (the shape, B-9 v2)? */

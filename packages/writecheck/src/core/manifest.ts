@@ -41,6 +41,19 @@ export interface ToolTemplate {
   args: unknown;
 }
 
+/**
+ * `decode: json` on a read, a list or the guard: the tool answers structuredContent `{"result": "<a JSON document as a string>"}`
+ * (a wrapped result) without an outputSchema that says so; paths are read from the parsed document. Absent unless declared.
+ */
+export type Decode = { decode?: 'json' };
+
+/** Parse an optional `decode` member (only `json`). */
+function decodeOf(v: unknown, where: string): Decode {
+  if (v === undefined) return {};
+  if (v !== 'json') throw fail(`${where}.decode`, 'json (paths are read from the JSON document a wrapped result carries as a string)');
+  return { decode: 'json' };
+}
+
 export interface FieldSpec {
   /** Where the field is in the object the read returns. */
   path: string;
@@ -79,7 +92,7 @@ export interface ControlSpec {
 }
 
 /** A list call and how to pick items out of its result. */
-export interface ListSpec extends ToolTemplate {
+export interface ListSpec extends ToolTemplate, Decode {
   items: string;
   id: string;
   name: string;
@@ -160,7 +173,7 @@ export interface ResourceSpec {
   vars: Record<string, unknown>;
   create: (ToolTemplate & { id: string | null; id_regex: string | null; name_path: string | null }) | null;
   /** The read tool: `object` is where the object is in the result; with `items` and `match`, the result is a list and the object is the item whose `match` equals the id. */
-  read: ToolTemplate & { object: string; settle_ms: number; ignore: string[]; items: string | null; match: string | null };
+  read: ToolTemplate & Decode & { object: string; settle_ms: number; ignore: string[]; items: string | null; match: string | null };
   /** Null for a resource the tester only creates and deletes (no update tool declared). */
   /**
    * override: an argument the declared update arguments set that is an explicit override (spec NF-7), such as overwrite: true;
@@ -265,7 +278,7 @@ export interface Manifest {
      * whose only tool is a dispatcher (PostHog `cli` mode: `exec`, readOnlyHint: false). The guard then rests on that
      * declaration, not on an annotation; the run verifies it (three identical answers) and fails closed.
      */
-    guard: { tool: string; args: unknown; path: string | null; pattern: string; read_only: boolean; read_only_call?: boolean } | null;
+    guard: ({ tool: string; args: unknown; path: string | null; pattern: string; read_only: boolean; read_only_call?: boolean } & Decode) | null;
     refuse_fingerprints: string[];
   };
   limits: { write_budget: number; writes_per_second: number; pairs: number; stale_reps: number; gate_reps: number; timeout_ms: number; max_fuzz_cases: number };
@@ -417,14 +430,14 @@ function control(v: unknown, where: string): ControlSpec {
 export const RESERVED_VARS = ['prefix', 'id', 'field', 'value', 'object', 'version', 'key', 'scope', 'marker', 'ids', 'batch', 'missing_id', 'names_inserted', 'position', 'element_id', 'n'];
 
 function listSpec(v: unknown, where: string): ListSpec {
-  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next']);
+  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode']);
   let next: ListSpec['next'] = null;
   if (l['next'] !== undefined) {
     const n = obj(l['next'], `${where}.next`);
     keys(n, ['path', 'arg'], `${where}.next`);
     next = { path: path(n['path'], `${where}.next.path`), arg: str(n['arg'], `${where}.next.arg`) };
   }
-  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next };
+  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...decodeOf(l['decode'], where) };
 }
 
 const optBool = (v: unknown, where: string): boolean | null => {
@@ -486,7 +499,7 @@ function resource(v: unknown, i: number): ResourceSpec {
   const name = str(o['name'], `${w}.name`, /^[a-z][a-z0-9_-]{0,39}$/);
   const vars = o['vars'] === undefined ? {} : obj(o['vars'], `${w}.vars`);
   for (const k of Object.keys(vars)) if (RESERVED_VARS.includes(k)) throw fail(`${w}.vars.${k}`, 'a reserved template name');
-  const read = tool(o['read'], `${w}.read`, ['object', 'settle_ms', 'ignore', 'items', 'match']);
+  const read = tool(o['read'], `${w}.read`, ['object', 'settle_ms', 'ignore', 'items', 'match', 'decode']);
   if ((read['items'] === undefined) !== (read['match'] === undefined)) throw fail(`${w}.read`, 'items and match go together (a list read: the object is the item whose match field equals the id)');
   let update: ResourceSpec['update'] = null;
   let f: ResourceSpec['fields'] = null;
@@ -746,7 +759,7 @@ function resource(v: unknown, i: number): ResourceSpec {
     restorable: restorableOf(o['restorable'], `${w}.restorable`, !!update),
     no_version_check: strList(o['no_version_check'], `${w}.no_version_check`),
     create,
-    read: { tool: read.tool, args: read.args, object: read['object'] === undefined ? '$' : path(read['object'], `${w}.read.object`), settle_ms: num(read['settle_ms'], 0, 0, 60_000, `${w}.read.settle_ms`), ignore: strList(read['ignore'], `${w}.read.ignore`).map((p, j) => path(p, `${w}.read.ignore[${j}]`)), items: read['items'] === undefined ? null : path(read['items'], `${w}.read.items`), match: read['match'] === undefined ? null : path(read['match'], `${w}.read.match`) },
+    read: { tool: read.tool, args: read.args, object: read['object'] === undefined ? '$' : path(read['object'], `${w}.read.object`), settle_ms: num(read['settle_ms'], 0, 0, 60_000, `${w}.read.settle_ms`), ignore: strList(read['ignore'], `${w}.read.ignore`).map((p, j) => path(p, `${w}.read.ignore[${j}]`)), items: read['items'] === undefined ? null : path(read['items'], `${w}.read.items`), match: read['match'] === undefined ? null : path(read['match'], `${w}.read.match`), ...decodeOf(read['decode'], `${w}.read`) },
     update,
     fields: f,
     version,
@@ -1049,7 +1062,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const environment = str(t['environment'], 'target.environment');
   let guard: Manifest['target']['guard'] = null;
   if (t['guard'] !== undefined) {
-    const g = tool(t['guard'], 'target.guard', ['path', 'pattern', 'read_only', 'read_only_call']);
+    const g = tool(t['guard'], 'target.guard', ['path', 'pattern', 'read_only', 'read_only_call', 'decode']);
     if (g['read_only'] !== undefined && typeof g['read_only'] !== 'boolean') throw fail('target.guard.read_only', 'true or false');
     if (g['read_only_call'] !== undefined && typeof g['read_only_call'] !== 'boolean') throw fail('target.guard.read_only_call', 'true or false');
     // why: a declared read-only call is the exact call the operator read; a template could make it another call.
@@ -1060,7 +1073,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     } catch (e) {
       throw fail('target.guard.pattern', (e as Error).message);
     }
-    guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}) };
+    guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
   keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases'], 'limits');

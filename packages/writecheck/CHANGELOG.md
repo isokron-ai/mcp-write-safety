@@ -5,6 +5,7 @@ All notable changes to `@mcp-write-safety/writecheck` (the `mcp-writecheck` comm
 ## Unreleased
 
 ### Fixed
+- Wrapped results are read (t17): a tool that answers structuredContent `{"result": "<a JSON document as a string>"}`, as Python FastMCP does with a wrap-result output schema, had its paths (a read's `items`/`match`, the fixture lookup, `target.guard.path`) read from the wrapper, so nothing was found and the fixture was "not found". The JSON inside the string is now parsed and read, only where the tool's `outputSchema` marks a wrapped result (`x-fastmcp-wrap-result`, or `result` as the only property) or the manifest declares the new `decode: json` on `read`, `list` or `target.guard`, and only where structuredContent has `result` as its only member and that string is a JSON object or array. Each decoded call says so (`decoded` in its record), and `target.mcp.notes` names each decoded tool and why. Results of servers that do not wrap are read as before; plan hashes of existing manifests do not change.
 - A backend URL in the server's command line (`server.stdio`, `server.launch.command`; e.g. `redis://host:6379` or `--url=postgres://…`) is now a target host. It is shown in the plan and checked by the production-host refusal; before, such a host was neither. Plans for servers with such an argument get a new hash. A run left open by an earlier version on such a manifest is refused at cleanup ("environment now points at …") and needs `--abandon`.
 
 ## 0.1.0 (16 Nov 2026): preview for MWS 0.9

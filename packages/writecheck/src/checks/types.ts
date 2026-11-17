@@ -9,7 +9,7 @@
  *             recorded run, so a rule fixed later can be applied to old evidence.
  */
 
-import type { Carried } from '../core/session.js';
+import type { CallResult, Carried } from '../core/session.js';
 import type { Driver } from '../core/driver.js';
 import type { Ledger } from '../core/ledger.js';
 import type { Manifest, ResourceSpec, ReviewSpec } from '../core/manifest.js';
@@ -161,15 +161,17 @@ export interface CallBrief {
   shape?: ShapeCapture | null;
   /** Whether the call carried an idempotency key and a version, where the trial recorded it (B-9: same_key / same_version); absent in older evidence. */
   carried?: Carried;
+  /** `data` is the JSON document a wrapped result carried as a string in structuredContent.result, and why it was decoded; absent otherwise. */
+  decoded?: CallResult['decoded'];
 }
 
-export function brief(r0: { step: string; ok: boolean; isError: boolean; rpc_error: { code: number; message: string } | null; text: string | null; data: unknown; timed_out: boolean; transport_error: string | null; result_type?: string | null; tool?: string; shape?: ShapeCapture | null; prose_text?: string | null; carried?: Carried }, max = 2000): CallBrief {
+export function brief(r0: { step: string; ok: boolean; isError: boolean; rpc_error: { code: number; message: string } | null; text: string | null; data: unknown; timed_out: boolean; transport_error: string | null; result_type?: string | null; tool?: string; shape?: ShapeCapture | null; prose_text?: string | null; carried?: Carried; decoded?: CallResult['decoded'] }, max = 2000): CallBrief {
   // why: B-9 v2: for a tool that adopts the shape, the text kept is what the patterns read (readText); `shape` is kept even when null.
   const r = { ...r0, text: readText(r0) };
   const d = JSON.stringify(r.data ?? null);
   const clipped = (r.text?.length ?? 0) > max || d.length > max * 2;
   // why: an identifier past the clip must still be found (MWS-RES-3, RES-4, ATOM-1); the full answer is kept for the search only then.
-  return { step: r.step, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : r.text.length > max ? `${r.text.slice(0, max)}…` : r.text, data: d.length > max * 2 ? { clipped: true, bytes: d.length } : r.data, indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ...(clipped ? { hay: `${r.text ?? ''}\n${d}`.slice(0, 256 * 1024) } : {}), ...(clipped && adoptedBy(r.tool ?? null) && isObjLike(r.data) && 'mws' in r.data ? { phay: `${r.text ?? ''}\n${JSON.stringify(patternData({ tool: r.tool, data: r.data }))}`.slice(0, 256 * 1024) } : {}), ...(r.result_type && r.result_type !== 'complete' ? { result_type: r.result_type } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.shape !== undefined ? { shape: r.shape } : {}), ...(r.carried ? { carried: r.carried } : {}) };
+  return { step: r.step, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : r.text.length > max ? `${r.text.slice(0, max)}…` : r.text, data: d.length > max * 2 ? { clipped: true, bytes: d.length } : r.data, indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ...(clipped ? { hay: `${r.text ?? ''}\n${d}`.slice(0, 256 * 1024) } : {}), ...(clipped && adoptedBy(r.tool ?? null) && isObjLike(r.data) && 'mws' in r.data ? { phay: `${r.text ?? ''}\n${JSON.stringify(patternData({ tool: r.tool, data: r.data }))}`.slice(0, 256 * 1024) } : {}), ...(r.result_type && r.result_type !== 'complete' ? { result_type: r.result_type } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.shape !== undefined ? { shape: r.shape } : {}), ...(r.carried ? { carried: r.carried } : {}), ...(r.decoded ? { decoded: r.decoded } : {}) };
 }
 
 const isObjLike = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
