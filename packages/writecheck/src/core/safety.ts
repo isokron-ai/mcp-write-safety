@@ -36,13 +36,17 @@ export function productionReason(host: string): string | null {
   return null;
 }
 
+/** A URL with a scheme inside one command-line argument (the whole argument, or after `--flag=`). */
+const URL_IN_ARG = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,]+/gi;
+
 /** Every host the run would reach directly, or that the server is pointed at through a passed-through variable. */
 export function targetHosts(m: Manifest, env: NodeJS.ProcessEnv): { host: string; where: string }[] {
   const out: { host: string; where: string }[] = [];
   const add = (u: string | undefined | null, where: string) => {
     if (!u) return;
     try {
-      out.push({ host: new URL(u).host, where });
+      const host = new URL(u).host;
+      if (host) out.push({ host, where }); // file:///x and the like have no host
     } catch {
       /* not a URL */
     }
@@ -50,6 +54,13 @@ export function targetHosts(m: Manifest, env: NodeJS.ProcessEnv): { host: string
   add(m.server.url, 'server.url');
   for (const n of [...m.server.env_passthrough, ...m.server.env_public]) add(env[n], `server environment ${n}`);
   for (const [k, v] of Object.entries(m.server.env)) add(v, `server.env ${k}`);
+  // why: a server can be pointed at its backend by a command-line argument (`server redis://host:6379`, `--url=…`),
+  // not only by its environment (corpus batch 1, 17 Nov). Such a host is shown in the plan and checked like the rest.
+  const argv = (cmd: string[] | null | undefined, where: string) => {
+    for (const [i, a] of (cmd ?? []).entries()) for (const u of a.match(URL_IN_ARG) ?? []) add(u, `${where}[${i}]`);
+  };
+  argv(m.server.stdio, 'server.stdio');
+  argv(m.server.launch?.command, 'server.launch.command');
   for (const r of m.resources) if (r.control) add(r.control.base ?? env[r.control.base_env!], `resources.${r.name}.control`);
   return out;
 }
