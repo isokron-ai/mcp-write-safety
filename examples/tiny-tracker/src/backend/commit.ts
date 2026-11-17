@@ -328,7 +328,23 @@ export interface JournalLookupFenceLine {
   checksum: string;
 }
 
-export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine | JournalLookupFenceLine;
+/**
+ * Additive (0.4.0, coordinator note 19 item 7): the fixture clock moved (POST /_fixture/clock), journalled before the
+ * offset is stored or answered. At load the last one's to_ms goes back into the fixture clock, so record time never
+ * moves back across a restart (the reason CMP-65 refused durable with clock in 0.3.0). No commit_seq.
+ */
+export interface JournalClockLine {
+  jseq: number;
+  line: "clock";
+  /** The offset before and after the move, in milliseconds (to_ms > from_ms: the clock only moves forward). */
+  from_ms: number;
+  to_ms: number;
+  /** Wall time of the move. */
+  at: string;
+  checksum: string;
+}
+
+export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine | JournalLookupFenceLine | JournalClockLine;
 
 export class CommitSinkError extends Error {
   constructor(readonly sink: string, cause: unknown) {

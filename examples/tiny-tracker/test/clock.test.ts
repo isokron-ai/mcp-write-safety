@@ -178,3 +178,57 @@ describe("the clock feature on the command line", () => {
     assert.ok(![BACKEND, EVIDENCE, CONTROL].some((t) => r.stdout.includes(t) || r.stderr.includes(t)));
   });
 });
+
+describe("the fixture clock with the durable journal (0.4.0, note 19 item 7)", () => {
+  it("a move is handed to beforeMove before the offset is stored; a failed journal append leaves the clock where it was (503)", async () => {
+    const seen: number[] = [];
+    const c = new FixtureClock(memoryOffset(), () => 1_000_000);
+    c.beforeMove = (m) => { seen.push(c.offsetMs(), m.to_ms); };
+    c.advance(5000);
+    assert.deepEqual(seen, [0, 5000], "beforeMove sees the old offset: the journal line comes first");
+    c.beforeMove = () => { throw new Error("disk full"); };
+    assert.throws(() => c.advance(5000), (e: any) => e.status === 503 && e.code === "journal_unavailable");
+    assert.equal(c.offsetMs(), 5000);
+    const answer = await clockRoute(c, "POST", async () => ({ advance_ms: 1 }));
+    assert.equal(answer!.status, 503);
+    assert.equal(c.offsetMs(), 5000);
+  });
+
+  it("restore puts back a recorded offset, forward only, within the cap", () => {
+    const c = new FixtureClock(memoryOffset(7000));
+    c.restore(5000);
+    assert.equal(c.offsetMs(), 7000, "an offset already further (the supervisor's state folder) stays");
+    c.restore(9000);
+    assert.equal(c.offsetMs(), 9000);
+    assert.throws(() => c.restore(MAX_OFFSET_MS + 1));
+    assert.throws(() => c.restore(-1));
+  });
+
+  it("a journal replays its clock lines into the clock, and refuses to load clock lines without one", async () => {
+    const { Journal } = await import("../src/backend/journal.js");
+    const { Store } = await import("../src/backend/store.js");
+    const dir = mkdtempSync(join(tmpdir(), "tt-clockj-"));
+    const data = join(dir, "data");
+    try {
+      const open = (clock?: FixtureClock) => {
+        const j = new Journal(new Store(), undefined, { dataDir: data, writer: "test", log: () => {} });
+        if (clock) j.clock = clock;
+        j.load();
+        return j;
+      };
+      const j1 = open(new FixtureClock());
+      j1.recordClockMove({ from_ms: 0, to_ms: 120_000, at: "2026-11-17T00:00:00.000Z" });
+      j1.recordClockMove({ from_ms: 120_000, to_ms: 180_000, at: "2026-11-17T00:00:01.000Z" });
+      j1.close();
+      const restored = new FixtureClock();
+      const j2 = open(restored);
+      assert.equal(restored.offsetMs(), 180_000);
+      assert.equal(j2.report!.clockOffsetMs, 180_000);
+      j2.close();
+      assert.throws(() => open(), /moved the fixture clock to an offset of 180000 ms/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+

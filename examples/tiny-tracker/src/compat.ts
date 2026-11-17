@@ -202,15 +202,8 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     check: (c) => c.faults.includes("backend/after-effect-before-key/crash") && !has(c.features, "durable")
       ? "fault point backend/after-effect-before-key/crash needs the durable feature: without a journal there is no key record to keep after the effect" : undefined,
   },
-  {
-    // G2 fold-in 9 (refused, not journalled): the fixture clock's offset lives in memory, or under --supervise in the
-    // supervisor's state folder, which goes when the supervisor stops; the journal does not keep it. After a restart
-    // the record time would move back, and tombstones would read as completed records again. Journalling the offset
-    // would take a new journal-format/1 line kind; a durable run is a wall-clock run (the A5 plan), so it is refused.
-    id: "CMP-65", post01: true,
-    check: (c) => has(c.features, "durable") && has(c.features, "clock")
-      ? "the durable feature does not run with the fixture clock: the journal does not keep the clock offset, so after a restart record time would move back and expired keys would read as live again (run durable on the wall clock: drop clock)" : undefined,
-  },
+  // CMP-65 (G2 fold-in 9: durable with the fixture clock) is retired in 0.4.0 (coordinator note 19, item 7): the journal
+  // keeps the clock's moves (clock lines, written before the offset is stored) and restores the offset at load.
   // ---- stream F (CMP-70 to CMP-79) ----
   {
     // 0.4.0 integration: narrowed. stdio runs through the same start as `all`, so fixture-layer features, the evidence

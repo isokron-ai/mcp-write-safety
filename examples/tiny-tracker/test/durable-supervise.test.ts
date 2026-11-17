@@ -196,3 +196,42 @@ describe("tiny-tracker all --supervise with durable (G2 restart tests)", () => {
     });
   });
 });
+
+describe("the fixture clock under --supervise with durable (0.4.0, note 19 item 7)", () => {
+  it("a clock move is a journal line; a new supervisor (a new state folder) on the same data dir starts at the journalled offset", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-dsup-clock-"));
+    const dataDir = join(dir, "data");
+    const start = async () => {
+      const lines: Record<string, unknown>[] = [];
+      const sup = await startSupervisor({
+        cli: CLI, env: ENV, onLine: (l) => void lines.push(l), onStderr: () => {},
+        args: ["--features", `${FEATURES},clock`, "--fixture-control", "--data-dir", dataDir, "--port", "0", "--backend-port", "0", "--control-port", "0"],
+      });
+      return { sup, first: lines[0] as any };
+    };
+    try {
+      const a = await start();
+      try {
+        const moved = await call("POST", `${a.first.control}/_fixture/clock`, CONTROL, { advance_ms: 7_200_000 });
+        assert.equal(moved.status, 200, JSON.stringify(moved.body));
+        assert.equal(moved.body.offset_ms, 7_200_000);
+      } finally {
+        await a.sup.close();
+      }
+      const kinds = readJournal(join(dataDir, JOURNAL_FILE)).lines.map((l) => l.line);
+      assert.ok(kinds.includes("clock"), kinds.join(","));
+      const b = await start();
+      try {
+        assert.notEqual(b.sup.stateDir, a.sup.stateDir, "the clock.json of the first supervisor went with it");
+        const now = await call("GET", `${b.first.control}/_fixture/clock`, CONTROL);
+        assert.equal(now.body.offset_ms, 7_200_000);
+        const build = (await call("GET", `${b.first.backend}/build`, EVIDENCE)).body;
+        assert.equal(build.clock.offset_ms, 7_200_000);
+      } finally {
+        await b.sup.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
