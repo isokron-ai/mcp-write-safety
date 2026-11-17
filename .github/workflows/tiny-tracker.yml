@@ -1,0 +1,142 @@
+# Public CI for examples/tiny-tracker (0.4.0, reviews C6 and T5).
+#
+#   test         the whole suite on Linux, macOS and Windows with Node 22 and 24. Journal, fsync, process kill and
+#                port reuse all differ by platform. On Linux and macOS the suite runs with TT_GATE=1, so the
+#                Python-backed checks (digest vectors, JSON Schemas) fail instead of skipping. Windows runners have
+#                no python3 command, so there the suite runs without the gate and those checks are skipped.
+#   known-answers  each known-answer generator three times in fresh processes; any byte difference fails the job.
+#                The runs' bytes are uploaded, so anyone can compare them across platforms.
+#   container    builds the image and checks the start refusal (X1): no token, exit 2; with a token, /mcp needs it.
+#
+# Read-only token, no secrets, no publish. Runs only when tiny-tracker or this file changes.
+
+name: tiny-tracker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/tiny-tracker/**"
+      - ".github/workflows/tiny-tracker.yml"
+  pull_request:
+    paths:
+      - "examples/tiny-tracker/**"
+      - ".github/workflows/tiny-tracker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tiny-tracker-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: examples/tiny-tracker
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: examples/tiny-tracker/package-lock.json
+      - name: Python with jsonschema (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --disable-pip-version-check -q "jsonschema==4.26.0" "referencing==0.37.0"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test (TT_GATE=1)
+        if: runner.os != 'Windows'
+        env:
+          TT_GATE: "1"
+        run: npm test
+      - name: Test (no python3 command on Windows runners)
+        if: runner.os == 'Windows'
+        run: npm test
+
+  known-answers:
+    name: known answers reproduce (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: examples/tiny-tracker/package-lock.json
+      - name: Install and build
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Generate three times and compare
+        run: node dist/test/repro-known-answers.js --runs 3 --out "$RUNNER_TEMP/known-answers"
+      - name: Keep the runs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: known-answers-${{ matrix.os }}-node${{ matrix.node }}
+          path: ${{ runner.temp }}/known-answers
+          if-no-files-found: ignore
+          retention-days: 14
+
+  container:
+    name: container (start refusal and bearer token)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image
+        run: docker build -t tiny-tracker:ci .
+      - name: Without a token it refuses to start (exit 2)
+        run: |
+          set +e
+          docker run --rm tiny-tracker:ci > out.txt 2> err.txt
+          code=$?
+          set -e
+          cat err.txt
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 without a token, got $code"; exit 1; }
+          [ ! -s out.txt ] || { echo "::error::printed a state line without a token"; exit 1; }
+          grep -q "needs a bearer token for /mcp" err.txt
+      - name: With a token, /mcp needs it
+        run: |
+          token="$(openssl rand -hex 24)"
+          docker run -d --name tt -p 127.0.0.1:47310:47310 -e TRACKER_MCP_TOKEN="$token" tiny-tracker:ci
+          trap 'docker logs tt; docker rm -f tt >/dev/null' EXIT
+          for _ in $(seq 1 50); do docker logs tt 2>/dev/null | grep -q '"mcp"' && break; sleep 0.2; done
+          body='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+          hdr=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
+          none="$(curl -s -o /dev/null -w '%{http_code}' "${hdr[@]}" -d "$body" http://127.0.0.1:47310/mcp)"
+          good="$(curl -s -o /dev/null -w '%{http_code}' "${hdr[@]}" -H "authorization: Bearer $token" -d "$body" http://127.0.0.1:47310/mcp)"
+          echo "without token: $none, with token: $good"
+          [ "$none" = "401" ] && [ "$good" = "200" ]
+          ! docker logs tt 2>&1 | grep -qF "$token"
+      - name: The image runs as an unprivileged user with a 0700 data dir
+        run: |
+          [ "$(docker run --rm --entrypoint id tiny-tracker:ci -u)" != "0" ]
+          [ "$(docker run --rm --entrypoint stat tiny-tracker:ci -c '%a %U' /data)" = "700 node" ]
