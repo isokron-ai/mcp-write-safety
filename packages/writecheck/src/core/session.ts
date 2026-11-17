@@ -392,7 +392,8 @@ export class Session {
     } else if (this.o.manifest.server.stdio) {
       conn.client = conn.launchEnv ? this.stdioClient(label, this.serverEnv(conn.launchEnv)) : this.stdioClient(label, this.serverEnv());
     } else {
-      if (this.main?.hasExited) {
+      // why: alive() already said no; a hung shared launch process is stopped and started again too, not reused (review, 17 Nov).
+      if (this.main) {
         await this.main.stop();
         this.main = null;
         this.mainStart = null;
@@ -432,7 +433,7 @@ export class Session {
       const code = conn.client instanceof StdioClient ? conn.client.exitInfo.exit_code : null;
       const tail = conn.client instanceof StdioClient ? conn.client.stderrTail() : (conn.own ?? this.main)?.stderrTail() ?? '';
       const last = tail.split('\n').filter((l) => l.trim()).pop()?.slice(0, 200);
-      this.note(label, st, `the server failed on server/discover (${why}${code !== null ? `; exit code ${code}` : ''}${last ? `; last stderr line: ${JSON.stringify(last)}` : ''}). It was started again once and the session uses initialize only; server/discover is not sent again.`);
+      this.note(label, st, `the server failed on server/discover (${why}${code !== null ? `; exit code ${code}` : ''}${last ? `; last stderr line: ${JSON.stringify(last)}` : ''}). ${conn.own || this.main || this.o.manifest.server.stdio ? 'It was started again once' : 'A new session was opened'} and the session uses initialize only; server/discover is not sent again.`);
       await this.revive(conn, label, st);
       return false;
     }
@@ -494,7 +495,7 @@ export class Session {
         await this.handshake(conn, o.label, step);
       } catch (e) {
         await this.release([o.label]);
-        return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: own.stderrTail() };
+        return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: (conn.own ?? own).stderrTail() };
       }
       return { started: true, protocol: conn.protocol };
     }

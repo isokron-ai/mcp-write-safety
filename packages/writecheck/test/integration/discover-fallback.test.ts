@@ -29,7 +29,7 @@ resources:
     fields: [ { path: a, values: [1, 2] }, { path: b, values: [1, 2] } ]
 `;
 
-/** DISCOVER=notfound|crash|hang; REV: the revision initialize answers. Every method it receives is appended to LOG. */
+/** DISCOVER=notfound|crash|crashall|hang; REV: the revision initialize answers. Every method it receives is appended to LOG. */
 const SERVER = `
 import { appendFileSync } from 'node:fs';
 const rl = (await import('node:readline')).createInterface({ input: process.stdin });
@@ -38,6 +38,7 @@ appendFileSync(process.env.LOG, 'start\\n');
 rl.on('line', (l) => {
   const m = JSON.parse(l);
   appendFileSync(process.env.LOG, m.method + '\\n');
+  if (process.env.DISCOVER === 'crashall' && m.id !== undefined && m.method !== 'initialize') { process.stderr.write('boom\\n'); process.exit(1); }
   if (m.method === 'server/discover') {
     if (process.env.DISCOVER === 'crash') { process.stderr.write('pydantic_core._pydantic_core.ValidationError: 1 validation error for ClientRequest\\n'); process.exit(1); }
     if (process.env.DISCOVER === 'hang') return;
@@ -154,5 +155,14 @@ test('(d) a server that hangs on server/discover but still answers ping: initial
     assert.ok(log().includes('ping'));
     assert.equal(s.notes.length, 1);
     assert.match(s.notes[0]!, /server\/discover failed \(no answer within the discover timeout\), but the server still answers/);
+  });
+});
+
+test('(e) a server that crashes on every request after initialize: one restart, then a code 4 failure, no loop', async () => {
+  await withServer({ DISCOVER: 'crashall' }, async (s, log) => {
+    await assert.rejects(s.listTools('MAIN'), (e: unknown) => (e as { code?: number }).code === 4);
+    const l = log();
+    assert.equal(l.filter((x) => x === 'start').length, 2, l.join(','));
+    assert.equal(l.filter((x) => x === 'server/discover').length, 1);
   });
 });
