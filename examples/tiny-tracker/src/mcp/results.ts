@@ -5,6 +5,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { ApiResponse } from "./api.js";
 import { renderText } from "./text.js";
+// ---- stream D ----
+import { keyedStateResult } from "./keyed-states.js";
+// ---- end stream D ----
 
 export type Structured = Record<string, unknown>;
 
@@ -135,6 +138,10 @@ export function quotedNames(names: string[]): string {
 
 /** Maps a backend refusal to a tool error. Never includes the request (it holds the bearer token). */
 export function fromBackend(res: ApiResponse, what: string, w?: WriteContext): CallToolResult {
+  // ---- stream D: keyed states (in_progress, key_expired, key_fenced; decision 0004) ----
+  const keyed = keyedStateResult(res, what, w);
+  if (keyed) return keyed;
+  // ---- end stream D ----
   const body = (res.body ?? {}) as { error?: string; message?: string; field?: string; reason?: string; current?: { version: number } };
   // A read tool's error carries no shape; a write tool's always does: a refusal is not_applied, no answer or a 5xx unknown.
   const no = (code: string, extra: Omit<WriteResult, "shape" | "outcome"> = {}) => (w ? notApplied(w, code, { ...(body.message ? { message: body.message } : {}), ...extra }) : undefined);

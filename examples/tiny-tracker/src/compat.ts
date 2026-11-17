@@ -169,3 +169,32 @@ export function checkCompat(c: Combination): string[] {
   const e: EffectiveCombination = { ...c, named: c.features, features: [...new Set([...features, ...c.features])] };
   return COMPAT_RULES.filter((r) => !(r.post01 && e.profile === "0.1")).map((r) => r.check(e)).filter((m): m is string => m !== undefined);
 }
+
+// ---- stream D: CMP-50 to CMP-59 (0.3.0 durability) ----
+const KEY_VARIANTS = ["key-store-honest", "key-store-durable", "settle-by-lookup", "settle-by-client-reference"];
+
+(COMPAT_RULES as CompatRule[]).push(
+  {
+    id: "CMP-50", post01: true,
+    check: (c) => c.layout === "server" && c.features.some((f) => ["durable", "inflight", "retention"].includes(f))
+      ? "durable, inflight and retention are backend features; name them where the backend runs (`all` or `backend`)" : undefined,
+  },
+  {
+    id: "CMP-51", post01: false,
+    check: (c) => has(c.variants, "settle-by-lookup") && !has(c.features, "inflight")
+      ? "the settle-by-lookup variant fences keys through the backend's key states; it needs the inflight feature" : undefined,
+  },
+  {
+    id: "CMP-52", post01: false,
+    check: (c) => {
+      const on = c.variants.filter((v) => KEY_VARIANTS.includes(v));
+      return on.length > 1 ? `the variants ${on.join(", ")} each replace create_ticket's key handling; name one` : undefined;
+    },
+  },
+  {
+    id: "CMP-53", post01: false,
+    check: (c) => (has(c.variants, "key-store-durable") || has(c.variants, "settle-by-client-reference")) && (has(c.features, "lookup") || has(c.features, "inflight"))
+      ? "the key-store-durable and settle-by-client-reference variants stand for a backend with no idempotency key; do not combine them with the backend key features (lookup, inflight)" : undefined,
+  },
+);
+// ---- end stream D ----

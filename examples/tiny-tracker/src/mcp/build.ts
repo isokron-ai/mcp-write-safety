@@ -11,6 +11,9 @@ import { addComment } from "./tools/comments.js";
 import { bulkUpdateTickets } from "./tools/bulk.js";
 import { getExecution, getOperation } from "./tools/operations.js";
 import { resolveDefects } from "../defects/index.js";
+// ---- stream D ----
+import { applyRetentionStatement } from "./keyed-states.js";
+// ---- end stream D ----
 
 export const CORRECT_TOOLS: ToolDef[] = [
   listProjects, createProject, deleteProject,
@@ -33,6 +36,9 @@ export function createBuild(defectNames: string[] = [], features: readonly strin
     configRules: { ...correctConfigRules },
     defects: [],
   };
+  // ---- stream D: the stated key retention (feature retention) ----
+  applyRetentionStatement(build, features);
+  // ---- end stream D ----
   const defects = resolveDefects(defectNames, features);
   // Replacing defects first, wrapping ones after, so that none hides another.
   for (const defect of [...defects.filter((d) => !d.wraps), ...defects.filter((d) => d.wraps)]) {
