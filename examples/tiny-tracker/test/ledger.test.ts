@@ -501,6 +501,20 @@ describe("faults (R7, B7, G9): armed on the control listener, recorded in the le
     }
   });
 
+  it("G2 round 2, item 6: backend/after-effect-before-key/crash without durable is refused 400 needs_feature on the control listener", async () => {
+    const point = "backend/after-effect-before-key/crash";
+    assert.throws(() => parseArming({ point }, FAULT_ACTIONS, ALL), (e: FaultError) => e.status === 400 && e.code === "needs_feature");
+    assert.equal(parseArming({ point }, FAULT_ACTIONS, [...ALL, "durable"]).point, point);
+    const s = await stack({ features: ALL });
+    try {
+      const r = await s.arm(point);
+      assert.deepEqual([r.status, r.body.error, r.body.feature], [400, "needs_feature", "durable"]);
+      assert.deepEqual((await call("GET", `${s.control}/_fixture/faults`, CONTROL)).body.armed, [], "nothing armed");
+    } finally {
+      await s.close();
+    }
+  });
+
   it("without the faults feature the control listener arms nothing (501, named feature)", async () => {
     const s = await stack({ features: ["evidence", "strict-input", "ledger"] });
     try {

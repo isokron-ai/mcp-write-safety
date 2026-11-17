@@ -136,7 +136,14 @@ export const FAULT_ACTIONS: Record<string, FaultAction> = {
 };
 
 /** Validates an arming request. Unknown members are refused, never ignored. */
-export function parseArming(body: unknown, actions: Record<string, FaultAction> = FAULT_ACTIONS): { point: string; selector: FaultSelector } {
+/** Points that need a feature on top of faults (CMP-66 at start; the same rule on the control listener). */
+export const POINT_NEEDS_FEATURE: Record<string, string> = { "backend/after-effect-before-key/crash": "durable" };
+
+/**
+ * Validates an arming request. Unknown members are refused, never ignored. `features`, when given, are the build's: a
+ * point that needs a feature the build lacks is refused 400 needs_feature (G2 round 2, item 6).
+ */
+export function parseArming(body: unknown, actions: Record<string, FaultAction> = FAULT_ACTIONS, features?: readonly string[]): { point: string; selector: FaultSelector } {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new FaultError(400, "bad_request", "the body must be an object: {\"point\": \"process/position/action\", \"selector\": {...}}");
   const b = body as Record<string, unknown>;
   const extra = Object.keys(b).filter((k) => k !== "point" && k !== "selector");
@@ -147,6 +154,10 @@ export function parseArming(body: unknown, actions: Record<string, FaultAction> 
   if (!(BUILT_FAULT_POINTS as readonly string[]).includes(p.id) || !actions[p.id]) {
     if (p.since === null) throw new FaultError(400, "not_planned", `fault point ${p.id} is legal but not planned for any release`);
     throw new FaultError(501, "not_built", `fault point ${p.id} arrives in ${p.since}; this build cannot arm it`, { available_from: p.since });
+  }
+  const needs = POINT_NEEDS_FEATURE[p.id];
+  if (needs !== undefined && features !== undefined && !features.includes(needs)) {
+    throw new FaultError(400, "needs_feature", `fault point ${p.id} needs the ${needs} feature (CMP-66): without a journal there is no key record to keep after the effect`, { feature: needs });
   }
   const raw = b.selector ?? {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new FaultError(400, "bad_selector", "selector must be an object");
@@ -189,7 +200,7 @@ export class FaultController {
   private closed = false;
 
   constructor(private readonly ledger: Ledger, private readonly descriptor: BuildDescriptor, private readonly clock: Clock,
-    private readonly actions: Record<string, FaultAction> = FAULT_ACTIONS) {}
+    private readonly actions: Record<string, FaultAction> = FAULT_ACTIONS, private readonly features?: readonly string[]) {}
 
   private active(): ArmedFault[] {
     return this.arms.filter((a) => a.state === "armed");
@@ -202,7 +213,7 @@ export class FaultController {
   }
 
   arm(body: unknown): ArmedFault {
-    const { point, selector } = parseArming(body, this.actions);
+    const { point, selector } = parseArming(body, this.actions, this.features);
     if (this.active().length >= FAULT_CAPS.maxArmed) throw new FaultError(429, "too_many_faults", `at most ${FAULT_CAPS.maxArmed} faults armed at once`);
     if (isCrashPoint(point)) {
       // In memory (one process) the store refuses a crash point (needs --supervise); in a supervised child it is the

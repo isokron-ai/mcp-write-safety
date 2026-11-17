@@ -89,7 +89,7 @@ export function createFixtureLayer(options: FixtureOptions): FixtureLayer {
   const runs = new RunRegistry(descriptor.bootId, clock);
   // The compatibility table (CMP-30 to CMP-33) keeps these to `tiny-tracker all` with evidence and strict-input.
   const ledger = options.features.includes("ledger") && options.layout !== "server" ? new Ledger(descriptor.bootId, clock) : undefined;
-  const faults = options.features.includes("faults") && ledger ? new FaultController(ledger, descriptor, clock) : undefined;
+  const faults = options.features.includes("faults") && ledger ? new FaultController(ledger, descriptor, clock, undefined, options.features) : undefined;
   let attached: AttachedBackend | undefined;
   return {
     descriptor,

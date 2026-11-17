@@ -237,7 +237,7 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-63 | A crash fault point without `--supervise`: in one process a crash stops both layers and nothing restarts them. On the control listener the same arming is refused 409 `needs_supervise` |
 | CMP-64 | Under `--supervise`, `--fault` naming a point that is not a crash point (the supervisor's arming store is read by the crash checks only; arm the others on the control listener) |
 | CMP-65 | `durable` with `clock`: the journal does not keep the fixture clock's offset (it lives in memory, or in the supervisor's state folder, which goes with the supervisor), so after a restart record time would move back and tombstones would read as live records again. Refused rather than journalled (G2 fold-in 9): a durable run is a wall-clock run. Journalling the offset (a new line kind) is listed for 0.4.0 |
-| CMP-66 | `--fault backend/after-effect-before-key/crash` without `durable` (the point lies between the journalled effect and the key record) |
+| CMP-66 | `--fault backend/after-effect-before-key/crash` without `durable` (the point lies between the journalled effect and the key record). On the control listener the same arming is refused 400 `needs_feature` |
 
 Tests check the command line against the table on a pairwise set of combinations, not the full product.
 
