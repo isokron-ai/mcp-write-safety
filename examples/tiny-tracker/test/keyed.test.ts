@@ -347,6 +347,24 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     }
   });
 
+  it("CMP-65 (G2 fold-in 9): durable with the fixture clock is refused at start, supervised or not; each alone starts", async () => {
+    const d = { ...base, features: ["durable", "strict-input"], dataDir: "/x", fixtureControl: true };
+    assert.deepEqual(checkCompat(d), []);
+    assert.deepEqual(checkCompat({ ...base, features: ["clock"], fixtureControl: true }), []);
+    assert.match(checkCompat({ ...d, features: ["durable", "strict-input", "clock"] }).join(), /durable feature does not run with the fixture clock/);
+    assert.match(checkCompat({ ...d, features: ["durable", "strict-input", "clock"], supervise: true }).join(), /does not run with the fixture clock/);
+    const t = tempDir("cmp65");
+    try {
+      const r = await runCli(["all", "--features", "durable,strict-input,clock", "--fixture-control", "--data-dir", t.dataDir, "--port", "0", "--backend-port", "0", "--control-port", "0"],
+        { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" });
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /journal does not keep the clock offset/);
+      assert.equal(r.stdout, "", "nothing started");
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("CMP-50: durable needs strict-input, refused at start with a clear message (seams v2.1)", async () => {
     assert.match(checkCompat({ ...base, features: ["durable"], dataDir: "/x" }).join(), /durable feature needs strict-input/);
     assert.deepEqual(checkCompat({ ...base, features: ["durable", "strict-input"], dataDir: "/x" }), []);
