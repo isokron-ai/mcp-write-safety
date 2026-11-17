@@ -99,6 +99,31 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
     }
   });
 
+  it("G2 fold-in 8: a pending line that cannot be written answers 503 journal_unavailable (not 500 internal), recorded as such; nothing begins", async () => {
+    const t = tempDir("beginfail");
+    try {
+      const refusals: Array<[number, string]> = [];
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock(), sinks: [{ name: "spy", role: "observer", onCommit() {}, onRefusal: (tx) => void refusals.push([tx.status, tx.code]) }] });
+      try {
+        const j = b.backend.durability!.journal! as any;
+        let fail = true;
+        const orig = j.options.crash;
+        j.options.crash = (p: string, at: any) => { if (fail && p === "before-append" && at.line === "pending") { fail = false; throw new Error("disk full"); } return orig?.(p, at); };
+        const r = await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("beginfail-key-1"));
+        assert.deepEqual([r.status, r.body.error], [503, "journal_unavailable"]);
+        assert.deepEqual(refusals, [[503, "journal_unavailable"]], "one refusal, as the answer says");
+        assert.equal(b.backend.durability!.keys.get({ principal: "p-default" }, "beginfail-key-1"), undefined, "no pending record");
+        const ok = await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("beginfail-key-1"));
+        assert.equal(ok.status, 201, "the key was not held");
+      } finally {
+        await b.close();
+      }
+      assert.deepEqual(readJournal(join(t.dataDir, JOURNAL_FILE)).lines.map((l) => l.line), ["header", "pending", "commit"], "the failed line was cut back");
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("only a torn last line is tolerated: it is dropped and cut; a bad line in the middle stops the start", async () => {
     const t = tempDir("torn");
     try {

@@ -35,7 +35,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
 import { ensurePrivateDir, PrivateDirError } from "../private-dir.js";
-import { storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
+import { JournalError, storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
 import type { AbortReason, JournalSeam, KeyScope } from "./seams.js";
 import type { Store } from "./store.js";
 import type { DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
@@ -595,7 +595,20 @@ export class Journal implements JournalSeam, KeyLineWriter {
 
   // ---- KeyLineWriter ----
 
+  /**
+   * A pending line that cannot be written is a JournalError (G2 fold-in 8): the keyed path answers 503
+   * journal_unavailable and records that refusal, not 500 internal. A simulated crash passes through.
+   */
   pending(scope: KeyScope, key: string, fingerprint: string, run: string | null): number {
+    try {
+      return this.appendPending(scope, key, fingerprint, run);
+    } catch (e) {
+      if (e instanceof SimulatedCrash) throw e;
+      throw new JournalError(this.name, e);
+    }
+  }
+
+  private appendPending(scope: KeyScope, key: string, fingerprint: string, run: string | null): number {
     return this.append({ line: "pending", principal: scope.principal, key, fingerprint, run, created_at: this.store.clock.now().toISOString(), clock_offset_ms: this.store.clock.offsetMs() } as Omit<JournalPendingLine, "jseq" | "checksum">, key);
   }
 
