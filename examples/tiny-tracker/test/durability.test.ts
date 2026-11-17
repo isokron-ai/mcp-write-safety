@@ -556,6 +556,39 @@ describe("the lock takeover (G2 fold-in 7)", () => {
     }
   });
 
+  it("G2 follow-up 3: a temp file swept while its start stalled gives a clear refusal; a live writer's temp file is never swept", async () => {
+    const t = tempDir("lockstall");
+    try {
+      prepareDataDir(t.dataDir);
+      const link = fs.linkSync;
+      (fs as any).linkSync = (from: string, to: string) => {
+        // Another start's sweep removes this start's temp file while it stalls before the link.
+        if (String(from).includes(".new-")) unlinkSync(from);
+        return link(from, to);
+      };
+      syncBuiltinESMExports();
+      try {
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /temporary lock file was removed before it was linked into place.*start again/);
+      } finally {
+        (fs as any).linkSync = link;
+        syncBuiltinESMExports();
+      }
+      // An empty temp file of a live writer (here our parent stands in), older than the grace period: kept.
+      const old = new Date(Date.now() - 2 * LOCK_UNREADABLE_GRACE_MS);
+      const live = `lock.new-${process.ppid}-aaaaaaaaaaaa`;
+      const dead = `lock.new-${2 ** 22 + 12345}-bbbbbbbbbbbb`;
+      for (const n of [live, dead]) { writeFileSync(join(t.dataDir, n), ""); utimesSync(join(t.dataDir, n), old, old); }
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      try {
+        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")), [live], "the live writer's temp file stays; the dead one's goes");
+      } finally {
+        await b.close();
+      }
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("round 3, F2: without link(2), the lock moved aside is never renamed back over the lock path; it is kept and the start refuses", async () => {
     const t = tempDir("locknolink");
     try {

@@ -289,6 +289,10 @@ function createLock(path: string, content: string): number | false {
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "EEXIST") return false;
+    if (code === "ENOENT") {
+      // G2 follow-up 3: this start stalled past the grace period and another start's sweep removed its temp file.
+      throw new DataDirError(`could not take the data-dir lock ${path}: this start's temporary lock file was removed before it was linked into place (the start stalled for more than ${LOCK_UNREADABLE_GRACE_MS / 1000} s and another start swept it); nothing was taken, start again`);
+    }
     if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EOPNOTSUPP" && code !== "ENOSYS") throw e;
     try {
       const lfd = openSync(path, "wx", 0o600);
@@ -346,6 +350,10 @@ export function sweepLockLeftovers(dir: string, log: (m: string) => void): numbe
     try {
       const st = lstatSync(file);
       if (!st.isFile() || Date.now() - st.mtimeMs < LOCK_UNREADABLE_GRACE_MS) continue;
+      // A temp file names its writer: while that process runs it may still be writing (a stall), so it stays (G2
+      // follow-up 3). This process writes none at this point (createLock is synchronous), so its own pid is not a writer.
+      const writer = name.startsWith(`${LOCK_FILE}.new-`) ? Number(name.slice(`${LOCK_FILE}.new-`.length).split("-")[0]) : NaN;
+      if (Number.isSafeInteger(writer) && writer !== process.pid && alive(writer)) continue;
       if (leftoverOwnerAlive(readFileSync(file, "utf8"))) continue;
       unlinkSync(file);
       removed++;
