@@ -23,6 +23,16 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 - CI: the Python suites and the OpenAPI check run on Linux and macOS; the whole matrix is regenerated on Linux; the container job checks the evidence listener.
 - `docs/patterns.md` covers the 0.2.0 and 0.3.0 defects and variants and the backend `FX-` defects; CONTRIBUTING and STABILITY cover the 0.2.0 to 0.4.0 features. The `tiny-tracker` issue label is in `.github/labels.json`. The package ships CONTRIBUTING, STABILITY, the patterns page, the OpenAPI file and its check, and the 0.4.0 known answers.
 
+### 0.4.0 G3 review: transports, container, fx-check, adapter, CI (coordinator notes 24, 26 and 27)
+- R23 retired: see the container item under 0.4.0 integration and the `TRACKER_CONTAINER_ALLOW_DEFECTS` item under 0.4.0 additions.
+- `tiny-tracker stdio`: SIGTERM and SIGINT now close the backend before the process exits, so the data dir's lease (`lock.d`) and pid lock (`lock`) are released, as they are when stdin closes. Shutdown runs once, whoever asks for it.
+- `tiny-tracker stdio` reads stdin only after the control listener is up and `--fault` is armed, just before the state line. A message over 4 MiB closes the connection with the reason on stderr and exit 1 (it was exit 0, silently).
+- The `Bearer` scheme name is matched without regard to case on every listener (RFC 7235); the token is compared exactly.
+- `POST /_fixture/clock` without the `clock` feature answers 501 `not_enabled` with `feature` and `available_from`, as `openapi.yaml` says (it answered `not_built`).
+- `fx-check`: FX-DUR-2 does not count the pid lock's and the lease's leftovers (`lock.new-*`, `lock.stale-*`, `lock.d.new-*`, `lock.d.stale-*`, `lock.d.released-*`). FX-KEY-1 confirms in `/build` that the fixture clock moved; if it did not, FX-KEY-1 is `not checked`.
+- The contract adapter's stdio mode (`mcp_command`): a refused start raises `StdioStartError` with the exit code and the server's stderr tail.
+- CI's container job: the token-leak checks read the logs from a file (a `grep -q` pipe under `pipefail` could pass falsely), and every status check fails its step.
+
 ### 0.4.0 additions (coordinator note 19)
 - The fixture clock with `durable`: each clock move is an additive journal `clock` line (`from_ms`, `to_ms`, `at`), written before the offset is stored; the offset is restored at load, and a data dir with clock lines refuses to start without the `clock` feature. CMP-65 (`durable` with `clock` refused) is retired, and the 0.4.0 matrix's durable level runs with the fixture clock, so FX-KEY-1 is checked on durable rows. `tt_recount.py` knows the kind. `fx-check` makes the FX-DUR-1 plant after FX-KEY-1's clock move, so the restart measures durability only.
 - `TRACKER_CONTAINER_ALLOW_DEFECTS` (R23) is removed: it does not exist in 0.4.0. A start that sets it, to any value, is refused with a message naming it, so a stale setting is never ignored silently.
