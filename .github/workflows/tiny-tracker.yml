@@ -1,12 +1,19 @@
 # Public CI for examples/tiny-tracker (0.4.0, reviews C6 and T5).
 #
-#   test         the whole suite on Linux, macOS and Windows with Node 22 and 24. Journal, fsync, process kill and
-#                port reuse all differ by platform. On Linux and macOS the suite runs with TT_GATE=1, so the
-#                Python-backed checks (digest vectors, JSON Schemas) fail instead of skipping. Windows runners have
-#                no python3 command, so there the suite runs without the gate and those checks are skipped.
-#   known-answers  each known-answer generator three times in fresh processes; any byte difference fails the job.
-#                The runs' bytes are uploaded, so anyone can compare them across platforms.
-#   container    builds the image and checks the start refusal (X1): no token, exit 2; with a token, /mcp needs it.
+#   test         the whole suite on Linux, macOS and Windows with Node 22 and 24, the 0.4.0 suites included (stdio,
+#                listener, integration-040, kit, the FX-DUR/FX-KEY checks). Journal, fsync, process kill and port
+#                reuse all differ by platform. On Linux and macOS the suite runs with TT_GATE=1, so the
+#                Python-backed checks (digest vectors, JSON Schemas, the OpenAPI file) fail instead of skipping, and
+#                the Python suites (the recount, the contract adapter) run too. Windows runners have no python3
+#                command, so there the suite runs without the gate and those checks are skipped.
+#   known-answers  each registered generator (the surface transcript, the 0.4.0 selection, a sample of the 0.4.0
+#                matrix) three times in fresh processes; any byte difference fails the job. The runs' bytes are
+#                uploaded, so anyone can compare them across platforms.
+#   known-answers-matrix  Linux, Node 22 and 24: the 0.4.0 selection and the whole matrix regenerated and compared
+#                with expected/builds-0.4.0.json and expected/0.4.0.json byte for byte (fixture answers; the
+#                contract rows need the driver checkout, which the release checklist runs).
+#   container    builds the image and checks the start refusal (X1): no token, exit 2; with a token, /mcp needs it;
+#                the evidence listener (TRACKER_EVIDENCE_LISTEN) answers only with the evidence token.
 #
 # Read-only token, no secrets, no publish. Runs only when tiny-tracker or this file changes.
 
@@ -59,7 +66,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install --disable-pip-version-check -q "jsonschema==4.26.0" "referencing==0.37.0"
+          "$RUNNER_TEMP/venv/bin/pip" install --disable-pip-version-check -q "jsonschema==4.26.0" "referencing==0.37.0" "openapi-spec-validator==0.9.0"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Install
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -71,6 +78,12 @@ jobs:
       - name: Test (no python3 command on Windows runners)
         if: runner.os == 'Windows'
         run: npm test
+      - name: Python suites (the recount, the contract adapter, the OpenAPI file)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -I verify/python/test_tt_recount.py
+          python3 -I harness/test_adapter.py
+          python3 -I verify/python/check_openapi.py
 
   known-answers:
     name: known answers reproduce (${{ matrix.os }}, node ${{ matrix.node }})
@@ -103,8 +116,40 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  known-answers-matrix:
+    name: the 0.4.0 matrix reproduces (ubuntu, node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: examples/tiny-tracker/package-lock.json
+      - name: Install and build
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: The build selection reproduces
+        run: node expected/select-0.4.0.mjs --check
+      - name: The fixture answers reproduce (contract rows left out)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const strip = (d) => ({ ...d, builds: d.builds.map(({ contract, ...b }) => b) });
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/0.4.0.fixture.json", JSON.stringify(strip(JSON.parse(fs.readFileSync("expected/0.4.0.json", "utf8"))), null, 2) + "\n");
+            const list = JSON.parse(fs.readFileSync("expected/builds-0.4.0.json", "utf8"));
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/builds.json", JSON.stringify({ ...list, builds: list.builds.map((b) => ({ ...b, contract: false })) }));
+          '
+          node expected/generate.mjs --builds "$RUNNER_TEMP/builds.json" --out "$RUNNER_TEMP/0.4.0.fixture.json" --check
+
   container:
-    name: container (start refusal and bearer token)
+    name: container (start refusal, bearer token, evidence listener)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -136,6 +181,21 @@ jobs:
           echo "without token: $none, with token: $good"
           [ "$none" = "401" ] && [ "$good" = "200" ]
           ! docker logs tt 2>&1 | grep -qF "$token"
+      - name: The evidence listener answers only with the evidence token
+        run: |
+          mcp="$(openssl rand -hex 24)"
+          ev="$(openssl rand -hex 24)"
+          docker run -d --name tt-ev -p 127.0.0.1:47310:47310 -p 127.0.0.1:47312:47312 \
+            -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+            tiny-tracker:ci all --port 47310 --features evidence,strict-input,execution-records,lookup,principals,ledger
+          trap 'docker logs tt-ev; docker rm -f tt-ev >/dev/null' EXIT
+          for _ in $(seq 1 50); do docker logs tt-ev 2>/dev/null | grep -q '"evidence_listener"' && break; sleep 0.2; done
+          none="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47312/build)"
+          good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
+          api="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/tickets)"
+          echo "evidence without token: $none, with: $good, API path: $api"
+          [ "$none" = "404" ] && [ "$good" = "200" ] && [ "$api" = "404" ]
+          ! docker logs tt-ev 2>&1 | grep -qF -e "$ev" -e "$mcp"
       - name: The image runs as an unprivileged user with a 0700 data dir
         run: |
           [ "$(docker run --rm --entrypoint id tiny-tracker:ci -u)" != "0" ]
