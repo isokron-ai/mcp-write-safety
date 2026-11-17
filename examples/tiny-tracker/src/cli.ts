@@ -361,6 +361,8 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
 
   const out: Record<string, unknown> = {};
+  /** Over stdio: starts reading stdin; called after every other listener is up (note 27 item 5). */
+  let serveStdio: (() => void) | undefined;
   let backend: RunningBackend | undefined;
   const runsBackend = (mode === "all" || mode === "backend") && child?.role !== "mcp";
   const runsServer = (mode === "all" || mode === "server") && child?.role !== "backend";
@@ -417,8 +419,18 @@ async function main(): Promise<void> {
       let server: { build: import("./mcp/types.js").Build; config: import("./mcp/config.js").ServerConfig; variants: string[]; close(): Promise<void> };
       if (stdio) {
         // ---- stream F: the MCP layer over stdio; stdin closing stops the process as SIGTERM would ----
-        const { startStdioServer } = await import("./stdio.js");
-        server = startStdioServer({ env, defects, features, extras: serverExtras, retentionMs: durability?.retentionMs ?? statedRetentionMs, onClose: () => { fixture?.close(); void shutdown(); } });
+        // Checked here, served last (note 27 item 5): stdin is read only once the control listener is up and --fault
+        // is armed, just before the state line. A connection the transport closed on an error (a message over the
+        // 4 MiB cap) is logged with its reason, and the process exits 1.
+        const { prepareStdioServer } = await import("./stdio.js");
+        const prepared = prepareStdioServer({ env, defects, features, extras: serverExtras, retentionMs: durability?.retentionMs ?? statedRetentionMs,
+          onClose: (failure) => {
+            if (failure) process.stderr.write(`tiny-tracker: ${failure}. Stopping.\n`);
+            fixture?.close();
+            void shutdown(failure ? 1 : 0);
+          } });
+        serveStdio = prepared.serve;
+        server = prepared;
         out.transport = "stdio";
       } else {
         const http = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras, retentionMs: durability?.retentionMs ?? statedRetentionMs });
@@ -493,6 +505,8 @@ async function main(): Promise<void> {
     process.on("disconnect", () => void shutdown());
   }
   // ---- end stream E ----
+  // The MCP transport over stdio starts last, as the state line comes last over HTTP.
+  serveStdio?.();
   // stdout carries protocol messages only over stdio: the state line goes to stderr there.
   (stdio ? process.stderr : process.stdout).write(`${JSON.stringify(out)}\n`);
 }

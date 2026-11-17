@@ -22,7 +22,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { DEFECTS } from "../src/defects/index.js";
 import { REQUIREMENT_IDS, type RequirementId } from "../src/requirements.js";
 import { checkCompat } from "../src/compat.js";
-import { MAX_STDIO_MESSAGE } from "../src/stdio.js";
+import { MAX_STDIO_MESSAGE, prepareStdioServer } from "../src/stdio.js";
+import { PassThrough } from "node:stream";
 import { MCP_HTTP_CAPS } from "../src/mcp/server.js";
 import { CHECKS, type Verdict } from "./support/checks.js";
 import { startStack, type Era, type StackOptions } from "./support/stack.js";
@@ -243,7 +244,7 @@ describe("tiny-tracker stdio: the fixture layer over stdio (CMP-70 narrowed)", (
     const { client, stderr } = await connectCli(["--features", features, "--fixture-control"],
       { TRACKER_EVIDENCE_TOKEN: evidence, TRACKER_CONTROL_TOKEN: control });
     try {
-      // The server answers on stdin before the state line is written (after the control listener starts): wait for it.
+      // stdin is read only after the control listener starts (note 27 item 5); the state line follows at once.
       for (let i = 0; i < 200 && !/"transport":"stdio"/.test(stderr()); i++) await new Promise((r) => setTimeout(r, 25));
       const state = JSON.parse(stderr().trim().split("\n").at(-1)!);
       assert.equal(state.transport, "stdio");
@@ -271,6 +272,81 @@ describe("tiny-tracker stdio: the fixture layer over stdio (CMP-70 narrowed)", (
     }
     const out = stderr();
     assert.ok(!out.includes(evidence) && !out.includes(control), "no token is printed");
+  });
+});
+
+describe("tiny-tracker stdio: start order and the message cap (note 27 item 5)", () => {
+  it("stdin is read only after the control listener is up and --fault is armed: no answer precedes the state line", async () => {
+    const control = `ct-${"c".repeat(8)}-0123456789abcdef`;
+    const evidence = `ev-${"e".repeat(8)}-0123456789abcdef`;
+    const child = spawn(process.execPath, [CLI, "stdio", "--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+      "--fixture-control", "--fault", "mcp/after-backend-reply/drop:once"], { env: { PATH: process.env.PATH ?? "", TRACKER_CONTROL_TOKEN: control, TRACKER_EVIDENCE_TOKEN: evidence } });
+    let stderr = "";
+    let stateBeforeFirstAnswer: boolean | undefined;
+    child.stderr.on("data", (d) => { stderr += d; });
+    const answered = new Promise<string>((resolve) => {
+      let stdout = "";
+      child.stdout.on("data", (d) => {
+        stateBeforeFirstAnswer ??= /"transport":"stdio"/.test(stderr);
+        stdout += d;
+        if (stdout.includes("\n")) resolve(stdout);
+      });
+    });
+    // Written at once, before the process has started anything: the pipe holds it until the transport reads.
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } } })}\n`);
+    const exited = new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
+      child.on("exit", (code) => { clearTimeout(timer); resolve(code); });
+    });
+    try {
+      const first = await Promise.race([answered, exited.then((code) => { throw new Error(`exited ${code} before answering: ${stderr}`); })]);
+      assert.equal(JSON.parse(first.split("\n")[0]).id, 1);
+      assert.equal(stateBeforeFirstAnswer, true, "the state line (written after the control listener and the fault arming) came first");
+      const state = JSON.parse(stderr.trim().split("\n").at(-1)!);
+      const faults = await (await fetch(`${state.control}/_fixture/faults`, { headers: { authorization: `Bearer ${control}` } })).json() as any;
+      assert.ok(faults.armed.some((f: any) => f.point === "mcp/after-backend-reply/drop"), JSON.stringify(faults.armed));
+    } finally {
+      child.stdin.end();
+    }
+    assert.equal(await exited, 0, stderr);
+  });
+
+  it("prepareStdioServer reads nothing from stdin until serve(), which the command line calls last", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    let out = "";
+    stdout.on("data", (d) => { out += d; });
+    let failure: string | undefined | null = null;
+    const prepared = prepareStdioServer({ env: { TRACKER_BACKEND_URL: "http://127.0.0.1:9", TRACKER_BACKEND_TOKEN: "backend-token-0123456789" }, stdin, stdout,
+      onClose: (f) => { failure = f; } });
+    stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } } })}\n`);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(out, "", "nothing is answered before serve()");
+    prepared.serve();
+    for (let i = 0; i < 200 && !out.includes("\n"); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(JSON.parse(out.split("\n")[0]).id, 1, "answered once served");
+    // A message over the cap: the transport closes itself, and onClose names why.
+    stdin.write(Buffer.alloc(MAX_STDIO_MESSAGE + 1, 0x78));
+    for (let i = 0; i < 200 && failure === null; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.match(String(failure), /larger than 4194304 bytes \(4 MiB\)/);
+    await prepared.close();
+  });
+
+  it("a message over 4 MiB closes the connection: the reason on stderr, exit 1", async () => {
+    const run = await startStdioChild([]);
+    // One line longer than the cap, never finished: the transport refuses it before any newline arrives.
+    const chunk = "x".repeat(1024 * 1024);
+    run.child.stdin.on("error", () => {}); // EPIPE once the server has stopped reading and exited
+    run.child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":"');
+    for (let i = 0; i < 5; i++) {
+      if (run.child.exitCode !== null) break;
+      await new Promise<void>((resolve) => run.child.stdin.write(chunk, () => resolve()));
+    }
+    const { code, signal } = await run.exited;
+    assert.equal(signal, null, run.stderr());
+    assert.equal(code, 1, run.stderr());
+    assert.match(run.stderr(), new RegExp(`a stdio message was larger than ${MAX_STDIO_MESSAGE} bytes \\(4 MiB\\), the cap; the connection is closed\\. Stopping\\.`));
+    assert.equal(run.stdout(), "");
   });
 });
 
