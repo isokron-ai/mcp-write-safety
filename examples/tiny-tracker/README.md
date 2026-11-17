@@ -89,6 +89,24 @@ TRACKER_BACKEND_URL=http://127.0.0.1:4200 node dist/src/cli.js server --port 430
 | `TRACKER_VARIANTS` | | Correct variants to switch on (see [Variants](#variants)). An unknown name stops the server (exit 2). |
 | `TRACKER_KEY_JOURNAL` | | The journal file of the `key-store-honest` variant (required with it). |
 | | `--backend-defect` | `lost-update`. |
+| `TRACKER_MCP_TOKEN` / `TRACKER_MCP_TOKEN_FILE` | | Bearer token for `/mcp`. Required in container mode; optional otherwise. Refused with `stdio`. |
+| `TRACKER_CONTAINER` | | `1` in the image: listen on every interface, and refuse to start without an MCP token. Only `1` or `0`. Refuses `tiny-tracker backend`. |
+| `TRACKER_EVIDENCE_LISTEN` | | `HOST:PORT`: a listener with the evidence routes only, behind the evidence token (needs `evidence` and `all`). Off loopback a defect build is refused, except in container mode. |
+
+**Over stdio.** `npx -y @mcp-write-safety/tiny-tracker stdio` speaks MCP on stdin and stdout, so a client that launches servers as a command can run it directly. It is `tiny-tracker all` with the MCP layer on stdio: the backend runs in the same process on a loopback port, and every option of `all` works (defects, `--profile`, `--features`, the fixture features, `--fixture-control`) except `--port` and `--supervise`. `--backend-url URL` (with `TRACKER_BACKEND_TOKEN`) points it at a backend you run yourself, as `server` does. stdout carries only protocol messages: the state line and the broken-build banner go to stderr. The process exits when stdin closes.
+
+**In a container.** The image runs `tiny-tracker all` on port 47310 in container mode. Container mode listens on every interface inside the container, so it needs a bearer token for `/mcp` and will not start without one:
+
+```sh
+docker build -t tiny-tracker examples/tiny-tracker
+install -m 600 /dev/null mcp.token && openssl rand -hex 24 > mcp.token
+docker run --rm --init -p 127.0.0.1:47310:47310 \
+  -v "$PWD/mcp.token:/run/secrets/mcp.token:ro" -e TRACKER_MCP_TOKEN_FILE=/run/secrets/mcp.token tiny-tracker
+```
+
+Send `Authorization: Bearer <token>` with every request to `http://127.0.0.1:47310/mcp`. Publish the port on `127.0.0.1` only: Host and Origin checks on `/mcp` still allow only `localhost` and `127.0.0.1`. To read the evidence from outside the container (the build descriptor, the ledger, execution and operation records), name the `evidence` feature and set `TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312` with an evidence token; that listener serves the evidence routes only, for any Host, and only with the evidence token (the Dockerfile shows the command). `docker run --rm -i tiny-tracker stdio` needs no token. The image runs as the unprivileged `node` user; `/data` and `/tokens` are 0700 for `--data-dir` and `--token-dir`.
+
+**A bearer token outside a container.** Set `TRACKER_MCP_TOKEN` (or `TRACKER_MCP_TOKEN_FILE`, a file only you can read) and `/mcp` answers 401 without it. The token follows the rules of every other token: 16 to 256 printable characters, different from every other token (the principals', evidence and control tokens included), never on the command line, never printed.
 
 Objects are named for cleanup by run prefix: project keys are chosen by the caller (`mwsc-<run>-a`), and tickets can be listed and deleted by `title_prefix`. `test/cleanup.test.ts` shows a full sweep through the MCP tools.
 
@@ -225,9 +243,9 @@ Shared-fixture groundwork ([FIXTURE.md](FIXTURE.md)): `test/surface.test.ts` (th
 ## Safety of the broken builds
 
 - The correct build is the default. Defects need a flag and print a banner on stderr; MCP-layer defects also put a warning in the server's MCP `instructions`.
-- Both processes bind to 127.0.0.1 only; the MCP endpoint serves only loopback `Host` and `Origin` values.
+- Both processes bind to 127.0.0.1 only; the MCP endpoint serves only loopback `Host` and `Origin` values. Container mode is the one exception: it listens on the container's interfaces and never starts without a bearer token on `/mcp`.
 - A build with defects refuses a backend URL that is not loopback.
-- The backend keeps its data in memory; nothing survives a restart.
+- The backend keeps its data in memory; nothing survives a restart, unless the `durable` feature is named with `--data-dir` (a 0700 directory of its own).
 - Unknown defect names, settings and tool names stop the process (exit 2).
 
 ## What this does not cover yet
@@ -235,7 +253,6 @@ Shared-fixture groundwork ([FIXTURE.md](FIXTURE.md)): `test/surface.test.ts` (th
 - **MWS-RES-3, second clause** ("including when a later step of the same call fails") and **MWS-RES-2, second clause** (an error that leaves a change applied): every correct create is a single backend request, so there is no later step to fail. A defect for this needs a multi-step create and a gate fault (`status` on the k-th request).
 - **MWS-CONC-3** is forced in one schedule (hold A, run B); the mirrored schedule and the statistical barrier pairs belong to the suite.
 - **MWS-SEC-1** is a search for one canary and bearer-token patterns, as the design says: it can only ever be `violated` or `not observed`.
-- **stdio** transport is not offered; the suite's `launch` method is shown with in-process launches and the CLI tests.
 
 ## Shared fixture (in development)
 
