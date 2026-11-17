@@ -2,6 +2,11 @@
 
 All notable changes to `@mcp-write-safety/writecheck` (the `mcp-writecheck` command). The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
+## Unreleased
+
+### Fixed
+- A backend URL in the server's command line (`server.stdio`, `server.launch.command`; e.g. `redis://host:6379` or `--url=postgres://…`) is now a target host. It is shown in the plan and checked by the production-host refusal; before, such a host was neither. Plans for servers with such an argument get a new hash. A run left open by an earlier version on such a manifest is refused at cleanup ("environment now points at …") and needs `--abandon`.
+
 ## 0.1.0 (16 Nov 2026): preview for MWS 0.9
 
 First published version. Follows the MCP Write-Safety Requirements 0.9 (37 requirements, 26 MUST, 11 SHOULD).

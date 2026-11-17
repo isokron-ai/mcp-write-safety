@@ -154,6 +154,8 @@ test('safety: a backend URL in the server command line is a target host (shown a
   assert.deepEqual(targetHosts(flag, {}).filter((h) => h.where.startsWith('server.stdio')).map((h) => h.host), ['db.prod.example.com:5432']);
   assert.throws(() => checkTarget(flag, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.stdio\[2\].*production label/);
   assert.deepEqual(targetHosts(withArgv(['node', 'server.js', '--verbose']), {}).filter((h) => h.where.startsWith('server.stdio')), []);
+  assert.deepEqual(targetHosts(withArgv(['node', 'server.js', 'file:///tmp/db.sqlite']), {}).filter((h) => h.where.startsWith('server.stdio')), []);
+  assert.deepEqual(targetHosts(withArgv(['node', 'server.js', '--peers=http://a:1,http://b:2']), {}).filter((h) => h.where.startsWith('server.stdio')).map((h) => h.host), ['a:1', 'b:2']);
 });
 
 test('confirmation needs the target and the plan hash; without a terminal both must be flags', async () => {

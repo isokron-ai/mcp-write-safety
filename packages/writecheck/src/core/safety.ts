@@ -37,7 +37,7 @@ export function productionReason(host: string): string | null {
 }
 
 /** A URL with a scheme inside one command-line argument (the whole argument, or after `--flag=`). */
-const URL_IN_ARG = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi;
+const URL_IN_ARG = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,]+/gi;
 
 /** Every host the run would reach directly, or that the server is pointed at through a passed-through variable. */
 export function targetHosts(m: Manifest, env: NodeJS.ProcessEnv): { host: string; where: string }[] {
@@ -45,7 +45,8 @@ export function targetHosts(m: Manifest, env: NodeJS.ProcessEnv): { host: string
   const add = (u: string | undefined | null, where: string) => {
     if (!u) return;
     try {
-      out.push({ host: new URL(u).host, where });
+      const host = new URL(u).host;
+      if (host) out.push({ host, where }); // file:///x and the like have no host
     } catch {
       /* not a URL */
     }
