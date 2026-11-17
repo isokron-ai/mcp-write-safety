@@ -2,6 +2,23 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
+## Unreleased
+
+Groundwork for the shared-fixture releases (0.2.0 on). The default build's surface is unchanged: it is checked call for call against a transcript captured from the published 0.1.0 tarball.
+
+### Added
+- `--profile 0.1`: exactly the surface of the published 0.1.0, kept in every later release. `--profile default` is what runs when none is named.
+- `--features` (`TRACKER_FEATURES`): strict feature switches; a name not built in this version stops the process (exit 2) and says which release builds it. Built now: `strict-input` (the backend checks idempotency keys itself and refuses strings that are not well-formed Unicode) and `evidence` (a stub: the read-only evidence namespace with `GET /build`, the build descriptor and its two hashes, mirrored in the MCP instructions and every result's `_meta`; run and operation tags from request `_meta` stamped on every backend request).
+- `--fixture-control`: a separate, hardened loopback control listener with its own token (run ids; clock and fault tables, read-only for now).
+- Tokens for the evidence namespace and the control listener are read from the environment or a 0600 file, never from the command line, and never printed.
+- A compatibility table: illegal combinations of profile, features, defects, variants, faults and process layout stop the process (exit 2).
+- Defects carry a `requires` list; `--defect all` means every defect valid for the active features. The backend has its own defect registry (seams, banner, refusal rules), and a computed defect placement map.
+- RFC 8785 canonical bytes and domain-tagged SHA-256 digests, with cross-language vectors (`vectors/digest-1.json`) and a standard-library Python verifier (`verify/python`).
+- `FIXTURE.md`, JSON Schemas with `$id`s (`schemas/`), and decision records (`docs/decisions/`).
+
+### Fixed
+- The 0.1.0 entry below says "41 deliberate defects"; 0.1.0 shipped 47 MCP-layer defects and 1 backend defect.
+
 ## 0.1.0 (16 Nov 2026) for MWS 0.9
 
 First published version. Follows the MCP Write-Safety Requirements 0.9 (37 requirements).

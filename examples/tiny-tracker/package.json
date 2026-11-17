@@ -36,8 +36,14 @@
     "dist/src",
     "writecheck.yaml",
     "README.md",
+    "FIXTURE.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "schemas",
+    "vectors",
+    "verify/python/tt_digest.py",
+    "verify/python/check_schemas.py",
+    "docs/decisions"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

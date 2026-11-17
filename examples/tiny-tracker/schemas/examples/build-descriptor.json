@@ -1,0 +1,46 @@
+{
+  "descriptor": "build-descriptor/1",
+  "package": {
+    "name": "@mcp-write-safety/tiny-tracker",
+    "version": "0.1.0"
+  },
+  "fixture_api": "fixture-api/0",
+  "profile": "default",
+  "features": [
+    "evidence"
+  ],
+  "defects": {
+    "mcp": [],
+    "backend": []
+  },
+  "variants": [],
+  "control": {
+    "enabled": false
+  },
+  "durability": {
+    "mode": "memory",
+    "journal_format": null
+  },
+  "contract": {
+    "repo": "zambodotdev/lost-response-test-contract",
+    "commit": "92bf1ba"
+  },
+  "process": {
+    "layout": "all",
+    "boot_id": "08dfee0f23720bde",
+    "restart_count": 0,
+    "started_at": "2026-11-17T03:55:29.622Z"
+  },
+  "journal": {
+    "head": null
+  },
+  "faults": {
+    "armed": []
+  },
+  "clock": {
+    "domain": "wall",
+    "offset_ms": 0
+  },
+  "build_hash": "a411387b99987d1bf15dc2a19e009d81dd44fb240e98f871343b77e851de6a34",
+  "descriptor_hash": "7e36a043416fb4a78ee66f754eec16a6145e76111255fad4a0974e469ceb70dc"
+}

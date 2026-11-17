@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://writesafety.dev/schemas/tiny-tracker/ledger-entry-1.schema.json",
+  "title": "Ledger entry (draft for 0.2.0)",
+  "description": "One line of the append-only execution ledger, written below every MCP-layer defect: GET /ledger (evidence token) and the export. Attribution (run, operation_tag) comes from request _meta through the server wrapper, never from a handler. Entries are never removed; a run reset is itself an entry.",
+  "type": "object",
+  "properties": {
+    "entry": {
+      "const": "ledger-entry/1"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall time, never the fixture clock."
+    },
+    "clock_offset_ms": {
+      "type": "integer"
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "kind": {
+      "enum": [
+        "start",
+        "execution",
+        "replay",
+        "refusal",
+        "fault-armed",
+        "fault-fired",
+        "run-allocated",
+        "run-reset"
+      ]
+    },
+    "principal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operation_tag": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "request": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "key": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fingerprint_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "method",
+            "path",
+            "key",
+            "fingerprint_hash"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "status": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "execution_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^X-[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "fault": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "string",
+              "pattern": "^(mcp|backend)/[a-z-]+/[a-z]+$"
+            },
+            "selector": {
+              "type": "object"
+            },
+            "fired_on_seq": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "point",
+            "selector",
+            "fired_on_seq"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "entry",
+    "seq",
+    "at",
+    "clock_offset_ms",
+    "boot_id",
+    "kind",
+    "principal",
+    "run",
+    "operation_tag",
+    "request",
+    "status",
+    "execution_id",
+    "objects",
+    "fault"
+  ],
+  "additionalProperties": false
+}

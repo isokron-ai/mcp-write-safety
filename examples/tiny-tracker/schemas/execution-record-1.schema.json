@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://writesafety.dev/schemas/tiny-tracker/execution-record-1.schema.json",
+  "title": "Execution record (draft for 0.2.0)",
+  "description": "One applied write, as committed: served at GET /executions/:id (evidence token) and by the get_execution tool. A replay serves the same record. Not a receipt: the MWS receipt is the compact result every write tool returns.",
+  "type": "object",
+  "properties": {
+    "record": {
+      "const": "execution-record/1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^X-[1-9][0-9]*$"
+    },
+    "principal": {
+      "type": "string"
+    },
+    "run": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operation_tag": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The ledger sequence number of the commit."
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fingerprint_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "method",
+        "path",
+        "key",
+        "fingerprint_hash"
+      ],
+      "additionalProperties": false
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "ticket",
+              "project",
+              "comment",
+              "label"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "result": {
+      "$ref": "https://writesafety.dev/schemas/tiny-tracker/served-digest-1.schema.json",
+      "description": "Under domain dev.writesafety.tiny-tracker/execution-result/1: the committed response body, with every server-generated value as committed."
+    },
+    "committed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "clock_offset_ms": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "record",
+    "id",
+    "principal",
+    "run",
+    "operation_tag",
+    "boot_id",
+    "seq",
+    "request",
+    "objects",
+    "result",
+    "committed_at",
+    "clock_offset_ms"
+  ],
+  "additionalProperties": false
+}

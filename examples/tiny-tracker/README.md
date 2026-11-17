@@ -22,6 +22,7 @@ If you want a starting point for your own server, read the correct handlers in `
 - [Tests: the self-test matrix](#tests-the-self-test-matrix)
 - [Safety of the broken builds](#safety-of-the-broken-builds)
 - [What this does not cover yet](#what-this-does-not-cover-yet)
+- [Shared fixture (in development)](#shared-fixture-in-development)
 
 ## Shape
 
@@ -210,6 +211,8 @@ These are tiny-tracker's own scripted checks. Through `mcp-writecheck` (`mcp-wri
 
 Also: `test/platform.test.ts` (the backend defect), `test/backend.test.ts` (the backend's own contract), `test/cli.test.ts` (launch behavior of the built CLI), `test/cleanup.test.ts` (prefix sweep through the MCP tools), `test/transport.test.ts` (an unreachable backend gives `written: "unknown"`), `test/variants.test.ts` (the `key-store-honest` variant).
 
+Shared-fixture groundwork ([FIXTURE.md](FIXTURE.md)): `test/surface.test.ts` (the 0.1 surface against a transcript of the published 0.1.0 tarball), `test/import-graph.test.ts` (the teaching server never loads `src/fixture`), `test/digest.test.ts` (digest vectors in Node and Python), `test/foundation.test.ts` (profiles, features, the compatibility table, both defect registries, the placement map), `test/fixture.test.ts` (evidence namespace, control listener, tokens, build descriptor, attribution) and `test/schemas.test.ts`.
+
 ## Safety of the broken builds
 
 - The correct build is the default. Defects need a flag and print a banner on stderr; MCP-layer defects also put a warning in the server's MCP `instructions`.
@@ -224,6 +227,15 @@ Also: `test/platform.test.ts` (the backend defect), `test/backend.test.ts` (the 
 - **MWS-CONC-3** is forced in one schedule (hold A, run B); the mirrored schedule and the statistical barrier pairs belong to the suite.
 - **MWS-SEC-1** is a search for one canary and bearer-token patterns, as the design says: it can only ever be `violated` or `not observed`.
 - **stdio** transport is not offered; the suite's `launch` method is shown with in-process launches and the CLI tests.
+
+## Shared fixture (in development)
+
+tiny-tracker is also becoming a shared fixture for write-safety harnesses: a lookup by idempotency key, committed digests you can verify yourself, server-side fault points, and evidence that names the build it came from. The design, the parts built so far and their limits are in [FIXTURE.md](FIXTURE.md), with the larger choices in [docs/decisions](docs/decisions/README.md).
+
+- `--profile 0.1` runs exactly the surface of the published 0.1.0 (its tools, texts and structured results, checked against a transcript of the 0.1.0 tarball). Until 0.2.0 the default build is the same.
+- New behaviour is switched on with `--features` (`TRACKER_FEATURES`). A name this version does not build yet stops the process and says which release builds it.
+
+Feedback is welcome: open an issue or a discussion on [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety).
 
 ## License
 

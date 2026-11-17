@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://writesafety.dev/schemas/tiny-tracker/served-digest-1.schema.json",
+  "title": "Served digest",
+  "description": "What a record serves for one hashed object: the exact RFC 8785 canonical bytes, as a string, and SHA-256 over UTF-8(domain), one line feed and UTF-8(canonical). A verifier hashes the served bytes; it needs no canonicalizer of its own.",
+  "type": "object",
+  "properties": {
+    "alg": {
+      "const": "sha-256"
+    },
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+(/[a-z0-9-]+)+/[0-9]+$",
+      "description": "Type and version of the hashed object, e.g. dev.writesafety.tiny-tracker/execution-result/1."
+    },
+    "canonical": {
+      "type": "string",
+      "description": "The canonical bytes that were hashed (RFC 8785)."
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lower-case hex SHA-256 over UTF-8(domain) || 0x0A || UTF-8(canonical)."
+    }
+  },
+  "required": [
+    "alg",
+    "domain",
+    "canonical",
+    "digest"
+  ],
+  "additionalProperties": false
+}
