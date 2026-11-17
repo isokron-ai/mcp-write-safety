@@ -16,9 +16,9 @@ import type { Manifest, ResourceSpec, ReviewSpec } from '../core/manifest.js';
 import type { Session } from '../core/session.js';
 import type { Gate } from '../gate/gate.js';
 import type { RequirementId } from '../requirements.js';
-import { short } from '../core/util.js';
+import { getPath, setPath, short } from '../core/util.js';
 import { result, type Result, type WritePath } from '../report/verdicts.js';
-import { fromDeclaration, outcomeByField, patternOf, saidBy, says } from './says.js';
+import { fromDeclaration, outcomeByField, outcomeFieldPath, patternOf, saidBy, says } from './says.js';
 import { DEFAULT_PATTERNS } from './says.js';
 import { adoptedBy, readText, decidedByShape, effectiveRepeat, patternData, quoteField, readShape, shapeFallbackNote, shapeIdentifies, shapeOf, type ShapeCapture, type WriteResult } from './shape.js';
 
@@ -169,10 +169,40 @@ export function brief(r0: { step: string; ok: boolean; isError: boolean; rpc_err
   const d = JSON.stringify(r.data ?? null);
   const clipped = (r.text?.length ?? 0) > max || d.length > max * 2;
   // why: an identifier past the clip must still be found (MWS-RES-3, RES-4, ATOM-1); the full answer is kept for the search only then.
-  return { step: r.step, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : r.text.length > max ? `${r.text.slice(0, max)}…` : r.text, data: d.length > max * 2 ? { clipped: true, bytes: d.length } : r.data, indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ...(clipped ? { hay: `${r.text ?? ''}\n${d}`.slice(0, 256 * 1024) } : {}), ...(clipped && adoptedBy(r.tool ?? null) && isObjLike(r.data) && 'mws' in r.data ? { phay: `${r.text ?? ''}\n${JSON.stringify(patternData({ tool: r.tool, data: r.data }))}`.slice(0, 256 * 1024) } : {}), ...(r.result_type && r.result_type !== 'complete' ? { result_type: r.result_type } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.shape !== undefined ? { shape: r.shape } : {}), ...(r.carried ? { carried: r.carried } : {}) };
+  return { step: r.step, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : r.text.length > max ? `${r.text.slice(0, max)}…` : r.text, data: d.length > max * 2 ? { ...signalMembers(r.data), clipped: true, bytes: d.length } : r.data, indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ...(clipped ? { hay: `${r.text ?? ''}\n${d}`.slice(0, 256 * 1024) } : {}), ...(clipped && adoptedBy(r.tool ?? null) && isObjLike(r.data) && 'mws' in r.data ? { phay: `${r.text ?? ''}\n${JSON.stringify(patternData({ tool: r.tool, data: r.data }))}`.slice(0, 256 * 1024) } : {}), ...(r.result_type && r.result_type !== 'complete' ? { result_type: r.result_type } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.shape !== undefined ? { shape: r.shape } : {}), ...(r.carried ? { carried: r.carried } : {}) };
 }
 
 const isObjLike = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+
+/**
+ * The members a structured signal is read from (signals.ts: the top level of the structured content and of its `error` object),
+ * kept when the data is clipped. Review (CONC-3 item 5): clipping a large answer to { clipped } hid a structured conflict
+ * ("conflict": true, a 409 status, a conflict code) from shownBy and conflictSignal. Only short scalars are kept.
+ */
+function signalMembers(d: unknown): Record<string, unknown> {
+  const short = (v: unknown) => typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200);
+  // why: review round 2 item 4: the keys signals.ts reads are kept whatever their position, beyond the cap of 64 other scalars.
+  const scalars = (o: Record<string, unknown>) => {
+    const e = Object.entries(o).filter(([, v]) => short(v));
+    return Object.fromEntries([...e.filter(([k]) => SIGNAL_KEYS.has(k.toLowerCase())), ...e.filter(([k]) => !SIGNAL_KEYS.has(k.toLowerCase())).slice(0, 64)]);
+  };
+  if (!isObjLike(d)) return {};
+  let kept: Record<string, unknown> = { ...scalars(d), ...(isObjLike(d['error']) ? { error: scalars(d['error']) } : {}) };
+  // The declared outcome field (outcome_field.path), at any depth, when its value is a scalar.
+  const path = outcomeFieldPath();
+  if (path) {
+    try {
+      const v = getPath(d, path);
+      if (short(v)) kept = setPath(kept, path, v);
+    } catch {
+      // a path that does not fit this answer keeps nothing
+    }
+  }
+  return kept;
+}
+
+/** The members signals.ts reads (conflict, Status reason/kind, status and code keys, error), lower-cased. */
+const SIGNAL_KEYS = new Set(['conflict', 'reason', 'kind', 'status', 'statuscode', 'status_code', 'http_status', 'httpstatus', 'code', 'error_code', 'errorcode', 'error']);
 
 /**
  * The answer as the text patterns read it (B-9 v2, "Free words and the serialized block"): for a tool that adopts a result

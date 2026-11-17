@@ -70,6 +70,9 @@ export function usePatterns(m: (Pick<Manifest, 'patterns'> & { outcome_field?: O
   field = m?.outcome_field ?? null;
 }
 
+/** The declared outcome field's path, or null (types.ts keeps it when an answer's data is clipped). */
+export const outcomeFieldPath = (): string | null => field?.path ?? null;
+
 export type FieldOutcome = { outcome: 'applied' | 'not_applied' | 'unknown'; line: string };
 
 /**

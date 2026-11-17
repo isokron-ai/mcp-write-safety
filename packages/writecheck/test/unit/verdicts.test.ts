@@ -7,12 +7,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { annotationVerdicts, namedBy } from '../../src/checks/annotations.js';
-import { identifiesChange, saysUnknown } from '../../src/checks/types.js';
-import { usePatterns } from '../../src/checks/says.js';
+import { brief, identifiesChange, saysUnknown } from '../../src/checks/types.js';
+import { outcomeByField, usePatterns } from '../../src/checks/says.js';
 import { versionLeftOutRuns } from '../../src/checks/stale.js';
 import { parseStructured } from '../../src/core/util.js';
 import { annVerdicts } from '../../src/checks/catalog.js';
 import { pairsExperiment, pairsVerdicts } from '../../src/checks/pairs.js';
+import { gatedVerdicts, type GatedObs } from '../../src/checks/gated.js';
 import { readbackVerdicts, type CaseObs } from '../../src/checks/readback.js';
 import { keptValue, meaningOf, protectedProps, refusalProblem, schemaVerdicts, probeCases, validFor, type ProbeObs } from '../../src/checks/schema.js';
 import { staleExperiment, staleVerdicts } from '../../src/checks/stale.js';
@@ -103,6 +104,206 @@ test('stale write: violated, platform, held, and CONC-1 only with a control', ()
   assert.equal(nc.find((x) => x.requirement === 'MWS-CONC-1'), undefined, 'no CONC-1 verdict without a control');
   const stopped = staleVerdicts(outcome(exp, {}, 'stopped: rate limited'), res);
   assert.ok(stopped.every((r) => r.verdict === 'not tested'));
+});
+
+test('barrier pairs: a pair whose answer shows a conflict (declared patterns.conflict) is not "both reported success" (MWS-CONC-3)', () => {
+  const res = M().resources[0]!;
+  const exp = pairsExperiment(res, 40, 'separate');
+  // Raw-statement tool: the second writer's version precondition matched 0 rows; the answer has no isError.
+  const half = (text: string) => ({ ok: true, isError: false, text, data: null, tool: 'ticket_update', shape: null });
+  const rep = (i: number, bText: string) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half('modified 1'), b: half(bText) }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } });
+  const run = (bText: string) => {
+    const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: { valid: 1, both_kept: 1 }, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps: Array.from({ length: 40 }, (_, i) => rep(i, bText)) } }, [], null);
+    out.arms['validity']!.counts = { valid: 1, both_kept: 1 };
+    return pairsVerdicts(out, res, false)[0]!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const shown = run('matched 0, modified 0');
+    assert.notEqual(shown.verdict, 'violated', 'the declared conflict pattern reads the answer as a refusal, not a success');
+    assert.equal(shown.verdict, 'not observed');
+    assert.equal(shown.numbers['lost'], 0);
+    assert.equal(shown.numbers['conflict_shown'], 40);
+    assert.ok(shown.notes.some((n) => /is MWS-CONC-4's to judge in its own trials/.test(n)));
+    // Review item 4: the experiment's own rule still says reproduced (it reads isError only); the record says why it differs.
+    assert.ok(shown.notes.some((n) => /mechanical rule .* says reproduced.*its verdict is not observed, and that verdict is the one that counts/.test(n)));
+    // An answer the declared pattern does not match is still a reported success: the loss stays violated.
+    const silent = run('ok');
+    assert.equal(silent.verdict, 'violated');
+    assert.match(silent.reason, /40 of 40 pairs/);
+    assert.ok(!silent.notes.some((n) => /mechanical rule/.test(n)), 'no note where the two agree');
+  } finally {
+    usePatterns(null);
+  }
+  // Without a declaration only the built-in words read "not applied" as a conflict: that decides nothing (rule 11).
+  const dflt = run('nothing was written');
+  assert.equal(dflt.verdict, 'not tested');
+  assert.match(dflt.reason, /needs reading/);
+});
+
+test('barrier pairs, mixed runs (review): one silent loss among shown conflicts stays violated; a structured conflict: true is a signal (MWS-CONC-3)', () => {
+  const res = M().resources[0]!;
+  const exp = pairsExperiment(res, 40, 'separate');
+  const half = (text: string, data: unknown = null) => ({ ok: true, isError: false, text, data, tool: 'ticket_update', shape: null });
+  const run = (texts: (string | Record<string, unknown>)[]) => {
+    const reps = texts.map((t, i) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half('modified 1'), b: typeof t === 'string' ? half(t) : half('ok', t) }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } }));
+    const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: {}, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps } }, [], null);
+    out.arms['validity']!.counts = { valid: 1, both_kept: 1 };
+    return pairsVerdicts(out, res, false)[0]!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const r = run([...Array<string>(39).fill('matched 0'), 'ok']);
+    assert.equal(r.verdict, 'violated');
+    assert.equal(r.numbers['lost'], 1);
+    assert.equal(r.numbers['conflict_shown'], 39);
+    assert.equal(r.steps[0], 'test.r39.race', 'the witness is the counted loss, not a shown conflict');
+    assert.match(r.reason, /1 of 40 pairs/);
+  } finally {
+    usePatterns(null);
+  }
+  const d = run([...Array<string>(39).fill('nothing was written'), 'ok']);
+  assert.equal(d.verdict, 'violated');
+  assert.equal(d.numbers['lost'], 1);
+  assert.equal(d.numbers['needs_reading'], 39);
+  assert.ok(d.notes.some((n) => /39 further pair\(s\).*built-in words/.test(n)));
+  const s = run(Array.from({ length: 40 }, () => ({ conflict: true })));
+  assert.equal(s.verdict, 'not observed', 'a structured conflict: true shows the conflict without any pattern');
+  assert.equal(s.numbers['conflict_shown'], 40);
+  assert.equal(s.numbers['lost'], 0);
+});
+
+test('held request: a trial whose answer shows a conflict (declared patterns.conflict) is not "both reported success" (MWS-CONC-3)', () => {
+  const res = M().resources[0]!;
+  // Raw-statement tool: the held writer's version precondition matched 0 rows on release; the answer has no isError.
+  const cb = (step: string, text: string) => ({ step, ok: true, isError: false, rpc_error: null, text, data: null, indeterminate: false, tool: 'ticket_update', shape: null });
+  const trial = (i: number, schedule: 'hold A, run B' | 'hold B, run A', holderText: string) => ({ schedule, held: { seq: 10 + i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: cb(`h${i}`, holderText), other: cb(`o${i}`, 'modified 1'), kept: { holder: false, other: true }, steps: [`h${i}`, `o${i}`] });
+  const run = (holderText: string) => {
+    const o: GatedObs = { routing: 'r', learned: [], trials: [0, 1, 2, 3].map((i) => trial(i, i % 2 ? 'hold B, run A' : 'hold A, run B', holderText)), control: null, independent: true, conc1: null, res2: null, atom: null };
+    return gatedVerdicts(o, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const shown = run('matched 0, modified 0');
+    assert.equal(shown.verdict, 'held', 'the declared conflict pattern reads the answer as a refusal, not a success');
+    assert.equal(shown.numbers['lost'], 0);
+    assert.equal(shown.numbers['conflict_shown'], 4);
+    assert.ok(shown.notes.some((n) => /is MWS-CONC-4's to judge in its own trials/.test(n)));
+    assert.ok(shown.notes.some((n) => /holder answered without isError but showed a conflict/.test(n)));
+    // An answer the declared pattern does not match is still a reported success: the loss stays violated.
+    const silent = run('ok');
+    assert.equal(silent.verdict, 'violated');
+    assert.match(silent.reason, /4 of 4 forced trials/);
+  } finally {
+    usePatterns(null);
+  }
+  // Without a declaration only the built-in words read "nothing was written" as a conflict: that decides nothing (rule 11).
+  const dflt = run('nothing was written');
+  assert.equal(dflt.verdict, 'not tested');
+  assert.match(dflt.reason, /needs reading/);
+  assert.equal(dflt.numbers['needs_reading'], 4);
+});
+
+test('held request, mixed run: one silent loss among shown conflicts stays violated (review round 2, item 3)', () => {
+  const res = M().resources[0]!;
+  const cb = (step: string, text: string) => ({ step, ok: true, isError: false, rpc_error: null, text, data: null, indeterminate: false, tool: 'ticket_update', shape: null });
+  const trials = ['matched 0', 'matched 0', 'matched 0', 'ok'].map((holderText, i) => ({ schedule: (i % 2 ? 'hold B, run A' : 'hold A, run B') as 'hold A, run B' | 'hold B, run A', held: { seq: i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: cb(`h${i}`, holderText), other: cb(`o${i}`, 'modified 1'), kept: { holder: false, other: true }, steps: [`h${i}`, `o${i}`] }));
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const r = gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+    assert.equal(r.verdict, 'violated');
+    assert.equal(r.numbers['lost'], 1);
+    assert.equal(r.numbers['conflict_shown'], 3);
+    assert.match(r.reason, /1 of 4 forced trials/);
+    assert.deepEqual(r.steps, ['h3', 'o3'], 'the steps are the counted loss, not a shown conflict');
+  } finally {
+    usePatterns(null);
+  }
+});
+
+test('CONC-3 pairs: the mechanical-rule note is not given on a record that is not tested for a failed validity arm (review round 2, item 1)', () => {
+  const res = M().resources[0]!;
+  const exp = pairsExperiment(res, 40, 'separate');
+  const half = (text: string) => ({ ok: true, isError: false, text, data: null, tool: 'ticket_update', shape: null });
+  const reps = Array.from({ length: 40 }, (_, i) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half('modified 1'), b: half('ok') }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } }));
+  const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: {}, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps } }, [], null);
+  out.arms['validity']!.counts = { valid: 1, both_kept: 0 };
+  assert.equal(out.verdict.verdict, 'reproduced', 'the experiment rule reads isError only');
+  const r = pairsVerdicts(out, res, false)[0]!;
+  assert.equal(r.verdict, 'not tested');
+  assert.match(r.reason, /not independent/);
+  assert.ok(!r.notes.some((n) => /mechanical rule/.test(n)), 'no shown conflict or needs-reading pair is why the two differ');
+});
+
+test('CONC-3: an answer that showed a conflict while its own change took effect and the other writer lost is recorded, not counted (review item 3)', () => {
+  const res = M().resources[0]!;
+  // assignee (writer A, field 0) = bob is in effect; status (writer B, field 1) stays blocked, so B's change is lost.
+  const exp = pairsExperiment(res, 40, 'separate');
+  const half = (text: string) => ({ ok: true, isError: false, text, data: null, tool: 'ticket_update', shape: null });
+  const pairs = (aText: string, bText: string) => {
+    const reps = Array.from({ length: 40 }, (_, i) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half(aText), b: half(bText) }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } }));
+    const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: {}, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps } }, [], null);
+    out.arms['validity']!.counts = { valid: 1, both_kept: 1 };
+    return pairsVerdicts(out, res, false)[0]!;
+  };
+  // Held request: the holder's change is absent, the other's present.
+  const cb = (step: string, text: string) => ({ step, ok: true, isError: false, rpc_error: null, text, data: null, indeterminate: false, tool: 'ticket_update', shape: null });
+  const held = (holderText: string, otherText: string) => {
+    const trials = [0, 1, 2, 3].map((i) => ({ schedule: (i % 2 ? 'hold B, run A' : 'hold A, run B') as 'hold A, run B' | 'hold B, run A', held: { seq: i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: cb(`h${i}`, holderText), other: cb(`o${i}`, otherText), kept: { holder: false, other: true }, steps: [] }));
+    return gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const truthful = pairs('modified 1', 'matched 0');
+    assert.equal(truthful.numbers['conflict_shown_own_applied'], 0, 'B said refused and its change is absent');
+    const falseRefusal = pairs('matched 0', 'ok');
+    assert.equal(falseRefusal.verdict, 'not observed', 'not a CONC-3 loss under the spec text');
+    assert.equal(falseRefusal.numbers['conflict_shown'], 40);
+    assert.equal(falseRefusal.numbers['conflict_shown_own_applied'], 40);
+    assert.ok(falseRefusal.notes.some((n) => /false refusal/.test(n)));
+    assert.equal(held('matched 0', 'ok').numbers['conflict_shown_own_applied'], 0);
+    const h = held('ok', 'matched 0');
+    assert.equal(h.verdict, 'held');
+    assert.equal(h.numbers['conflict_shown_own_applied'], 4);
+    assert.ok(h.notes.some((n) => /false refusal/.test(n)));
+  } finally {
+    usePatterns(null);
+  }
+});
+
+test('CONC-3 held request: a structured conflict in a large answer survives the clip of brief() (review item 5)', () => {
+  const res = M().resources[0]!;
+  const big = 'x'.repeat(6000);
+  const raw = (step: string, data: unknown) => ({ step, ok: true, isError: false, rpc_error: null, text: 'done', data, timed_out: false, transport_error: null, tool: 'ticket_update' });
+  const conflicting = brief(raw('h', { conflict: true, error: { code: 409, detail: big }, object: { body: big } }));
+  assert.equal((conflicting.data as Record<string, unknown>)['clipped'], true, 'the data was clipped');
+  assert.equal((conflicting.data as Record<string, unknown>)['conflict'], true, 'the signal member is kept');
+  assert.deepEqual((conflicting.data as Record<string, unknown>)['error'], { code: 409 }, 'the error object keeps its short scalars only');
+  const plain = brief(raw('o', { object: { body: big } }));
+  const trials = [0, 1, 2, 3].map((i) => ({ schedule: (i % 2 ? 'hold B, run A' : 'hold A, run B') as 'hold A, run B' | 'hold B, run A', held: { seq: i, method: 'PATCH', path: '/t/T1' }, released: 'after the other writer finished' as const, holder: conflicting, other: plain, kept: { holder: false, other: true }, steps: [] }));
+  const r = gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
+  assert.equal(r.verdict, 'held', 'the clipped answer still shows the conflict by its structured field');
+  assert.equal(r.numbers['conflict_shown'], 4);
+});
+
+test('brief() keeps the signal keys and the declared outcome field of a clipped answer whatever their position (review round 2, item 4)', () => {
+  const big = 'x'.repeat(6000);
+  const filler = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`f${i}`, i]));
+  const raw = (data: unknown) => ({ step: 's', ok: true, isError: false, rpc_error: null, text: 'done', data, timed_out: false, transport_error: null, tool: 'ticket_update' });
+  try {
+    usePatterns({ outcome_field: { path: 'result.outcome', applied: ['applied'], not_applied: ['refused'], unknown: ['unknown'] } } as never);
+    const b = brief(raw({ ...filler, body: big, status: 409, conflict: true, error: { ...filler, code: 'conflict' }, result: { outcome: 'refused', blob: big } }));
+    const d = b.data as Record<string, unknown>;
+    assert.equal(d['clipped'], true);
+    assert.equal(d['status'], 409, 'a signal key after 100 other scalars is kept');
+    assert.equal(d['conflict'], true);
+    assert.equal((d['error'] as Record<string, unknown>)['code'], 'conflict');
+    assert.equal(Object.keys(d).filter((k) => /^f\d+$/.test(k)).length, 64, 'other scalars stay capped at 64');
+    assert.deepEqual(d['result'], { outcome: 'refused' }, 'the declared outcome field is kept at its path, nothing else of that object');
+    assert.equal(outcomeByField(b)?.outcome, 'not_applied');
+  } finally {
+    usePatterns(null);
+  }
 });
 
 test('recount re-derives the counters from recorded repetitions', () => {
