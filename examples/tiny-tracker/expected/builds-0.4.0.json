@@ -8,9 +8,9 @@
       "backend": 10,
       "variant": 5
     },
-    "legal_candidates": 3140,
-    "pairs": 1031,
-    "builds": 553
+    "legal_candidates": 4140,
+    "pairs": 1044,
+    "builds": 515
   },
   "levels": {
     "L2": "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
@@ -218,10 +218,10 @@
       "fixture": true
     },
     {
-      "label": "L3, defect update-adds-defaults, backend lost-update, variant settle-by-lookup",
+      "label": "L2, defect update-adds-defaults, backend lost-update, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -231,7 +231,7 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "update-adds-defaults",
         "backend": "lost-update",
         "variant": "settle-by-lookup"
@@ -240,12 +240,10 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect label-by-position, backend digest-of-current-state, variant settle-by-lookup",
+      "label": "L3, defect label-by-position, backend digest-of-current-state, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -255,9 +253,33 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3d",
+        "level": "L3",
         "mcp": "label-by-position",
         "backend": "digest-of-current-state",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect force-by-default, backend replay-digest-mismatch, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "force-by-default",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L3d",
+        "mcp": "force-by-default",
+        "backend": "replay-digest-mismatch",
         "variant": "settle-by-lookup"
       },
       "contract": false,
@@ -310,12 +332,34 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect force-by-default, backend replay-digest-mismatch, variant settle-by-client-reference",
+      "label": "Lv, defect delete-refetches-version, backend digest-not-canonical, variant settle-by-lookup",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "force-by-default",
+        "delete-refetches-version",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "delete-refetches-version",
+        "backend": "digest-not-canonical",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect read-merge-put, backend replay-digest-mismatch, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "read-merge-put",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -324,7 +368,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "force-by-default",
+        "mcp": "read-merge-put",
         "backend": "replay-digest-mismatch",
         "variant": "settle-by-client-reference"
       },
@@ -332,36 +376,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect force-by-default, backend lost-update",
+      "label": "L2, defect label-by-position, backend key-expires-early",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "force-by-default",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "force-by-default",
-        "backend": "lost-update",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect label-by-position, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "label-by-position",
         "backend": "key-expires-early",
         "variant": "-"
@@ -370,45 +395,20 @@
       "fixture": true
     },
     {
-      "label": "L3, defect delete-refetches-version, backend replay-digest-mismatch, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "delete-refetches-version",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L3",
-        "mcp": "delete-refetches-version",
-        "backend": "replay-digest-mismatch",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect force-by-default, backend digest-not-canonical, variant settle-by-lookup",
+      "label": "L3, defect force-by-default, backend lost-update",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
-        "digest-not-canonical"
+        "lost-update"
       ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
       "factors": {
         "level": "L3",
         "mcp": "force-by-default",
-        "backend": "digest-not-canonical",
-        "variant": "settle-by-lookup"
+        "backend": "lost-update",
+        "variant": "-"
       },
       "contract": false,
       "fixture": true
@@ -500,14 +500,14 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect delete-refetches-version, backend digest-not-canonical, variant key-store-honest",
+      "label": "Lv, defect force-by-default, backend key-expires-early, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "delete-refetches-version",
+        "force-by-default",
         "--backend-defect",
-        "digest-not-canonical"
+        "key-expires-early"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-honest",
@@ -515,48 +515,86 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "delete-refetches-version",
-        "backend": "digest-not-canonical",
+        "mcp": "force-by-default",
+        "backend": "key-expires-early",
         "variant": "key-store-honest"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3, defect stale-unannounced, backend digest-of-current-state",
+      "label": "L2, defect stale-unannounced, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "stale-unannounced"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L2",
+        "mcp": "stale-unannounced",
+        "backend": "-",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect stale-unannounced, backend replay-digest-mismatch",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
-        "digest-of-current-state"
+        "replay-digest-mismatch"
       ],
       "factors": {
         "level": "L3",
         "mcp": "stale-unannounced",
-        "backend": "digest-of-current-state",
+        "backend": "replay-digest-mismatch",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3, defect conflict-as-generic-error, variant settle-by-lookup",
+      "label": "L3, defect conflict-as-generic-error, backend digest-not-canonical",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
-        "conflict-as-generic-error"
+        "conflict-as-generic-error",
+        "--backend-defect",
+        "digest-not-canonical"
       ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
       "factors": {
         "level": "L3",
         "mcp": "conflict-as-generic-error",
-        "backend": "-",
-        "variant": "settle-by-lookup"
+        "backend": "digest-not-canonical",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect ignore-project-scope, backend key-expires-early",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "ignore-project-scope",
+        "backend": "key-expires-early",
+        "variant": "-"
       },
       "contract": false,
       "fixture": true
@@ -583,7 +621,7 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect conflict-without-iserror, backend replay-digest-mismatch",
+      "label": "L3d, defect conflict-without-iserror, backend digest-of-current-state",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
@@ -592,61 +630,19 @@
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
-        "replay-digest-mismatch"
+        "digest-of-current-state"
       ],
       "factors": {
         "level": "L3d",
         "mcp": "conflict-without-iserror",
-        "backend": "replay-digest-mismatch",
+        "backend": "digest-of-current-state",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3d, defect conflict-as-generic-error, backend digest-not-canonical",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "conflict-as-generic-error",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "conflict-as-generic-error",
-        "backend": "digest-not-canonical",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect ignore-project-scope, backend lookup-wrong-record",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "lookup-wrong-record"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "ignore-project-scope",
-        "backend": "lookup-wrong-record",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect empty-filter-deletes-all, backend lookup-unscoped",
+      "label": "L3d, defect empty-filter-deletes-all, backend digest-not-canonical",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
@@ -655,19 +651,19 @@
         "--defect",
         "empty-filter-deletes-all",
         "--backend-defect",
-        "lookup-unscoped"
+        "digest-not-canonical"
       ],
       "factors": {
         "level": "L3d",
         "mcp": "empty-filter-deletes-all",
-        "backend": "lookup-unscoped",
+        "backend": "digest-not-canonical",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3d, defect create-overwrites, backend key-expires-early",
+      "label": "L3d, defect create-overwrites, backend lookup-wrong-record",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
@@ -676,11 +672,53 @@
         "--defect",
         "create-overwrites",
         "--backend-defect",
-        "key-expires-early"
+        "lookup-wrong-record"
       ],
       "factors": {
         "level": "L3d",
         "mcp": "create-overwrites",
+        "backend": "lookup-wrong-record",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect skip-null-assignee, backend lookup-unscoped",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "skip-null-assignee",
+        "--backend-defect",
+        "lookup-unscoped"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "skip-null-assignee",
+        "backend": "lookup-unscoped",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect shape-claims-applied, backend key-expires-early",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "shape-claims-applied",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "shape-claims-applied",
         "backend": "key-expires-early",
         "variant": "-"
       },
@@ -688,14 +726,14 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect stale-unannounced, backend key-record-not-durable, variant settle-by-lookup",
+      "label": "L3d, defect conflict-as-generic-error, backend key-record-not-durable, variant settle-by-lookup",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "stale-unannounced",
+        "conflict-as-generic-error",
         "--backend-defect",
         "key-record-not-durable"
       ],
@@ -704,7 +742,7 @@
       },
       "factors": {
         "level": "L3d",
-        "mcp": "stale-unannounced",
+        "mcp": "conflict-as-generic-error",
         "backend": "key-record-not-durable",
         "variant": "settle-by-lookup"
       },
@@ -712,14 +750,14 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect skip-null-assignee, backend key-record-after-effect, variant settle-by-lookup",
+      "label": "L3d, defect ignore-project-scope, backend key-record-after-effect, variant settle-by-lookup",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "skip-null-assignee",
+        "ignore-project-scope",
         "--backend-defect",
         "key-record-after-effect"
       ],
@@ -728,7 +766,7 @@
       },
       "factors": {
         "level": "L3d",
-        "mcp": "skip-null-assignee",
+        "mcp": "ignore-project-scope",
         "backend": "key-record-after-effect",
         "variant": "settle-by-lookup"
       },
@@ -736,18 +774,18 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect skip-null-assignee, backend lookup-wrong-record",
+      "label": "Lv, defect error-as-text, backend lookup-wrong-record",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "skip-null-assignee",
+        "error-as-text",
         "--backend-defect",
         "lookup-wrong-record"
       ],
       "factors": {
         "level": "Lv",
-        "mcp": "skip-null-assignee",
+        "mcp": "error-as-text",
         "backend": "lookup-wrong-record",
         "variant": "-"
       },
@@ -755,18 +793,18 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-claims-applied, backend lookup-unscoped",
+      "label": "Lv, defect shape-unknown-as-failed, backend lookup-unscoped",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "shape-claims-applied",
+        "shape-unknown-as-failed",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
         "level": "Lv",
-        "mcp": "shape-claims-applied",
+        "mcp": "shape-unknown-as-failed",
         "backend": "lookup-unscoped",
         "variant": "-"
       },
@@ -774,35 +812,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect read-merge-put, variant key-store-honest",
+      "label": "Lv, defect conflict-without-iserror, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "read-merge-put"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "read-merge-put",
-        "backend": "-",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect conflict-without-iserror, backend digest-of-current-state, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "conflict-without-iserror",
-        "--backend-defect",
-        "digest-of-current-state"
+        "conflict-without-iserror"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-honest",
@@ -811,6 +826,29 @@
       "factors": {
         "level": "Lv",
         "mcp": "conflict-without-iserror",
+        "backend": "-",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect stale-unannounced, backend digest-of-current-state, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "stale-unannounced",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "stale-unannounced",
         "backend": "digest-of-current-state",
         "variant": "key-store-honest"
       },
@@ -818,12 +856,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect stale-unannounced, backend replay-digest-mismatch, variant key-store-honest",
+      "label": "Lv, defect conflict-as-generic-error, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "stale-unannounced",
+        "conflict-as-generic-error",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -833,7 +871,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "stale-unannounced",
+        "mcp": "conflict-as-generic-error",
         "backend": "replay-digest-mismatch",
         "variant": "key-store-honest"
       },
@@ -841,12 +879,35 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect ignore-project-scope, variant key-store-durable",
+      "label": "Lv, defect ignore-project-scope, backend digest-not-canonical, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "ignore-project-scope"
+        "ignore-project-scope",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "ignore-project-scope",
+        "backend": "digest-not-canonical",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect empty-filter-deletes-all, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "empty-filter-deletes-all"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-durable",
@@ -854,7 +915,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "ignore-project-scope",
+        "mcp": "empty-filter-deletes-all",
         "backend": "-",
         "variant": "key-store-durable"
       },
@@ -862,12 +923,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect conflict-as-generic-error, backend lost-update, variant key-store-durable",
+      "label": "Lv, defect create-overwrites, backend lost-update, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "conflict-as-generic-error",
+        "create-overwrites",
         "--backend-defect",
         "lost-update"
       ],
@@ -877,7 +938,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "conflict-as-generic-error",
+        "mcp": "create-overwrites",
         "backend": "lost-update",
         "variant": "key-store-durable"
       },
@@ -885,12 +946,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant key-store-durable",
+      "label": "Lv, defect skip-null-assignee, backend replay-digest-mismatch, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "empty-filter-deletes-all",
+        "skip-null-assignee",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -900,7 +961,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "skip-null-assignee",
         "backend": "replay-digest-mismatch",
         "variant": "key-store-durable"
       },
@@ -908,12 +969,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect create-overwrites, backend digest-not-canonical, variant key-store-durable",
+      "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "create-overwrites",
+        "shape-claims-applied",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -923,7 +984,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "create-overwrites",
+        "mcp": "shape-claims-applied",
         "backend": "digest-not-canonical",
         "variant": "key-store-durable"
       },
@@ -931,19 +992,42 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect error-as-text, variant settle-by-client-reference",
+      "label": "Lv, defect shape-text-says-failed, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "error-as-text"
+        "shape-text-says-failed",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-text-says-failed",
+        "backend": "key-expires-early",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-text-invites-retry, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-text-invites-retry"
       ],
       "env": {
         "TRACKER_VARIANTS": "settle-by-client-reference"
       },
       "factors": {
         "level": "Lv",
-        "mcp": "error-as-text",
+        "mcp": "shape-text-invites-retry",
         "backend": "-",
         "variant": "settle-by-client-reference"
       },
@@ -951,12 +1035,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-unknown-as-failed, backend lost-update, variant settle-by-client-reference",
+      "label": "Lv, defect comment-id-dropped, backend lost-update, variant settle-by-client-reference",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "shape-unknown-as-failed",
+        "comment-id-dropped",
         "--backend-defect",
         "lost-update"
       ],
@@ -965,7 +1049,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-unknown-as-failed",
+        "mcp": "comment-id-dropped",
         "backend": "lost-update",
         "variant": "settle-by-client-reference"
       },
@@ -973,12 +1057,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-text-says-failed, backend digest-of-current-state, variant settle-by-client-reference",
+      "label": "Lv, defect receipt-missing-version, backend digest-of-current-state, variant settle-by-client-reference",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "shape-text-says-failed",
+        "receipt-missing-version",
         "--backend-defect",
         "digest-of-current-state"
       ],
@@ -987,7 +1071,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-text-says-failed",
+        "mcp": "receipt-missing-version",
         "backend": "digest-of-current-state",
         "variant": "settle-by-client-reference"
       },
@@ -995,12 +1079,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-text-invites-retry, backend digest-not-canonical, variant settle-by-client-reference",
+      "label": "Lv, defect shape-wrong-version, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "shape-text-invites-retry",
+        "shape-wrong-version",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -1009,7 +1093,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-text-invites-retry",
+        "mcp": "shape-wrong-version",
         "backend": "digest-not-canonical",
         "variant": "settle-by-client-reference"
       },
@@ -1017,18 +1101,23 @@
       "fixture": true
     },
     {
-      "label": "L2, defect shape-unknown-as-failed",
+      "label": "Lv, defect shape-missing-failed, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,ledger,faults",
         "--defect",
-        "shape-unknown-as-failed"
+        "shape-missing-failed",
+        "--backend-defect",
+        "key-expires-early"
       ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
       "factors": {
-        "level": "L2",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "-",
-        "variant": "-"
+        "level": "Lv",
+        "mcp": "shape-missing-failed",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
       },
       "contract": false,
       "fixture": true
@@ -1044,23 +1133,6 @@
       "factors": {
         "level": "L2",
         "mcp": "shape-text-says-failed",
-        "backend": "-",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect shape-text-invites-retry",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-text-invites-retry"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "shape-text-invites-retry",
         "backend": "-",
         "variant": "-"
       },
@@ -1544,34 +1616,15 @@
       "fixture": true
     },
     {
-      "label": "L2, defect error-as-text, backend lost-update",
+      "label": "L2, defect in-progress-reported-not-applied",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "error-as-text",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "error-as-text",
-        "backend": "lost-update",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect in-progress-reported-not-applied",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
         "in-progress-reported-not-applied"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "in-progress-reported-not-applied",
         "backend": "-",
         "variant": "-"
@@ -1580,15 +1633,15 @@
       "fixture": true
     },
     {
-      "label": "L3, defect settle-miss-reported-not-applied",
+      "label": "L2, defect settle-miss-reported-not-applied",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "settle-miss-reported-not-applied"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "settle-miss-reported-not-applied",
         "backend": "-",
         "variant": "-"
@@ -1597,30 +1650,29 @@
       "fixture": true
     },
     {
-      "label": "L3, defect empty-filter-deletes-all, variant settle-by-lookup",
+      "label": "L2, defect shape-text-invites-retry, backend lost-update",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "empty-filter-deletes-all"
+        "shape-text-invites-retry",
+        "--backend-defect",
+        "lost-update"
       ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
       "factors": {
-        "level": "L3",
-        "mcp": "empty-filter-deletes-all",
-        "backend": "-",
-        "variant": "settle-by-lookup"
+        "level": "L2",
+        "mcp": "shape-text-invites-retry",
+        "backend": "lost-update",
+        "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3, defect create-overwrites, variant settle-by-lookup",
+      "label": "L2, defect create-overwrites, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "create-overwrites"
       ],
@@ -1628,7 +1680,7 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "create-overwrites",
         "backend": "-",
         "variant": "settle-by-lookup"
@@ -1637,10 +1689,30 @@
       "fixture": true
     },
     {
-      "label": "L3, defect shape-claims-applied, variant settle-by-lookup",
+      "label": "L2, defect skip-null-assignee, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "skip-null-assignee"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L2",
+        "mcp": "skip-null-assignee",
+        "backend": "-",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect shape-claims-applied, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "shape-claims-applied"
       ],
@@ -1648,7 +1720,7 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "shape-claims-applied",
         "backend": "-",
         "variant": "settle-by-lookup"
@@ -1657,12 +1729,52 @@
       "fixture": true
     },
     {
-      "label": "L3, defect ignore-project-scope, backend lost-update, variant settle-by-lookup",
+      "label": "L2, defect error-as-text, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "ignore-project-scope",
+        "error-as-text"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L2",
+        "mcp": "error-as-text",
+        "backend": "-",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect shape-unknown-as-failed, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "shape-unknown-as-failed"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L2",
+        "mcp": "shape-unknown-as-failed",
+        "backend": "-",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect empty-filter-deletes-all, backend lost-update, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "empty-filter-deletes-all",
         "--backend-defect",
         "lost-update"
       ],
@@ -1670,8 +1782,8 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3",
-        "mcp": "ignore-project-scope",
+        "level": "L2",
+        "mcp": "empty-filter-deletes-all",
         "backend": "lost-update",
         "variant": "settle-by-lookup"
       },
@@ -1694,50 +1806,6 @@
       "factors": {
         "level": "L3",
         "mcp": "shape-text-says-failed",
-        "backend": "lost-update",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-text-invites-retry, backend lost-update, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-text-invites-retry",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-text-invites-retry",
-        "backend": "lost-update",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect comment-id-dropped, backend lost-update, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "comment-id-dropped",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L3",
-        "mcp": "comment-id-dropped",
         "backend": "lost-update",
         "variant": "settle-by-lookup"
       },
@@ -2405,56 +2473,10 @@
       "fixture": true
     },
     {
-      "label": "L3, defect error-as-text, backend digest-of-current-state, variant settle-by-lookup",
+      "label": "L3, defect in-progress-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "error-as-text",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L3",
-        "mcp": "error-as-text",
-        "backend": "digest-of-current-state",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-unknown-as-failed, backend digest-of-current-state, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "digest-of-current-state",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect in-progress-reported-not-applied, backend lost-update, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
         "--defect",
         "in-progress-reported-not-applied",
         "--backend-defect",
@@ -2464,7 +2486,7 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3d",
+        "level": "L3",
         "mcp": "in-progress-reported-not-applied",
         "backend": "lost-update",
         "variant": "settle-by-lookup"
@@ -2473,12 +2495,10 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect settle-miss-reported-not-applied, backend lost-update, variant settle-by-lookup",
+      "label": "L3, defect settle-miss-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "settle-miss-reported-not-applied",
         "--backend-defect",
@@ -2488,7 +2508,7 @@
         "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "L3d",
+        "level": "L3",
         "mcp": "settle-miss-reported-not-applied",
         "backend": "lost-update",
         "variant": "settle-by-lookup"
@@ -2497,93 +2517,45 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect comment-id-dropped, backend digest-of-current-state, variant key-store-honest",
+      "label": "L3, defect shape-text-invites-retry, backend digest-of-current-state, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "shape-text-invites-retry",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L3",
+        "mcp": "shape-text-invites-retry",
+        "backend": "digest-of-current-state",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect comment-id-dropped, backend digest-of-current-state, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
         "digest-of-current-state"
       ],
       "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+        "TRACKER_VARIANTS": "settle-by-lookup"
       },
       "factors": {
-        "level": "Lv",
+        "level": "L3",
         "mcp": "comment-id-dropped",
         "backend": "digest-of-current-state",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect receipt-missing-version, backend digest-of-current-state, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "receipt-missing-version",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "receipt-missing-version",
-        "backend": "digest-of-current-state",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-wrong-version, backend digest-of-current-state, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-wrong-version",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-wrong-version",
-        "backend": "digest-of-current-state",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-missing-failed, backend digest-of-current-state, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-missing-failed",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-missing-failed",
-        "backend": "digest-of-current-state",
-        "variant": "key-store-honest"
+        "variant": "settle-by-lookup"
       },
       "contract": false,
       "fixture": true
@@ -3187,33 +3159,62 @@
       "fixture": true
     },
     {
-      "label": "L2, defect update-adds-defaults",
+      "label": "Lv, defect in-progress-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,ledger,faults",
         "--defect",
-        "update-adds-defaults"
+        "in-progress-reported-not-applied",
+        "--backend-defect",
+        "digest-of-current-state"
       ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
       "factors": {
-        "level": "L2",
-        "mcp": "update-adds-defaults",
-        "backend": "-",
-        "variant": "-"
+        "level": "Lv",
+        "mcp": "in-progress-reported-not-applied",
+        "backend": "digest-of-current-state",
+        "variant": "key-store-honest"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L2, defect label-by-position",
+      "label": "Lv, defect settle-miss-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "settle-miss-reported-not-applied",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "settle-miss-reported-not-applied",
+        "backend": "digest-of-current-state",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect force-by-default",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "label-by-position"
+        "force-by-default"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "label-by-position",
+        "mcp": "force-by-default",
         "backend": "-",
         "variant": "-"
       },
@@ -3238,165 +3239,126 @@
       "fixture": true
     },
     {
-      "label": "L2, defect conflict-without-iserror",
+      "label": "L2, defect read-merge-put",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "conflict-without-iserror"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "conflict-without-iserror",
-        "backend": "-",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect stale-unannounced",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "stale-unannounced"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "stale-unannounced",
-        "backend": "-",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect skip-null-assignee",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "skip-null-assignee"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "skip-null-assignee",
-        "backend": "-",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect empty-filter-deletes-all, backend lost-update",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "empty-filter-deletes-all",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "empty-filter-deletes-all",
-        "backend": "lost-update",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect create-overwrites, backend lost-update",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "create-overwrites",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "create-overwrites",
-        "backend": "lost-update",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect shape-claims-applied, backend lost-update",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "shape-claims-applied",
-        "backend": "lost-update",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect read-merge-put, backend digest-of-current-state",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "read-merge-put",
-        "--backend-defect",
-        "digest-of-current-state"
+        "read-merge-put"
       ],
       "factors": {
         "level": "L2",
         "mcp": "read-merge-put",
-        "backend": "digest-of-current-state",
+        "backend": "-",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L2, defect conflict-as-generic-error, backend digest-of-current-state",
+      "label": "L2, defect conflict-as-generic-error",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "conflict-as-generic-error",
-        "--backend-defect",
-        "digest-of-current-state"
+        "conflict-as-generic-error"
       ],
       "factors": {
         "level": "L2",
         "mcp": "conflict-as-generic-error",
-        "backend": "digest-of-current-state",
+        "backend": "-",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L2, defect ignore-project-scope, backend digest-of-current-state",
+      "label": "L2, defect ignore-project-scope",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "digest-of-current-state"
+        "ignore-project-scope"
       ],
       "factors": {
         "level": "L2",
         "mcp": "ignore-project-scope",
-        "backend": "digest-of-current-state",
+        "backend": "-",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect conflict-without-iserror, backend lost-update",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "conflict-without-iserror",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "conflict-without-iserror",
+        "backend": "lost-update",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, backend lost-update, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L2",
+        "mcp": "-",
+        "backend": "lost-update",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect update-adds-defaults",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "update-adds-defaults"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "update-adds-defaults",
+        "backend": "-",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect delete-refetches-version, backend lost-update",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "delete-refetches-version",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "delete-refetches-version",
+        "backend": "lost-update",
         "variant": "-"
       },
       "contract": false,
@@ -3422,59 +3384,75 @@
       "fixture": true
     },
     {
-      "label": "L3, backend lost-update, variant settle-by-lookup",
+      "label": "L3, defect shape-claims-applied, backend lost-update",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "shape-claims-applied",
         "--backend-defect",
         "lost-update"
       ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
       "factors": {
         "level": "L3",
-        "mcp": "-",
+        "mcp": "shape-claims-applied",
         "backend": "lost-update",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect force-by-default",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "force-by-default"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "force-by-default",
-        "backend": "-",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3d, defect shape-claims-applied, backend digest-of-current-state",
+      "label": "L3, defect error-as-text, backend lost-update",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
-        "shape-claims-applied",
+        "error-as-text",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "error-as-text",
+        "backend": "lost-update",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect shape-unknown-as-failed, backend lost-update",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "shape-unknown-as-failed",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "shape-unknown-as-failed",
+        "backend": "lost-update",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect empty-filter-deletes-all, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "empty-filter-deletes-all",
         "--backend-defect",
         "digest-of-current-state"
       ],
       "factors": {
-        "level": "L3d",
-        "mcp": "shape-claims-applied",
+        "level": "L3",
+        "mcp": "empty-filter-deletes-all",
         "backend": "digest-of-current-state",
         "variant": "-"
       },
@@ -3482,20 +3460,163 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect shape-text-invites-retry, backend digest-of-current-state",
+      "label": "L3, defect create-overwrites, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "create-overwrites",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "create-overwrites",
+        "backend": "digest-of-current-state",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect label-by-position",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "shape-text-invites-retry",
+        "label-by-position"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "label-by-position",
+        "backend": "-",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect stale-unannounced, backend lost-update",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "stale-unannounced",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "stale-unannounced",
+        "backend": "lost-update",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect error-as-text, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "error-as-text",
         "--backend-defect",
         "digest-of-current-state"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "shape-text-invites-retry",
+        "mcp": "error-as-text",
+        "backend": "digest-of-current-state",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect shape-unknown-as-failed, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "shape-unknown-as-failed",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "shape-unknown-as-failed",
+        "backend": "digest-of-current-state",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect shape-text-says-failed, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "shape-text-says-failed",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "shape-text-says-failed",
+        "backend": "digest-of-current-state",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect shape-wrong-version, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "shape-wrong-version",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "shape-wrong-version",
+        "backend": "digest-of-current-state",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect shape-missing-failed, backend digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "shape-missing-failed",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "shape-missing-failed",
         "backend": "digest-of-current-state",
         "variant": "-"
       },
@@ -3524,62 +3645,20 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect error-as-text, backend replay-digest-mismatch",
+      "label": "L3d, defect shape-text-invites-retry, backend replay-digest-mismatch",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "error-as-text",
+        "shape-text-invites-retry",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "error-as-text",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect shape-unknown-as-failed, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect shape-text-says-failed, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-text-says-failed",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "shape-text-says-failed",
+        "mcp": "shape-text-invites-retry",
         "backend": "replay-digest-mismatch",
         "variant": "-"
       },
@@ -3622,48 +3701,6 @@
       "factors": {
         "level": "L3d",
         "mcp": "receipt-missing-version",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect shape-wrong-version, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-wrong-version",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "shape-wrong-version",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect shape-missing-failed, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-missing-failed",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "shape-missing-failed",
         "backend": "replay-digest-mismatch",
         "variant": "-"
       },
@@ -4217,6 +4254,48 @@
       "fixture": true
     },
     {
+      "label": "L3d, defect in-progress-reported-not-applied, backend replay-digest-mismatch",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "in-progress-reported-not-applied",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "in-progress-reported-not-applied",
+        "backend": "replay-digest-mismatch",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect settle-miss-reported-not-applied, backend replay-digest-mismatch",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "settle-miss-reported-not-applied",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "settle-miss-reported-not-applied",
+        "backend": "replay-digest-mismatch",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "Lv, defect lookup-reexecutes, backend replay-digest-mismatch",
       "args": [
         "--features",
@@ -4236,12 +4315,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect force-by-default, backend digest-of-current-state, variant key-store-honest",
+      "label": "Lv, defect delete-refetches-version, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "force-by-default",
+        "delete-refetches-version",
         "--backend-defect",
         "digest-of-current-state"
       ],
@@ -4251,7 +4330,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "force-by-default",
+        "mcp": "delete-refetches-version",
         "backend": "digest-of-current-state",
         "variant": "key-store-honest"
       },
@@ -4259,12 +4338,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect empty-filter-deletes-all, backend digest-of-current-state, variant key-store-honest",
+      "label": "Lv, defect read-merge-put, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "empty-filter-deletes-all",
+        "read-merge-put",
         "--backend-defect",
         "digest-of-current-state"
       ],
@@ -4274,30 +4353,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "empty-filter-deletes-all",
-        "backend": "digest-of-current-state",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect create-overwrites, backend digest-of-current-state, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "create-overwrites",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "create-overwrites",
+        "mcp": "read-merge-put",
         "backend": "digest-of-current-state",
         "variant": "key-store-honest"
       },
@@ -4328,6 +4384,29 @@
       "fixture": true
     },
     {
+      "label": "Lv, defect shape-claims-applied, backend digest-of-current-state, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-claims-applied",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-claims-applied",
+        "backend": "digest-of-current-state",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "Lv, defect update-adds-defaults, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
@@ -4351,12 +4430,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect conflict-as-generic-error, backend replay-digest-mismatch, variant key-store-honest",
+      "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "conflict-as-generic-error",
+        "empty-filter-deletes-all",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -4366,7 +4445,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "conflict-as-generic-error",
+        "mcp": "empty-filter-deletes-all",
         "backend": "replay-digest-mismatch",
         "variant": "key-store-honest"
       },
@@ -4374,12 +4453,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect ignore-project-scope, backend replay-digest-mismatch, variant key-store-honest",
+      "label": "Lv, defect create-overwrites, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "ignore-project-scope",
+        "create-overwrites",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -4389,7 +4468,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "ignore-project-scope",
+        "mcp": "create-overwrites",
         "backend": "replay-digest-mismatch",
         "variant": "key-store-honest"
       },
@@ -4397,60 +4476,14 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-claims-applied",
-        "backend": "replay-digest-mismatch",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-text-invites-retry, backend replay-digest-mismatch, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-text-invites-retry",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-text-invites-retry",
-        "backend": "replay-digest-mismatch",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect error-as-text, backend digest-not-canonical, variant key-store-honest",
+      "label": "Lv, defect error-as-text, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
         "error-as-text",
         "--backend-defect",
-        "digest-not-canonical"
+        "replay-digest-mismatch"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-honest",
@@ -4459,21 +4492,21 @@
       "factors": {
         "level": "Lv",
         "mcp": "error-as-text",
-        "backend": "digest-not-canonical",
+        "backend": "replay-digest-mismatch",
         "variant": "key-store-honest"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-unknown-as-failed, backend digest-not-canonical, variant key-store-honest",
+      "label": "Lv, defect shape-unknown-as-failed, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
         "shape-unknown-as-failed",
         "--backend-defect",
-        "digest-not-canonical"
+        "replay-digest-mismatch"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-honest",
@@ -4482,19 +4515,88 @@
       "factors": {
         "level": "Lv",
         "mcp": "shape-unknown-as-failed",
-        "backend": "digest-not-canonical",
+        "backend": "replay-digest-mismatch",
         "variant": "key-store-honest"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-text-says-failed, backend digest-not-canonical, variant key-store-honest",
+      "label": "Lv, defect shape-text-says-failed, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
         "shape-text-says-failed",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-text-says-failed",
+        "backend": "replay-digest-mismatch",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-wrong-version, backend replay-digest-mismatch, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-wrong-version",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-wrong-version",
+        "backend": "replay-digest-mismatch",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-missing-failed, backend replay-digest-mismatch, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-missing-failed",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-missing-failed",
+        "backend": "replay-digest-mismatch",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-text-invites-retry, backend digest-not-canonical, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-text-invites-retry",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -4504,7 +4606,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-text-says-failed",
+        "mcp": "shape-text-invites-retry",
         "backend": "digest-not-canonical",
         "variant": "key-store-honest"
       },
@@ -4512,12 +4614,79 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect delete-refetches-version, backend lost-update, variant key-store-durable",
+      "label": "Lv, defect comment-id-dropped, backend digest-not-canonical, variant key-store-honest",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "delete-refetches-version",
+        "comment-id-dropped",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "comment-id-dropped",
+        "backend": "digest-not-canonical",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect receipt-missing-version, backend digest-not-canonical, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "receipt-missing-version",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "receipt-missing-version",
+        "backend": "digest-not-canonical",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, backend key-expires-early, variant key-store-honest",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-honest",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "-",
+        "backend": "key-expires-early",
+        "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect conflict-as-generic-error, backend lost-update, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "conflict-as-generic-error",
         "--backend-defect",
         "lost-update"
       ],
@@ -4527,7 +4696,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "delete-refetches-version",
+        "mcp": "conflict-as-generic-error",
         "backend": "lost-update",
         "variant": "key-store-durable"
       },
@@ -4535,12 +4704,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect conflict-without-iserror, backend lost-update, variant key-store-durable",
+      "label": "Lv, defect ignore-project-scope, backend lost-update, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "conflict-without-iserror",
+        "ignore-project-scope",
         "--backend-defect",
         "lost-update"
       ],
@@ -4550,7 +4719,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "conflict-without-iserror",
+        "mcp": "ignore-project-scope",
         "backend": "lost-update",
         "variant": "key-store-durable"
       },
@@ -4558,14 +4727,14 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect stale-unannounced, backend lost-update, variant key-store-durable",
+      "label": "Lv, defect force-by-default, backend digest-of-current-state, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "stale-unannounced",
+        "force-by-default",
         "--backend-defect",
-        "lost-update"
+        "digest-of-current-state"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-durable",
@@ -4573,8 +4742,8 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "stale-unannounced",
-        "backend": "lost-update",
+        "mcp": "force-by-default",
+        "backend": "digest-of-current-state",
         "variant": "key-store-durable"
       },
       "contract": false,
@@ -4604,14 +4773,60 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect read-merge-put, backend replay-digest-mismatch, variant key-store-durable",
+      "label": "Lv, defect delete-refetches-version, backend replay-digest-mismatch, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "delete-refetches-version",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "delete-refetches-version",
+        "backend": "replay-digest-mismatch",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect conflict-without-iserror, backend replay-digest-mismatch, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "conflict-without-iserror",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "conflict-without-iserror",
+        "backend": "replay-digest-mismatch",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect read-merge-put, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
         "read-merge-put",
         "--backend-defect",
-        "replay-digest-mismatch"
+        "digest-not-canonical"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-durable",
@@ -4620,52 +4835,6 @@
       "factors": {
         "level": "Lv",
         "mcp": "read-merge-put",
-        "backend": "replay-digest-mismatch",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect skip-null-assignee, backend replay-digest-mismatch, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "skip-null-assignee",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "skip-null-assignee",
-        "backend": "replay-digest-mismatch",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-claims-applied",
         "backend": "digest-not-canonical",
         "variant": "key-store-durable"
       },
@@ -4673,12 +4842,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect comment-id-dropped, backend digest-not-canonical, variant key-store-durable",
+      "label": "Lv, defect stale-unannounced, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "comment-id-dropped",
+        "stale-unannounced",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -4688,7 +4857,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "comment-id-dropped",
+        "mcp": "stale-unannounced",
         "backend": "digest-not-canonical",
         "variant": "key-store-durable"
       },
@@ -4696,12 +4865,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect receipt-missing-version, backend digest-not-canonical, variant key-store-durable",
+      "label": "Lv, defect error-as-text, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "receipt-missing-version",
+        "error-as-text",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -4711,7 +4880,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "receipt-missing-version",
+        "mcp": "error-as-text",
         "backend": "digest-not-canonical",
         "variant": "key-store-durable"
       },
@@ -4719,12 +4888,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-wrong-version, backend digest-not-canonical, variant key-store-durable",
+      "label": "Lv, defect shape-unknown-as-failed, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "shape-wrong-version",
+        "shape-unknown-as-failed",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -4734,7 +4903,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-wrong-version",
+        "mcp": "shape-unknown-as-failed",
         "backend": "digest-not-canonical",
         "variant": "key-store-durable"
       },
@@ -5363,12 +5532,104 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect delete-refetches-version, backend digest-of-current-state, variant settle-by-client-reference",
+      "label": "Lv, defect shape-text-invites-retry, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "delete-refetches-version",
+        "shape-text-invites-retry",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-text-invites-retry",
+        "backend": "key-expires-early",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect comment-id-dropped, backend key-expires-early, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "comment-id-dropped",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "comment-id-dropped",
+        "backend": "key-expires-early",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect receipt-missing-version, backend key-expires-early, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "receipt-missing-version",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "receipt-missing-version",
+        "backend": "key-expires-early",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-wrong-version, backend key-expires-early, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-wrong-version",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-wrong-version",
+        "backend": "key-expires-early",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect conflict-as-generic-error, backend digest-of-current-state, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "conflict-as-generic-error",
         "--backend-defect",
         "digest-of-current-state"
       ],
@@ -5377,7 +5638,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "delete-refetches-version",
+        "mcp": "conflict-as-generic-error",
         "backend": "digest-of-current-state",
         "variant": "settle-by-client-reference"
       },
@@ -5385,12 +5646,34 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect create-overwrites, backend replay-digest-mismatch, variant settle-by-client-reference",
+      "label": "Lv, defect ignore-project-scope, backend digest-of-current-state, variant settle-by-client-reference",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "create-overwrites",
+        "ignore-project-scope",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "ignore-project-scope",
+        "backend": "digest-of-current-state",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-claims-applied",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -5399,7 +5682,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "create-overwrites",
+        "mcp": "shape-claims-applied",
         "backend": "replay-digest-mismatch",
         "variant": "settle-by-client-reference"
       },
@@ -5451,12 +5734,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect read-merge-put, backend digest-not-canonical, variant settle-by-client-reference",
+      "label": "Lv, defect force-by-default, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "read-merge-put",
+        "force-by-default",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -5465,7 +5748,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "read-merge-put",
+        "mcp": "force-by-default",
         "backend": "digest-not-canonical",
         "variant": "settle-by-client-reference"
       },
@@ -5495,12 +5778,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect stale-unannounced, backend digest-not-canonical, variant settle-by-client-reference",
+      "label": "Lv, defect create-overwrites, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
         "evidence,strict-input,ledger,faults",
         "--defect",
-        "stale-unannounced",
+        "create-overwrites",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -5509,51 +5792,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "stale-unannounced",
-        "backend": "digest-not-canonical",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect ignore-project-scope, backend digest-not-canonical, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "ignore-project-scope",
-        "backend": "digest-not-canonical",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect empty-filter-deletes-all, backend digest-not-canonical, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "empty-filter-deletes-all",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "create-overwrites",
         "backend": "digest-not-canonical",
         "variant": "settle-by-client-reference"
       },
@@ -5583,6 +5822,729 @@
       "fixture": true
     },
     {
+      "label": "Lv, defect shape-text-says-failed, backend digest-not-canonical, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-text-says-failed",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-text-says-failed",
+        "backend": "digest-not-canonical",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect delete-refetches-version, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "delete-refetches-version",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "delete-refetches-version",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect stale-unannounced, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "stale-unannounced",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "stale-unannounced",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect empty-filter-deletes-all, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "empty-filter-deletes-all",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect error-as-text, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "error-as-text",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "error-as-text",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-unknown-as-failed, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-unknown-as-failed",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-unknown-as-failed",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect shape-text-says-all-saved, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "shape-text-says-all-saved",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-text-says-all-saved",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect bulk-misreports-partial, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "bulk-misreports-partial",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "bulk-misreports-partial",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect bulk-without-transaction, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "bulk-without-transaction",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "bulk-without-transaction",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect no-idempotency-key, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "no-idempotency-key",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "no-idempotency-key",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect idempotency-key-dropped, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "idempotency-key-dropped",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "idempotency-key-dropped",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect idempotency-key-ignores-args, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "idempotency-key-ignores-args",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "idempotency-key-ignores-args",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect retry-without-key, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "retry-without-key",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "retry-without-key",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect key-store-in-memory, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "key-store-in-memory",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "key-store-in-memory",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect close-before-confirm, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "close-before-confirm",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "close-before-confirm",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect coerce-types, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "coerce-types",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "coerce-types",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect drop-unknown-args, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "drop-unknown-args",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "drop-unknown-args",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect skip-limits, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "skip-limits",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "skip-limits",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect vague-validation-error, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "vague-validation-error",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "vague-validation-error",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect undeclared-title-limit, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "undeclared-title-limit",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "undeclared-title-limit",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect convert-numeric-strings, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "convert-numeric-strings",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "convert-numeric-strings",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect ignore-unknown-args-with-notice, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "ignore-unknown-args-with-notice",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "ignore-unknown-args-with-notice",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect read-only-strict-true, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "read-only-strict-true",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "read-only-strict-true",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect unknown-denied-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "unknown-denied-tools-ignored",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "unknown-denied-tools-ignored",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect read-only-by-annotation, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "read-only-by-annotation",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "read-only-by-annotation",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect unknown-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "unknown-tools-ignored",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "unknown-tools-ignored",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect comment-marked-read-only, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "comment-marked-read-only",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "comment-marked-read-only",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect add-label-replaces-list, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "add-label-replaces-list",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "add-label-replaces-list",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect create-marked-idempotent, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "create-marked-idempotent",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "create-marked-idempotent",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect missing-annotations, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "missing-annotations",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "missing-annotations",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect set-labels-non-destructive, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "set-labels-non-destructive",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "set-labels-non-destructive",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "Lv, defect token-in-error, backend key-expires-early, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults",
+        "--defect",
+        "token-in-error",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "token-in-error",
+        "backend": "key-expires-early",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect ignore-project-scope, backend replay-digest-mismatch",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "ignore-project-scope",
+        "backend": "replay-digest-mismatch",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "L2, defect lookup-reexecutes, backend digest-not-canonical",
       "args": [
         "--features",
@@ -5595,6 +6557,44 @@
       "factors": {
         "level": "L2",
         "mcp": "lookup-reexecutes",
+        "backend": "digest-not-canonical",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect in-progress-reported-not-applied, backend digest-not-canonical",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "in-progress-reported-not-applied",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "in-progress-reported-not-applied",
+        "backend": "digest-not-canonical",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect settle-miss-reported-not-applied, backend digest-not-canonical",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "settle-miss-reported-not-applied",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "settle-miss-reported-not-applied",
         "backend": "digest-not-canonical",
         "variant": "-"
       },
@@ -5735,6 +6735,25 @@
       "fixture": true
     },
     {
+      "label": "L2, defect ignore-project-scope, backend lookup-wrong-record",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "ignore-project-scope",
+        "backend": "lookup-wrong-record",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "L2, defect empty-filter-deletes-all, backend lookup-wrong-record",
       "args": [
         "--features",
@@ -5754,18 +6773,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect create-overwrites, backend lookup-wrong-record",
+      "label": "L2, defect skip-null-assignee, backend lookup-wrong-record",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "create-overwrites",
+        "skip-null-assignee",
         "--backend-defect",
         "lookup-wrong-record"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "create-overwrites",
+        "mcp": "skip-null-assignee",
         "backend": "lookup-wrong-record",
         "variant": "-"
       },
@@ -5785,25 +6804,6 @@
       "factors": {
         "level": "L2",
         "mcp": "shape-claims-applied",
-        "backend": "lookup-wrong-record",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect error-as-text, backend lookup-wrong-record",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "error-as-text",
-        "--backend-defect",
-        "lookup-wrong-record"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "error-as-text",
         "backend": "lookup-wrong-record",
         "variant": "-"
       },
@@ -6457,6 +7457,44 @@
       "fixture": true
     },
     {
+      "label": "L2, defect in-progress-reported-not-applied, backend lookup-wrong-record",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "in-progress-reported-not-applied",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "in-progress-reported-not-applied",
+        "backend": "lookup-wrong-record",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect settle-miss-reported-not-applied, backend lookup-wrong-record",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "settle-miss-reported-not-applied",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "settle-miss-reported-not-applied",
+        "backend": "lookup-wrong-record",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "L2, defect update-adds-defaults, backend lookup-unscoped",
       "args": [
         "--features",
@@ -6609,6 +7647,25 @@
       "fixture": true
     },
     {
+      "label": "L2, defect empty-filter-deletes-all, backend lookup-unscoped",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "lookup-unscoped"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "empty-filter-deletes-all",
+        "backend": "lookup-unscoped",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "L2, defect create-overwrites, backend lookup-unscoped",
       "args": [
         "--features",
@@ -6628,18 +7685,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect skip-null-assignee, backend lookup-unscoped",
+      "label": "L2, defect shape-claims-applied, backend lookup-unscoped",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "skip-null-assignee",
+        "shape-claims-applied",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "skip-null-assignee",
+        "mcp": "shape-claims-applied",
         "backend": "lookup-unscoped",
         "variant": "-"
       },
@@ -6659,25 +7716,6 @@
       "factors": {
         "level": "L2",
         "mcp": "error-as-text",
-        "backend": "lookup-unscoped",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect shape-unknown-as-failed, backend lookup-unscoped",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "lookup-unscoped"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "shape-unknown-as-failed",
         "backend": "lookup-unscoped",
         "variant": "-"
       },
@@ -7312,169 +8350,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect in-progress-reported-not-applied, backend digest-of-current-state",
+      "label": "L2, defect in-progress-reported-not-applied, backend lookup-unscoped",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "in-progress-reported-not-applied",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "in-progress-reported-not-applied",
-        "backend": "digest-of-current-state",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect settle-miss-reported-not-applied, backend digest-of-current-state",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "settle-miss-reported-not-applied",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "settle-miss-reported-not-applied",
-        "backend": "digest-of-current-state",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect in-progress-reported-not-applied, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "in-progress-reported-not-applied",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "in-progress-reported-not-applied",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect settle-miss-reported-not-applied, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "settle-miss-reported-not-applied",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "settle-miss-reported-not-applied",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect in-progress-reported-not-applied, backend digest-not-canonical",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "in-progress-reported-not-applied",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "in-progress-reported-not-applied",
-        "backend": "digest-not-canonical",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect settle-miss-reported-not-applied, backend digest-not-canonical",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "settle-miss-reported-not-applied",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "settle-miss-reported-not-applied",
-        "backend": "digest-not-canonical",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect in-progress-reported-not-applied, backend lookup-wrong-record",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "in-progress-reported-not-applied",
-        "--backend-defect",
-        "lookup-wrong-record"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "in-progress-reported-not-applied",
-        "backend": "lookup-wrong-record",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect settle-miss-reported-not-applied, backend lookup-wrong-record",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "settle-miss-reported-not-applied",
-        "--backend-defect",
-        "lookup-wrong-record"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "settle-miss-reported-not-applied",
-        "backend": "lookup-wrong-record",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect in-progress-reported-not-applied, backend lookup-unscoped",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "in-progress-reported-not-applied",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "in-progress-reported-not-applied",
         "backend": "lookup-unscoped",
         "variant": "-"
@@ -7483,17 +8369,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect settle-miss-reported-not-applied, backend lookup-unscoped",
+      "label": "L2, defect settle-miss-reported-not-applied, backend lookup-unscoped",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "settle-miss-reported-not-applied",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "settle-miss-reported-not-applied",
         "backend": "lookup-unscoped",
         "variant": "-"
@@ -7502,34 +8388,17 @@
       "fixture": true
     },
     {
-      "label": "L3, backend key-expires-early",
+      "label": "L2, defect update-adds-defaults, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "-",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect update-adds-defaults, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "update-adds-defaults",
         "backend": "key-expires-early",
         "variant": "-"
@@ -7538,55 +8407,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect force-by-default, backend key-expires-early",
+      "label": "L2, defect read-merge-put, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "force-by-default",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "force-by-default",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect delete-refetches-version, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "delete-refetches-version",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "delete-refetches-version",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect read-merge-put, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "read-merge-put",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "read-merge-put",
         "backend": "key-expires-early",
         "variant": "-"
@@ -7595,17 +8426,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect conflict-without-iserror, backend key-expires-early",
+      "label": "L2, defect conflict-without-iserror, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "conflict-without-iserror",
         "backend": "key-expires-early",
         "variant": "-"
@@ -7614,36 +8445,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect stale-unannounced, backend key-expires-early",
+      "label": "L2, defect conflict-as-generic-error, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "stale-unannounced",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "stale-unannounced",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect conflict-as-generic-error, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "conflict-as-generic-error",
         "backend": "key-expires-early",
         "variant": "-"
@@ -7652,18 +8464,18 @@
       "fixture": true
     },
     {
-      "label": "L3, defect ignore-project-scope, backend key-expires-early",
+      "label": "L2, defect create-overwrites, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "ignore-project-scope",
+        "create-overwrites",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
-        "mcp": "ignore-project-scope",
+        "level": "L2",
+        "mcp": "create-overwrites",
         "backend": "key-expires-early",
         "variant": "-"
       },
@@ -7671,36 +8483,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect empty-filter-deletes-all, backend key-expires-early",
+      "label": "L2, defect skip-null-assignee, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "empty-filter-deletes-all",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "empty-filter-deletes-all",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect skip-null-assignee, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "skip-null-assignee",
         "backend": "key-expires-early",
         "variant": "-"
@@ -7709,682 +8502,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect shape-claims-applied, backend key-expires-early",
+      "label": "L2, defect lookup-reexecutes, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-claims-applied",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect error-as-text, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "error-as-text",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "error-as-text",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-unknown-as-failed, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-text-says-failed, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-text-says-failed",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-text-says-failed",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-text-invites-retry, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-text-invites-retry",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-text-invites-retry",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect comment-id-dropped, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "comment-id-dropped",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "comment-id-dropped",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect receipt-missing-version, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "receipt-missing-version",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "receipt-missing-version",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-wrong-version, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-wrong-version",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-wrong-version",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-missing-failed, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-missing-failed",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-missing-failed",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect shape-text-says-all-saved, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "shape-text-says-all-saved",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-text-says-all-saved",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect bulk-misreports-partial, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "bulk-misreports-partial",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "bulk-misreports-partial",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect bulk-without-transaction, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "bulk-without-transaction",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "bulk-without-transaction",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect no-idempotency-key, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "no-idempotency-key",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "no-idempotency-key",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect idempotency-key-dropped, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "idempotency-key-dropped",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "idempotency-key-dropped",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect idempotency-key-ignores-args, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "idempotency-key-ignores-args",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "idempotency-key-ignores-args",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect retry-without-key, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "retry-without-key",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "retry-without-key",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect key-store-in-memory, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "key-store-in-memory",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "key-store-in-memory",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect close-before-confirm, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "close-before-confirm",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "close-before-confirm",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect coerce-types, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "coerce-types",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "coerce-types",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect drop-unknown-args, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "drop-unknown-args",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "drop-unknown-args",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect skip-limits, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "skip-limits",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "skip-limits",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect vague-validation-error, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "vague-validation-error",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "vague-validation-error",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect undeclared-title-limit, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "undeclared-title-limit",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "undeclared-title-limit",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect convert-numeric-strings, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "convert-numeric-strings",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "convert-numeric-strings",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect ignore-unknown-args-with-notice, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "ignore-unknown-args-with-notice",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "ignore-unknown-args-with-notice",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect read-only-strict-true, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "read-only-strict-true",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "read-only-strict-true",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect unknown-denied-tools-ignored, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "unknown-denied-tools-ignored",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "unknown-denied-tools-ignored",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect read-only-by-annotation, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "read-only-by-annotation",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "read-only-by-annotation",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect unknown-tools-ignored, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "unknown-tools-ignored",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "unknown-tools-ignored",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect comment-marked-read-only, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "comment-marked-read-only",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "comment-marked-read-only",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect add-label-replaces-list, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "add-label-replaces-list",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "add-label-replaces-list",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect create-marked-idempotent, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "create-marked-idempotent",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "create-marked-idempotent",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect missing-annotations, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "missing-annotations",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "missing-annotations",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect set-labels-non-destructive, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "set-labels-non-destructive",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "set-labels-non-destructive",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect token-in-error, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "token-in-error",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "token-in-error",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect lookup-reexecutes, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "lookup-reexecutes",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "lookup-reexecutes",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8393,17 +8521,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect in-progress-reported-not-applied, backend key-expires-early",
+      "label": "L2, defect in-progress-reported-not-applied, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "in-progress-reported-not-applied",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "in-progress-reported-not-applied",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8412,17 +8540,17 @@
       "fixture": true
     },
     {
-      "label": "L3, defect settle-miss-reported-not-applied, backend key-expires-early",
+      "label": "L2, defect settle-miss-reported-not-applied, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "settle-miss-reported-not-applied",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L3",
+        "level": "L2",
         "mcp": "settle-miss-reported-not-applied",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8555,20 +8683,20 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect conflict-as-generic-error, backend key-record-not-durable",
+      "label": "L3d, defect stale-unannounced, backend key-record-not-durable",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "conflict-as-generic-error",
+        "stale-unannounced",
         "--backend-defect",
         "key-record-not-durable"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "conflict-as-generic-error",
+        "mcp": "stale-unannounced",
         "backend": "key-record-not-durable",
         "variant": "-"
       },
@@ -9624,27 +9752,6 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect ignore-project-scope, backend key-record-after-effect",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "key-record-after-effect"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "ignore-project-scope",
-        "backend": "key-record-after-effect",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-after-effect",
       "args": [
         "--features",
@@ -9680,6 +9787,27 @@
       "factors": {
         "level": "L3d",
         "mcp": "create-overwrites",
+        "backend": "key-record-after-effect",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect skip-null-assignee, backend key-record-after-effect",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "skip-null-assignee",
+        "--backend-defect",
+        "key-record-after-effect"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "skip-null-assignee",
         "backend": "key-record-after-effect",
         "variant": "-"
       },
@@ -10485,25 +10613,6 @@
       "fixture": true
     },
     {
-      "label": "Lv, variant key-store-honest",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-honest",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "-",
-        "backend": "-",
-        "variant": "key-store-honest"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "Lv, variant key-store-durable",
       "args": [
         "--features",
@@ -10523,111 +10632,6 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect force-by-default, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "force-by-default"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "force-by-default",
-        "backend": "-",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect error-as-text, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "error-as-text"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "error-as-text",
-        "backend": "-",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-unknown-as-failed, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-unknown-as-failed"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "-",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-text-says-failed, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-text-says-failed"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-text-says-failed",
-        "backend": "-",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-text-invites-retry, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-text-invites-retry"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-text-invites-retry",
-        "backend": "-",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "Lv, variant settle-by-client-reference",
       "args": [
         "--features",
@@ -10639,646 +10643,6 @@
       "factors": {
         "level": "Lv",
         "mcp": "-",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect conflict-as-generic-error, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "conflict-as-generic-error"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "conflict-as-generic-error",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-claims-applied, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-claims-applied"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-claims-applied",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect comment-id-dropped, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "comment-id-dropped"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "comment-id-dropped",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect receipt-missing-version, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "receipt-missing-version"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "receipt-missing-version",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-wrong-version, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-wrong-version"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-wrong-version",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-missing-failed, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-missing-failed"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-missing-failed",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-text-says-all-saved, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-text-says-all-saved"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-text-says-all-saved",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect bulk-misreports-partial, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "bulk-misreports-partial"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "bulk-misreports-partial",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect bulk-without-transaction, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "bulk-without-transaction"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "bulk-without-transaction",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect no-idempotency-key, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "no-idempotency-key"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "no-idempotency-key",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect idempotency-key-dropped, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "idempotency-key-dropped"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "idempotency-key-dropped",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect idempotency-key-ignores-args, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "idempotency-key-ignores-args"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "idempotency-key-ignores-args",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect retry-without-key, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "retry-without-key"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "retry-without-key",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect key-store-in-memory, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "key-store-in-memory"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "key-store-in-memory",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect close-before-confirm, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "close-before-confirm"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "close-before-confirm",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect coerce-types, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "coerce-types"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "coerce-types",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect drop-unknown-args, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "drop-unknown-args"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "drop-unknown-args",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect skip-limits, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "skip-limits"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "skip-limits",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect vague-validation-error, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "vague-validation-error"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "vague-validation-error",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect undeclared-title-limit, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "undeclared-title-limit"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "undeclared-title-limit",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect convert-numeric-strings, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "convert-numeric-strings"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "convert-numeric-strings",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect ignore-unknown-args-with-notice, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "ignore-unknown-args-with-notice"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "ignore-unknown-args-with-notice",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect read-only-strict-true, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "read-only-strict-true"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "read-only-strict-true",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect unknown-denied-tools-ignored, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "unknown-denied-tools-ignored"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "unknown-denied-tools-ignored",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect read-only-by-annotation, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "read-only-by-annotation"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "read-only-by-annotation",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect unknown-tools-ignored, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "unknown-tools-ignored"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "unknown-tools-ignored",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect comment-marked-read-only, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "comment-marked-read-only"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "comment-marked-read-only",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect add-label-replaces-list, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "add-label-replaces-list"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "add-label-replaces-list",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect create-marked-idempotent, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "create-marked-idempotent"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "create-marked-idempotent",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect missing-annotations, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "missing-annotations"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "missing-annotations",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect set-labels-non-destructive, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "set-labels-non-destructive"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "set-labels-non-destructive",
-        "backend": "-",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect token-in-error, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "token-in-error"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "token-in-error",
         "backend": "-",
         "variant": "settle-by-client-reference"
       },
