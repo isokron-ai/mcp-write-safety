@@ -16,9 +16,9 @@ import type { Manifest, ResourceSpec, ReviewSpec } from '../core/manifest.js';
 import type { Session } from '../core/session.js';
 import type { Gate } from '../gate/gate.js';
 import type { RequirementId } from '../requirements.js';
-import { short } from '../core/util.js';
+import { getPath, setPath, short } from '../core/util.js';
 import { result, type Result, type WritePath } from '../report/verdicts.js';
-import { fromDeclaration, outcomeByField, patternOf, saidBy, says } from './says.js';
+import { fromDeclaration, outcomeByField, outcomeFieldPath, patternOf, saidBy, says } from './says.js';
 import { DEFAULT_PATTERNS } from './says.js';
 import { adoptedBy, readText, decidedByShape, effectiveRepeat, patternData, quoteField, readShape, shapeFallbackNote, shapeIdentifies, shapeOf, type ShapeCapture, type WriteResult } from './shape.js';
 
@@ -180,10 +180,29 @@ const isObjLike = (x: unknown): x is Record<string, unknown> => typeof x === 'ob
  * ("conflict": true, a 409 status, a conflict code) from shownBy and conflictSignal. Only short scalars are kept.
  */
 function signalMembers(d: unknown): Record<string, unknown> {
-  const scalars = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200)).slice(0, 64));
+  const short = (v: unknown) => typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200);
+  // why: review round 2 item 4: the keys signals.ts reads are kept whatever their position, beyond the cap of 64 other scalars.
+  const scalars = (o: Record<string, unknown>) => {
+    const e = Object.entries(o).filter(([, v]) => short(v));
+    return Object.fromEntries([...e.filter(([k]) => SIGNAL_KEYS.has(k.toLowerCase())), ...e.filter(([k]) => !SIGNAL_KEYS.has(k.toLowerCase())).slice(0, 64)]);
+  };
   if (!isObjLike(d)) return {};
-  return { ...scalars(d), ...(isObjLike(d['error']) ? { error: scalars(d['error']) } : {}) };
+  let kept: Record<string, unknown> = { ...scalars(d), ...(isObjLike(d['error']) ? { error: scalars(d['error']) } : {}) };
+  // The declared outcome field (outcome_field.path), at any depth, when its value is a scalar.
+  const path = outcomeFieldPath();
+  if (path) {
+    try {
+      const v = getPath(d, path);
+      if (short(v)) kept = setPath(kept, path, v);
+    } catch {
+      // a path that does not fit this answer keeps nothing
+    }
+  }
+  return kept;
 }
+
+/** The members signals.ts reads (conflict, Status reason/kind, status and code keys, error), lower-cased. */
+const SIGNAL_KEYS = new Set(['conflict', 'reason', 'kind', 'status', 'statuscode', 'status_code', 'http_status', 'httpstatus', 'code', 'error_code', 'errorcode', 'error']);
 
 /**
  * The answer as the text patterns read it (B-9 v2, "Free words and the serialized block"): for a tool that adopts a result

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 import { annotationVerdicts, namedBy } from '../../src/checks/annotations.js';
 import { brief, identifiesChange, saysUnknown } from '../../src/checks/types.js';
-import { usePatterns } from '../../src/checks/says.js';
+import { outcomeByField, usePatterns } from '../../src/checks/says.js';
 import { versionLeftOutRuns } from '../../src/checks/stale.js';
 import { parseStructured } from '../../src/core/util.js';
 import { annVerdicts } from '../../src/checks/catalog.js';
@@ -284,6 +284,26 @@ test('CONC-3 held request: a structured conflict in a large answer survives the 
   const r = gatedVerdicts({ routing: 'r', learned: [], trials, control: null, independent: true, conc1: null, res2: null, atom: null }, res).find((x) => x.requirement === 'MWS-CONC-3')!;
   assert.equal(r.verdict, 'held', 'the clipped answer still shows the conflict by its structured field');
   assert.equal(r.numbers['conflict_shown'], 4);
+});
+
+test('brief() keeps the signal keys and the declared outcome field of a clipped answer whatever their position (review round 2, item 4)', () => {
+  const big = 'x'.repeat(6000);
+  const filler = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`f${i}`, i]));
+  const raw = (data: unknown) => ({ step: 's', ok: true, isError: false, rpc_error: null, text: 'done', data, timed_out: false, transport_error: null, tool: 'ticket_update' });
+  try {
+    usePatterns({ outcome_field: { path: 'result.outcome', applied: ['applied'], not_applied: ['refused'], unknown: ['unknown'] } } as never);
+    const b = brief(raw({ ...filler, body: big, status: 409, conflict: true, error: { ...filler, code: 'conflict' }, result: { outcome: 'refused', blob: big } }));
+    const d = b.data as Record<string, unknown>;
+    assert.equal(d['clipped'], true);
+    assert.equal(d['status'], 409, 'a signal key after 100 other scalars is kept');
+    assert.equal(d['conflict'], true);
+    assert.equal((d['error'] as Record<string, unknown>)['code'], 'conflict');
+    assert.equal(Object.keys(d).filter((k) => /^f\d+$/.test(k)).length, 64, 'other scalars stay capped at 64');
+    assert.deepEqual(d['result'], { outcome: 'refused' }, 'the declared outcome field is kept at its path, nothing else of that object');
+    assert.equal(outcomeByField(b)?.outcome, 'not_applied');
+  } finally {
+    usePatterns(null);
+  }
 });
 
 test('recount re-derives the counters from recorded repetitions', () => {
