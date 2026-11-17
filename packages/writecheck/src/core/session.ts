@@ -17,7 +17,7 @@ import type { Gate } from '../gate/gate.js';
 import type { Manifest } from './manifest.js';
 import type { Redactor } from './redact.js';
 import { Throttle } from './throttle.js';
-import { getPath, isObj, nowMs, parseStructured, sha256, WritecheckError, type Obj } from './util.js';
+import { getPath, isObj, nowMs, parseStructured, sha256, sleep, WritecheckError, type Obj } from './util.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import { captureShape, freeWordsOfBlock, type ShapeCapture } from '../checks/shape.js';
 
@@ -26,6 +26,13 @@ export const PROTOCOL_VERSION = '2025-11-25';
 export const MODERN_PROTOCOL = '2026-07-28';
 /** How long `auto` waits for server/discover before taking the 2025-11-25 path. */
 const DISCOVER_TIMEOUT_MS = 5_000;
+
+/**
+ * Whether a revision negotiated by initialize predates the one the tester offered (2025-11-25). Revisions are dates
+ * (YYYY-MM-DD), so they order as strings. A server that answers an older revision knows neither 2025-11-25 nor
+ * 2026-07-28, the revision that introduced server/discover, so it is not asked server/discover.
+ */
+export const predatesOffered = (rev: string | null): boolean => typeof rev === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rev) && rev < PROTOCOL_VERSION;
 
 /** What a call carried (B-9: same_key / same_version): true or false where the tester knows it, absent where it cannot tell (then the shape gives no held and no violated from it). */
 export type Carried = { key?: boolean; version?: boolean };
@@ -180,6 +187,8 @@ export class Session {
   private mainStart: Promise<LaunchOutcome> | null = null;
   /** Learned on the first connection: whether this server speaks 2026-07-28 (auto mode asks once). */
   private modern: boolean | null = null;
+  /** Facts about the connection that are not verdicts (for the results' `target.mcp.notes`): e.g. a server that failed on server/discover. */
+  readonly notes: string[] = [];
 
   constructor(readonly o: SessionOptions) {
     if (o.min_interval_ms > 0 && o.throttle_file) this.throttle = new Throttle(o.throttle_file, o.min_interval_ms);
@@ -323,7 +332,7 @@ export class Session {
     if (!res) {
       // a server without initialize (stateless revisions): in `auto`, ask whether it speaks 2026-07-28; else calls go ahead uninitialised
       if (r.message && isObj(r.message['error'])) {
-        if (want === 'auto' && this.modern === null) await this.probeModern(conn, st);
+        if (want === 'auto' && this.modern === null) await this.probeModern(conn, label, st);
         return;
       }
       throw new WritecheckError(`server ${label} did not initialize: ${r.transport_error ?? (r.timed_out ? 'timed out' : 'no answer')}`, 4);
@@ -333,20 +342,99 @@ export class Session {
     conn.client.negotiated(conn.protocol);
     conn.initialized = true;
     await conn.client.notify(st, 'notifications/initialized', {});
-    if (want === 'auto' && this.modern === null) await this.probeModern(conn, st);
+    if (want === 'auto' && this.modern === null) {
+      // why: corpus run 3 (t05): a server on an older MCP Python SDK exits on any method it does not know. One that negotiated a
+      // revision older than the one offered cannot speak 2026-07-28, so server/discover is not sent to it at all.
+      if (predatesOffered(conn.protocol)) {
+        this.modern = false;
+        this.note(label, st, `server/discover was not sent: the server negotiated protocol revision ${conn.protocol}, which predates ${PROTOCOL_VERSION} (offered) and ${MODERN_PROTOCOL} (where server/discover was introduced); the session uses initialize only.`);
+        return;
+      }
+      await this.probeModern(conn, label, st);
+    }
+  }
+
+  /** A note about the connection (not a verdict): kept for the results and written to the capture. */
+  private note(label: string, step: string, text: string): void {
+    this.notes.push(`${label}: ${text}`);
+    this.o.capture.write({ label, step, dir: 'event', channel: 'process', event: 'note', note: text });
+  }
+
+  /** Whether a connection still answers after a failed request: the process has not exited, and it answers ping. */
+  private async alive(conn: Conn, st: string): Promise<boolean> {
+    if (conn.client instanceof StdioClient) {
+      await Promise.race([conn.client.whenClosed(), sleep(200)]);
+      if (conn.client.exitInfo.exited) return false;
+    }
+    const host = conn.own ?? (this.o.manifest.server.launch ? this.main : null);
+    if (host?.hasExited) return false;
+    const p = await conn.client.request(st, 'ping', {}, { timeout_ms: Math.min(DISCOVER_TIMEOUT_MS, this.timeout()) });
+    return !!p.message;
+  }
+
+  /**
+   * Start the server (or session) behind `conn` again after it failed on server/discover, and initialize it. Called at most once
+   * per session: `modern` is settled to false first, so the new connection is never asked server/discover.
+   */
+  private async revive(conn: Conn, label: string, st: string): Promise<void> {
+    await conn.client.stop().catch(() => undefined);
+    if (conn.own) {
+      await conn.own.stop();
+      const own = this.launched(label, this.serverEnv(conn.launchEnv ?? {}));
+      const r = await own.start(st);
+      if (!r.ok) {
+        await own.stop();
+        throw new WritecheckError(`server ${label} did not start again after it failed on server/discover: ${r.reason}${r.stderr_tail ? `\n${r.stderr_tail}` : ''}`, 4);
+      }
+      this.allow(r.url);
+      conn.own = own;
+      conn.client = this.httpClient(label, r.url);
+    } else if (this.o.manifest.server.stdio) {
+      conn.client = conn.launchEnv ? this.stdioClient(label, this.serverEnv(conn.launchEnv)) : this.stdioClient(label, this.serverEnv());
+    } else {
+      // why: alive() already said no; a hung shared launch process is stopped and started again too, not reused (review, 17 Nov).
+      if (this.main) {
+        await this.main.stop();
+        this.main = null;
+        this.mainStart = null;
+      }
+      conn.client = await this.newClient(label);
+    }
+    this.started.push(label);
+    conn.initialized = false;
+    conn.protocol = null;
+    conn.capabilities = null;
+    await this.handshake(conn, label, st);
   }
 
   /**
    * `auto`, after the handshake (or after an initialize the server refused): does the server also speak 2026-07-28? Asked once per
    * session with server/discover; where it lists that revision, this connection and every later one speak it, else none does.
    */
-  private async probeModern(conn: Conn, st: string): Promise<boolean> {
+  private async probeModern(conn: Conn, label: string, st: string): Promise<boolean> {
     const r = await conn.client.request(st, 'server/discover', { _meta: this.envelope() }, { timeout_ms: Math.min(DISCOVER_TIMEOUT_MS, this.timeout()) });
     const res = r.message && isObj(r.message['result']) ? r.message['result'] : null;
     const versions = res && Array.isArray(res['supportedVersions']) ? (res['supportedVersions'] as unknown[]) : [];
     if (!versions.includes(MODERN_PROTOCOL)) {
-      // why: only a definite answer settles it for the session; a transport failure may be this process alone.
-      if (r.message) this.modern = false;
+      const err = r.message && isObj(r.message['error']) ? r.message['error'] : null;
+      if (r.message) {
+        this.modern = false;
+        if (err) this.note(label, st, `server/discover was answered with JSON-RPC error ${String(err['code'])}${err['code'] === -32601 ? ' (method not found)' : ''}; the session uses initialize (${conn.protocol ?? 'no revision'}) only.`);
+        return false;
+      }
+      // why: corpus run 3 (t05): a server that crashes or hangs on server/discover. It is not asked again in this session; if it
+      // died, it is started once more and initialized, and the run goes on. A note, not a violation.
+      this.modern = false;
+      const why = r.timed_out ? 'no answer within the discover timeout' : (r.transport_error ?? 'no answer');
+      if (await this.alive(conn, st)) {
+        this.note(label, st, `server/discover failed (${why}), but the server still answers; the session uses initialize (${conn.protocol ?? 'no revision'}) only.`);
+        return false;
+      }
+      const code = conn.client instanceof StdioClient ? conn.client.exitInfo.exit_code : null;
+      const tail = conn.client instanceof StdioClient ? conn.client.stderrTail() : (conn.own ?? this.main)?.stderrTail() ?? '';
+      const last = tail.split('\n').filter((l) => l.trim()).pop()?.slice(0, 200);
+      this.note(label, st, `the server failed on server/discover (${why}${code !== null ? `; exit code ${code}` : ''}${last ? `; last stderr line: ${JSON.stringify(last)}` : ''}). ${conn.own || this.main || this.o.manifest.server.stdio ? 'It was started again once' : 'A new session was opened'} and the session uses initialize only; server/discover is not sent again.`);
+      await this.revive(conn, label, st);
       return false;
     }
     this.modern = true;
@@ -407,7 +495,7 @@ export class Session {
         await this.handshake(conn, o.label, step);
       } catch (e) {
         await this.release([o.label]);
-        return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: own.stderrTail() };
+        return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: (conn.own ?? own).stderrTail() };
       }
       return { started: true, protocol: conn.protocol };
     }
@@ -420,12 +508,14 @@ export class Session {
     } catch (e) {
       failed = (e as Error).message;
     }
+    // why: the handshake may have started the server again after a failed server/discover (revive): judge the live process.
+    const live = conn.client instanceof StdioClient ? conn.client : client;
     // why: a server that refuses its settings usually exits at once; one that answered initialize and then exits did not start either.
-    if (!failed) await Promise.race([client.whenClosed(), new Promise((r) => setTimeout(r, 150))]);
-    if (failed || client.exitInfo.exited) {
-      await Promise.race([client.whenClosed(), new Promise((r) => setTimeout(r, 2_000))]);
-      const tail = client.stderrTail();
-      const code = client.exitInfo.exit_code;
+    if (!failed) await Promise.race([live.whenClosed(), new Promise((r) => setTimeout(r, 150))]);
+    if (failed || live.exitInfo.exited) {
+      await Promise.race([live.whenClosed(), new Promise((r) => setTimeout(r, 2_000))]);
+      const tail = live.stderrTail();
+      const code = live.exitInfo.exit_code;
       await this.release([o.label]);
       return { started: false, exit_code: code, reason: failed ?? `exited (${code ?? 'signal'}) right after starting`, stderr_tail: tail };
     }
