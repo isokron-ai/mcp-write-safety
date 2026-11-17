@@ -27,6 +27,9 @@ describe("profiles and features", () => {
     const { PACKAGE_VERSION } = await import("../src/profile.js");
     const { readFileSync } = await import("node:fs");
     assert.equal(PACKAGE_VERSION, JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version);
+    // initialize's serverInfo.version names the package (the 0.1 surface transcript leaves that one field out).
+    const { SERVER_INFO } = await import("../src/mcp/server.js");
+    assert.equal(SERVER_INFO.version, PACKAGE_VERSION);
   });
 
   it("profile 0.1 turns on no feature; the 0.2.0 default turns on the core features 0.2.0 ships", () => {

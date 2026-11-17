@@ -12,7 +12,7 @@ import type { Build, Deps } from "./types.js";
 import { toolInputSchema } from "./validate.js";
 import { attributionFromMeta, runWithAttribution } from "../attribution.js";
 
-export const SERVER_INFO = { name: "tiny-tracker", version: "0.1.0" };
+export const SERVER_INFO = { name: "tiny-tracker", version: "0.2.0" };
 
 export interface RunningMcpServer {
   url: string;
