@@ -13,8 +13,9 @@
 // Lines: the header (with the seed), commit lines (commit_seq = tx.seq, the
 // complete CommittedTransaction, pending_jseq), pending lines (inflight),
 // aborted lines, fence lines (a run reset ended a pending line; seams v2.1),
-// run-alloc lines (the fixture layer's run registry; seams v2.1) and
-// lookup-fence lines (settle-by-lookup; additive). The effect and its key record are one line: replay rebuilds the
+// run-alloc lines (the fixture layer's run registry; seams v2.1),
+// lookup-fence lines (settle-by-lookup; additive) and clock lines (the fixture
+// clock's moves; additive, 0.4.0). The effect and its key record are one line: replay rebuilds the
 // key record from the commit line with storedReplyOf(tx).
 //
 // The journal is the commit path's step 2 (src/backend/commit.ts): the line is
@@ -36,7 +37,7 @@ import { isMainThread } from "node:worker_threads";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
 import { ensurePrivateDir, PrivateDirError } from "../private-dir.js";
-import { JournalError, storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
+import { JournalError, storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalClockLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
 import type { AbortReason, JournalSeam, KeyScope } from "./seams.js";
 import type { Store } from "./store.js";
 import type { DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
@@ -47,6 +48,18 @@ export interface JournalRun {
   principal: string;
   created_at: string;
   label: string | null;
+}
+
+/** A fixture clock move (src/fixture/clock.ts ClockMove); the journal's clock line. */
+export interface JournalClockMove {
+  from_ms: number;
+  to_ms: number;
+  at: string;
+}
+
+/** Where clock lines go back at load (the fixture clock: its offset is set to the last line's to_ms, forward only). */
+export interface ClockRestorer {
+  restore(offsetMs: number): void;
 }
 
 /** Where run-alloc lines go back at load (the fixture layer's RunRegistry). */
@@ -471,6 +484,8 @@ export interface LoadReport {
   fences: number;
   /** Runs restored from run-alloc lines. */
   runs: number;
+  /** The fixture clock offset the last clock line set (0: no clock line). */
+  clockOffsetMs: number;
   /**
    * Pending lines a later run-reset commit line had fenced, with no fence line after it (a crash between the reset's
    * commit line and its fence line): fenced at start, and their fence lines written then (G2 fold-in 5).
@@ -495,6 +510,10 @@ function lineProblem(line: JournalLine | undefined, expected: number, lastCommit
     if (typeof line.run_id !== "string" || typeof line.principal !== "string") return "a run-alloc line without run_id or principal";
   } else if (line.line === "lookup-fence") {
     if (typeof line.key !== "string" || typeof line.principal !== "string") return "a lookup-fence line without principal or key";
+  } else if (line.line === "clock") {
+    if (!Number.isSafeInteger(line.from_ms) || !Number.isSafeInteger(line.to_ms) || line.from_ms < 0 || line.to_ms <= line.from_ms || typeof line.at !== "string") {
+      return "a clock line whose offsets are not integers moving forward";
+    }
   } else if (line.line !== "pending") {
     return `unknown line kind ${JSON.stringify((line as { line: unknown }).line)}`;
   }
@@ -518,6 +537,11 @@ export class Journal implements JournalSeam, KeyLineWriter {
   keyFromCommitLine = true;
   /** The fixture layer's run registry, set before load: run-alloc lines go back into it. */
   runs: RunRestorer | undefined;
+  /**
+   * The fixture clock, set before load: clock lines go back into it. A journal with clock lines refuses to load
+   * without one (a build without the clock feature would run on wall time, and record time would move back).
+   */
+  clock: ClockRestorer | undefined;
   /**
    * Told each replayed commit after its post-state is applied (no clock, no ledger): the execution records, so
    * /executions/:id and /operations/:key answer for commits made before a restart.
@@ -556,7 +580,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
   }
 
   private replay(): void {
-    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0, fences: 0, runs: 0, fencedAtStart: 0 };
+    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0, fences: 0, runs: 0, clockOffsetMs: 0, fencedAtStart: 0 };
     this.report = report;
     // A journal file that is missing, or empty because the first start stopped before its header was flushed, is new.
     if (!existsSync(this.path) || statSync(this.path).size === 0) {
@@ -622,6 +646,10 @@ export class Journal implements JournalSeam, KeyLineWriter {
       }
       lines.push(l);
       offset += Buffer.byteLength(parts[i]) + (isLast && !terminated ? 0 : 1);
+    }
+    const lastClock = lines.findLast((l): l is JournalClockLine => l.line === "clock");
+    if (lastClock && !this.clock) {
+      throw new JournalCorruptError(`${this.path}: the journal moved the fixture clock to an offset of ${lastClock.to_ms} ms (clock lines); start this data dir with the clock feature, or record time would move back. Not starting.`);
     }
     this.store.applySeed(header.seed);
     for (const l of lines.slice(1)) this.apply(l, report);
@@ -707,6 +735,10 @@ export class Journal implements JournalSeam, KeyLineWriter {
         this.runs?.restore({ run_id: line.run_id, principal: line.principal, created_at: line.created_at, label: line.label });
         report.runs++;
         break;
+      case "clock":
+        this.clock?.restore(line.to_ms);
+        report.clockOffsetMs = Math.max(report.clockOffsetMs, line.to_ms);
+        break;
       default:
         break;
     }
@@ -770,6 +802,12 @@ export class Journal implements JournalSeam, KeyLineWriter {
 
   recordRun(run: JournalRun): void {
     this.append({ line: "run-alloc", run_id: run.run_id, principal: run.principal, created_at: run.created_at, label: run.label } as Omit<JournalRunAllocLine, "jseq" | "checksum">);
+  }
+
+  // ---- the fixture clock (0.4.0): a move is journalled before the offset is stored or answered ----
+
+  recordClockMove(move: JournalClockMove): void {
+    this.append({ line: "clock", from_ms: move.from_ms, to_ms: move.to_ms, at: move.at } as Omit<JournalClockLine, "jseq" | "checksum">);
   }
 
   // ---- KeyLineWriter ----

@@ -719,6 +719,8 @@ paths:
       description: |
         Moves the fixture clock forward (feature `clock`, with `--fixture-control`). Every record carries
         `clock_offset_ms`; an A5 run that counts shows offset 0 with control off. Without the `clock` feature: 501.
+        With `durable` the move is journalled (a `clock` line) before the offset is stored, and the offset is restored
+        at the next start; if the line cannot be written the clock does not move (503 `journal_unavailable`).
       security: [{ controlToken: [] }]
       requestBody:
         required: true
@@ -737,7 +739,9 @@ paths:
                     properties:
                       moved: { type: object, properties: { from_ms: { type: integer }, to_ms: { type: integer }, at: { type: string } } }
         "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/NotBuilt" }
+        "503": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:

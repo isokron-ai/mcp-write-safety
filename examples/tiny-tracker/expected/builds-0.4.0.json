@@ -15,7 +15,7 @@
   "levels": {
     "L2": "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
     "L3": "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-    "L3d": "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable --data-dir {DATA_DIR}",
+    "L3d": "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable --data-dir {DATA_DIR}",
     "Lv": "evidence,strict-input,ledger,faults"
   },
   "builds": [
@@ -53,7 +53,7 @@
       "label": "L3d correct build",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}"
       ],
@@ -243,7 +243,7 @@
       "label": "L3d, defect label-by-position, backend digest-of-current-state, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -461,7 +461,7 @@
       "label": "L3d, defect update-adds-defaults, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -482,7 +482,7 @@
       "label": "L3d, defect delete-refetches-version, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -565,7 +565,7 @@
       "label": "L3d, defect read-merge-put, backend lost-update",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -586,7 +586,7 @@
       "label": "L3d, defect conflict-without-iserror, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -607,7 +607,7 @@
       "label": "L3d, defect conflict-as-generic-error, backend digest-not-canonical",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -628,7 +628,7 @@
       "label": "L3d, defect ignore-project-scope, backend lookup-wrong-record",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -649,7 +649,7 @@
       "label": "L3d, defect empty-filter-deletes-all, backend lookup-unscoped",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -670,7 +670,7 @@
       "label": "L3d, defect create-overwrites, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -691,7 +691,7 @@
       "label": "L3d, defect stale-unannounced, backend key-record-not-durable, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -715,7 +715,7 @@
       "label": "L3d, defect skip-null-assignee, backend key-record-after-effect, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -2452,7 +2452,7 @@
       "label": "L3d, defect in-progress-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -2476,7 +2476,7 @@
       "label": "L3d, defect settle-miss-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3445,7 +3445,7 @@
       "label": "L3d, defect force-by-default",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3464,7 +3464,7 @@
       "label": "L3d, defect shape-claims-applied, backend digest-of-current-state",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3485,7 +3485,7 @@
       "label": "L3d, defect shape-text-invites-retry, backend digest-of-current-state",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3506,7 +3506,7 @@
       "label": "L3d, defect lookup-reexecutes, backend digest-of-current-state",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3527,7 +3527,7 @@
       "label": "L3d, defect error-as-text, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3548,7 +3548,7 @@
       "label": "L3d, defect shape-unknown-as-failed, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3569,7 +3569,7 @@
       "label": "L3d, defect shape-text-says-failed, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3590,7 +3590,7 @@
       "label": "L3d, defect comment-id-dropped, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3611,7 +3611,7 @@
       "label": "L3d, defect receipt-missing-version, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3632,7 +3632,7 @@
       "label": "L3d, defect shape-wrong-version, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3653,7 +3653,7 @@
       "label": "L3d, defect shape-missing-failed, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3674,7 +3674,7 @@
       "label": "L3d, defect shape-text-says-all-saved, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3695,7 +3695,7 @@
       "label": "L3d, defect bulk-misreports-partial, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3716,7 +3716,7 @@
       "label": "L3d, defect bulk-without-transaction, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3737,7 +3737,7 @@
       "label": "L3d, defect no-idempotency-key, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3758,7 +3758,7 @@
       "label": "L3d, defect idempotency-key-dropped, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3779,7 +3779,7 @@
       "label": "L3d, defect idempotency-key-ignores-args, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3800,7 +3800,7 @@
       "label": "L3d, defect retry-without-key, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3821,7 +3821,7 @@
       "label": "L3d, defect key-store-in-memory, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3842,7 +3842,7 @@
       "label": "L3d, defect close-before-confirm, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3863,7 +3863,7 @@
       "label": "L3d, defect coerce-types, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3884,7 +3884,7 @@
       "label": "L3d, defect drop-unknown-args, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3905,7 +3905,7 @@
       "label": "L3d, defect skip-limits, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3926,7 +3926,7 @@
       "label": "L3d, defect vague-validation-error, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3947,7 +3947,7 @@
       "label": "L3d, defect undeclared-title-limit, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3968,7 +3968,7 @@
       "label": "L3d, defect convert-numeric-strings, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -3989,7 +3989,7 @@
       "label": "L3d, defect ignore-unknown-args-with-notice, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4010,7 +4010,7 @@
       "label": "L3d, defect read-only-strict-true, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4031,7 +4031,7 @@
       "label": "L3d, defect unknown-denied-tools-ignored, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4052,7 +4052,7 @@
       "label": "L3d, defect read-only-by-annotation, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4073,7 +4073,7 @@
       "label": "L3d, defect unknown-tools-ignored, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4094,7 +4094,7 @@
       "label": "L3d, defect comment-marked-read-only, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4115,7 +4115,7 @@
       "label": "L3d, defect add-label-replaces-list, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4136,7 +4136,7 @@
       "label": "L3d, defect create-marked-idempotent, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4157,7 +4157,7 @@
       "label": "L3d, defect missing-annotations, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4178,7 +4178,7 @@
       "label": "L3d, defect set-labels-non-destructive, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -4199,7 +4199,7 @@
       "label": "L3d, defect token-in-error, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8434,7 +8434,7 @@
       "label": "L3d, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--backend-defect",
@@ -8453,7 +8453,7 @@
       "label": "L3d, defect label-by-position, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8474,7 +8474,7 @@
       "label": "L3d, defect force-by-default, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8495,7 +8495,7 @@
       "label": "L3d, defect delete-refetches-version, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8516,7 +8516,7 @@
       "label": "L3d, defect read-merge-put, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8537,7 +8537,7 @@
       "label": "L3d, defect conflict-without-iserror, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8558,7 +8558,7 @@
       "label": "L3d, defect conflict-as-generic-error, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8579,7 +8579,7 @@
       "label": "L3d, defect ignore-project-scope, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8600,7 +8600,7 @@
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8621,7 +8621,7 @@
       "label": "L3d, defect create-overwrites, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8642,7 +8642,7 @@
       "label": "L3d, defect skip-null-assignee, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8663,7 +8663,7 @@
       "label": "L3d, defect shape-claims-applied, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8684,7 +8684,7 @@
       "label": "L3d, defect error-as-text, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8705,7 +8705,7 @@
       "label": "L3d, defect shape-unknown-as-failed, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8726,7 +8726,7 @@
       "label": "L3d, defect shape-text-says-failed, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8747,7 +8747,7 @@
       "label": "L3d, defect shape-text-invites-retry, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8768,7 +8768,7 @@
       "label": "L3d, defect comment-id-dropped, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8789,7 +8789,7 @@
       "label": "L3d, defect receipt-missing-version, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8810,7 +8810,7 @@
       "label": "L3d, defect shape-wrong-version, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8831,7 +8831,7 @@
       "label": "L3d, defect shape-missing-failed, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8852,7 +8852,7 @@
       "label": "L3d, defect shape-text-says-all-saved, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8873,7 +8873,7 @@
       "label": "L3d, defect bulk-misreports-partial, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8894,7 +8894,7 @@
       "label": "L3d, defect bulk-without-transaction, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8915,7 +8915,7 @@
       "label": "L3d, defect no-idempotency-key, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8936,7 +8936,7 @@
       "label": "L3d, defect idempotency-key-dropped, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8957,7 +8957,7 @@
       "label": "L3d, defect idempotency-key-ignores-args, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8978,7 +8978,7 @@
       "label": "L3d, defect retry-without-key, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -8999,7 +8999,7 @@
       "label": "L3d, defect key-store-in-memory, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9020,7 +9020,7 @@
       "label": "L3d, defect close-before-confirm, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9041,7 +9041,7 @@
       "label": "L3d, defect coerce-types, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9062,7 +9062,7 @@
       "label": "L3d, defect drop-unknown-args, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9083,7 +9083,7 @@
       "label": "L3d, defect skip-limits, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9104,7 +9104,7 @@
       "label": "L3d, defect vague-validation-error, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9125,7 +9125,7 @@
       "label": "L3d, defect undeclared-title-limit, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9146,7 +9146,7 @@
       "label": "L3d, defect convert-numeric-strings, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9167,7 +9167,7 @@
       "label": "L3d, defect ignore-unknown-args-with-notice, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9188,7 +9188,7 @@
       "label": "L3d, defect read-only-strict-true, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9209,7 +9209,7 @@
       "label": "L3d, defect unknown-denied-tools-ignored, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9230,7 +9230,7 @@
       "label": "L3d, defect read-only-by-annotation, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9251,7 +9251,7 @@
       "label": "L3d, defect unknown-tools-ignored, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9272,7 +9272,7 @@
       "label": "L3d, defect comment-marked-read-only, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9293,7 +9293,7 @@
       "label": "L3d, defect add-label-replaces-list, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9314,7 +9314,7 @@
       "label": "L3d, defect create-marked-idempotent, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9335,7 +9335,7 @@
       "label": "L3d, defect missing-annotations, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9356,7 +9356,7 @@
       "label": "L3d, defect set-labels-non-destructive, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9377,7 +9377,7 @@
       "label": "L3d, defect token-in-error, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9398,7 +9398,7 @@
       "label": "L3d, defect lookup-reexecutes, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9419,7 +9419,7 @@
       "label": "L3d, defect in-progress-reported-not-applied, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9440,7 +9440,7 @@
       "label": "L3d, defect settle-miss-reported-not-applied, backend key-record-not-durable",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9461,7 +9461,7 @@
       "label": "L3d, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--backend-defect",
@@ -9480,7 +9480,7 @@
       "label": "L3d, defect update-adds-defaults, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9501,7 +9501,7 @@
       "label": "L3d, defect label-by-position, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9522,7 +9522,7 @@
       "label": "L3d, defect force-by-default, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9543,7 +9543,7 @@
       "label": "L3d, defect read-merge-put, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9564,7 +9564,7 @@
       "label": "L3d, defect conflict-without-iserror, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9585,7 +9585,7 @@
       "label": "L3d, defect stale-unannounced, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9606,7 +9606,7 @@
       "label": "L3d, defect conflict-as-generic-error, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9627,7 +9627,7 @@
       "label": "L3d, defect ignore-project-scope, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9648,7 +9648,7 @@
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9669,7 +9669,7 @@
       "label": "L3d, defect create-overwrites, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9690,7 +9690,7 @@
       "label": "L3d, defect shape-claims-applied, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9711,7 +9711,7 @@
       "label": "L3d, defect error-as-text, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9732,7 +9732,7 @@
       "label": "L3d, defect shape-unknown-as-failed, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9753,7 +9753,7 @@
       "label": "L3d, defect shape-text-says-failed, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9774,7 +9774,7 @@
       "label": "L3d, defect shape-text-invites-retry, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9795,7 +9795,7 @@
       "label": "L3d, defect comment-id-dropped, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9816,7 +9816,7 @@
       "label": "L3d, defect receipt-missing-version, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9837,7 +9837,7 @@
       "label": "L3d, defect shape-wrong-version, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9858,7 +9858,7 @@
       "label": "L3d, defect shape-missing-failed, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9879,7 +9879,7 @@
       "label": "L3d, defect shape-text-says-all-saved, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9900,7 +9900,7 @@
       "label": "L3d, defect bulk-misreports-partial, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9921,7 +9921,7 @@
       "label": "L3d, defect bulk-without-transaction, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9942,7 +9942,7 @@
       "label": "L3d, defect no-idempotency-key, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9963,7 +9963,7 @@
       "label": "L3d, defect idempotency-key-dropped, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -9984,7 +9984,7 @@
       "label": "L3d, defect idempotency-key-ignores-args, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10005,7 +10005,7 @@
       "label": "L3d, defect retry-without-key, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10026,7 +10026,7 @@
       "label": "L3d, defect key-store-in-memory, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10047,7 +10047,7 @@
       "label": "L3d, defect close-before-confirm, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10068,7 +10068,7 @@
       "label": "L3d, defect coerce-types, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10089,7 +10089,7 @@
       "label": "L3d, defect drop-unknown-args, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10110,7 +10110,7 @@
       "label": "L3d, defect skip-limits, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10131,7 +10131,7 @@
       "label": "L3d, defect vague-validation-error, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10152,7 +10152,7 @@
       "label": "L3d, defect undeclared-title-limit, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10173,7 +10173,7 @@
       "label": "L3d, defect convert-numeric-strings, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10194,7 +10194,7 @@
       "label": "L3d, defect ignore-unknown-args-with-notice, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10215,7 +10215,7 @@
       "label": "L3d, defect read-only-strict-true, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10236,7 +10236,7 @@
       "label": "L3d, defect unknown-denied-tools-ignored, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10257,7 +10257,7 @@
       "label": "L3d, defect read-only-by-annotation, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10278,7 +10278,7 @@
       "label": "L3d, defect unknown-tools-ignored, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10299,7 +10299,7 @@
       "label": "L3d, defect comment-marked-read-only, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10320,7 +10320,7 @@
       "label": "L3d, defect add-label-replaces-list, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10341,7 +10341,7 @@
       "label": "L3d, defect create-marked-idempotent, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10362,7 +10362,7 @@
       "label": "L3d, defect missing-annotations, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10383,7 +10383,7 @@
       "label": "L3d, defect set-labels-non-destructive, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10404,7 +10404,7 @@
       "label": "L3d, defect token-in-error, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10425,7 +10425,7 @@
       "label": "L3d, defect lookup-reexecutes, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10446,7 +10446,7 @@
       "label": "L3d, defect in-progress-reported-not-applied, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
@@ -10467,7 +10467,7 @@
       "label": "L3d, defect settle-miss-reported-not-applied, backend key-record-after-effect",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,durable",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",

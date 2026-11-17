@@ -18,7 +18,7 @@ import type { KeyRecordSeam } from "./seams.js";
 import type { Store } from "./store.js";
 import type { CommittedTransaction } from "./commit.js";
 import { DurableKeyRecords, fingerprintHashOf, type KeptReply } from "./keyrecords.js";
-import { Journal, type CrashHook, type JournalRun } from "./journal.js";
+import { Journal, type CrashHook, type JournalClockMove, type JournalRun } from "./journal.js";
 import { keyExpiry, DEFAULT_RETENTION_MS, type ExpiryPolicy } from "./expiry.js";
 import { PACKAGE_VERSION } from "../profile.js";
 import { KEY_PATTERN } from "./input.js";
@@ -51,6 +51,11 @@ export interface DurabilityOptions {
    * listener can allocate.
    */
   runs?: { restore(run: JournalRun): void; onAllocate: ((run: JournalRun) => void) | undefined };
+  /**
+   * The fixture clock (0.4.0, feature clock). Under durable its clock lines go back into it at load (restore), and its
+   * beforeMove journals each move before the offset is stored (chained before any beforeMove already set).
+   */
+  clock?: { restore(offsetMs: number): void; beforeMove: ((move: JournalClockMove) => void) | undefined };
   /**
    * The point backend/after-effect-before-key (G2 fold-in 11): called with the commit sequence of a keyed write after it
    * is journalled and applied, before its key record is kept. A supervised backend child's crash check; it may exit.
@@ -93,7 +98,18 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
     if (features.inflight) keys.lines = journal;
     journal.replayObservers = options.replayObservers ?? [];
     if (options.runs) journal.runs = options.runs;
+    if (options.clock) journal.clock = options.clock;
     journal.load();
+    if (options.clock) {
+      // 0.4.0: a clock move is journalled (clock line) before the offset is stored or answered.
+      const clock = options.clock;
+      const next = clock.beforeMove;
+      const j = journal;
+      clock.beforeMove = (move) => {
+        j.recordClockMove(move);
+        next?.(move);
+      };
+    }
     if (options.runs) {
       // Seams v2.1: a run allocation is journalled before it is registered or answered (run-alloc line).
       const runs = options.runs;

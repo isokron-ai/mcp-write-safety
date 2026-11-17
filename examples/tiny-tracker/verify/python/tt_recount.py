@@ -84,8 +84,9 @@ def find_records(value, kind, out=None, depth=0):
     return out
 
 
-# journal-format/1's line kinds (tiny-tracker INTERFACES 1.9; lookup-fence is the additive 0.3.0 kind).
-JOURNAL_LINE_KINDS = frozenset(["header", "commit", "pending", "aborted", "fence", "run-alloc", "lookup-fence"])
+# journal-format/1's line kinds (tiny-tracker INTERFACES 1.9; lookup-fence is the additive 0.3.0 kind, clock the
+# additive 0.4.0 kind: a fixture clock move).
+JOURNAL_LINE_KINDS = frozenset(["header", "commit", "pending", "aborted", "fence", "run-alloc", "lookup-fence", "clock"])
 
 
 def journal_executions(path, principal=None):
