@@ -282,6 +282,21 @@ const res1: Check = {
     const del = await mcp.call("delete_ticket", { force: true, id: d.id });
     const gone = (await stack.rest.tickets({ project: p })).every((x: any) => x.id !== d.id);
     if (!del.isError && !gone) return violated(`delete_ticket reported ${JSON.stringify(del.structured.mws?.outcome ?? "success")} but ${d.id} still exists`);
+    // ---- stream D: a keyed create whose request is held on its way while the server hears nothing (inflight) ----
+    if (stack.features.includes("inflight")) {
+      const lp = await project(stack, "res1k");
+      const h = stack.gate.dropAndHoldNext((q) => q.method === "POST" && q.path === "/tickets");
+      const lost = await mcp.call("create_ticket", { project: lp, title: `${lp} late`, idempotency_key: key() });
+      h.release();
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([h.landed, new Promise((r) => { timer = setTimeout(r, 2000); })]);
+      clearTimeout(timer);
+      const made = await stack.rest.tickets({ project: lp });
+      if (made.length > 0 && lost.structured?.mws?.outcome === "not_applied") {
+        return violated(`a create whose answer was lost was reported not applied ("${lost.text}"), and the held request then created ${made[0].id}`);
+      }
+    }
+    // ---- end stream D ----
     return held("unassign, rename and delete applied");
   },
 };
@@ -311,6 +326,39 @@ const res2: Check = {
     if (!/not known whether/.test(u.text)) return violated(`the lost answer does not say the outcome is unknown: "${u.text}"`);
     // Nor may its text invite a repeat without a read first or the call's guard (B-9, "Text"; rule 11): a correct shape does not repair it.
     if (/\bplease (retry|try again)\b|\bsend (it|the call) again\b/i.test(u.text)) return violated(`the lost answer invites a blind repeat: "${u.text}"`);
+    // ---- stream D: a same-key call while the first is still being applied (inflight, decision 0004) ----
+    if (stack.features.includes("inflight")) {
+      const kp = await project(stack, "res2k");
+      const k = key();
+      let release!: () => void;
+      let reached!: () => void;
+      const arrived = new Promise<void>((r) => { reached = r; });
+      const gate = new Promise<void>((r) => { release = r; });
+      stack.beforeCommit = async (path) => {
+        if (path !== "/tickets") return;
+        stack.beforeCommit = undefined;
+        reached();
+        await gate;
+      };
+      const first = mcp.call("create_ticket", { project: kp, title: `${kp} once`, idempotency_key: k });
+      let timer: NodeJS.Timeout | undefined;
+      const hit = await Promise.race([arrived.then(() => true), new Promise<false>((r) => { timer = setTimeout(() => r(false), 2000); })]);
+      clearTimeout(timer);
+      if (!hit) {
+        stack.beforeCommit = undefined;
+        release();
+        await first;
+      } else {
+        const second = await mcp.call("create_ticket", { project: kp, title: `${kp} once`, idempotency_key: k });
+        release();
+        await first;
+        const n = (await stack.rest.tickets({ project: kp })).length;
+        const m = second.structured?.mws;
+        if (n === 1 && m?.outcome === "not_applied") return violated(`a same-key call during the pending first was reported not applied ("${second.text}"); the keyed write applied`);
+        if (n === 1 && !second.isError && !replayed(second)) return violated(`a same-key call during the pending first reported a new success: "${second.text}"`);
+      }
+    }
+    // ---- end stream D ----
     return held(`${r.text} | ${u.text}`);
   },
 };

@@ -51,6 +51,10 @@ import { defect as shapeWrongVersion } from "./shape-wrong-version.js";
 import { defect as shapeMissingFailed } from "./shape-missing-failed.js";
 import { defect as shapeTextSaysAllSaved } from "./shape-text-says-all-saved.js";
 import { defect as lookupReexecutes } from "./lookup-reexecutes.js";
+// ---- stream D: defects that need the inflight feature ----
+import { defect as inProgressReportedNotApplied } from "./in-progress-reported-not-applied.js";
+import { defect as settleMissReportedNotApplied } from "./settle-miss-reported-not-applied.js";
+// ---- end stream D ----
 
 export type { Defect } from "./types.js";
 
@@ -104,6 +108,9 @@ export const DEFECTS: Defect[] = [
   setLabelsNonDestructive,
   tokenInError,
   lookupReexecutes,
+  // ---- stream D (requires inflight) ----
+  inProgressReportedNotApplied,
+  settleMissReportedNotApplied,
 ];
 
 /** The defects that need no feature: the 0.1 set (47), the whole of `--defect all` under profile 0.1. */

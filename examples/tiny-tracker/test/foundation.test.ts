@@ -256,7 +256,10 @@ describe("the defect placement map (B11)", () => {
     }
     for (const s of plannedSeams()) assert.ok(s in BACKEND_SEAMS, s);
     // Several planned defects land on create_ticket: the overlap list for --defect all must be kept when they arrive.
-    assert.ok(PLANNED_DEFECTS.filter((d) => d.placement.includes("tool:create_ticket")).length >= 3);
+    // ---- stream D: gated defects that are built count with the planned ones ----
+    const builtGated = DEFECTS.filter((d) => d.requires?.length && map.byDefect[d.name].some((p) => p.startsWith("tool:create_ticket")));
+    assert.ok(PLANNED_DEFECTS.filter((d) => d.placement.includes("tool:create_ticket")).length + builtGated.length >= 3);
+    // ---- end stream D ----
   });
 
   it("names on the wire follow decision 11; every FX- property is claimed by a planned defect or is an oracle property", () => {

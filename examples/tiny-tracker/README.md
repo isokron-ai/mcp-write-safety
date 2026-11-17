@@ -177,6 +177,8 @@ Defects that need a feature (`requires`). A defect listed here runs only with th
 | Flag | Requirement | Requires | What goes wrong | What the self-test sees |
 |---|---|---|---|---|
 | `lookup-reexecutes` | MWS-ANN-1 | execution-records, lookup | `get_operation` (declared read-only) sends a create with the key when the backend has no record of it, so a lookup writes (fixture property FX-LOOK-2) | MWS-ANN-1: calling the read-only lookup tool changed the state. Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches. |
+| `in-progress-reported-not-applied` | MWS-RES-2 | inflight | A same-key call while the first is still being applied is reported as not applied (nothing written), though the keyed write is about to apply | the second call's result says `not_applied` while the first call's ticket appears |
+| `settle-miss-reported-not-applied` | MWS-RES-1 | inflight | After a lost backend answer, a lookup with no fence finds no record and reports not applied; the held request lands afterwards | the call reports `not_applied`, then the ticket exists |
 
 Backend defect:
 

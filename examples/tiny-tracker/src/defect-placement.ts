@@ -94,10 +94,6 @@ export const PLANNED_DEFECTS: readonly PlannedDefect[] = [
     summary: "Check-then-act with no pending record: two overlapping same-key creates both apply." },
   { name: "in-flight-phantom-success", layer: "backend", trips: ["FX-KEY-3", "MWS-RES-1"], placement: ["backend:keyRecord"], requires: ["inflight"], since: "0.3.0",
     summary: "A same-key call during a pending one answers success at once, with no committed record." },
-  { name: "in-progress-reported-not-applied", layer: "mcp", trips: ["MWS-RES-2"], placement: ["tool:create_ticket"], requires: ["inflight"], since: "0.3.0",
-    summary: "The 409 for a pending key is reported as not applied, though the keyed write is about to apply (it is in_progress, outcome unknown)." },
-  { name: "settle-miss-reported-not-applied", layer: "mcp", trips: ["MWS-RES-1"], placement: ["tool:create_ticket"], requires: ["lookup", "variant:settle-by-lookup"], since: "0.3.0",
-    summary: "After a lost backend answer, a lookup miss is reported as not applied, though the held request can still land." },
   { name: "settled-reported-unknown", layer: "mcp", trips: ["FX-LOOK-4"], placement: ["tool:create_ticket"], requires: ["lookup", "variant:settle-by-lookup"], since: "0.3.0",
     summary: "The lookup finds the write applied, and the answer still says unknown." },
 ];

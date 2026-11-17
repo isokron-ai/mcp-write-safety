@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { canonicalize, domainDigest, DOMAINS } from "../src/digest.js";
 import { META_KEYS } from "../src/fixture-properties.js";
 import { startBackend, startServer } from "../src/start.js";
+import { DEFECTS } from "../src/defects/index.js";
 import { placementMap } from "../src/defect-placement.js";
 import { createFixtureLayer, BuildDescriptor } from "../src/fixture/index.js";
 import { RunRegistry, MAX_RUNS } from "../src/fixture/control.js";
@@ -312,7 +313,10 @@ describe("attribution outside the handlers (rule 3, B5)", () => {
       const backend = await startBackend({ token: BACKEND, port: 0 });
       const spy = await startSpy(backend.url, 0);
       const server = await startServer({
-        env: { TRACKER_BACKEND_URL: spy.url, TRACKER_BACKEND_TOKEN: BACKEND }, defects, port: 0, features: ["evidence"], extras: { attribution: true },
+        // ---- stream D: a defect that needs features runs with them ----
+        env: { TRACKER_BACKEND_URL: spy.url, TRACKER_BACKEND_TOKEN: BACKEND }, defects, port: 0, extras: { attribution: true },
+        features: ["evidence", ...new Set(defects.flatMap((d) => [...(DEFECTS.find((x) => x.name === d)?.requires ?? [])]))],
+        // ---- end stream D ----
       });
       const mcp = await connectClient(server.url, "2026-07-28");
       try {
