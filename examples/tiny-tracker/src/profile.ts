@@ -93,6 +93,37 @@ export function parseFeatures(raw: string | undefined): FeatureName[] {
   return [...new Set(names)] as FeatureName[];
 }
 
+/**
+ * A profile feature a variant turns off for one build, when the feature comes only from the profile (owner decision,
+ * 16 Nov 2026, CMP-5 option b). A feature named with --features or TRACKER_FEATURES is never turned off: with the
+ * variant the compatibility table refuses it (CMP-5, exit 2).
+ */
+export const VARIANT_TURNS_OFF: ReadonlyArray<{ variant: string; feature: FeatureName; reason: string }> = [
+  { variant: "key-store-honest", feature: "lookup", reason: "key-store-honest keeps keys in the MCP server" },
+];
+
+export interface FeatureOff {
+  feature: FeatureName;
+  variant: string;
+  reason: string;
+}
+
+/** The profile features the variants turn off for this build (none under profile 0.1, which turns nothing on). */
+export function featuresTurnedOff(profile: ProfileName, named: readonly string[], variants: readonly string[]): FeatureOff[] {
+  return VARIANT_TURNS_OFF
+    .filter((t) => variants.includes(t.variant) && PROFILE_FEATURES[profile].includes(t.feature) && !named.includes(t.feature))
+    .map((t) => ({ feature: t.feature, variant: t.variant, reason: t.reason }));
+}
+
+/** The features a build runs: the active set less what the variants turn off (featuresTurnedOff). */
+export function effectiveFeatures(profile: ProfileName, named: readonly FeatureName[], variants: readonly string[]): { features: FeatureName[]; off: FeatureOff[] } {
+  const off = featuresTurnedOff(profile, named, variants);
+  return { features: activeFeatures(profile, named).filter((f) => !off.some((o) => o.feature === f)), off };
+}
+
+/** The state-line and notice text for a feature turned off: "lookup off: key-store-honest keeps keys in the MCP server". */
+export const featureOffText = (o: FeatureOff) => `${o.feature} off: ${o.reason}`;
+
 /** The active feature set: the profile's own features plus the named ones. */
 export function activeFeatures(profile: ProfileName, named: readonly FeatureName[]): FeatureName[] {
   return [...new Set([...PROFILE_FEATURES[profile], ...named])];

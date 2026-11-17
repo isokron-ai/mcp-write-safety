@@ -27,7 +27,7 @@ import { createFixtureLayer } from "../src/fixture/index.js";
 import { checkArgv, TokenError } from "../src/tokens.js";
 import { loadToken } from "../src/fixture/tokens.js";
 import { checkCompat } from "../src/compat.js";
-import { PROFILE_FEATURES } from "../src/profile.js";
+import { effectiveFeatures, featureOffText, featuresTurnedOff, PROFILE_FEATURES } from "../src/profile.js";
 import { COMMIT_STEPS, SECTION_STEPS } from "../src/fault-points.js";
 import { mkdirSync, symlinkSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -763,20 +763,31 @@ describe("seams v2: --token-dir and the argv check", () => {
 });
 
 describe("seams v2: compatibility rules see the effective feature set", () => {
-  it("a feature the profile turns on counts like a named one (CMP-5 after a default flip)", () => {
-    const base = { layout: "all" as const, defects: [], backendDefects: [], variants: ["key-store-honest"], faults: [], fixtureControl: false };
+  it("a feature the profile turns on counts like a named one (a simulated default flip)", () => {
+    const base = { layout: "all" as const, defects: [], backendDefects: [], variants: [], faults: [], fixtureControl: false };
     const def = PROFILE_FEATURES.default as string[];
     const saved = [...def];
     try {
-      def.push("lookup");
-      assert.ok(checkCompat({ ...base, profile: "default", features: [] }).some((m) => /key-store-honest/.test(m)));
+      def.push("durable");
+      assert.ok(checkCompat({ ...base, profile: "default", features: [] }).some((m) => /durable feature needs --data-dir/.test(m)));
     } finally {
       def.splice(0, def.length, ...saved);
     }
-    // 0.2.0 flipped lookup into the default for real, so the pair is refused there too; profile 0.1 still runs it.
-    assert.ok(checkCompat({ ...base, profile: "default", features: [] }).some((m) => /key-store-honest/.test(m)));
-    assert.deepEqual(checkCompat({ ...base, profile: "0.1", features: [] }), []);
   });
+
+  it("CMP-5 (owner decision, 16 Nov 2026, option b): key-store-honest turns off a default-only lookup; a named lookup is refused", () => {
+    const base = { layout: "all" as const, defects: [], backendDefects: [], variants: ["key-store-honest"], faults: [], fixtureControl: false };
+    assert.deepEqual(checkCompat({ ...base, profile: "default", features: [] }), [], "lookup comes from the profile only: turned off, not refused");
+    assert.deepEqual(featuresTurnedOff("default", [], ["key-store-honest"]).map(featureOffText), ["lookup off: key-store-honest keeps keys in the MCP server"]);
+    const eff = effectiveFeatures("default", [], ["key-store-honest"]);
+    assert.ok(!eff.features.includes("lookup") && eff.features.includes("execution-records"));
+    assert.ok(checkCompat({ ...base, profile: "default", features: ["lookup"] }).some((m) => /key-store-honest/.test(m)), "named: refused (exit 2)");
+    assert.deepEqual(featuresTurnedOff("default", ["lookup"], ["key-store-honest"]), []);
+    assert.deepEqual(featuresTurnedOff("0.1", [], ["key-store-honest"]), [], "profile 0.1 turns nothing on, so nothing is turned off");
+    assert.deepEqual(checkCompat({ ...base, profile: "0.1", features: [] }), []);
+    assert.deepEqual(featuresTurnedOff("default", [], []), [], "without the variant the default is unchanged");
+  });
+
 });
 
 // ---- seams v2.1 ----

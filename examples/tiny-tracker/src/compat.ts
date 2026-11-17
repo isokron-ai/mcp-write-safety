@@ -8,7 +8,7 @@
 // not as the full product of every factor.
 
 import { BUILT_FAULT_POINTS, faultPoint, FAULT_DEMOS, RETIRED_FAULT_NAMES } from "./fault-points.js";
-import { activeFeatures, featureInfo, type FeatureName, type ProfileName } from "./profile.js";
+import { effectiveFeatures, featureInfo, type FeatureName, type ProfileName } from "./profile.js";
 
 export type ProcessLayout = "all" | "backend" | "server";
 
@@ -163,6 +163,9 @@ export const COMPAT_RULES: readonly CompatRule[] = [
 /** The rules a combination breaks, as messages. Empty: it may start. */
 export function checkCompat(c: Combination): string[] {
   const known = c.features.filter((f): f is FeatureName => featureInfo(f) !== undefined);
-  const e: EffectiveCombination = { ...c, named: c.features, features: [...new Set([...activeFeatures(c.profile, known), ...c.features])] };
+  // The effective set less the profile features a variant turns off (owner decision, CMP-5 option b): a lookup that
+  // comes only from the default profile is off with key-store-honest, so CMP-5 refuses only a lookup that was named.
+  const { features } = effectiveFeatures(c.profile, known, c.variants);
+  const e: EffectiveCombination = { ...c, named: c.features, features: [...new Set([...features, ...c.features])] };
   return COMPAT_RULES.filter((r) => !(r.post01 && e.profile === "0.1")).map((r) => r.check(e)).filter((m): m is string => m !== undefined);
 }

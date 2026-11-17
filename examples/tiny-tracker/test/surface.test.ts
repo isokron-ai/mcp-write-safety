@@ -70,20 +70,27 @@ function withoutDefaultAdditions(value: unknown): unknown {
 }
 
 test("the default build (0.2.0) is the 0.1.0 surface plus the lookup tools and the lookup defect, and nothing else", { timeout: 120_000 }, async () => {
-  // The key-store-honest variant keeps keys in the MCP server, where the default's lookup cannot see them: CMP-5 refuses
-  // the pair, so that configuration runs under --profile 0.1 only (checked below).
-  const configs = SURFACE_CONFIGS.filter((c) => !c.env?.TRACKER_VARIANTS);
-  const now = await recordSurface({ cli: CLI, extraArgs: [], portBase: 4622, configs });
-  const expected = golden.configs.filter((c) => configs.some((x) => x.name === c.name));
+  // The key-store-honest variant keeps keys in the MCP server, where a backend lookup cannot see them. Owner decision
+  // (16 Nov 2026, CMP-5 option b): with the variant the default's lookup is turned off for that build and the state
+  // line says so (features_off); that is its one difference from 0.1.0. A lookup named with the variant is refused.
+  const now = await recordSurface({ cli: CLI, extraArgs: [], portBase: 4622 });
+  const expected = golden.configs;
   assert.equal(now.configs.length, expected.length);
   for (let i = 0; i < expected.length; i++) {
     const tools = (now.configs[i].tools as Array<{ name: string }>).map((t) => t.name);
-    const listsLookup = !now.configs[i].args.includes("--tools");
+    const honest = Boolean(SURFACE_CONFIGS[i].env?.TRACKER_VARIANTS);
+    const listsLookup = !honest && !now.configs[i].args.includes("--tools");
     if (listsLookup) assert.ok(tools.includes("get_operation") && tools.includes("get_execution"), now.configs[i].name);
+    if (honest) {
+      assert.ok(!tools.includes("get_operation") && !tools.includes("get_execution"), "lookup is off with key-store-honest");
+      const start = now.configs[i].start as { stateLine: Record<string, unknown> };
+      assert.deepEqual(start.stateLine.features_off, ["lookup off: key-store-honest keeps keys in the MCP server"]);
+      delete start.stateLine.features_off;
+    }
     const diff = firstDifference(withoutDefaultAdditions(now.configs[i]), expected[i]);
     assert.equal(diff, undefined, `configuration "${expected[i].name}": ${diff}`);
   }
-  const honest = await runCli(["all", "--port", "0", "--backend-port", "0"], { TRACKER_VARIANTS: "key-store-honest" });
-  assert.equal(honest.code, 2);
-  assert.match(honest.stderr, /key-store-honest variant keeps keys in the MCP server/);
+  const named = await runCli(["all", "--features", "lookup", "--port", "0", "--backend-port", "0"], { TRACKER_VARIANTS: "key-store-honest" });
+  assert.equal(named.code, 2);
+  assert.match(named.stderr, /key-store-honest variant keeps keys in the MCP server/);
 });

@@ -4,7 +4,7 @@
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import { ConfigError, startBackend, startServer, type RunningBackend } from "./start.js";
-import { activeFeatures, needsFixtureLayer, parseFeatures, parseProfile, SettingError } from "./profile.js";
+import { effectiveFeatures, featureOffText, needsFixtureLayer, parseFeatures, parseProfile, SettingError, type FeatureOff } from "./profile.js";
 import { checkCompat, type ProcessLayout } from "./compat.js";
 import { checkArgv, checkDistinct, TokenError } from "./tokens.js";
 import { resolveDefects } from "./defects/index.js";
@@ -72,17 +72,19 @@ async function main(): Promise<void> {
 
   // Profile, features and the compatibility table (src/compat.ts). Profile 0.1 keeps the 0.1.0 command line.
   const layout = mode as ProcessLayout;
+  const variantNames = (env.TRACKER_VARIANTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   let profile: ReturnType<typeof parseProfile>, named: ReturnType<typeof parseFeatures>, features: string[];
+  // Profile features a variant turns off for this build (owner decision, CMP-5 option b), named on the state line.
+  let featuresOff: FeatureOff[];
   try {
     profile = parseProfile(values.profile ?? env.TRACKER_PROFILE);
     named = parseFeatures(values.features ?? env.TRACKER_FEATURES);
-    features = activeFeatures(profile, named);
+    ({ features, off: featuresOff } = effectiveFeatures(profile, named, variantNames));
   } catch (e) {
     if (e instanceof SettingError) fail(e.message);
     throw e;
   }
   const fixtureControl = values["fixture-control"] === true;
-  const variantNames = (env.TRACKER_VARIANTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   let mcpDefects: string[] = [];
   if (layout !== "backend") {
     try {
@@ -254,6 +256,12 @@ async function main(): Promise<void> {
     process.stderr.write("\n*** tiny-tracker BROKEN BUILD (teaching fixture): "
       + `${[...((out.defects as string[]) ?? []), ...backendDefects.map((d) => `backend:${d}`)].join(", ")}.\n`
       + "*** Deliberately unsafe. Loopback only. Never point it at data you care about. ***\n\n");
+  }
+  if (featuresOff.length) {
+    out.features_off = featuresOff.map(featureOffText);
+    for (const o of featuresOff) {
+      process.stderr.write(`tiny-tracker: ${featureOffText(o)}; this build runs without ${o.feature} (name --features ${o.feature} to be refused instead).\n`);
+    }
   }
   process.stdout.write(`${JSON.stringify(out)}\n`);
 }

@@ -215,7 +215,7 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-1, CMP-2 | Any feature, or `--fixture-control`, under profile 0.1 |
 | CMP-3 | A feature this version does not build yet |
 | CMP-4 | `durable` without `--data-dir` (and `--data-dir` without `durable`) |
-| CMP-5 | The `key-store-honest` variant with `lookup`: its keys live in the MCP server, where a backend lookup cannot see them |
+| CMP-5 | The `key-store-honest` variant with a `lookup` named with `--features` or `TRACKER_FEATURES`: its keys live in the MCP server, where a backend lookup cannot see them. A `lookup` that comes only from the default profile is not refused: the build turns it off and says so (owner decision, 16 Nov 2026). The state line carries `"features_off": ["lookup off: key-store-honest keeps keys in the MCP server"]`, a notice goes to stderr, and the build descriptor's `features` and `build_hash` are those of the build without `lookup`. |
 | CMP-6 | A fault demonstration without the defect or variant that makes it meaningful (for example a crash between effect and key record needs `key-record-after-effect` or `key-store-honest`); a fault name the point table replaced; an unknown point |
 | CMP-7 | Arming any fault at start in this version |
 | CMP-8 | `--fixture-control` outside `tiny-tracker all` (this version) |
