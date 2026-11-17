@@ -116,5 +116,27 @@ class ConfigPrinter(unittest.TestCase):
             config.config_for({"backend": "x"}, opts)
 
 
+class EvidencePrincipal(unittest.TestCase):
+    def test_without_a_principal_a_principal_required_answer_names_the_first_and_the_read_is_repeated(self):
+        # The delayed leg builds a fresh adapter and never calls initialize (0.3.0 integration finding).
+        a = adapter.Adapter.__new__(adapter.Adapter)
+        a.principal = None
+        seen = []
+
+        class Ev:
+            def call(self, method, path):
+                seen.append(path)
+                if "principal=" not in path:
+                    return {"http_status": 400, "body_json": {"error": "principal_required", "principals": ["p-default", "p-second"]}}, b""
+                return {"http_status": 200, "body_json": {"ok": True}}, b""
+        a.evidence = Ev()
+        served, _ = a._ev("/operations/K-1")
+        self.assertEqual(served["http_status"], 200)
+        self.assertEqual(seen, ["/operations/K-1", "/operations/K-1?principal=p-default"])
+        self.assertEqual(a.principal, "p-default")
+        a._ev("/executions/X-1")
+        self.assertEqual(seen[-1], "/executions/X-1?principal=p-default", "named from then on")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -553,10 +553,23 @@ class Adapter(SystemAdapter):
         self.principal = c.get("principal")
 
     def _ev(self, path):
-        """GET on the evidence namespace, naming the principal when one is set (INTERFACES §1.4)."""
-        if self.principal:
-            path += ("&" if "?" in path else "?") + "principal=" + quote(self.principal, safe="")
-        return self.evidence.call("GET", path)
+        """GET on the evidence namespace, naming the principal when one is set (INTERFACES §1.4).
+
+        Without one (the delayed leg builds a fresh adapter and does not call initialize; a build with control off
+        allocates no run), a 400 principal_required that lists the principals is answered by naming the first one,
+        the MCP server's own (tiny-tracker's TRACKER_BACKEND_TOKENS_FILE order), and the read is repeated once.
+        """
+        def call(p):
+            if self.principal:
+                p += ("&" if "?" in p else "?") + "principal=" + quote(self.principal, safe="")
+            return self.evidence.call("GET", p)
+        served, raw = call(path)
+        body = served.get("body_json") if isinstance(served.get("body_json"), dict) else {}
+        if (not self.principal and served.get("http_status") == 400 and body.get("error") == "principal_required"
+                and isinstance(body.get("principals"), list) and body["principals"]):
+            self.principal = body["principals"][0]
+            served, raw = call(path)
+        return served, raw
 
     def _args(self, session_id, operation_key, mismatched):
         template = dict(self.config["args_template"])
