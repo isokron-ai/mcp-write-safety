@@ -77,7 +77,13 @@ export function startBuild(args, extraEnv = {}, reuse = undefined) {
           stop: (keep = false) => new Promise((r) => { child.once("exit", () => { if (!keep) rmSync(work, { recursive: true, force: true }); r(); }); child.kill("SIGTERM"); }) });
       }
     });
-    child.on("exit", (code) => { clearTimeout(timer); if (!out.includes("\n")) reject(new Error(`tiny-tracker all ${args.join(" ")} exited ${code}: ${err.trim()}`)); });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (out.includes("\n")) return;
+      // A start that never printed its state line leaves nothing to keep: its folder goes too (unless it is a restart's).
+      if (!reuse) rmSync(work, { recursive: true, force: true });
+      reject(new Error(`tiny-tracker all ${args.join(" ")} exited ${code}: ${err.trim()}`));
+    });
   });
 }
 
