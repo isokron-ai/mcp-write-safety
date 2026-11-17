@@ -25,11 +25,11 @@
 // answers 501 with the feature's name.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { BackendExtension } from "../backend/http.js";
+import type { BackendExtension, ExtensionContext } from "../backend/http.js";
 import { HEADERS } from "../fixture-properties.js";
 import type { BuildDescriptor } from "./descriptor.js";
 import { bearerMatches } from "./tokens.js";
-import type { EvidenceSource } from "../backend/seams.js";
+import type { EvidenceReader } from "../backend/lookup.js";
 import { MAX_LEDGER_PAGE, type Ledger, type LedgerFilter } from "./ledger.js";
 import type { LedgerKind } from "../records.js";
 
@@ -46,12 +46,17 @@ export function isEvidencePath(path: string): boolean {
   return path === "/build" || path === "/export" || RECORD_PATHS.some((p) => p.match.test(path));
 }
 
-/** What the evidence routes read: the ledger (when on) and stream A's records (once the backend is attached). */
+/**
+ * What the evidence routes read: the ledger (when on) and stream A's records (once the backend is attached).
+ * GET /executions/:id and GET /operations/:key have one implementation, the reader's `serve` (stream A,
+ * docs/INTERFACES.md §1.4): this namespace adds the evidence token, the loopback Host check and the 501 for a feature
+ * this process does not run.
+ */
 export interface EvidenceSources {
   ledger?: Ledger;
   /** The configured principal ids (default: p-default only). */
   principals?: readonly string[];
-  records(): EvidenceSource | undefined;
+  records(): EvidenceReader | undefined;
 }
 
 const LEDGER_KINDS: readonly LedgerKind[] = ["start", "execution", "replay", "refusal", "fault-armed", "fault-fired", "run-allocated", "run-reset"];
@@ -112,15 +117,18 @@ function ledgerFilter(q: URLSearchParams): LedgerFilter & { format: "json" | "js
 export function evidenceExtension(token: string, descriptor: BuildDescriptor, sources: EvidenceSources = { records: () => undefined }): BackendExtension {
   const configured = sources.principals ?? ["p-default"];
   return {
-    async handle(req: IncomingMessage, res: ServerResponse, url: URL, store): Promise<boolean> {
+    async handle(req: IncomingMessage, res: ServerResponse, url: URL, store, context?: ExtensionContext): Promise<boolean> {
       if (!isEvidencePath(url.pathname)) return false;
       if (!bearerMatches(req.headers.authorization, token)) return false;
       const send = (status: number, body: unknown, headers: Record<string, string> = {}) => {
         res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers });
         res.end(JSON.stringify(body));
       };
+      // The loopback Host check guards the loopback API listener against DNS rebinding. The container-mode evidence
+      // listener is reached through a published port and is guarded by the evidence token alone (owner decision), so
+      // the backend tells this namespace which listener the request came in on; the Host header is never rewritten.
       const host = (req.headers.host ?? "").replace(/:\d+$/, "");
-      if (!LOOPBACK_HOSTS.has(host)) {
+      if (context?.listener !== "evidence" && !LOOPBACK_HOSTS.has(host)) {
         send(403, { error: "forbidden", message: "loopback Host only" });
         return true;
       }
@@ -158,7 +166,14 @@ export function evidenceExtension(token: string, descriptor: BuildDescriptor, so
         return true;
       }
       const path = RECORD_PATHS.find((p) => p.match.test(url.pathname))!;
-      const served = path.feature === "ledger" ? sources.ledger !== undefined : records !== undefined;
+      // One record (an execution by id, an operation by key): stream A's reader answers it, with the frozen
+      // ?principal= rule. It answers undefined for a path whose feature is off (lookup), which is the 501 below.
+      const one = records && url.pathname !== "/executions" && path.feature !== "ledger" ? records.serve(url.pathname, url.searchParams) : undefined;
+      if (one) {
+        send(one.status, one.body);
+        return true;
+      }
+      const served = path.feature === "ledger" ? sources.ledger !== undefined : records !== undefined && url.pathname === "/executions";
       if (!served) {
         send(501, { error: "not_enabled", feature: path.feature, available_from: "0.2.0",
           message: `${path.what} are served only with the ${path.feature} feature, which this process does not run` });
@@ -179,20 +194,7 @@ export function evidenceExtension(token: string, descriptor: BuildDescriptor, so
           }
           return true;
         }
-        const exec = /^\/executions\/([^/]+)$/.exec(url.pathname);
-        if (url.pathname === "/executions") {
-          send(200, { principal, executions: [...records!.executions()].filter((x) => x.principal === principal) });
-        } else if (exec) {
-          const id = decodeURIComponent(exec[1]);
-          const record = records!.execution(id);
-          if (record && record.principal === principal) send(200, record);
-          else send(404, { error: "not_found", principal, message: `no execution record ${id} for ${principal}` });
-        } else {
-          const key = decodeURIComponent(url.pathname.slice("/operations/".length));
-          const record = records!.operation({ principal }, key);
-          if (record) send(200, record);
-          else send(404, { error: "not_found", principal, message: "no record of this key now" });
-        }
+        send(200, { principal, executions: [...records!.executions()].filter((x) => x.principal === principal) });
       } catch (e) {
         return bad(e);
       }

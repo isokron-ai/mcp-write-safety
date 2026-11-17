@@ -66,7 +66,7 @@ export interface FixtureLayer {
   faults?: FaultController;
   /**
    * Hands the started backend to the fixture layer, for the run reset (RunningBackend.dropRun) and the record routes
-   * (stream A's EvidenceSource). Call it once, right after the backend starts.
+   * (stream A's EvidenceReader). Call it once, right after the backend starts.
    */
   attachBackend(backend: AttachedBackend): void;
   /** Sends every held answer and fires no more faults (shutdown). */

@@ -201,10 +201,10 @@ async function main(): Promise<void> {
     closers.push(backend.close);
     // ---- stream B ----
     // The run reset and the record routes reach the started backend. On shutdown, held answers are sent before the
-    // servers close. (Stream A: add `evidence: <its EvidenceSource>` here when execution records are on.)
+    // servers close. The record routes read stream A's EvidenceReader (undefined without execution-records).
     if (fixture) {
       const layer = fixture;
-      layer.attachBackend({ store: backend.store, dropRun: backend.dropRun });
+      layer.attachBackend({ store: backend.store, dropRun: backend.dropRun, ...(backend.evidence ? { evidence: backend.evidence } : {}) });
       process.prependListener("SIGINT", () => layer.close());
       process.prependListener("SIGTERM", () => layer.close());
     }

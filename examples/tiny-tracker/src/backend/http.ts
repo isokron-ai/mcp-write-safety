@@ -75,8 +75,13 @@ export interface BackendFaultHooks {
   afterCommit?(ctx: FaultContext & { tx: CommittedTransaction }): Promise<undefined | "drop" | { status: number; body: unknown }>;
 }
 
+/** Which listener a request reached: the loopback API listener, or the container-mode evidence listener. */
+export interface ExtensionContext {
+  listener: "api" | "evidence";
+}
+
 export interface BackendExtension {
-  handle(req: IncomingMessage, res: ServerResponse, url: URL, store: Store): Promise<boolean>;
+  handle(req: IncomingMessage, res: ServerResponse, url: URL, store: Store, context?: ExtensionContext): Promise<boolean>;
 }
 
 export interface RunningBackend {
@@ -321,7 +326,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     try {
-      if (options.extension && await options.extension.handle(req, res, new URL(req.url ?? "/", "http://backend.invalid"), store)) return;
+      if (options.extension && await options.extension.handle(req, res, new URL(req.url ?? "/", "http://backend.invalid"), store, { listener: "api" })) return;
       const principal = principalFor(req.headers.authorization, principals);
       if (principal === undefined) {
         throw new ApiError(401, "unauthorized", "missing or wrong bearer token");
@@ -526,9 +531,9 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       try {
         // The evidence namespace's loopback Host check guards a loopback listener against DNS rebinding. This listener
         // is reached through the container's published port, so it is guarded by the evidence token alone (owner
-        // decision); the request is handed on as a loopback request, and nothing but an evidence route is served.
-        req.headers.host = "127.0.0.1";
-        if (!(await extension.handle(req, res, new URL(req.url ?? "/", "http://evidence.invalid"), store))) notHere();
+        // decision): the namespace is told the request came in here (listener "evidence"), and nothing but an
+        // evidence route is served. The Host header is left as sent.
+        if (!(await extension.handle(req, res, new URL(req.url ?? "/", "http://evidence.invalid"), store, { listener: "evidence" }))) notHere();
       } catch {
         if (!res.headersSent) notHere();
       }

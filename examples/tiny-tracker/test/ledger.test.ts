@@ -23,7 +23,6 @@ import type { CommitSink, CommittedTransaction, ReplayedTransaction } from "../s
 import { BUILT_FAULT_POINTS } from "../src/fault-points.js";
 import { FIXTURE_API_VERSION } from "../src/fixture/descriptor.js";
 import { parsePrincipals, type Principal } from "../src/principals.js";
-import type { EvidenceSource } from "../src/backend/seams.js";
 import { checkCompat, type Combination } from "../src/compat.js";
 import { featureInfo } from "../src/profile.js";
 import { fingerprintHash } from "../src/digest.js";
@@ -68,7 +67,7 @@ interface Stack {
 }
 
 /** One `tiny-tracker all` stack in this process, wired as the command line wires it (stream B block in src/cli.ts). */
-async function stack(options: { features?: string[]; records?: EvidenceSource; principals?: Principal[]; attach?: (b: RunningBackend) => AttachedBackend } = {}): Promise<Stack> {
+async function stack(options: { features?: string[]; principals?: Principal[]; attach?: (b: RunningBackend) => AttachedBackend } = {}): Promise<Stack> {
   const features = options.features ?? ALL;
   const layer = createFixtureLayer({
     layout: "all", profile: "default", features, mcpDefects: [], backendDefects: [], variants: [], control: true,
@@ -77,7 +76,7 @@ async function stack(options: { features?: string[]; records?: EvidenceSource; p
   // As src/cli.ts starts it: the descriptor's boot id, the run registry, the ledger sink and the backend fault hooks.
   const backend = await startBackend({ token: BACKEND, port: 0, features, extension: layer.backendExtension, principals: options.principals,
     bootId: layer.descriptor.bootId, runOwner: layer.runOwner, ...layer.backendOptions });
-  layer.attachBackend(options.attach ? options.attach(backend) : { store: backend.store, dropRun: backend.dropRun, evidence: options.records });
+  layer.attachBackend(options.attach ? options.attach(backend) : { store: backend.store, dropRun: backend.dropRun, ...(backend.evidence ? { evidence: backend.evidence } : {}) });
   const server = await startServer({ env: { TRACKER_BACKEND_URL: backend.url, TRACKER_BACKEND_TOKEN: BACKEND }, port: 0, features, extras: layer.serverExtras });
   const control = await layer.startControl(0);
   const mcp = await connectClient(server.url, "2026-07-28");
@@ -321,30 +320,39 @@ describe("the evidence routes (G3): /ledger, /export, /executions, /operations",
     }
   });
 
-  it("serves execution and operation records from the attached EvidenceSource, the operation in the principal's scope", async () => {
-    const exec = { record: "execution-record/1", id: "X-1", principal: "p-default" } as unknown as ExecutionRecord;
-    const op = { record: "operation-record/1", key: "rec-key-00000001", principal: "p-default" } as unknown as OperationRecord;
-    const asked: string[] = [];
-    const records: EvidenceSource = {
-      execution: (id) => (id === "X-1" ? exec : undefined),
-      operation: (scope, key) => { asked.push(`${scope.principal} ${key}`); return scope.principal === "p-default" && key === op.key ? op : undefined; },
-      executions: () => [exec],
-    };
-    const s = await stack({ records });
+  it("serves execution and operation records through stream A's EvidenceReader (one implementation), the operation in the principal's scope", async () => {
+    const s = await stack({ features: [...ALL, "execution-records", "lookup"] });
     try {
       const get = (path: string) => call("GET", `${s.backend.url}${path}`, EVIDENCE);
-      assert.deepEqual((await get("/executions")).body, { principal: "p-default", executions: [exec] });
-      assert.deepEqual((await get("/executions/X-1")).body, exec);
+      const w = await s.api.send("POST", "/tickets", { project: "inbox", title: "rec" }, { "idempotency-key": "rec-key-00000001" });
+      assert.equal(w.status, 201);
+      const list = (await get("/executions")).body;
+      assert.equal(list.principal, "p-default");
+      assert.deepEqual(list.executions.map((x: ExecutionRecord) => x.id), ["X-1"]);
+      const exec = (await get("/executions/X-1")).body as ExecutionRecord;
+      assert.deepEqual([exec.record, exec.id, exec.principal], ["execution-record/1", "X-1", "p-default"]);
+      assert.deepEqual(exec, (await s.api.send("GET", "/executions/X-1")).body, "the evidence route and the API serve the same record");
       assert.equal((await get("/executions/X-9")).status, 404);
-      assert.deepEqual((await get("/operations/rec-key-00000001")).body, op);
+      const op = (await get("/operations/rec-key-00000001")).body as OperationRecord;
+      assert.deepEqual([op.record, op.key, op.principal, op.execution_id], ["operation-record/1", "rec-key-00000001", "p-default", "X-1"]);
       const miss = await get("/operations/rec-key-00000002");
-      assert.deepEqual([miss.status, miss.body.message, miss.body.principal], [404, "no record of this key now", "p-default"]);
+      assert.equal(miss.status, 404);
+      assert.equal(miss.body.principal, "p-default");
+      assert.match(miss.body.message, /^no record of this key now/);
       assert.equal((await get("/operations/rec-key-00000001?principal=p-bob")).body.error, "unknown_principal", "only configured principals");
       assert.equal((await get("/operations/rec-key-00000001?principal=Bob")).status, 400);
-      assert.deepEqual(asked, ["p-default rec-key-00000001", "p-default rec-key-00000002"]);
-      assert.deepEqual((await get("/export")).body.executions, [exec]);
+      assert.deepEqual((await get("/export")).body.executions.map((x: ExecutionRecord) => x.id), ["X-1"]);
     } finally {
       await s.close();
+    }
+    // execution-records without lookup: an execution is served, an operation is 501 naming lookup.
+    const t = await stack({ features: [...ALL, "execution-records"] });
+    try {
+      const r = await call("GET", `${t.backend.url}/operations/rec-key-00000001`, EVIDENCE);
+      assert.deepEqual([r.status, r.body.error, r.body.feature], [501, "not_enabled", "lookup"]);
+      assert.equal((await call("GET", `${t.backend.url}/executions/X-1`, EVIDENCE)).status, 404);
+    } finally {
+      await t.close();
     }
   });
 

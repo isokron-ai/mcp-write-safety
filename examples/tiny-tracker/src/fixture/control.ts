@@ -26,7 +26,7 @@ import { bearerMatches } from "./tokens.js";
 import { ApiError, type Store } from "../backend/store.js";
 import { CommitSinkError, JournalError } from "../backend/commit.js";
 import type { RunningBackend } from "../backend/http.js";
-import type { EvidenceSource } from "../backend/seams.js";
+import type { EvidenceReader } from "../backend/lookup.js";
 import { FaultError, type FaultController } from "./faults.js";
 import type { Ledger } from "./ledger.js";
 
@@ -44,8 +44,8 @@ export interface AttachedBackend {
   store: Store;
   /** The run reset; absent only in tests that check the 501. */
   dropRun?: DropRun;
-  /** Execution and operation records (stream A), when this build keeps them. */
-  evidence?: EvidenceSource;
+  /** Execution and operation records (stream A's EvidenceReader, RunningBackend.evidence), when this build keeps them. */
+  evidence?: EvidenceReader;
 }
 
 export interface Run {

@@ -10,6 +10,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -443,6 +444,19 @@ describe("evidence reads across principals (INTERFACES §1.4) and container mode
       assert.equal((await get("/tickets", ALICE)).status, 404, "the API is not served there, not even with the backend token");
       assert.equal((await get("/build", ALICE)).status, 404);
       assert.equal((await get("/build", "")).status, 404);
+      // A published port carries the outside Host: the evidence listener serves it on the evidence token alone (an
+      // explicit listener option, the Host header is not rewritten); the loopback API listener still refuses it.
+      const withHost = (base: string, host: string) => new Promise<number>((resolve, reject) => {
+        const u = new URL(`${base}/build`);
+        const q = httpRequest({ host: u.hostname, port: u.port, path: u.pathname, headers: { host, authorization: `Bearer ${env.TRACKER_EVIDENCE_TOKEN}` } }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        q.on("error", reject);
+        q.end();
+      });
+      assert.equal(await withHost(ev, "tracker.example:8080"), 200);
+      assert.equal(await withHost(state.backend as string, "tracker.example:8080"), 403);
     });
     assert.equal(r.code, 0, r.stderr);
     const noEvidence = await runCli(["all", "--port", "0", "--backend-port", "0"], env);
