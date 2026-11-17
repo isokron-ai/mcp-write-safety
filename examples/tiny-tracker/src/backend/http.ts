@@ -393,12 +393,22 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
        * seam nothing fences a write that is held at BackendOps.beforePatch or the before-commit hook while its run is
        * reset, so the store counts the resets of each (principal, run): the count is read before the awaits and compared
        * after them, and a write whose run was reset meanwhile is refused 409 run_reset (recorded, nothing applied).
+       * The runs watched are the request's own run tag and the run that owns the ticket the path names (G1 review,
+       * fold-in 5): an untagged write held across the reset of the run that created its ticket is refused too, so a
+       * read-merge-put defect build cannot bring a reset run's ticket back.
        */
-      const resetsBefore = runTag === null ? 0 : store.resetCount(principal, runTag);
+      const fenced: Array<{ principal: string; run: string; count: number }> = [];
+      if (runTag !== null) fenced.push({ principal, run: runTag, count: store.resetCount(principal, runTag) });
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      const target = pathParts[0] === "tickets" && pathParts.length >= 2 ? store.ownerOf({ type: "ticket", id: decodeURIComponent(pathParts[1]) }) : undefined;
+      if (target?.run && !fenced.some((f) => f.principal === target.principal && f.run === target.run)) {
+        fenced.push({ principal: target.principal, run: target.run, count: store.resetCount(target.principal, target.run) });
+      }
       const checkNotReset = () => {
-        if (runTag === null || store.resetCount(principal, runTag) === resetsBefore) return;
+        const reset = fenced.find((f) => store.resetCount(f.principal, f.run) !== f.count);
+        if (!reset) return;
         store.refuse(meta, 409, "run_reset");
-        throw new ApiError(409, "run_reset", `run ${runTag} was reset while this request was waiting to commit; nothing was applied`);
+        throw new ApiError(409, "run_reset", `run ${reset.run} was reset while this request was waiting to commit; nothing was applied`);
       };
       /** Sends a committed reply, after the backend/after-commit fault hook. */
       const sendCommitted = async (reply: Reply, tx: CommittedTransaction | undefined) => {

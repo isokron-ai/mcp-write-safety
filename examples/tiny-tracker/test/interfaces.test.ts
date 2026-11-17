@@ -1045,4 +1045,30 @@ describe("G1 fold-ins: every answer reaches the ledger; a run reset during the a
       }
     });
   }
+
+  it("an untagged write to a ticket whose run is reset while it waits is refused 409 run_reset, even under lost-update (fold-in 5)", async () => {
+    const rec = new Recorder();
+    let release!: () => void;
+    let arrived!: () => void;
+    let holdNext = false;
+    const atHook = new Promise<void>((r) => { arrived = r; });
+    const backend = await startBackend({
+      token: TOKEN, port: 0, sinks: [rec], runOwner: () => "p-default", defects: ["lost-update"],
+      faults: { async beforeCommit() { if (holdNext) { holdNext = false; arrived(); await new Promise<void>((r) => { release = r; }); } } },
+    });
+    try {
+      const api = new Rest(backend.url, TOKEN);
+      const t = (await api.send("POST", "/tickets", { project: "inbox", title: "owned" }, { "tiny-tracker-run": "run-owner" })).body.ticket;
+      holdNext = true;
+      const held = api.send("PATCH", `/tickets/${t.id}`, { title: "written back" }, { "if-match": `"${t.version}"` });
+      await atHook;
+      backend.dropRun({ principal: "p-default" }, "run-owner");
+      release();
+      const r = await held;
+      assert.deepEqual([r.status, r.body.error], [409, "run_reset"]);
+      assert.equal((await api.export()).tickets.length, 0, "the reset run's ticket did not come back");
+    } finally {
+      await backend.close();
+    }
+  });
 });
