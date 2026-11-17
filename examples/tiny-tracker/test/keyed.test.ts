@@ -203,6 +203,44 @@ describe("variants (G6, B9)", () => {
     }
   });
 
+  it("settle-by-lookup compares the record's fingerprint_hash (G2 fold-in 1): another request's write under the key is not_applied, idempotency_key_reused, live and as a tombstone", async () => {
+    const clock = movableClock();
+    const r = await rig({ env: { TRACKER_VARIANTS: "settle-by-lookup" }, clock });
+    try {
+      const a = await r.mcp.call("create_ticket", { project: "inbox", title: "A", idempotency_key: "sbl-fp-key-0001" });
+      assert.equal(a.isError, false);
+      // The same key with title B: the backend answers 422, and the answer is lost on the way back.
+      const cut = r.gate.cutNext((q) => q.method === "POST" && q.path === "/tickets");
+      const b = await r.mcp.call("create_ticket", { project: "inbox", title: "B", idempotency_key: "sbl-fp-key-0001" });
+      await cut;
+      assert.equal(b.isError, true, "B was never applied: a lookup must not report A's write as B's");
+      assert.deepEqual([b.structured.mws.outcome, b.structured.mws.code, b.structured.settled_by], ["not_applied", "idempotency_key_reused", "lookup"]);
+      assert.doesNotMatch(b.text, /^Created/);
+      // The same arguments as A: settled applied, as before.
+      const cutA = r.gate.cutNext((q) => q.method === "POST" && q.path === "/tickets");
+      const again = await r.mcp.call("create_ticket", { project: "inbox", title: "A", idempotency_key: "sbl-fp-key-0001" });
+      await cutA;
+      assert.deepEqual([again.structured.mws.outcome, again.structured.settled_by], ["applied", "lookup"]);
+      // After the retention the record is a tombstone: it keeps the fingerprint_hash, and the same check applies.
+      clock.advance(8 * DAY_MS);
+      const cutB = r.gate.cutNext((q) => q.method === "POST" && q.path === "/tickets");
+      const late = await r.mcp.call("create_ticket", { project: "inbox", title: "B", idempotency_key: "sbl-fp-key-0001" });
+      await cutB;
+      assert.deepEqual([late.structured.mws.outcome, late.structured.mws.code], ["not_applied", "idempotency_key_reused"]);
+      const cutA2 = r.gate.cutNext((q) => q.method === "POST" && q.path === "/tickets");
+      const lateA = await r.mcp.call("create_ticket", { project: "inbox", title: "A", idempotency_key: "sbl-fp-key-0001" });
+      await cutA2;
+      assert.deepEqual([lateA.structured.mws.outcome, lateA.structured.mws.repeat], ["applied", "read_first"]);
+      assert.deepEqual((await r.rest.tickets({ project: "inbox" })).map((x) => x.title), ["A"]);
+      // The fence answer names the principal and the fingerprint_hash.
+      const fence = await r.rest.send("POST", "/operations/sbl-fp-key-0001/fence", { fence: false });
+      assert.equal(typeof fence.body.fingerprint_hash, "string");
+      assert.equal(fence.body.principal, "p-default");
+    } finally {
+      await r.close();
+    }
+  });
+
   it("settle-by-lookup's defect (settle-miss-reported-not-applied): the same miss with no fence says not applied, and the ticket appears", async () => {
     const r = await rig({ defects: ["settle-miss-reported-not-applied"] });
     try {

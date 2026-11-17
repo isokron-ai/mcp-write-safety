@@ -17,7 +17,7 @@ import { join } from "node:path";
 import type { KeyRecordSeam } from "./seams.js";
 import type { Store } from "./store.js";
 import type { CommittedTransaction } from "./commit.js";
-import { DurableKeyRecords, type KeptReply } from "./keyrecords.js";
+import { DurableKeyRecords, fingerprintHashOf, type KeptReply } from "./keyrecords.js";
 import { Journal, type CrashHook, type JournalRun } from "./journal.js";
 import { keyExpiry, DEFAULT_RETENTION_MS, type ExpiryPolicy } from "./expiry.js";
 import { PACKAGE_VERSION } from "../profile.js";
@@ -143,9 +143,11 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
         case "pending":
           return { status: 409, headers: { "retry-after": "1" }, body: { error: "in_progress", key, state: "pending", message: "a request with this key is still being applied" } };
         case "completed":
-          return { status: 200, body: { key, state: "completed", execution_id: `X-${s.reply.seq}`, status: s.reply.status, body: s.reply.body, committed_at: s.reply.committedAt } };
+          // principal and fingerprint_hash (G2 fold-in 1): the caller compares the request the key was used for with its
+          // own, so a lookup never settles another write as this one.
+          return { status: 200, body: { key, state: "completed", principal, fingerprint_hash: fingerprintHashOf(principal, s.reply.fingerprint), execution_id: `X-${s.reply.seq}`, status: s.reply.status, body: s.reply.body, committed_at: s.reply.committedAt } };
         case "tombstone":
-          return { status: 200, body: { key, state: "expired", execution_id: s.tomb.executionId, result_digest: s.tomb.resultDigest, committed_at: s.tomb.committedAt, objects: s.tomb.objects } };
+          return { status: 200, body: { key, state: "expired", principal, fingerprint_hash: s.tomb.fingerprintHash, execution_id: s.tomb.executionId, result_digest: s.tomb.resultDigest, committed_at: s.tomb.committedAt, objects: s.tomb.objects } };
         case "fenced":
           return { status: 200, body: { key, state: "fenced", fenced_at: s.at } };
       }

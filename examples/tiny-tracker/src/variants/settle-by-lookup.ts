@@ -7,7 +7,10 @@
 // it has none, closes the key, so the original request is refused if it is
 // still on its way and arrives later. Only then is a miss final:
 //
-//   record found       applied, with the ticket as committed
+//   record found       applied, with the ticket as committed, when the record's
+//                      fingerprint_hash is this call's; a record of another
+//                      request under the same key is not_applied,
+//                      idempotency_key_reused (as the backend's 422)
 //   key fenced         not applied, and it can no longer be (use a new key)
 //   still in progress  unknown, in_progress, repeat with the same key
 //   lookup failed      unknown, as without the variant
@@ -23,6 +26,17 @@ import type { Build, Deps } from "../mcp/types.js";
 import { applied, fail, notApplied, ok, unknownOutcome, type WriteContext } from "../mcp/results.js";
 import { receipt } from "../mcp/tools/tickets.js";
 import { enc } from "../mcp/tools/common.js";
+import { fingerprintHash } from "../digest.js";
+
+/**
+ * Whether the fence's record is this call's request (G2 fold-in 1): the record's fingerprint_hash against the hash of
+ * the body this call sent (POST /tickets, as JSON carries it), under the principal the backend named. A record with no
+ * fingerprint_hash is not taken as this call's.
+ */
+export function sameRequest(answer: { principal?: unknown; fingerprint_hash?: unknown }, sent: unknown): boolean {
+  if (typeof answer.principal !== "string" || typeof answer.fingerprint_hash !== "string") return false;
+  return fingerprintHash(answer.principal, "POST", "/tickets", JSON.parse(JSON.stringify(sent ?? null))) === answer.fingerprint_hash;
+}
 
 /** fence: the correct variant. peek: a lookup with no fence (only the settle-miss-reported-not-applied defect). */
 export function applySettleByLookup(build: Build, mode: "fence" | "peek" = "fence"): void {
@@ -39,6 +53,14 @@ export function applySettleByLookup(build: Build, mode: "fence" | "peek" = "fenc
       const changed = Object.keys(fields).filter((k) => k !== "project");
       const res = await deps.api.request("POST", `/operations/${enc(key)}/fence`, { body: { fence: mode === "fence" } });
       const state = (res.body as { state?: string } | undefined)?.state;
+      if (res.status === 200 && (state === "completed" || state === "expired") && !sameRequest(res.body as object, { ...fields, project })) {
+        // The key holds another request's write: this call's request was not applied under it (the backend refuses it
+        // 422 idempotency_key_reused if it is still on its way).
+        return fail("The tracker backend's answer was lost, and this idempotency_key was already used with different arguments; "
+          + "this call's request was not written. If you are retrying the same create, send exactly the same arguments as the first call; "
+          + "list your tickets before using a new key, or you may create a duplicate.",
+        { error: "idempotency_key_reused", settled_by: "lookup" }, notApplied(w, "idempotency_key_reused", { argument: "/idempotency_key" }));
+      }
       if (res.status === 200 && state === "completed") {
         const t = (res.body as { body: { ticket: { id: string; version: number; project: string } } }).body.ticket;
         return ok(`Created ticket ${t.id} in project ${t.project} (version ${t.version}). The backend's answer was lost; the write was found by its idempotency_key.`,
