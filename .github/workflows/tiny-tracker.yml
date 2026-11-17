@@ -13,7 +13,10 @@
 #                with expected/builds-0.4.0.json and expected/0.4.0.json byte for byte (fixture answers; the
 #                contract rows need the driver checkout, which the release checklist runs).
 #   container    builds the image and checks the start refusal (X1): no token, exit 2; with a token, /mcp needs it;
-#                the evidence listener (TRACKER_EVIDENCE_LISTEN) answers only with the evidence token.
+#                the evidence listener (TRACKER_EVIDENCE_LISTEN) answers only with the evidence token; a defect build
+#                serves evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1 (R23); a durable server
+#                killed and started again on its reused /data volume (pid 1 both times) takes its own lease and lock
+#                over and replays a keyed write.
 #
 # Read-only token, no secrets, no publish. Runs only when tiny-tracker or this file changes.
 
@@ -196,6 +199,58 @@ jobs:
           echo "evidence without token: $none, with: $good, API path: $api"
           [ "$none" = "404" ] && [ "$good" = "200" ] && [ "$api" = "404" ]
           ! docker logs tt-ev 2>&1 | grep -qF -e "$ev" -e "$mcp"
+      - name: A defect build serves evidence off loopback only with TRACKER_CONTAINER_ALLOW_DEFECTS=1 (R23)
+        run: |
+          mcp="$(openssl rand -hex 24)"
+          ev="$(openssl rand -hex 24)"
+          set +e
+          docker run --rm -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+            tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put > out.txt 2> err.txt
+          code=$?
+          set -e
+          cat err.txt
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 without the opt-in, got $code"; exit 1; }
+          grep -q "only with TRACKER_CONTAINER_ALLOW_DEFECTS=1" err.txt
+          docker run -d --name tt-r23 -p 127.0.0.1:47312:47312 -e TRACKER_CONTAINER_ALLOW_DEFECTS=1 \
+            -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+            tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put
+          trap 'docker logs tt-r23; docker rm -f tt-r23 >/dev/null' EXIT
+          for _ in $(seq 1 50); do docker logs tt-r23 2>/dev/null | grep -q '"evidence_listener"' && break; sleep 0.2; done
+          good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
+          echo "defect build with the opt-in, evidence: $good"
+          [ "$good" = "200" ]
+      - name: A durable server restarted on its reused /data replays a keyed write (pid 1 both times)
+        run: |
+          token="$(openssl rand -hex 24)"
+          docker volume create tt-data >/dev/null
+          # No --init: tiny-tracker is pid 1 in both runs, so the lease and the pid lock name the same pid each time.
+          docker run -d --name tt-dur -p 127.0.0.1:47310:47310 -v tt-data:/data -e TRACKER_MCP_TOKEN="$token" \
+            tiny-tracker:ci all --port 47310 --features durable,strict-input --data-dir /data
+          trap 'docker logs tt-dur; docker rm -f tt-dur >/dev/null; docker volume rm tt-data >/dev/null' EXIT
+          up() { for _ in $(seq 1 50); do [ "$(docker logs tt-dur 2>/dev/null | grep -c '"mcp"')" -ge "$1" ] && return 0; sleep 0.2; done; return 1; }
+          call() {
+            local url=http://127.0.0.1:47310/mcp sid
+            local hdr=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H "authorization: Bearer $token")
+            local init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+            sid="$(curl -s -D - -o /dev/null "${hdr[@]}" -d "$init" "$url" | tr -d '\r' | awk -F': ' 'tolower($1)=="mcp-session-id"{print $2}')"
+            if [ -n "$sid" ]; then hdr+=(-H "mcp-session-id: $sid"); fi
+            curl -s -o /dev/null "${hdr[@]}" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' "$url"
+            curl -s "${hdr[@]}" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_ticket","arguments":{"project":"inbox","title":"ci restart","idempotency_key":"ci-restart-key-0001"}}}' "$url" \
+              | sed -n 's/^data: //; /^{/p'
+          }
+          up 1
+          first="$(call)"
+          echo "first: $first"
+          echo "$first" | grep -q 'replayed\\":false'
+          docker kill tt-dur >/dev/null
+          docker start tt-dur >/dev/null
+          up 2
+          second="$(call)"
+          echo "second: $second"
+          echo "$second" | grep -q 'replayed\\":true'
+          echo "$second" | grep -q 'T-1'
+          docker logs tt-dur 2>&1 | grep -q "taking over a stale data-dir lease"
+          ! docker logs tt-dur 2>&1 | grep -qF "$token"
       - name: The image runs as an unprivileged user with a 0700 data dir
         run: |
           [ "$(docker run --rm --entrypoint id tiny-tracker:ci -u)" != "0" ]
