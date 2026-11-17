@@ -603,3 +603,21 @@ describe("the FX defect harness: each 0.2.0 fixture defect trips its own propert
     for (const d of BUILT_FIXTURE_DEFECTS) assert.ok(doc.includes(`| \`${d.name}\` | ${d.trips.join(", ")} |`), d.name);
   });
 });
+
+// ---- integration: the MCP answer to the seams v2.1 keyed-path refusals ----
+
+describe("the MCP layer's answer to 409 in_progress and 409 key_fenced (seams v2.1, rule 4)", () => {
+  it("in_progress is outcome unknown, repeat with the same key; key_fenced is not_applied", async () => {
+    const { fromBackend } = await import("../src/mcp/results.js");
+    const w = { operation: "create", type: "ticket", guard: "key" as const, read: { tool: "list_tickets", arguments: {} } };
+    const pending = fromBackend({ status: 409, body: { error: "in_progress", message: "still running", since: "2030-01-01T00:00:00.000Z" } } as any, "the ticket", w);
+    const pm = (pending.structuredContent as any).mws;
+    assert.equal(pending.isError, true);
+    assert.deepEqual([pm.outcome, pm.repeat, pm.code], ["unknown", "same_key", "in_progress"]);
+    assert.doesNotMatch((pending.content[0] as any).text, /Nothing was written/);
+    const fenced = fromBackend({ status: 409, body: { error: "key_fenced", message: "run reset" } } as any, "the ticket", w);
+    const fm = (fenced.structuredContent as any).mws;
+    assert.deepEqual([fm.outcome, fm.code], ["not_applied", "key_fenced"]);
+    assert.match((fenced.content[0] as any).text, /Nothing was written/);
+  });
+});

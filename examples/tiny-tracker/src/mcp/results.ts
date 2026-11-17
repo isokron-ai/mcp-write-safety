@@ -142,6 +142,12 @@ export function fromBackend(res: ApiResponse, what: string, w?: WriteContext): C
     case 404:
       return fail(`Not found: ${what}${body.message && body.message !== what ? ` (${body.message})` : ""}. Nothing was written.`, { not_found: true }, no("not_found"));
     case 409:
+      // Seams v2.1: in_progress means another request with this key is still running and may yet apply (rule 4, outcome
+      // unknown: repeat with the same key later). key_fenced, like every other 409, applied nothing and never will.
+      if (body.error === "in_progress") {
+        return fail(`${what}: a request with this idempotency_key is still in progress. It is not known yet whether it `
+          + `will be applied; repeat later with the same idempotency_key.`, { written: "unknown", error: "in_progress" }, w ? unknownOutcome(w, "in_progress") : undefined);
+      }
       return fail(`${what}: ${body.message ?? "conflict"}. Nothing was written.`, { error: body.error }, no(body.error ?? "already_exists"));
     case 412:
       return conflict(what, body.current, w);
