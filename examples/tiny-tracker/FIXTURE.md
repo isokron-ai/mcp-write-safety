@@ -290,6 +290,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - **writecheck coverage.** writecheck's tiny-tracker integration test starts `tiny-tracker server` with the default profile, so the two inflight-gated MCP-layer defects, `in-progress-reported-not-applied` and `settle-miss-reported-not-applied`, have no expectation row there: that run says nothing about them (tiny-tracker's own tests show both). Rows and a leg with `inflight` are listed for 0.4.0.
 - **Crash points between the effect and the key record.** `key-record-after-effect` shows from outside the process only through `backend/after-effect-before-key/crash`, which needs `tiny-tracker all --supervise` and `durable`; a run with no crash between the two (the restart leg of a planted A5, say) shows nothing against it. The in-process T1 shows it too.
 - **One instance.** Behaviour with more than one server instance on the same data is out of scope.
+- **Two containers sharing one data-dir volume are not supported.** Both servers are usually pid 1, and neither can see whether the other is alive, so the lock cannot tell a live holder in the other container from an earlier run of its own: a lock that names this pid and that this process did not write is taken as an earlier run's and taken over. Give each container its own data dir.
 - **Forced overlaps are not guaranteed.** A simultaneous same-key repeat can only be observed or not observed; known answers list both where both can happen.
 
 ## Feedback
