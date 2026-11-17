@@ -11,13 +11,14 @@
  */
 
 import { hasControl, needsBase } from '../core/driver.js';
-import { recount, runExperiment, witness, type ExperimentOutcome } from '../core/exec.js';
+import { recount, repsWhere, runExperiment, witness, type ExperimentOutcome } from '../core/exec.js';
 import { validateExperiment, type Experiment } from '../core/experiment.js';
 import type { ResourceSpec } from '../core/manifest.js';
 import { ruleOfThree, wilson } from '../core/stats.js';
 import { NOT_OBSERVED_SENTENCE, result, VIOLATED_CAVEAT, type Result } from '../report/verdicts.js';
 import { ruleNote } from './rules.js';
-import { objRef } from './stale.js';
+import { objRef, shownBy } from './stale.js';
+import type { ShapeCapture } from './shape.js';
 import { notRun, wp, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'barrier-pairs';
@@ -141,19 +142,38 @@ export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateCon
   if (c('validity', 'valid') < 1 || c('validity', 'both_kept') < c('validity', 'valid')) return [result('MWS-CONC-3', w, sc, 'not tested', `the two fields are not independent one after the other (writing ${res.fields![0].path} and ${res.fields![1].path} in sequence, in both orders, did not keep both); see MWS-UPD-1`)];
   const valid = c('test', 'valid');
   const overlapped = c('test', 'overlapped');
-  const loss = c('test', 'silent_loss');
-  const numbers: Record<string, unknown> = { pairs: valid, pairs_overlapped: overlapped, both_ok: c('test', 'both_ok'), one_error: c('test', 'one_error'), lost: loss };
+  // why: spec MWS-CONC-3 counts a loss only where both calls reported success, and its held covers "one caller received a
+  // conflict"; a result without isError whose content says the write failed is not a success (MWS-RES-2 test method), and
+  // what a result says is decided by a structured signal or a declared pattern (7.3, rule 11). So a pair in which either
+  // answer shows a conflict that way is not a loss here; that answer's form (no isError) is MWS-CONC-4's to judge. A
+  // conflict read only by the built-in default words decides nothing: such a pair needs reading.
+  const lossReps = repsWhere(out, 'test', 'silent_loss');
+  const shownIn = (e: Record<string, unknown>): 'signal' | 'default' | null => {
+    const race = (e['race'] ?? {}) as Record<string, { text?: string | null; data?: unknown; tool?: string | null; shape?: ShapeCapture | null } | undefined>;
+    const by = [race['a'], race['b']].map((h) => (h ? shownBy({ text: h.text ?? null, data: h.data, tool: h.tool ?? undefined, shape: h.shape ?? null }) : null));
+    return by.includes('signal') ? 'signal' : by.includes('default') ? 'default' : null;
+  };
+  const conflictShown = lossReps.filter((r) => shownIn(r.env) === 'signal');
+  const needsReading = lossReps.filter((r) => shownIn(r.env) === 'default');
+  const loss = c('test', 'silent_loss') - conflictShown.length - needsReading.length;
+  const numbers: Record<string, unknown> = { pairs: valid, pairs_overlapped: overlapped, both_ok: c('test', 'both_ok'), one_error: c('test', 'one_error'), lost: loss, ...(lossReps.length ? { conflict_shown: conflictShown.length, needs_reading: needsReading.length } : {}) };
+  const conflictNote = conflictShown.length ? [`In ${conflictShown.length} pair(s) one change was absent afterwards but its answer, without isError, showed a conflict (a structured signal or the declared patterns.conflict); these are not counted as losses, and the form of such an answer is judged by MWS-CONC-4.`] : [];
   if (out.arms['control']) Object.assign(numbers, { control_pairs: c('control', 'valid'), control_lost: c('control', 'silent_loss') });
   if (valid < 1) return [result('MWS-CONC-3', w, sc, 'not tested', `no valid pair (${c('test', 'setup_failures')} setup failures, ${c('test', 'exceptions')} exceptions)`, { numbers })];
+  if (loss < 1 && needsReading.length) {
+    const h = ((needsReading[0]!.env['race'] ?? {}) as { a?: { text?: string | null }; b?: { text?: string | null } });
+    return [result('MWS-CONC-3', w, sc, 'not tested', `In ${needsReading.length} of ${valid} pairs one change was absent afterwards while both calls answered without isError, and only the tester's built-in words read one answer as a conflict, which decides nothing (spec 7.3, rule 11). It needs reading: ${JSON.stringify(String(h.a?.text ?? '').slice(0, 160))} / ${JSON.stringify(String(h.b?.text ?? '').slice(0, 160))} (declare patterns.conflict if the answer reports a refusal).`, { numbers, steps: Object.values(needsReading[0]!.steps), notes: [...conflictNote, ...gateNote] })];
+  }
   if (loss >= 1) {
-    const steps = witness(out, 'test', 'silent_loss');
-    if (out.arms['control'] && c('control', 'silent_loss') >= 1) return [result('MWS-CONC-3', w, sc, 'platform', `Both calls reported success and one change was lost in ${loss} of ${valid} pairs; the platform's API lost ${c('control', 'silent_loss')} of ${c('control', 'valid')} of the same pairs.`, { numbers, steps, notes: [ruleNote('RAW_API_CONTROL', 'the API loses concurrent partial updates too'), VIOLATED_CAVEAT, ...gateNote] })];
-    return [result('MWS-CONC-3', w, sc, 'violated', `Both calls reported success and one change was lost in ${loss} of ${valid} pairs (${overlapped} overlapped).${!out.arms['control'] ? ' No control was declared, so the backend was not checked.' : c('control', 'valid') >= 1 ? ` The platform's API lost none of ${c('control', 'valid')} accepted pairs (${c('control', 'overlapped')} overlapped; side by side, R10-4: tool arm ${loss} lost of ${valid} pairs, ${overlapped} overlapped; control arm 0 lost of ${c('control', 'valid')} pairs, ${c('control', 'overlapped')} overlapped).` : ' The platform\'s API never accepted both writes of a pair (it refused one, or the control failed), so it shows no loss to compare.'}`, { numbers, steps, attribution: out.arms['control'] && c('control', 'overlapped') >= MIN_OVERLAPPED ? 'server' : 'unresolved', notes: [VIOLATED_CAVEAT, ...gateNote, ...(out.arms['control'] && c('control', 'overlapped') < MIN_OVERLAPPED ? [`The control arm lost none in ${c('control', 'overlapped')} overlapped pairs; "none lost" needs ${MIN_OVERLAPPED} (spec 8.2, rule 6), so it does not show that the platform keeps both changes, and the attribution stays unresolved (gate-2 Grafana item 3).`] : [])] })];
+    const counted = lossReps.filter((r) => shownIn(r.env) === null);
+    const steps = counted.length ? Object.values(counted[0]!.steps) : witness(out, 'test', 'silent_loss');
+    if (out.arms['control'] && c('control', 'silent_loss') >= 1) return [result('MWS-CONC-3', w, sc, 'platform', `Both calls reported success and one change was lost in ${loss} of ${valid} pairs; the platform's API lost ${c('control', 'silent_loss')} of ${c('control', 'valid')} of the same pairs.`, { numbers, steps, notes: [ruleNote('RAW_API_CONTROL', 'the API loses concurrent partial updates too'), VIOLATED_CAVEAT, ...conflictNote, ...gateNote] })];
+    return [result('MWS-CONC-3', w, sc, 'violated', `Both calls reported success and one change was lost in ${loss} of ${valid} pairs (${overlapped} overlapped).${!out.arms['control'] ? ' No control was declared, so the backend was not checked.' : c('control', 'valid') >= 1 ? ` The platform's API lost none of ${c('control', 'valid')} accepted pairs (${c('control', 'overlapped')} overlapped; side by side, R10-4: tool arm ${loss} lost of ${valid} pairs, ${overlapped} overlapped; control arm 0 lost of ${c('control', 'valid')} pairs, ${c('control', 'overlapped')} overlapped).` : ' The platform\'s API never accepted both writes of a pair (it refused one, or the control failed), so it shows no loss to compare.'}`, { numbers, steps, attribution: out.arms['control'] && c('control', 'overlapped') >= MIN_OVERLAPPED ? 'server' : 'unresolved', notes: [VIOLATED_CAVEAT, ...conflictNote, ...(needsReading.length ? [`${needsReading.length} further pair(s) lost a change where only the built-in words read an answer as a conflict; they are not counted (spec 7.3, rule 11).`] : []), ...gateNote, ...(out.arms['control'] && c('control', 'overlapped') < MIN_OVERLAPPED ? [`The control arm lost none in ${c('control', 'overlapped')} overlapped pairs; "none lost" needs ${MIN_OVERLAPPED} (spec 8.2, rule 6), so it does not show that the platform keeps both changes, and the attribution stays unresolved (gate-2 Grafana item 3).`] : [])] })];
   }
   // Spec 8.2 rule 6: not observed needs at least 30 overlapped pairs with no loss.
-  if (overlapped < MIN_OVERLAPPED) return [result('MWS-CONC-3', w, sc, 'not tested', `too few overlapped pairs: ${overlapped} of ${valid} pairs were in flight together, and ${MIN_OVERLAPPED} are needed before "not observed" (raise limits.pairs)`, { numbers, notes: gateNote })];
+  if (overlapped < MIN_OVERLAPPED) return [result('MWS-CONC-3', w, sc, 'not tested', `too few overlapped pairs: ${overlapped} of ${valid} pairs were in flight together, and ${MIN_OVERLAPPED} are needed before "not observed" (raise limits.pairs)`, { numbers, notes: [...conflictNote, ...gateNote] })];
   const wi = wilson(0, overlapped);
   const r3 = ruleOfThree(overlapped);
   Object.assign(numbers, { loss_rate_upper_95_wilson: wi ? Math.round(wi.hi * 10_000) / 10_000 : null, loss_rate_upper_95_rule_of_three: r3 ? Math.round(r3.approx * 10_000) / 10_000 : null });
-  return [result('MWS-CONC-3', w, sc, 'not observed', `No lost update in ${valid} simultaneous pairs (${overlapped} overlapped); the per-pair loss rate under these conditions could still be up to about ${r3 ? Math.round(r3.approx * 100) : '?'}% (95% bound). ${NOT_OBSERVED_SENTENCE}`, { numbers, notes: gateNote })];
+  return [result('MWS-CONC-3', w, sc, 'not observed', `No lost update in ${valid} simultaneous pairs (${overlapped} overlapped); the per-pair loss rate under these conditions could still be up to about ${r3 ? Math.round(r3.approx * 100) : '?'}% (95% bound). ${NOT_OBSERVED_SENTENCE}`, { numbers, notes: [...conflictNote, ...gateNote] })];
 }

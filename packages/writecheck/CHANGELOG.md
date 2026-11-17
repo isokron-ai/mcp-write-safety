@@ -2,6 +2,11 @@
 
 All notable changes to `@mcp-write-safety/writecheck` (the `mcp-writecheck` command). The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
+## Unreleased
+
+### Fixed
+- MWS-CONC-3 (barrier pairs): a pair in which one answer, without `isError`, shows a conflict by a structured signal or the declared `patterns.conflict` is no longer counted as one where both calls reported success, so it is not a loss (spec MWS-CONC-3: `held` covers "one caller received a conflict"; that answer's form is MWS-CONC-4's). A conflict read only by the built-in words gives `not tested` (needs reading), per spec 7.3 rule 11. The record's numbers gain `conflict_shown` and `needs_reading`.
+
 ## 0.1.0 (16 Nov 2026): preview for MWS 0.9
 
 First published version. Follows the MCP Write-Safety Requirements 0.9 (37 requirements, 26 MUST, 11 SHOULD).

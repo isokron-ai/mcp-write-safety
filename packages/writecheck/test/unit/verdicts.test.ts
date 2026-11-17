@@ -105,6 +105,38 @@ test('stale write: violated, platform, held, and CONC-1 only with a control', ()
   assert.ok(stopped.every((r) => r.verdict === 'not tested'));
 });
 
+test('barrier pairs: a pair whose answer shows a conflict (declared patterns.conflict) is not "both reported success" (MWS-CONC-3)', () => {
+  const res = M().resources[0]!;
+  const exp = pairsExperiment(res, 40, 'separate');
+  // Raw-statement tool: the second writer's version precondition matched 0 rows; the answer has no isError.
+  const half = (text: string) => ({ ok: true, isError: false, text, data: null, tool: 'ticket_update', shape: null });
+  const rep = (i: number, bText: string) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half('modified 1'), b: half(bText) }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } });
+  const run = (bText: string) => {
+    const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: { valid: 1, both_kept: 1 }, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps: Array.from({ length: 40 }, (_, i) => rep(i, bText)) } }, [], null);
+    out.arms['validity']!.counts = { valid: 1, both_kept: 1 };
+    return pairsVerdicts(out, res, false)[0]!;
+  };
+  try {
+    usePatterns({ patterns: { conflict: String.raw`\bmatched 0\b` } } as never);
+    const shown = run('matched 0, modified 0');
+    assert.notEqual(shown.verdict, 'violated', 'the declared conflict pattern reads the answer as a refusal, not a success');
+    assert.equal(shown.verdict, 'not observed');
+    assert.equal(shown.numbers['lost'], 0);
+    assert.equal(shown.numbers['conflict_shown'], 40);
+    assert.ok(shown.notes.some((n) => /judged by MWS-CONC-4/.test(n)));
+    // An answer the declared pattern does not match is still a reported success: the loss stays violated.
+    const silent = run('ok');
+    assert.equal(silent.verdict, 'violated');
+    assert.match(silent.reason, /40 of 40 pairs/);
+  } finally {
+    usePatterns(null);
+  }
+  // Without a declaration only the built-in words read "not applied" as a conflict: that decides nothing (rule 11).
+  const dflt = run('nothing was written');
+  assert.equal(dflt.verdict, 'not tested');
+  assert.match(dflt.reason, /needs reading/);
+});
+
 test('recount re-derives the counters from recorded repetitions', () => {
   const res = M().resources[0]!;
   const exp = pairsExperiment(res, 2, 'separate');
