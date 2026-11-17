@@ -77,6 +77,16 @@ describe("the CI workflow (.github/workflows/tiny-tracker.yml)", () => {
     assert.match(wf, /docker build/);
     assert.match(wf, /expected exit 2 without a token/);
   });
+
+  it("the container job checks R23 and a restart on a reused /data volume (note 19, items 3 and 8)", () => {
+    assert.match(wf, /expected exit 2 without the opt-in/);
+    assert.match(wf, /-e TRACKER_CONTAINER_ALLOW_DEFECTS=1/);
+    assert.match(wf, /-v tt-data:\/data/);
+    assert.match(wf, /--data-dir \/data/);
+    assert.match(wf, /docker kill tt-dur/);
+    assert.match(wf, /docker start tt-dur/);
+    assert.match(wf, /replayed\\\\":true/);
+  });
 });
 
 describe("known-answer reproducibility (test/repro-known-answers.ts)", () => {
