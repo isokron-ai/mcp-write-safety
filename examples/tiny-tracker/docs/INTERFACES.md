@@ -209,7 +209,7 @@ Every stream branches from the head of `tiny-tracker/shared-fixture` after the s
 
 **`durable` requires `strict-input` (decided in seams v2.1, on stream D's input).** A journal line is checksummed over RFC 8785 bytes, which a request body with a lone surrogate does not have, so under `durable` without `strict-input` such a write would be refused 503 `journal_unavailable` after validation. Stream D adds the compat rule **CMP-50** in its range: `durable` without `strict-input` in the effective feature set exits 2 and names the missing feature. (`strict-input` refuses such strings at the door, 400, before anything is begun.)
 
-**Compatibility rules see the effective feature set.** `checkCompat` evaluates each rule on the profile's features plus the named ones (`c.features`); only CMP-1 reads the named set (`c.named`). A rule such as CMP-5 therefore still refuses after a release flips its feature into the default profile.
+**Compatibility rules see the effective feature set.** `checkCompat` evaluates each rule on the profile's features plus the named ones (`c.features`); only CMP-1, CMP-21 and (from the 0.3.0 default flip) CMP-54 read the named set (`c.named`). A rule such as CMP-5 therefore still refuses after a release flips its feature into the default profile.
 
 **Sequential, after the streams:** the 0.4.0 pairwise known-answer matrix; the T3 three-way recount (ledger, journal replay and export: A, B and D merged); each release's `expected/` files and its default-feature flip, at release time; the durable A5 run (D and E).
 

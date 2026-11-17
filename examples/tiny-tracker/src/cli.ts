@@ -175,12 +175,18 @@ async function main(): Promise<void> {
   const keyRetention = values["key-retention"] ?? env.TRACKER_KEY_RETENTION;
   const keyExpiry = values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY;
   let durability: import("./backend/durability.js").DurabilityOptions | undefined;
+  // `server` (0.3.0 default flip): retention comes from the profile and the backend is another process; the tools state
+  // the retention given here, which should be the one the backend was started with.
+  let statedRetentionMs: number | undefined;
   if ((keyRetention !== undefined || keyExpiry !== undefined) && !features.includes("retention")) {
     refusals.push("--key-retention and --key-expiry (TRACKER_KEY_RETENTION, TRACKER_KEY_EXPIRY) need the retention feature");
-  } else if (layout !== "server" && ["durable", "inflight", "retention"].some((f) => features.includes(f))) {
+  } else if (["durable", "inflight", "retention"].some((f) => features.includes(f))) {
     const expiry = await import("./backend/expiry.js");
     try {
-      durability = { features, dataDir: values["data-dir"], retentionMs: expiry.parseRetention(keyRetention), policy: expiry.parseExpiryPolicy(keyExpiry) };
+      const retentionMs = expiry.parseRetention(keyRetention);
+      const policy = expiry.parseExpiryPolicy(keyExpiry);
+      if (layout !== "server") durability = { features, dataDir: values["data-dir"], retentionMs, policy };
+      else statedRetentionMs = retentionMs;
     } catch (e) {
       if (e instanceof expiry.ExpirySettingError) refusals.push(e.message);
       else throw e;
@@ -336,7 +342,7 @@ async function main(): Promise<void> {
   if (runsServer) {
     if (backend) env.TRACKER_BACKEND_URL = backend.url;
     try {
-      const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras, ...(durability?.retentionMs !== undefined ? { retentionMs: durability.retentionMs } : {}) });
+      const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras, ...((durability?.retentionMs ?? statedRetentionMs) !== undefined ? { retentionMs: durability?.retentionMs ?? statedRetentionMs } : {}) });
       closers.push(server.close);
       out.mcp = server.url;
       if (fixture) {

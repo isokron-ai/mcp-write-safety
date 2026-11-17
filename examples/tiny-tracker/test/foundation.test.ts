@@ -32,9 +32,10 @@ describe("profiles and features", () => {
     assert.equal(SERVER_INFO.version, PACKAGE_VERSION);
   });
 
-  it("profile 0.1 turns on no feature; the 0.2.0 default turns on the core features 0.2.0 ships", () => {
+  it("profile 0.1 turns on no feature; the default turns on the core features 0.2.0 and 0.3.0 ship (not durable)", () => {
     assert.deepEqual(PROFILE_FEATURES["0.1"], []);
-    assert.deepEqual(PROFILE_FEATURES.default, ["execution-records", "lookup", "principals"]);
+    assert.deepEqual(PROFILE_FEATURES.default, ["execution-records", "lookup", "principals", "inflight", "retention"]);
+    assert.ok(!PROFILE_FEATURES.default.includes("durable" as never), "durable needs --data-dir: it stays named");
     assert.equal(parseProfile(undefined), "default");
     assert.equal(parseProfile("0.1"), "0.1");
     assert.throws(() => parseProfile("0.2"), SettingError);
@@ -44,7 +45,7 @@ describe("profiles and features", () => {
     assert.deepEqual(parseFeatures(" evidence , strict-input,evidence"), ["evidence", "strict-input"]);
     assert.throws(() => parseFeatures("evidense"), /unknown feature/);
     assert.throws(() => parseFeatures(","), SettingError);
-    assert.deepEqual(activeFeatures("default", ["evidence"]), ["execution-records", "lookup", "principals", "evidence"]);
+    assert.deepEqual(activeFeatures("default", ["evidence"]), ["execution-records", "lookup", "principals", "inflight", "retention", "evidence"]);
     for (const f of FEATURES) assert.match(f.since, /^0\.[2-4]\.0$/, f.name);
   });
 

@@ -29,7 +29,7 @@ A **profile** names a fixed surface.
 | Profile | What it is |
 |---|---|
 | `0.1` | Exactly the surface of the published 0.1.0: `tools/list`, every tool result's text and structured content, the instructions and the first stdout line, for a recorded scenario set (only `serverInfo.version` and result `_meta` excluded). Checked against a transcript captured from the 0.1.0 tarball. Takes no feature. |
-| `default` | What runs when no profile is named. From 0.2.0 it turns on each feature a release ships once that release's gate is met. Until then it has the 0.1 surface. |
+| `default` | What runs when no profile is named. From 0.2.0 it turns on each feature a release ships once that release's gate is met: `execution-records`, `lookup` and `principals` from 0.2.0; `inflight` and `retention` from 0.3.0. `durable` stays named, since it needs `--data-dir`; the fixture-layer features stay named, since they need tokens the operator gives. Before 0.2.0 it had the 0.1 surface. |
 
 A **feature** is switched on with `--features a,b` or `TRACKER_FEATURES`. An unknown name, or a feature this version does not build yet, stops the process (exit 2) and says which release builds it.
 
@@ -229,8 +229,8 @@ The ledger, the fixture clock and the fault controller are the instruments other
 | CMP-50 | `durable` without `strict-input`: every journal line is checksummed over RFC 8785 bytes, so a string with a lone surrogate must be refused at the door (decision 0003 §7) |
 | CMP-51 | The `settle-by-lookup` variant without `inflight` (it fences keys through the backend's key states) |
 | CMP-52 | Two key variants at once (`key-store-honest`, `key-store-durable`, `settle-by-lookup`, `settle-by-client-reference`) |
-| CMP-53 | `key-store-durable` or `settle-by-client-reference` with a named `lookup` or `inflight` (they stand for a backend with no idempotency key). As with CMP-5, a `lookup` that comes only from the default profile is turned off for the build, not refused |
-| CMP-54 | `durable`, `inflight` or `retention` in `tiny-tracker server` (backend features) |
+| CMP-53 | `key-store-durable` or `settle-by-client-reference` with a named `lookup` or `inflight` (they stand for a backend with no idempotency key). As with CMP-5, a `lookup` or (from 0.3.0) an `inflight` that comes only from the default profile is turned off for the build, not refused, and the state line names it in `features_off` |
+| CMP-54 | `durable`, `inflight` or `retention` named in `tiny-tracker server` (backend features). The default profile's `inflight` and `retention` are not refused there: the backend is another process, and `--key-retention` given to `server` sets the retention its tools state |
 | CMP-55 | The `settle-by-lookup` variant with `--key-expiry forget`, or with the `key-expires-early` backend defect: a missing record may then be a forgotten applied write, and the fence would close it as never applied. A backend under `forget` started apart from its MCP server never fences a miss: the fence route answers 404 `state: "unknown"`, `fenced: false`, and the outcome stays open (G2 fold-in 2) |
 | CMP-60 | `clock` without `--fixture-control` (the fixture clock moves only through the control listener) |
 | CMP-61, CMP-62 | `--supervise` under profile 0.1, or outside `tiny-tracker all` |
@@ -281,7 +281,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 |---|---|---|
 | An OS-held data-dir lock | The 0.3.0 pid-file lock is best-effort (see the limits) | a small native helper (flock/fcntl), `proper-lockfile`-style mkdir leases with heartbeats, or the supervisor as the only starter |
 | The fixture clock's offset in the journal | CMP-65 refuses `durable` with `clock` in 0.3.0 | a new journal-format/1 line kind |
-| writecheck rows for the inflight-gated MCP defects | they have no expectation row in 0.3.0 | a harness leg with `inflight` |
+| writecheck rows for the inflight-gated MCP defects | they have no expectation row in 0.3.0 | rows measured with a same-key call while the first is in flight (`inflight` is on in the default profile from 0.3.0) |
 
 ## Limits: what a run against this fixture does not show
 
@@ -295,7 +295,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 - **`lookup-reexecutes` is detected by fx-check only.** Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches.
 - **Durability.** Until 0.3.0 everything is in memory. From 0.3.0, with `durable`, data, key records, tombstones, fences, run allocations and execution records survive a restart through the journal. **The ledger is still kept in memory, for one boot:** after a restart it holds only that boot's entries, so a recount that includes the ledger covers one boot (the durable A5 plan recounts before its restart; `docs/a5-durable.md`).
 - **"Flushed" on macOS is not power-cut-safe.** The journal flushes each line with `fsync` before the write is applied. On macOS Node's `fsync` is not `F_FULLFSYNC` (Node does not expose it), so the drive may still hold the line in its cache: there `after-fsync` is crash-safe, not power-cut-safe. A durable backend on macOS says so on stderr at start. On Linux `fsync` flushes to stable storage.
-- **writecheck coverage.** writecheck's tiny-tracker integration test starts `tiny-tracker server` with the default profile, so the two inflight-gated MCP-layer defects, `in-progress-reported-not-applied` and `settle-miss-reported-not-applied`, have no expectation row there: that run says nothing about them (tiny-tracker's own tests show both). Rows and a leg with `inflight` are listed for 0.4.0.
+- **writecheck coverage.** The two inflight-gated MCP-layer defects, `in-progress-reported-not-applied` and `settle-miss-reported-not-applied`, have no expectation row in writecheck's tiny-tracker integration test: its per-defect runs say nothing about them (tiny-tracker's own tests show both). From 0.3.0 the default profile turns `inflight` on, so its `--defect all` run includes them. Rows are listed for 0.4.0.
 - **Crash points between the effect and the key record.** `key-record-after-effect` shows from outside the process only through `backend/after-effect-before-key/crash`, which needs `tiny-tracker all --supervise` and `durable`; a run with no crash between the two (the restart leg of a planted A5, say) shows nothing against it. The in-process T1 shows it too.
 - **One instance.** Behaviour with more than one server instance on the same data is out of scope.
 - **The data-dir lock is best-effort (G13: one instance, enforced best-effort).** Node has no OS-held file lock (flock or fcntl), so the lock is a pid file taken over by rename-aside, compare and link-back. A takeover never deletes a lock it has not proven stale: a live lock is moved or, in the stated three-starter window, deleted (a clean close that has checked its own lock can, in that window, remove a third starter's lock put in its place). Two residual cases can leave two servers on one dir:

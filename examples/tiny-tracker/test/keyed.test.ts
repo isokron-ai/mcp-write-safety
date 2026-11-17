@@ -13,6 +13,7 @@ import { startGate, type Gate } from "./support/gate.js";
 import { movableClock, tempDir } from "./support/durable.js";
 import { runCli } from "./support/cli-run.js";
 import { checkCompat, type Combination } from "../src/compat.js";
+import { effectiveFeatures, featuresTurnedOff } from "../src/profile.js";
 import { DAY_MS } from "../src/backend/expiry.js";
 import { refLabel } from "../src/variants/settle-by-client-reference.js";
 import { runChecks } from "./support/checks.js";
@@ -304,14 +305,21 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
   const base: Combination = { layout: "all", profile: "default", features: [], defects: [], backendDefects: [], variants: [], faults: [], fixtureControl: false };
   it("refuses what cannot work", () => {
     assert.match(checkCompat({ ...base, layout: "server", features: ["inflight"] }).join(), /backend features/);
-    assert.match(checkCompat({ ...base, variants: ["settle-by-lookup"] }).join(), /needs the inflight feature/);
+    // 0.3.0 default flip: inflight and retention from the profile do not refuse `server` (CMP-54 reads the named set).
+    assert.deepEqual(checkCompat({ ...base, layout: "server" }), []);
+    assert.match(checkCompat({ ...base, profile: "0.1", variants: ["settle-by-lookup"] }).join(), /needs the inflight feature/);
+    assert.deepEqual(checkCompat({ ...base, variants: ["settle-by-lookup"] }), [], "the default profile's inflight is enough");
     assert.deepEqual(checkCompat({ ...base, variants: ["settle-by-lookup"], features: ["inflight"] }), []);
     assert.match(checkCompat({ ...base, variants: ["key-store-durable", "key-store-honest"] }).join(), /name one/);
     assert.match(checkCompat({ ...base, variants: ["settle-by-client-reference"], features: ["inflight"] }).join(), /no idempotency key/);
-    // The default profile's lookup is turned off by these variants (as with key-store-honest), not refused.
+    // The default profile's lookup and (0.3.0) inflight are turned off by these variants (as with key-store-honest), not
+    // refused; a named one is refused.
     for (const v of ["key-store-durable", "settle-by-client-reference"]) {
       assert.deepEqual(checkCompat({ ...base, variants: [v] }), [], v);
+      assert.deepEqual(featuresTurnedOff("default", [], [v]).map((o) => o.feature).sort(), ["inflight", "lookup"], v);
+      assert.ok(effectiveFeatures("default", [], [v]).features.includes("retention"), `${v}: retention stays on`);
       assert.match(checkCompat({ ...base, variants: [v], features: ["lookup"] }).join(), /no idempotency key/, `${v} with a named lookup`);
+      assert.match(checkCompat({ ...base, variants: [v], features: ["inflight"] }).join(), /no idempotency key/, `${v} with a named inflight`);
     }
   });
 
@@ -418,6 +426,33 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     }
   });
 
+  it("0.3.0 default flip: inflight and retention run with no feature named; `server` states the retention it is given", async () => {
+    const env: Record<string, string> = { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" };
+    const statement = async (mode: "all" | "server", args: string[]) => {
+      let text = "";
+      const extra = mode === "all" ? ["--backend-port", "0"] : [];
+      // `server` lists its tools without calling its backend, so the backend URL is never contacted.
+      const r = await runCli([mode, ...args, "--port", "0", ...extra], mode === "server" ? { ...env, TRACKER_BACKEND_URL: "http://127.0.0.1:9" } : env, async (state) => {
+        const mcp = await connectClient(state.mcp, "2026-07-28");
+        try {
+          text = (await mcp.tools()).find((t: any) => t.name === "create_ticket")!.description ?? "";
+        } finally {
+          await mcp.close();
+        }
+      });
+      assert.equal(r.code, 0, r.stderr);
+      return text;
+    };
+    assert.match(await statement("all", []), /A key is remembered for 7 days;/);
+    assert.match(await statement("server", []), /A key is remembered for 7 days;/);
+    assert.match(await statement("server", ["--key-retention", "1h"]), /A key is remembered for 1 hour;/);
+    const bad = await runCli(["server", "--key-retention", "soon", "--port", "0"], { ...env, TRACKER_BACKEND_URL: "http://127.0.0.1:9" });
+    assert.equal(bad.code, 2);
+    const named = await runCli(["server", "--features", "retention", "--port", "0"], { ...env, TRACKER_BACKEND_URL: "http://127.0.0.1:9" });
+    assert.equal(named.code, 2, "a named backend feature in `server` is still refused (CMP-54)");
+    assert.match(named.stderr, /backend features/);
+  });
+
   it("starts durable with --data-dir and names the journal; a second start on the same dir is refused; retention flags need retention", async () => {
     const t = tempDir("cli");
     try {
@@ -437,7 +472,7 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
         assert.match(state.journal.head, /^2:/, "header, pending, commit");
       });
       assert.equal(again.code, 0, again.stderr);
-      const flag = await runCli(["backend", "--key-expiry", "forget", "--port", "0"], env);
+      const flag = await runCli(["backend", "--profile", "0.1", "--key-expiry", "forget", "--port", "0"], env);
       assert.equal(flag.code, 2);
       assert.match(flag.stderr, /need the retention feature/);
       const bad = await runCli(["backend", "--features", "retention", "--key-retention", "soon", "--port", "0"], env);

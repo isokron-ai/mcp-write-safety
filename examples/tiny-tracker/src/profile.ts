@@ -6,7 +6,9 @@
 // gains a feature. `default` is what runs when no profile is named; from 0.2.0
 // it turns on the features each release ships once they meet that release's
 // gate. In 0.2.0 that is execution-records, lookup and principals: the 0.1
-// surface plus the two read-only lookup tools (test/surface.test.ts).
+// surface plus the two read-only lookup tools. In 0.3.0 inflight and
+// retention join them; durable stays named, since it needs --data-dir
+// (test/surface.test.ts).
 //
 // A feature is named with --features or TRACKER_FEATURES (comma-separated).
 // An unknown name, or a name for a feature this version does not build yet,
@@ -65,7 +67,9 @@ export const PROFILE_FEATURES: Record<ProfileName, readonly FeatureName[]> = {
   // 0.2.0 (owner decision 1): the core features 0.2.0 ships. The fixture-layer features (evidence, ledger, faults) stay
   // named, since they need tokens the operator gives, and strict-input stays named so the backend keeps accepting what
   // 0.1.0 accepted unless asked.
-  default: ["execution-records", "lookup", "principals"],
+  // 0.3.0 (owner decision 1, after the G2 gate): inflight and retention, both backend features with no setting of their
+  // own to give. durable stays named: it needs --data-dir. clock is a fixture-layer feature and needs --fixture-control.
+  default: ["execution-records", "lookup", "principals", "inflight", "retention"],
 };
 
 export function featureInfo(name: string): FeatureInfo | undefined {
@@ -103,6 +107,10 @@ export const VARIANT_TURNS_OFF: ReadonlyArray<{ variant: string; feature: Featur
   // 0.3.0 (stream D): these variants stand for a backend with no idempotency key (CMP-53), so the default lookup is off.
   { variant: "key-store-durable", feature: "lookup", reason: "key-store-durable keeps keys in the MCP server's own journal" },
   { variant: "settle-by-client-reference", feature: "lookup", reason: "settle-by-client-reference stands for a backend with no idempotency key" },
+  // 0.3.0 default flip: the same two variants refuse the backend's in-flight key states too (CMP-53), so a default-only
+  // inflight is off with them, as lookup is.
+  { variant: "key-store-durable", feature: "inflight", reason: "key-store-durable keeps keys in the MCP server's own journal" },
+  { variant: "settle-by-client-reference", feature: "inflight", reason: "settle-by-client-reference stands for a backend with no idempotency key" },
 ];
 
 export interface FeatureOff {

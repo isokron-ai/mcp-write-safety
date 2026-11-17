@@ -97,14 +97,14 @@ describe("tiny-tracker command line", () => {
     }
   });
 
-  it("key-store-honest with the 0.2.0 default (CMP-5 option b): lookup off and visible; a named lookup exits 2; profile 0.1 unchanged", async () => {
+  it("key-store-honest with the default profile (CMP-5 option b): lookup off and visible; a named lookup exits 2; profile 0.1 unchanged", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tt-variant-"));
     const ev = "evidence-token-cli-cmp5-000000000";
     const base = { TRACKER_BACKEND_TOKEN: "backend-token-cli-cmp5-0000000000", TRACKER_EVIDENCE_TOKEN: ev, TRACKER_VARIANTS: "key-store-honest" };
     const builds: any[] = [];
     try {
       const r = await run(["all", "--features", "evidence"], { ...base, TRACKER_KEY_JOURNAL: join(dir, "k1") }, async (out) => {
-        assert.deepEqual(out.features, ["execution-records", "principals", "evidence"], "the state line lists the effective features");
+        assert.deepEqual(out.features, ["execution-records", "principals", "inflight", "retention", "evidence"], "the state line lists the effective features");
         assert.deepEqual(out.features_off, ["lookup off: key-store-honest keeps keys in the MCP server"]);
         const build = await (await fetch(`${out.backend}/build`, { headers: { authorization: `Bearer ${ev}` } })).json() as any;
         assert.ok(!build.features.includes("lookup"), "the descriptor lists the features the build runs");

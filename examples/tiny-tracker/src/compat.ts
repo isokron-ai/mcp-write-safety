@@ -233,8 +233,10 @@ const KEY_VARIANTS = ["key-store-honest", "key-store-durable", "settle-by-lookup
       ? "the durable feature needs strict-input: every journal line is checksummed over RFC 8785 bytes, so the backend must refuse keys and strings that have none at the door (name it: --features durable,strict-input)" : undefined,
   },
   {
+    // The named set, as CMP-21: from 0.3.0 the default profile has inflight and retention, and a `server` start must not
+    // be refused for them (its backend is another process, which runs them).
     id: "CMP-54", post01: true,
-    check: (c) => c.layout === "server" && c.features.some((f) => ["durable", "inflight", "retention"].includes(f))
+    check: (c) => c.layout === "server" && c.named.some((f) => ["durable", "inflight", "retention"].includes(f))
       ? "durable, inflight and retention are backend features; name them where the backend runs (`all` or `backend`)" : undefined,
   },
   {
