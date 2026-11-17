@@ -621,3 +621,23 @@ describe("the MCP layer's answer to 409 in_progress and 409 key_fenced (seams v2
     assert.match((fenced.content[0] as any).text, /Nothing was written/);
   });
 });
+
+describe("create_project answers only the duplicate check as 'already exists' (G1 review, fold-in 3)", () => {
+  it("409 exists is already_exists; 409 in_progress, key_fenced and run_reset keep their own codes", async () => {
+    const { createProject } = await import("../src/mcp/tools/projects.js");
+    const call = async (body: Record<string, unknown>) => {
+      const api = { request: async () => ({ status: 409, ok: false, replayed: false, body }) };
+      return (await createProject.handler({ key: "dup", name: "Dup", idempotency_key: "proj-key-0001" } as any, { api } as any, {} as any)) as any;
+    };
+    const exists = await call({ error: "exists", message: "project dup already exists" });
+    assert.deepEqual([exists.structuredContent.mws.outcome, exists.structuredContent.mws.code], ["not_applied", "already_exists"]);
+    const pending = await call({ error: "in_progress", message: "still running" });
+    assert.deepEqual([pending.structuredContent.mws.outcome, pending.structuredContent.mws.code], ["unknown", "in_progress"]);
+    assert.doesNotMatch(pending.content[0].text, /already exists/);
+    for (const code of ["key_fenced", "run_reset"]) {
+      const r = await call({ error: code, message: code });
+      assert.deepEqual([r.structuredContent.mws.outcome, r.structuredContent.mws.code], ["not_applied", code]);
+      assert.doesNotMatch(r.content[0].text, /already exists/);
+    }
+  });
+});
