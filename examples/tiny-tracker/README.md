@@ -28,7 +28,7 @@ If you want a starting point for your own server, read the correct handlers in `
 
 ```
 MCP client ──Streamable HTTP──▶ MCP server (src/mcp) ──HTTP──▶ [optional gate] ──▶ backend (src/backend)
-                                 16 tools, thin                                     REST API, in memory
+                                 18 tools, thin                                     REST API, in memory
 ```
 
 The **backend** is deliberately correct. It is the "platform" whose checks the MCP layer must not lose:
@@ -99,6 +99,7 @@ Annotations in the correct build. Every tool also declares `openWorldHint: false
 | Tool | readOnly | destructive | idempotent | Notes |
 |---|---|---|---|---|
 | `list_projects`, `list_tickets`, `get_ticket` | true | | | `get_ticket` shows label ids and the version. |
+| `get_operation`, `get_execution` | true | | | From 0.2.0, with the `lookup` feature (on in the default profile; not under `--profile 0.1`, which lists the 16 tools of 0.1.0). `get_operation {idempotency_key}` looks up the write a key made, among your own writes; a miss says "no record of this key now", which never means nothing was written. `get_execution {id}` reads an execution record (`X-<n>`) with its committed result's canonical bytes and digest. |
 | `create_project` | false | false | false | POST; an existing key is an error; optional `idempotency_key`, sent to the backend. |
 | `delete_project` | false | true | true | Only an empty project. |
 | `create_ticket` | false | false | false | `project` honored; optional `idempotency_key`. |
