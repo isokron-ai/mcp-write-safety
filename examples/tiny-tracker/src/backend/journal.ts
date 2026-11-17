@@ -33,7 +33,7 @@ import { canonicalize } from "../digest.js";
 import { storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalHeader, type JournalLine, type JournalPendingLine } from "./commit.js";
 import type { JournalSeam, KeyScope } from "./seams.js";
 import type { Store } from "./store.js";
-import type { DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
+import type { AbortReason, DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
 
 export const JOURNAL_FORMAT = "journal-format/1";
 export const JOURNAL_FILE = "journal.jsonl";
@@ -212,6 +212,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
   private jseq = 0;
   private lastChecksum: string | null = null;
   private dead = false;
+  /** Set when a failed append could not be cut back: later lines would follow a torn one, so nothing more is appended. */
+  private broken: Error | undefined;
   readonly path: string;
   report: LoadReport | undefined;
   /** False only under the key-record-not-durable defect: a replayed commit line rebuilds no key record. */
@@ -332,7 +334,13 @@ export class Journal implements JournalSeam, KeyLineWriter {
         this.store.applyPostState(tx);
         if (!keys) break;
         const scope: KeyScope = { principal: tx.principal };
-        if (tx.kind === "run-reset" && tx.reset) keys.dropRun({ principal: tx.reset.principal }, tx.reset.run);
+        if (tx.kind === "run-reset" && tx.reset) {
+          // Replay writes nothing: a pending record the reset ended has its own aborted line later in the file.
+          const lines = keys.lines;
+          keys.lines = undefined;
+          keys.dropRun({ principal: tx.reset.principal }, tx.reset.run);
+          keys.lines = lines;
+        }
         else if (tx.kind === "write" && tx.request.key !== null && tx.request.fingerprint !== null) {
           // The key record goes with the effect, in the same line (FX-DUR-2); a pending record it completes ends here.
           if (this.keyFromCommitLine) keys.restore(scope, tx.request.key, { state: "completed", reply: { ...storedReplyOf(tx), objects: tx.objects } });
@@ -354,6 +362,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
   /** Writes one line and flushes it; returns its jseq. On an I/O error the file is cut back and the error is thrown. */
   private append(body: Omit<JournalLine, "jseq" | "checksum">, key?: string | null): number {
     if (this.dead) throw new SimulatedCrash("after a simulated crash");
+    if (this.broken) throw new Error(`the journal stopped after a failed append it could not cut back: ${this.broken.message}`);
     if (this.fd === undefined) throw new Error("the journal is not open");
     const line = { jseq: this.jseq + 1, ...body } as Omit<JournalLine, "checksum">;
     const text = encodeLine(line);
@@ -374,10 +383,13 @@ export class Journal implements JournalSeam, KeyLineWriter {
         this.dead = true;
         throw e;
       }
+      // A failed append is cut back to the last good offset, so a later line never follows a torn one (decision 0003,
+      // "only a torn last line"). If it cannot be cut back, the journal takes no more lines: every later write gets
+      // 503 journal_unavailable, and the next start drops the torn last line.
       try {
         ftruncateSync(this.fd, this.size);
-      } catch {
-        // The next start drops a torn last line.
+      } catch (t) {
+        this.broken = t as Error;
       }
       throw e;
     }
@@ -406,8 +418,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
     return this.append({ line: "pending", principal: scope.principal, key, fingerprint, run, created_at: this.store.clock.now().toISOString(), clock_offset_ms: this.store.clock.offsetMs() } as Omit<JournalPendingLine, "jseq" | "checksum">, key);
   }
 
-  aborted(pendingJseq: number, reason: JournalAbortedLine["reason"]): void {
-    this.append({ line: "aborted", pending_jseq: pendingJseq, reason } as Omit<JournalAbortedLine, "jseq" | "checksum">);
+  aborted(pendingJseq: number, reason: AbortReason): void {
+    this.append({ line: "aborted", pending_jseq: pendingJseq, reason } as unknown as Omit<JournalAbortedLine, "jseq" | "checksum">);
   }
 
   close(): void {

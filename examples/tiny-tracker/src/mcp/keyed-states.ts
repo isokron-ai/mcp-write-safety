@@ -32,7 +32,7 @@ export function keyedStateResult(res: ApiResponse, what: string, w?: WriteContex
     const primary = w ? body.objects?.find((o) => o.type === w.type) : undefined;
     const ctx = w && primary && w.id === undefined && !w.parent ? { ...w, id: primary.id } : w;
     return ok(`The earlier call with this idempotency_key was applied (${body.execution_id}), but its stored answer is gone: `
-      + `the key's retention has passed. Nothing new was written; read ${what} to see it now.`,
+      + `the key's retention is over. Nothing new was written; read ${what} to see it now.`,
     { replayed: true, written: false, execution_id: body.execution_id, result_digest: body.result_digest, committed_at: body.committed_at, objects: body.objects ?? [] },
     ctx ? { ...applied(ctx, { replayed: true }), repeat: "read_first", code: "key_expired", read_with: ctx.read } : undefined);
   }

@@ -78,6 +78,7 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
   const defects = options.defects ?? [];
   const retentionMs = Math.max(1, Math.floor((options.retentionMs ?? DEFAULT_RETENTION_MS) / (defects.includes("key-expires-early") ? 1000 : 1)));
   const keys = new DurableKeyRecords({ clock: store.clock, expiry: features.retention ? keyExpiry(retentionMs) : undefined, policy: options.policy });
+  keys.log = options.log ?? ((m) => process.stderr.write(`${m}\n`));
   let journal: Journal | undefined;
   if (features.durable) {
     if (!options.dataDir) throw new Error("the durable feature needs --data-dir");

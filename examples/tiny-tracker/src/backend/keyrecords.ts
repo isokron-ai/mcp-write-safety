@@ -24,7 +24,7 @@
 import { digestOf, DOMAINS, fingerprintHash } from "../digest.js";
 import { executionId } from "../records.js";
 import type { Clock } from "../clock.js";
-import type { CommitSink, CommittedTransaction, JournalAbortedLine, ObjectRef } from "./commit.js";
+import type { CommitSink, CommittedTransaction, ObjectRef } from "./commit.js";
 import type { InflightKeyRecordSeam, KeyExpirySeam, KeyScope, StoredReply } from "./seams.js";
 import type { ExpiryPolicy } from "./expiry.js";
 
@@ -42,7 +42,7 @@ export interface Tombstone {
 export type KeptReply = StoredReply & { objects?: ObjectRef[] };
 
 export type KeyState =
-  | { state: "pending"; fingerprint: string; run: string | null; jseq?: number }
+  | { state: "pending"; fingerprint: string; run: string | null; jseq?: number; since?: string }
   | { state: "completed"; reply: KeptReply }
   | { state: "tombstone"; tomb: Tombstone; run: string | null }
   | { state: "fenced"; at: string; run: string | null };
@@ -55,11 +55,21 @@ export type Screen =
   | { kind: "expired"; tomb: Tombstone }
   | { kind: "fenced"; at: string };
 
+/** Why a pending record ended with no commit (seams v2.1; v2 freezes refused, journal_unavailable, orphan_at_start). */
+export type AbortReason = "refused" | "journal_unavailable" | "fault" | "internal_error" | "orphan_at_start";
+
+/** The answer of get in seams v2.1 (coordinator note 7): what the keyed path branches on, in this order. */
+export type KeyLookup =
+  | { state: "completed"; reply: StoredReply }
+  | { state: "pending"; since: string }
+  | { state: "expired"; tombstone: Tombstone }
+  | undefined;
+
 /** Where key-state lines go when the store is durable (src/backend/journal.ts). */
 export interface KeyLineWriter {
   /** Writes a pending line; returns its jseq. */
   pending(scope: KeyScope, key: string, fingerprint: string, run: string | null): number;
-  aborted(pendingJseq: number, reason: JournalAbortedLine["reason"]): void;
+  aborted(pendingJseq: number, reason: AbortReason): void;
 }
 
 export interface KeyRecordOptions {
@@ -157,7 +167,12 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
     let n = 0;
     const prefix = `${scope.principal}\u0000`;
     for (const [k, s] of this.states) {
-      if (!k.startsWith(prefix) || s.state === "pending") continue;
+      if (!k.startsWith(prefix)) continue;
+      if (s.state === "pending") {
+        // seams v2.1: a run reset ends the run's pending records (journalled as aborted); they are not counted.
+        if (s.run === run) this.abort(scope, k.slice(prefix.length), "refused");
+        continue;
+      }
       const r = s.state === "completed" ? s.reply.run : s.run;
       if (r === run) { this.states.delete(k); n++; }
     }
@@ -168,21 +183,39 @@ export class DurableKeyRecords implements InflightKeyRecordSeam {
 
   begin(scope: KeyScope, key: string, fingerprint: string, run: string | null): void {
     const jseq = this.lines?.pending(scope, key, fingerprint, run);
-    this.states.set(id(scope, key), { state: "pending", fingerprint, run, jseq });
+    this.states.set(id(scope, key), { state: "pending", fingerprint, run, jseq, since: this.options.clock.now().toISOString() });
   }
 
-  abort(scope: KeyScope, key: string): void {
+  /**
+   * Ends a pending record with no commit. Never throws (seams v2.1: it runs in a finally, where a throw would hide the
+   * answer): a journal error is logged and the pending line is ended as orphan_at_start at the next start. Without a
+   * reason it is journal_unavailable after a failed commit line, else refused.
+   */
+  abort(scope: KeyScope, key: string, reason?: AbortReason): void {
     const k = id(scope, key);
+    const failed = this.journalFailed.delete(k);
     const s = this.states.get(k);
-    const reason = this.journalFailed.delete(k) ? "journal_unavailable" : "refused";
     if (s?.state !== "pending") return;
     this.states.delete(k);
     if (s.jseq === undefined) return;
     try {
-      this.lines?.aborted(s.jseq, reason);
-    } catch {
-      // The pending line stays open; it is ended as orphan_at_start at the next start.
+      this.lines?.aborted(s.jseq, reason ?? (failed ? "journal_unavailable" : "refused"));
+    } catch (e) {
+      this.log?.(`tiny-tracker: could not journal the end of a pending key record (${(e as Error).message}); it ends at the next start`);
     }
+  }
+
+  /** Where abort reports a journal error (default: none). */
+  log: ((message: string) => void) | undefined;
+
+  /** The seams v2.1 shape of get: completed, pending or expired (a fence answers as pending: no write may begin). */
+  lookup(scope: KeyScope, key: string): KeyLookup {
+    const s = this.state(scope, key);
+    if (!s) return undefined;
+    if (s.state === "completed") return { state: "completed", reply: s.reply };
+    if (s.state === "tombstone") return { state: "expired", tombstone: s.tomb };
+    if (s.state === "pending") return { state: "pending", since: s.since ?? "" };
+    return { state: "pending", since: s.at };
   }
 
   tombstone(scope: KeyScope, key: string) {

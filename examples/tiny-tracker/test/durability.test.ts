@@ -437,3 +437,58 @@ describe("the persistence gap (FX-DUR-1, FX-DUR-2)", () => {
     }
   });
 });
+
+describe("seams v2.1 shapes, built ahead of the rebase (coordinator note 7)", () => {
+  it("lookup answers completed, pending or expired; a fence answers pending; abort never throws and takes a reason", async () => {
+    const t = tempDir("v21");
+    try {
+      const clock = movableClock();
+      const b = await durableBackend({ dataDir: t.dataDir, clock });
+      const keys = b.backend.durability!.keys;
+      const s = { principal: "p-default" };
+      try {
+        await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("v21-key-00001"));
+        assert.equal(keys.lookup(s, "v21-key-00001")!.state, "completed");
+        keys.begin(s, "v21-key-00002", "POST /tickets {}", null);
+        assert.equal(keys.lookup(s, "v21-key-00002")!.state, "pending");
+        (b.backend.durability!.journal as any).abandon(); // the journal is gone: the abort cannot be written
+        const logged: string[] = [];
+        keys.log = (m) => void logged.push(m);
+        assert.doesNotThrow(() => keys.abort(s, "v21-key-00002", "fault"));
+        assert.equal(keys.lookup(s, "v21-key-00002"), undefined);
+        assert.match(logged[0], /next start/);
+        keys.fence(s, "v21-key-00003", null, true);
+        assert.equal(keys.lookup(s, "v21-key-00003")!.state, "pending", "a fenced key lets no write begin");
+        clock.advance(7 * DAY_MS);
+        const e = keys.lookup(s, "v21-key-00001");
+        assert.equal(e!.state, "expired");
+        assert.equal((e as any).tombstone.executionId, "X-1");
+      } finally {
+        await b.close();
+      }
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("a run reset ends that run's pending key records with an aborted line; the replay agrees", async () => {
+    const t = tempDir("v21r");
+    try {
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      const s = { principal: "p-default" };
+      b.backend.durability!.keys.begin(s, "v21-run-key01", "POST /tickets {}", "run-v-1");
+      b.backend.durability!.keys.begin(s, "v21-run-key02", "POST /tickets {}", "run-v-2");
+      b.backend.dropRun(s, "run-v-1");
+      assert.equal(b.backend.durability!.keys.lookup(s, "v21-run-key01"), undefined);
+      assert.equal(b.backend.durability!.keys.lookup(s, "v21-run-key02")!.state, "pending");
+      await b.crash();
+      const ls = readJournal(join(t.dataDir, JOURNAL_FILE)).lines.map((l: any) => [l.line, l.reason ?? null]);
+      assert.deepEqual(ls, [["header", null], ["pending", null], ["pending", null], ["commit", null], ["aborted", "refused"]]);
+      const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      assert.equal(b2.backend.durability!.journal!.report!.abortedOrphans, 1, "only run-v-2's pending record is an orphan");
+      await b2.close();
+    } finally {
+      t.cleanup();
+    }
+  });
+});
