@@ -14,12 +14,25 @@
 #     tiny-tracker                                       # then: Authorization: Bearer <token> on http://127.0.0.1:47310/mcp
 #   docker run --rm -i tiny-tracker stdio                # stdio needs no token: there is no listener
 #
+# The evidence routes (GET /build, /ledger, /executions, /operations, /export) for a harness outside the container
+# (owner decision: evidence reachable behind its token): name the evidence feature and TRACKER_EVIDENCE_LISTEN, and
+# give the evidence token the same way as the MCP token. Only the evidence routes are served there, for any Host, and
+# only with the evidence token; the backend API stays on the container's loopback. A defect build may do this too,
+# since container mode never starts without the bearer token on /mcp.
+#
+#   docker run --rm --init -p 127.0.0.1:47310:47310 -p 127.0.0.1:47312:47312 \
+#     -v "$PWD/mcp.token:/run/secrets/mcp.token:ro" -e TRACKER_MCP_TOKEN_FILE=/run/secrets/mcp.token \
+#     -v "$PWD/evidence.token:/run/secrets/evidence.token:ro" -e TRACKER_EVIDENCE_TOKEN_FILE=/run/secrets/evidence.token \
+#     -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+#     tiny-tracker all --port 47310 --features evidence,strict-input,execution-records,lookup,principals,ledger
+#
 # Without a token the container exits 2 at once with the reason on stderr. The token is never baked into the image,
 # never on the command line and never printed. /data and /tokens are 0700 and owned by `node`, for --data-dir and
 # --token-dir.
 #
-# Status: not built or run by the fixture's own test suite (no container runtime there). The start refusal is the
-# same code path, tested in Node (test/listener.test.ts). Pin NODE_IMAGE by digest when publishing an image.
+# Tested: CI's container job builds the image and checks the refusal, the bearer token, the evidence listener, the
+# user and the data dir; the same start paths are tested in Node (test/listener.test.ts, test/integration-040.test.ts).
+# Pin NODE_IMAGE by digest when publishing an image.
 
 ARG NODE_IMAGE=node:22-bookworm-slim
 
@@ -42,6 +55,8 @@ RUN npm install -g --omit=dev --ignore-scripts --no-audit --no-fund /tmp/pkg/*.t
 USER node
 WORKDIR /data
 EXPOSE 47310
+# The evidence listener, when TRACKER_EVIDENCE_LISTEN names it (see above).
+EXPOSE 47312
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["tiny-tracker"]
 CMD ["all", "--port", "47310"]
