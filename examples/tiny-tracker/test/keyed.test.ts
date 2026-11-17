@@ -118,6 +118,23 @@ describe("keyed-state answers at the MCP layer (decision 0004)", () => {
     assert.equal((other.structuredContent as any).mws.outcome, "unknown");
   });
 
+  it("create_project (409 branches on error === \"exists\" since 0.2.0): 410 key_expired is applied/replayed/read_first; in_progress is unknown/same_key; key_fenced is not_applied", async () => {
+    const { createProject } = await import("../src/mcp/tools/projects.js");
+    const call = async (status: number, body: Record<string, unknown>) => {
+      const api = { request: async () => ({ status, ok: false, replayed: status === 410, body }) };
+      return (await createProject.handler({ key: "dup", name: "Dup", idempotency_key: "proj-key-0001" } as any, { api } as any, {} as any)) as any;
+    };
+    const expired = await call(410, { error: "key_expired", message: "expired", execution_id: "X-4", result_digest: "ab".repeat(32), committed_at: "2030-01-01T00:00:00.000Z", objects: [{ type: "project", id: "dup" }] });
+    const em = expired.structuredContent.mws;
+    assert.deepEqual([em.outcome, em.replayed, em.repeat, em.code], ["applied", true, "read_first", "key_expired"]);
+    assert.equal(expired.structuredContent.execution_id, "X-4");
+    assert.doesNotMatch(expired.content[0].text, /already exists/);
+    const pending = await call(409, { error: "in_progress", message: "still running", since: "2030-01-01T00:00:00.000Z" });
+    assert.deepEqual([pending.structuredContent.mws.outcome, pending.structuredContent.mws.code, pending.structuredContent.mws.repeat], ["unknown", "in_progress", "same_key"]);
+    const fenced = await call(409, { error: "key_fenced", message: "run run-x was reset" });
+    assert.deepEqual([fenced.structuredContent.mws.outcome, fenced.structuredContent.mws.code], ["not_applied", "key_fenced"]);
+  });
+
   it("with retention, every key-accepting tool states it; without, the descriptions are the 0.1 ones", async () => {
     const on = await rig();
     const off = await rig({ features: [] });
