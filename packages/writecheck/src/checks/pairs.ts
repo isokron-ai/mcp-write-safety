@@ -135,6 +135,17 @@ export const pairsCheck: CheckModule = {
 };
 
 export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateConfigured: boolean): Result[] {
+  // why: review item 4: the experiment's own rule (out.verdict, kept in the observation and unchanged so the plan hash is too)
+  // counts test.silent_loss from isError alone. Where the requirement verdict reads a shown conflict and differs, the record
+  // says so, and the record's verdict is the one that counts.
+  return conc3Verdicts(out, res, gateConfigured).map((r) =>
+    out.verdict?.verdict === 'reproduced' && r.verdict !== 'violated' && r.verdict !== 'platform'
+      ? { ...r, notes: [...r.notes, `The experiment's mechanical rule (${out.verdict.criterion}) says reproduced, because it counts a call without isError as a success; this record reads what the answers say (numbers conflict_shown and needs_reading), so its verdict is ${r.verdict}, and that verdict is the one that counts.`] }
+      : r,
+  );
+}
+
+function conc3Verdicts(out: ExperimentOutcome, res: ResourceSpec, gateConfigured: boolean): Result[] {
   const w = wp(res.name, res.update!.tool);
   const sc = { id: ID, version: VERSION };
   const c = (arm: string, k: string) => out.arms[arm]?.counts[k] ?? 0;

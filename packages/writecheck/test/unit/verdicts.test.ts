@@ -125,10 +125,13 @@ test('barrier pairs: a pair whose answer shows a conflict (declared patterns.con
     assert.equal(shown.numbers['lost'], 0);
     assert.equal(shown.numbers['conflict_shown'], 40);
     assert.ok(shown.notes.some((n) => /is MWS-CONC-4's to judge in its own trials/.test(n)));
+    // Review item 4: the experiment's own rule still says reproduced (it reads isError only); the record says why it differs.
+    assert.ok(shown.notes.some((n) => /mechanical rule .* says reproduced.*its verdict is not observed, and that verdict is the one that counts/.test(n)));
     // An answer the declared pattern does not match is still a reported success: the loss stays violated.
     const silent = run('ok');
     assert.equal(silent.verdict, 'violated');
     assert.match(silent.reason, /40 of 40 pairs/);
+    assert.ok(!silent.notes.some((n) => /mechanical rule/.test(n)), 'no note where the two agree');
   } finally {
     usePatterns(null);
   }
