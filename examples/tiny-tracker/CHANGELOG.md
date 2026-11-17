@@ -5,11 +5,23 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 ## Unreleased
 
 ### Stream F (0.4.0 contract kit)
-- `tiny-tracker stdio`: the MCP server over stdin and stdout, from the same server factory as the HTTP transport, through the SDK's `./stdio` export. The backend runs in the same process unless `--backend-url` names one. The state line goes to stderr. Fixture-layer features run over Streamable HTTP only for now (CMP-70).
-- Container mode (`TRACKER_CONTAINER=1`, set by the image) listens on every interface and refuses to start without a bearer token for `/mcp` (`TRACKER_MCP_TOKEN` or a 0600 `TRACKER_MCP_TOKEN_FILE`). Outside a container the token is optional; when set, `/mcp` needs it. Host and Origin checks stay loopback-only.
+- `tiny-tracker stdio`: the MCP server over stdin and stdout, from the same server factory as the HTTP transport, through the SDK's `./stdio` export. The state line goes to stderr.
+- Container mode (`TRACKER_CONTAINER=1`, set by the image) listens on every interface and refuses to start without a bearer token for `/mcp` (`TRACKER_MCP_TOKEN` or a 0600 `TRACKER_MCP_TOKEN_FILE`). Outside a container the token is optional; when set, `/mcp` needs it. Host and Origin checks on `/mcp` stay loopback-only.
 - Resource caps on the MCP listener: request body 4 MiB, 256 connections, 64 requests in flight (503 beyond), header and request timeouts, and a POST unanswered for 120 s is cut off. A stdio message is capped at 4 MiB.
-- A data dir is created 0700, and one open to others is refused (`src/private-dir.ts`, for the durable feature).
-- `Dockerfile`, a public CI workflow (Linux, macOS, Windows; Node 22 and 24; known-answer reproducibility; the container start refusal), `CONTRIBUTING.md`, `docs/STABILITY.md`, `docs/patterns.md` and a draft `openapi.yaml` for the backend, evidence and control APIs.
+- A data dir is created 0700, and one open to others is refused (`src/private-dir.ts`).
+- `Dockerfile`, a public CI workflow (Linux, macOS, Windows; Node 22 and 24; known-answer reproducibility; the container), `CONTRIBUTING.md`, `docs/STABILITY.md`, `docs/patterns.md` and `openapi.yaml` for the backend, evidence and control APIs.
+
+### 0.4.0 integration (stream F on 0.3.0)
+- `tiny-tracker stdio` runs through the same start as `all` (or `server` with `--backend-url`): principals, durability, the fixture features, the evidence and control listeners and the fault controller work over stdio. CMP-70 refuses only `--supervise` over stdio.
+- The MCP bearer token must differ from every principal's token and from the evidence and control tokens however they are given (environment, file or the token folder).
+- Container mode: a defect build may serve its evidence on `TRACKER_EVIDENCE_LISTEN` off loopback (the evidence listener answers the evidence routes only, behind the evidence token); outside container mode a defect build keeps every listener on loopback. The image exposes 47312 for it.
+- With the `retention` feature the server instructions state the key retention too, and `--key-retention` sets the value the tool descriptions and instructions state (also in `server`).
+- `openapi.yaml` is final for 0.4.0: written from the routes, with the evidence `?principal=` rule, the export and ledger bodies, the fence route, run reset, fault arming (built points, selector, `needs_supervise`), the fixture clock, and the keyed answers (409 `in_progress`, `key_fenced`, `run_reset`; 410 `key_expired`). `verify/python/check_openapi.py` validates it as OpenAPI 3.1.
+- `fx-check` checks FX-KEY-1 (the fixture clock moved to just inside the stated retention), FX-KEY-2 (the tool descriptions and instructions), FX-DUR-1 (across a restart: `--durability-plant`, then `--durability-verify`) and FX-DUR-2 (the data dir's files, read only). FX-DUR-3 and FX-KEY-3 answer `not checked` with the reason.
+- The 0.4.0 known-answer matrix: `expected/select-0.4.0.mjs` selects the builds pairwise over feature level, MCP-layer defect, backend defect and variant (`expected/builds-0.4.0.json`), and `expected/generate.mjs` writes `expected/0.4.0.json` and `expected/0.4.0.md` (durable rows restarted for FX-DUR-1; per-build environment such as `TRACKER_VARIANTS`). Both reproduce byte for byte; `test/repro-known-answers.ts` registers the selection and a sample of the matrix.
+- The contract adapter can reach the MCP server over stdio (`mcp_command`).
+- CI: the Python suites and the OpenAPI check run on Linux and macOS; the whole matrix is regenerated on Linux; the container job checks the evidence listener.
+- `docs/patterns.md` covers the 0.2.0 and 0.3.0 defects and variants and the backend `FX-` defects; CONTRIBUTING and STABILITY cover the 0.2.0 to 0.4.0 features. The `tiny-tracker` issue label is in `.github/labels.json`. The package ships CONTRIBUTING, STABILITY, the patterns page, the OpenAPI file and its check, and the 0.4.0 known answers.
 
 ## 0.3.0 (unreleased) for MWS 0.9
 
