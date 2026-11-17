@@ -2,9 +2,9 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
-## Unreleased
+## 0.2.0 (unreleased) for MWS 0.9
 
-Groundwork for the shared-fixture releases (0.2.0 on). The default build's surface is unchanged: it is checked call for call against a transcript captured from the published 0.1.0 tarball.
+The first shared-fixture release: evidence, execution records, lookup, principals, the execution ledger and server-side faults. `--profile 0.1` keeps the surface of the published 0.1.0, checked call for call against a transcript captured from its tarball; the default profile's changes are listed below.
 
 ### Added
 - `--profile 0.1`: exactly the surface of the published 0.1.0, kept in every later release. `--profile default` is what runs when none is named.
