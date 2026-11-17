@@ -601,7 +601,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       (fs as any).linkSync = () => { const e: NodeJS.ErrnoException = new Error("link not supported"); e.code = "EPERM"; throw e; };
       syncBuiltinESMExports();
       try {
-        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /a lock this start moved aside is kept at/);
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /this start moved a lock aside and left it as .*another start may since have removed it/);
       } finally {
         (fs as any).linkSync = link;
         syncBuiltinESMExports();
@@ -631,7 +631,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       lockHooks.beforeTakeover = (p) => { unlinkSync(p); writeFileSync(p, A); };
       lockHooks.afterAside = (p) => { writeFileSync(p, C); };
       try {
-        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /a lock this start moved aside is kept at/);
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /this start moved a lock aside and left it as .*another start may since have removed it/);
       } finally {
         lockHooks.beforeTakeover = undefined;
         lockHooks.afterAside = undefined;

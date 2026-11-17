@@ -425,7 +425,8 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     lockHooks.beforeTakeover?.(path);
     const taken = removeStaleLock(path, { text, ino });
     if (taken.result === "left") {
-      throw new DataDirError(`the data dir ${dir}: other starts took the lock over at the same moment; a lock this start moved aside is kept at ${taken.aside} (it may be a running server's); one server per data dir`);
+      // G2 follow-up 4: the file was left in place by this start; another start's sweep or takeover may act on it later.
+      throw new DataDirError(`the data dir ${dir}: other starts took the lock over at the same moment; this start moved a lock aside and left it as ${taken.aside} (it may be a running server's; another start may since have removed it); one server per data dir`);
     }
     if (taken.result === "restored") continue; // another starter's lock: read it again (its live pid refuses this start)
     log(`tiny-tracker: taking over a stale data-dir lock (process ${Number.isNaN(pid) ? "unknown" : pid} is gone)`);
