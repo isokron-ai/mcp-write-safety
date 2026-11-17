@@ -27,6 +27,9 @@ import { ApiError } from "../store.js";
 export const lostUpdate: BackendDefect = {
   name: "lost-update",
   summary: "PATCH copies the record, waits, writes the stale copy back, then patches it; concurrent updates are lost",
+  context: "MWS-CONC-3",
+  seams: ["patchTicket"],
+  requires: [],
   apply(ops) {
     ops.patchTicket = async (store, id, fields, ifMatch) => {
       const snapshot = store.getTicket(id); // a copy

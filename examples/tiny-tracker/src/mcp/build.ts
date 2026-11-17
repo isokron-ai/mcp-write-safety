@@ -17,14 +17,14 @@ export const CORRECT_TOOLS: ToolDef[] = [
   addComment, addLabel, removeLabel, setLabels,
 ];
 
-export function createBuild(defectNames: string[] = []): Build {
+export function createBuild(defectNames: string[] = [], features: readonly string[] = []): Build {
   const build: Build = {
     tools: new Map(CORRECT_TOOLS.map((t) => [t.name, { ...t }])),
     validation: { ...correctValidation },
     configRules: { ...correctConfigRules },
     defects: [],
   };
-  const defects = resolveDefects(defectNames);
+  const defects = resolveDefects(defectNames, features);
   // Replacing defects first, wrapping ones after, so that none hides another.
   for (const defect of [...defects.filter((d) => !d.wraps), ...defects.filter((d) => d.wraps)]) {
     defect.apply(build);

@@ -4,6 +4,11 @@
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import { ConfigError, startBackend, startServer, type RunningBackend } from "./start.js";
+import { activeFeatures, needsFixtureLayer, parseFeatures, parseProfile, SettingError } from "./profile.js";
+import { checkCompat, type ProcessLayout } from "./compat.js";
+import { resolveDefects } from "./defects/index.js";
+import type { ServerExtras } from "./mcp/server.js";
+import type { BackendExtension } from "./backend/http.js";
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -11,7 +16,12 @@ const USAGE = `usage:
   tiny-tracker backend [--port N] [--backend-defect lost-update]      (needs TRACKER_BACKEND_TOKEN)
   tiny-tracker server  [--port N] [--defect NAME]... [--backend-url URL] [--read-only VALUE] [--tools a,b]
                                                                       (needs TRACKER_BACKEND_TOKEN)
-Defect names are listed in the README; --defect also takes a requirement ID (e.g. MWS-CONC-3) or "all".`;
+Defect names are listed in the README; --defect also takes a requirement ID (e.g. MWS-CONC-3) or "all".
+Fixture options (see FIXTURE.md):
+  --profile 0.1|default    0.1: exactly the surface of the published 0.1.0 (no features). Default: default.
+  --features a,b           features to switch on (TRACKER_FEATURES); unknown or not-yet-built names stop the process.
+  --fixture-control        start the control listener (needs TRACKER_CONTROL_TOKEN or _FILE); --control-port N.
+Tokens are read from the environment or a 0600 file, never from the command line.`;
 
 function fail(message: string): never {
   process.stderr.write(`tiny-tracker: ${message}\n`);
@@ -31,6 +41,11 @@ async function main(): Promise<void> {
       "read-only": { type: "string" },
       tools: { type: "string" },
       "default-project": { type: "string" },
+      profile: { type: "string" },
+      features: { type: "string" },
+      "fixture-control": { type: "boolean" },
+      "control-port": { type: "string" },
+      "data-dir": { type: "string" },
       help: { type: "boolean" },
     },
   });
@@ -52,6 +67,58 @@ async function main(): Promise<void> {
   const backendDefects = values["backend-defect"] ?? [];
   const port = (v: string | undefined) => (v === undefined ? 0 : Number(v));
 
+  // Profile, features and the compatibility table (src/compat.ts). Profile 0.1 keeps the 0.1.0 command line.
+  const layout = mode as ProcessLayout;
+  let profile: ReturnType<typeof parseProfile>, named: ReturnType<typeof parseFeatures>, features: string[];
+  try {
+    profile = parseProfile(values.profile ?? env.TRACKER_PROFILE);
+    named = parseFeatures(values.features ?? env.TRACKER_FEATURES);
+    features = activeFeatures(profile, named);
+  } catch (e) {
+    if (e instanceof SettingError) fail(e.message);
+    throw e;
+  }
+  const fixtureControl = values["fixture-control"] === true;
+  const variantNames = (env.TRACKER_VARIANTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  let mcpDefects: string[] = [];
+  if (layout !== "backend") {
+    try {
+      mcpDefects = resolveDefects(defects, features).map((d) => d.name);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  }
+  const refusals = checkCompat({
+    layout, profile, features: named, defects: mcpDefects, backendDefects, variants: variantNames, faults: [],
+    fixtureControl, dataDir: values["data-dir"],
+  });
+  if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
+  if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
+
+  if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
+
+  // The fixture layer is loaded only when asked for, so the teaching server never imports it (test/import-graph.test.ts).
+  let fixture: Awaited<ReturnType<typeof import("./fixture/index.js")["createFixtureLayer"]>> | undefined;
+  let backendExtension: BackendExtension | undefined;
+  let serverExtras: ServerExtras = {};
+  if (needsFixtureLayer(features, fixtureControl)) {
+    const layer = await import("./fixture/index.js");
+    try {
+      fixture = layer.createFixtureLayer({
+        layout, profile, features, control: fixtureControl,
+        mcpDefects: layout === "backend" ? null : mcpDefects,
+        backendDefects: layout === "server" ? null : backendDefects,
+        variants: layout === "backend" ? null : variantNames,
+        env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN,
+      });
+    } catch (e) {
+      if (e instanceof layer.TokenError) fail(e.message);
+      throw e;
+    }
+    backendExtension = fixture.backendExtension;
+    serverExtras = fixture.serverExtras;
+  }
+
   const closers: Array<() => Promise<void>> = [];
   const shutdown = async () => {
     for (const close of closers.reverse()) await close().catch(() => {});
@@ -63,11 +130,11 @@ async function main(): Promise<void> {
   const out: Record<string, unknown> = {};
   let backend: RunningBackend | undefined;
   if (mode === "all" || mode === "backend") {
-    if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
     if (!env.TRACKER_BACKEND_TOKEN) fail("TRACKER_BACKEND_TOKEN is required");
     try {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
+        features, extension: backendExtension,
       });
     } catch (e) {
       fail((e as Error).message);
@@ -79,7 +146,7 @@ async function main(): Promise<void> {
   if (mode === "all" || mode === "server") {
     if (backend) env.TRACKER_BACKEND_URL = backend.url;
     try {
-      const server = await startServer({ env, defects, port: port(values.port) });
+      const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras });
       closers.push(server.close);
       out.mcp = server.url;
       out.defects = server.build.defects;
@@ -89,6 +156,21 @@ async function main(): Promise<void> {
       for (const close of closers) await close();
       if (e instanceof ConfigError) fail(e.message);
       throw e;
+    }
+  }
+  if (fixture) {
+    out.profile = profile;
+    out.features = features;
+    if (backendExtension && out.backend) out.evidence = `${out.backend as string}/build`;
+    if (fixtureControl) {
+      try {
+        const control = await fixture.startControl(port(values["control-port"]));
+        closers.push(control.close);
+        out.control = control.url;
+      } catch (e) {
+        for (const close of closers) await close();
+        fail(`the control listener did not start: ${(e as Error).message}`);
+      }
     }
   }
   if ((out.defects as string[] | undefined)?.length || backendDefects.length) {

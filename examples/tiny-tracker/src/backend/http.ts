@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { timingSafeEqual } from "node:crypto";
 import { ApiError, canonicalJson, Store, type TicketFields } from "./store.js";
 import { applyBackendDefects } from "./defects/index.js";
+import { correctInputRules, type InputRules } from "./input.js";
 
 export interface BackendOptions {
   /** Bearer token the MCP layer must send. */
@@ -13,6 +14,17 @@ export interface BackendOptions {
   port?: number;
   /** Names of backend defects to switch on (see src/backend/defects). */
   defects?: string[];
+  /** Active features (see src/profile.ts). The backend acts on `strict-input`; the others are the fixture layer's. */
+  features?: readonly string[];
+  /**
+   * Routes served beside the API, with their own authorization (the fixture layer's read-only evidence namespace).
+   * Asked first for every request; when it answers false the request goes to the API as usual.
+   */
+  extension?: BackendExtension;
+}
+
+export interface BackendExtension {
+  handle(req: IncomingMessage, res: ServerResponse, url: URL, store: Store): Promise<boolean>;
 }
 
 export interface RunningBackend {
@@ -21,14 +33,20 @@ export interface RunningBackend {
   close(): Promise<void>;
 }
 
-/** The operations the routes call. A backend defect may replace one of them. */
+/**
+ * The operations the routes call: the backend's seams (src/backend/defects/index.ts, BACKEND_SEAMS). A backend
+ * defect may replace one of them.
+ */
 export interface BackendOps {
   patchTicket(store: Store, id: string, fields: TicketFields, ifMatch?: number | "*"):
     ReturnType<Store["patchTicket"]> | Promise<ReturnType<Store["patchTicket"]>>;
+  /** Seam inputRules: used only with the strict-input feature. */
+  inputRules: InputRules;
 }
 
 const correctOps: BackendOps = {
   patchTicket: (store, id, fields, ifMatch) => store.patchTicket(id, fields, ifMatch),
+  inputRules: correctInputRules,
 };
 
 interface Stored {
@@ -74,7 +92,9 @@ function tokenMatches(header: string | undefined, token: string): boolean {
 export async function startBackend(options: BackendOptions): Promise<RunningBackend> {
   const store = new Store();
   const ops: BackendOps = { ...correctOps };
-  applyBackendDefects(options.defects ?? [], ops);
+  const features = options.features ?? [];
+  applyBackendDefects(options.defects ?? [], ops, features);
+  const strictInput = features.includes("strict-input");
   const idempotency = new Map<string, Stored>();
 
   type Reply = { status: number; body?: unknown; headers?: Record<string, string> };
@@ -162,6 +182,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     try {
+      if (options.extension && await options.extension.handle(req, res, new URL(req.url ?? "/", "http://backend.invalid"), store)) return;
       if (!tokenMatches(req.headers.authorization, options.token)) {
         throw new ApiError(401, "unauthorized", "missing or wrong bearer token");
       }
@@ -169,6 +190,13 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       const url = new URL(req.url ?? "/", "http://backend.invalid");
       const body = await readJson(req);
       const key = req.headers["idempotency-key"] as string | undefined;
+      if (strictInput) {
+        // Strict input (rule 10, rule 5): the key's format is checked here, not only by the MCP tool schema, because
+        // other harnesses call this API directly; strings that are not well-formed are refused before anything is
+        // stored, so every stored string can be encoded as UTF-8 and hashed the same way in any language.
+        ops.inputRules.checkKey(key);
+        ops.inputRules.checkStrings(body);
+      }
       if (key !== undefined && method === "POST") {
         // A keyed POST is applied once. The same key with a different request is refused.
         // Store operations for POST are synchronous, so no second request can run between
