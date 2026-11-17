@@ -13,7 +13,7 @@ import { checkCompat, COMPAT_RULES, type Combination } from "../src/compat.js";
 import { DEFECTS, resolveDefects, ungatedDefects } from "../src/defects/index.js";
 import type { Defect } from "../src/defects/types.js";
 import { BACKEND_DEFECTS, BACKEND_SEAMS, backendBanner, backendDefectRefusals, type BackendDefect } from "../src/backend/defects/index.js";
-import { placementMap, PLANNED_DEFECTS, PLANNED_VARIANTS, plannedSeams } from "../src/defect-placement.js";
+import { BUILT_FIXTURE_DEFECTS, placementMap, PLANNED_DEFECTS, PLANNED_VARIANTS, plannedSeams } from "../src/defect-placement.js";
 import { FIXTURE_PROPERTIES, HEADERS, LRT_ASSERTIONS, META_KEYS } from "../src/fixture-properties.js";
 import { REQUIREMENTS } from "../src/requirements.js";
 import { FAULT_POINTS } from "../src/fault-points.js";
@@ -46,9 +46,9 @@ describe("profiles and features", () => {
   });
 
   it("a feature not built yet, an unknown feature or a feature under profile 0.1 stops the command line (exit 2)", async () => {
-    const unbuilt = await runCli(["all", "--features", "lookup"]);
+    const unbuilt = await runCli(["all", "--features", "inflight"]);
     assert.equal(unbuilt.code, 2);
-    assert.match(unbuilt.stderr, /not built in this version: lookup \(arrives in 0\.2\.0\)/);
+    assert.match(unbuilt.stderr, /not built in this version: inflight \(arrives in 0\.3\.0\)/);
     assert.equal(unbuilt.stdout, "");
     const unknown = await runCli(["all"], { TRACKER_FEATURES: "nope" });
     assert.equal(unknown.code, 2);
@@ -202,12 +202,12 @@ describe("the backend defect registry (G5)", () => {
 
   it("refusal rules: unknown name, a seam not built, missing features, a non-loopback bind", () => {
     assert.match(backendDefectRefusals(["nope"], { features: [] }).join(), /unknown backend defect "nope"; known: lost-update/);
-    const fake: BackendDefect = { name: "fake-digest", summary: "", context: "FX-DIG-1", seams: ["digest"], requires: ["execution-records"], apply() {} };
+    const fake: BackendDefect = { name: "fake-journal", summary: "", context: "FX-DUR-1", seams: ["journal"], requires: ["durable"], apply() {} };
     BACKEND_DEFECTS.push(fake);
     try {
-      const r = backendDefectRefusals(["fake-digest"], { features: [] }).join("\n");
-      assert.match(r, /seam\(s\) not built in this version: digest/);
-      assert.match(r, /needs the feature\(s\) execution-records/);
+      const r = backendDefectRefusals(["fake-journal"], { features: [] }).join("\n");
+      assert.match(r, /seam\(s\) not built in this version: journal/);
+      assert.match(r, /needs the feature\(s\) durable/);
     } finally {
       BACKEND_DEFECTS.pop();
     }
@@ -263,7 +263,7 @@ describe("the defect placement map (B11)", () => {
     assert.equal(META_KEYS.idempotencyKey, "dev.writesafety.tiny-tracker/idempotency-key");
     for (const h of Object.values(HEADERS)) assert.match(h, /^Tiny-Tracker-[A-Z][A-Za-z-]+$/);
     assert.deepEqual(Object.keys(LRT_ASSERTIONS), ["LRT-A1", "LRT-A2", "LRT-A3", "LRT-A4", "LRT-A5"]);
-    const claimed = new Set(PLANNED_DEFECTS.flatMap((d) => d.trips));
+    const claimed = new Set([...PLANNED_DEFECTS, ...BUILT_FIXTURE_DEFECTS].flatMap((d) => d.trips));
     const oracle = ["FX-FLT-1", "FX-BLD-1"];
     for (const id of Object.keys(FIXTURE_PROPERTIES)) assert.ok(claimed.has(id as never) || oracle.includes(id), id);
     for (const p of FAULT_POINTS) assert.equal(p.id, `${p.process}/${p.position}/${p.action}`);

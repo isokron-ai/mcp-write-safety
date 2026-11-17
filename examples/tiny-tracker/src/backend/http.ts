@@ -5,8 +5,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { ApiError, canonicalJson, Store, type SectionReply, type TicketFields } from "./store.js";
 import { CommitSinkError, JournalError, storedReplyOf, type CommitSink, type CommittedTransaction, type WriteMeta } from "./commit.js";
-import { isInflight, memoryKeyRecords, type AbortReason, type KeyRecordSeam, type KeyRecordState, type KeyScope } from "./seams.js";
-import { fingerprintHash } from "../digest.js";
+import { isInflight, memoryKeyRecords, type AbortReason, type DigestSeam, type KeyRecordSeam, type KeyRecordState, type KeyScope, type LookupSeam } from "./seams.js";
+import { CanonicalizationError, fingerprintHash } from "../digest.js";
+import { correctDigest, EXECUTION_HEADER, ExecutionLog } from "./execution.js";
+import { correctLookup, evidenceSource, NO_RECORD, NO_RECORD_NOTE, type EvidenceReader } from "./lookup.js";
+import { executionId } from "../records.js";
 import type { Clock } from "../clock.js";
 import { defaultPrincipals, principalFor, type Principal } from "../principals.js";
 import { HEADERS, TAG_PATTERN } from "../fixture-properties.js";
@@ -43,6 +46,12 @@ export interface BackendOptions {
    * 403 run_not_allocated (seams v2.1). Without it a run tag is a tag only.
    */
   runOwner?: (run: string) => string | undefined;
+  /**
+   * Container mode (owner decision, INTERFACES §1.4): a second listener that serves the evidence routes only, on the
+   * address given (for example 0.0.0.0 inside a container), behind the evidence token. The API stays on 127.0.0.1.
+   * Needs an `extension` (the evidence namespace); every other path answers 404 there.
+   */
+  evidenceListen?: { host: string; port: number };
 }
 
 /** What a backend fault hook is told about the write. */
@@ -74,6 +83,10 @@ export interface RunningBackend {
   url: string;
   store: Store;
   bootId: string;
+  /** The read side of the evidence (also store.evidence); undefined without the execution-records feature. */
+  evidence: EvidenceReader | undefined;
+  /** The container-mode evidence listener's URL, when `evidenceListen` was given. */
+  evidenceUrl?: string;
   /** The run reset (Store.dropRun through the commit path, with the key-record seam in use). */
   dropRun(scope: KeyScope, run: string): ReturnType<Store["dropRun"]>;
   close(): Promise<void>;
@@ -102,14 +115,25 @@ export interface BackendOps {
    * the sinks given to startBackend, so they are told after every ledger sink.
    */
   observers?: CommitSink[];
+  /** Seam digest (execution-records): the served canonical bytes and digest of a committed response body. */
+  digest: DigestSeam;
+  /** Seam lookup (lookup): a key's stored reply within the caller's scope. */
+  lookup: LookupSeam;
+  /** The store the seams work on (a backend defect may read it; the correct seams do not). */
+  readonly store: Store;
 }
 
-function correctOps(): BackendOps {
-  return {
-    patchTicket: (store, id, fields, ifMatch) => store.patchTicket(id, fields, ifMatch),
+function correctOps(store: Store): BackendOps {
+  const ops: BackendOps = {
+    patchTicket: (s, id, fields, ifMatch) => s.patchTicket(id, fields, ifMatch),
     inputRules: correctInputRules,
     keyRecord: memoryKeyRecords(),
+    digest: correctDigest,
+    // Reads ops.keyRecord on every call, so a key-record seam put in later (0.3.0) is the one looked up.
+    lookup: correctLookup(() => ops.keyRecord),
+    store,
   };
+  return ops;
 }
 
 function parseIfMatch(header: string | undefined): number | "*" | undefined {
@@ -146,13 +170,36 @@ function tag(value: string | string[] | undefined): string | null {
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * TxRequest.fingerprintHash for a write. A body holding a string that is not well-formed Unicode has no canonical bytes;
+ * with execution-records (or strict-input) such a body is refused before this point. Without them the backend keeps
+ * 0.1.0's behaviour (it accepts the write), and the hash, which no record serves, is left empty.
+ */
+function requestHash(principal: string, method: string, path: string, body: unknown): string {
+  try {
+    return fingerprintHash(principal, method, path, body ?? null);
+  } catch (e) {
+    if (e instanceof CanonicalizationError) return "";
+    throw e;
+  }
+}
+
 export async function startBackend(options: BackendOptions): Promise<RunningBackend> {
   const store = new Store(undefined, options.clock, options.bootId);
   for (const sink of options.sinks ?? []) store.addSink(sink);
   const principals = options.principals ?? defaultPrincipals(options.token);
-  const ops: BackendOps = correctOps();
+  const ops: BackendOps = correctOps(store);
   const features = options.features ?? [];
+  const executionRecords = features.includes("execution-records");
+  const lookupOn = features.includes("lookup");
+  if (lookupOn && !executionRecords) throw new Error("the lookup feature needs the execution-records feature (an operation record names its execution record)");
   applyBackendDefects(options.defects ?? [], ops, features);
+  if (executionRecords) {
+    // An observer: told after the ledger, before any observer a backend defect adds.
+    const executions = new ExecutionLog(() => ops.digest);
+    store.addSink(executions);
+    store.evidence = evidenceSource({ executions, lookup: () => ops.lookup, digest: () => ops.digest, lookupOn, principals: principals.map((p) => p.id) });
+  }
   for (const o of ops.observers ?? []) {
     if (o.role !== "observer") throw new Error(`a backend defect's commit sink must have role "observer" (${o.name})`);
     store.addSink(o);
@@ -174,7 +221,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   type Reply = SectionReply;
 
   /** Synchronous for every correct route (rule 9); a promise only where a backend defect awaits inside its write. */
-  function route(method: string, url: URL, req: IncomingMessage, body: unknown, prepared?: unknown): Reply {
+  function route(method: string, url: URL, req: IncomingMessage, body: unknown, prepared?: unknown, principal?: string): Reply {
     const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     const ifMatch = parseIfMatch(req.headers["if-match"] as string | undefined);
     const b = (body ?? {}) as Record<string, unknown>;
@@ -250,6 +297,21 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     if (parts[0] === "export" && parts.length === 1 && method === "GET") {
       return { status: 200, body: store.export() };
     }
+
+    // Execution records and lookup by key on the API (0.2.0), with the caller's own token: a principal sees its own
+    // records only. The evidence namespace serves the same records to the evidence token (EvidenceReader.serve).
+    if (parts[0] === "executions" && parts.length === 2 && method === "GET" && store.evidence && principal !== undefined) {
+      const record = store.evidence.execution(parts[1]);
+      if (!record || record.principal !== principal) throw new ApiError(404, "not_found", `no execution record ${parts[1]}`);
+      return { status: 200, body: record };
+    }
+    if (parts[0] === "operations" && parts.length === 2 && method === "GET" && lookupOn && principal !== undefined) {
+      // The key is in the path here, so with strict-input its format is checked as a header key would be.
+      if (strictInput) ops.inputRules.checkKey(parts[1]);
+      const record = store.evidence!.operation({ principal }, parts[1]);
+      if (!record) throw new ApiError(404, "no_record", `${NO_RECORD}; ${NO_RECORD_NOTE}`, { key: parts[1] });
+      return { status: 200, body: record };
+    }
     throw new ApiError(404, "no_route", `no route for ${method} ${url.pathname}`);
   }
 
@@ -275,9 +337,12 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         // stored, so every stored string can be encoded as UTF-8 and hashed the same way in any language.
         ops.inputRules.checkKey(key);
         ops.inputRules.checkStrings(body);
+      } else if (executionRecords) {
+        // An execution record serves canonical bytes of the request and the result: every string in them must encode.
+        ops.inputRules.checkStrings(body);
       }
       if (!MUTATING.has(method)) {
-        const reply = await route(method, url, req, body);
+        const reply = await route(method, url, req, body, undefined, principal);
         return send(reply.status, reply.body, reply.headers);
       }
       const keyed = key !== undefined && method === "POST";
@@ -286,8 +351,11 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         principal,
         attribution: { run: tag(req.headers[HEADERS.run.toLowerCase()]), operation: tag(req.headers[HEADERS.operation.toLowerCase()]) },
         // Only a keyed POST records its key: a key header on another write is ignored (no key record is made for it).
-        request: { method, path: url.pathname, key: keyed ? key : null, fingerprint, fingerprintHash: fingerprintHash(principal, method, url.pathname, body ?? null), body: body ?? null },
+        request: { method, path: url.pathname, key: keyed ? key : null, fingerprint, fingerprintHash: requestHash(principal, method, url.pathname, body), body: body ?? null },
       };
+      // The execution record a reply answers for: a commit's own, or on a replay the first write's.
+      const executionHeader = (seq: number | undefined): Record<string, string> =>
+        (executionRecords && seq !== undefined ? { [EXECUTION_HEADER.toLowerCase()]: executionId(seq) } : {});
       // A run tag the fixture layer gave another principal is refused: run tags are scoped per principal. With a run
       // registry wired, a tag it never allocated is refused too (run ids are random; a guessed or stale tag is not a run).
       const runTag = meta.attribution.run;
@@ -307,7 +375,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         const outcome = tx && faults.afterCommit ? await faults.afterCommit({ meta, tx }) : undefined;
         if (outcome === "drop") return void res.destroy();
         if (outcome) return send(outcome.status, outcome.body);
-        send(reply.status, reply.body, reply.headers);
+        send(reply.status, reply.body, { ...reply.headers, ...executionHeader(tx?.kind === "write" ? tx.seq : reply.replayOf) });
       };
       if (keyed) {
         // A keyed POST is applied once. The same key with a different request is refused. From the last lookup to the
@@ -332,7 +400,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
               throw new ApiError(422, "idempotency_key_reused", "this Idempotency-Key was already used for a different request");
             }
             store.replay(meta, seen.status, seen.body, seen.seq);
-            send(seen.status, seen.body, { ...seen.headers, "idempotent-replayed": "true" });
+            send(seen.status, seen.body, { ...seen.headers, ...executionHeader(seen.seq), "idempotent-replayed": "true" });
             return true;
           }
           if (found.state === "pending") {
@@ -350,7 +418,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
             execution_id: t.executionId, result_digest: t.resultDigest, committed_at: t.committedAt,
           };
           store.replay(meta, 410, expired, Number(t.executionId.slice(2)));
-          send(410, expired, { "idempotent-replayed": "true" });
+          send(410, expired, { ...executionHeader(Number(t.executionId.slice(2))), "idempotent-replayed": "true" });
           return true;
         };
         const fenced = (run: string) => {
@@ -444,14 +512,50 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   const server: Server = createServer((req, res) => void handle(req, res));
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
+  // Container mode: the evidence routes only, on the address given, behind the evidence token (the extension checks it).
+  let evidenceServer: Server | undefined;
+  let evidenceUrl: string | undefined;
+  if (options.evidenceListen) {
+    const extension = options.extension;
+    if (!extension) throw new Error("an evidence listener needs the evidence namespace (feature evidence)");
+    evidenceServer = createServer((req, res) => void (async () => {
+      const notHere = () => {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "not_found", message: "this listener serves the read-only evidence routes only, with the evidence token" }));
+      };
+      try {
+        // The evidence namespace's loopback Host check guards a loopback listener against DNS rebinding. This listener
+        // is reached through the container's published port, so it is guarded by the evidence token alone (owner
+        // decision); the request is handed on as a loopback request, and nothing but an evidence route is served.
+        req.headers.host = "127.0.0.1";
+        if (!(await extension.handle(req, res, new URL(req.url ?? "/", "http://evidence.invalid"), store))) notHere();
+      } catch {
+        if (!res.headersSent) notHere();
+      }
+    })());
+    await new Promise<void>((resolve, reject) => {
+      evidenceServer!.once("error", reject);
+      evidenceServer!.listen(options.evidenceListen!.port, options.evidenceListen!.host, resolve);
+    });
+    const a = evidenceServer.address() as AddressInfo;
+    evidenceUrl = `http://${a.family === "IPv6" ? `[${a.address}]` : a.address}:${a.port}`;
+  }
   return {
     url: `http://127.0.0.1:${port}`,
     store,
+    evidence: store.evidence,
+    ...(evidenceUrl ? { evidenceUrl } : {}),
     bootId: store.bootId,
     dropRun: (scope, run) => store.dropRun(scope, run),
-    close: () => new Promise<void>((resolve) => {
-      server.closeAllConnections();
-      server.close(() => resolve());
-    }),
+    close: async () => {
+      if (evidenceServer) {
+        evidenceServer.closeAllConnections();
+        await new Promise<void>((resolve) => evidenceServer!.close(() => resolve()));
+      }
+      await new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      });
+    },
   };
 }

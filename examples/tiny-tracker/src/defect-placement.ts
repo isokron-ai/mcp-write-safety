@@ -20,10 +20,11 @@ export type Placement = string;
 
 const TOOL_PARTS = ["handler", "description", "input", "annotations", "mutates"] as const;
 
-/** The pieces one MCP-layer defect changes, found by applying it to a fresh correct build. */
+/** The pieces one MCP-layer defect changes, found by applying it to a fresh correct build with the features it needs. */
 export function placementsOf(defectName: string): Placement[] {
-  const base = createBuild([]);
-  const withDefect = createBuild([defectName]);
+  const features = DEFECTS.find((d) => d.name === defectName)?.requires ?? [];
+  const base = createBuild([], features);
+  const withDefect = createBuild([defectName], features);
   const out: Placement[] = [];
   for (const [name, tool] of withDefect.tools) {
     const before = base.tools.get(name)!;
@@ -79,18 +80,6 @@ export interface PlannedDefect {
 }
 
 export const PLANNED_DEFECTS: readonly PlannedDefect[] = [
-  { name: "digest-of-current-state", layer: "backend", trips: ["FX-DIG-1"], placement: ["backend:digest"], requires: ["execution-records"], since: "0.2.0",
-    summary: "The digest is computed over the object's current state, so it changes after a later update." },
-  { name: "replay-digest-mismatch", layer: "backend", trips: ["FX-DIG-2"], placement: ["backend:digest", "backend:keyRecord"], requires: ["execution-records"], since: "0.2.0",
-    summary: "A replay re-renders the result with a fresh timestamp, so its digest differs from the first answer's." },
-  { name: "digest-not-canonical", layer: "backend", trips: ["FX-DIG-3"], placement: ["backend:digest"], requires: ["execution-records"], since: "0.2.0",
-    summary: "The hash is over insertion-ordered JSON, so recomputation from the served bytes does not match." },
-  { name: "lookup-wrong-record", layer: "backend", trips: ["FX-LOOK-1"], placement: ["backend:lookup"], requires: ["lookup"], since: "0.2.0",
-    summary: "A lookup returns the most recent record whose key shares a prefix with the key asked for." },
-  { name: "lookup-reexecutes", layer: "mcp", trips: ["FX-LOOK-2", "MWS-ANN-1"], placement: ["tool:get_operation"], requires: ["lookup"], since: "0.2.0",
-    summary: "get_operation repeats the create when the key is unknown; a read-only tool changes state." },
-  { name: "lookup-unscoped", layer: "backend", trips: ["FX-LOOK-3"], placement: ["backend:lookup"], requires: ["lookup", "principals"], since: "0.2.0",
-    summary: "A lookup returns another principal's record." },
   { name: "key-record-not-durable", layer: "backend", trips: ["FX-DUR-1", "MWS-RETRY-2"], placement: ["backend:journal"], requires: ["durable"], since: "0.3.0",
     summary: "Data is journalled but key records stay in memory; after a whole-stack restart a repeat duplicates." },
   { name: "key-record-after-effect", layer: "backend", trips: ["FX-DUR-2"], placement: ["backend:journal"], requires: ["durable"], since: "0.3.0",
@@ -111,6 +100,26 @@ export const PLANNED_DEFECTS: readonly PlannedDefect[] = [
     summary: "After a lost backend answer, a lookup miss is reported as not applied, though the held request can still land." },
   { name: "settled-reported-unknown", layer: "mcp", trips: ["FX-LOOK-4"], placement: ["tool:create_ticket"], requires: ["lookup", "variant:settle-by-lookup"], since: "0.3.0",
     summary: "The lookup finds the write applied, and the answer still says unknown." },
+];
+
+/**
+ * Fixture defects that are built (moved here from PLANNED_DEFECTS when their release builds them): what each trips, where
+ * it lands and what it needs. The backend ones are in src/backend/defects, the MCP-layer one in src/defects (the main
+ * registries, with `requires`); test/fx.test.ts shows each trips its own FX- property and only the overlaps listed here.
+ */
+export const BUILT_FIXTURE_DEFECTS: readonly PlannedDefect[] = [
+  { name: "digest-of-current-state", layer: "backend", trips: ["FX-DIG-1"], placement: ["backend:digest"], requires: ["execution-records"], since: "0.2.0",
+    summary: "The digest is computed over the object's current state, so it changes after a later update." },
+  { name: "replay-digest-mismatch", layer: "backend", trips: ["FX-DIG-2"], placement: ["backend:keyRecord"], requires: ["execution-records"], since: "0.2.0",
+    summary: "A replay re-renders the result with a fresh timestamp, so its digest differs from the first answer's." },
+  { name: "digest-not-canonical", layer: "backend", trips: ["FX-DIG-3"], placement: ["backend:digest"], requires: ["execution-records"], since: "0.2.0",
+    summary: "The hash is over insertion-ordered JSON, so recomputation from the served bytes does not match." },
+  { name: "lookup-wrong-record", layer: "backend", trips: ["FX-LOOK-1"], placement: ["backend:lookup"], requires: ["execution-records", "lookup"], since: "0.2.0",
+    summary: "A lookup returns the most recent record whose key shares a prefix with the key asked for." },
+  { name: "lookup-reexecutes", layer: "mcp", trips: ["FX-LOOK-2", "MWS-ANN-1"], placement: ["tool:get_operation"], requires: ["execution-records", "lookup"], since: "0.2.0",
+    summary: "get_operation repeats the create when the key is unknown; a read-only tool changes state." },
+  { name: "lookup-unscoped", layer: "backend", trips: ["FX-LOOK-3"], placement: ["backend:lookup"], requires: ["execution-records", "lookup", "principals"], since: "0.2.0",
+    summary: "A lookup returns another principal's record." },
 ];
 
 /** Planned correct variants (not defects), for the compatibility table and the placement map. */

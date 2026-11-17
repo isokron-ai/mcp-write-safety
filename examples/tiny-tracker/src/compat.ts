@@ -113,6 +113,18 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     check: (c) => has(c.features, "strict-input") && c.layout === "server"
       ? "strict-input is a backend feature; name it where the backend runs (`all` or `backend`)" : undefined,
   },
+  // ---- stream A (CMP-20 to CMP-29) ----
+  {
+    id: "CMP-20", post01: false,
+    check: (c) => has(c.features, "lookup") && !has(c.features, "execution-records")
+      ? "the lookup feature needs execution-records (an operation record names the execution record of its write); name both" : undefined,
+  },
+  {
+    // The named set: from 0.2.0 the default profile has principals, and a `server` start must not be refused for it.
+    id: "CMP-21", post01: true,
+    check: (c) => has(c.named, "principals") && c.layout === "server"
+      ? "principals is a backend feature; name it where the backend runs (`all` or `backend`)" : undefined,
+  },
 ];
 
 /** The rules a combination breaks, as messages. Empty: it may start. */

@@ -171,10 +171,11 @@ Requirement IDs come from `src/requirements.ts`, the only file that spells them.
 | `add-label-replaces-list` | MWS-ANN-2 | add_label replaces the whole label list with the one label it was given | A non-destructive tool removes labels the call did not name (also MWS-ANN-5) | GitHub GH-07; Kubernetes K8S-02 |
 | `token-in-error` | MWS-SEC-1 | get_ticket's error result includes the backend request with its Authorization header | The backend credential (a canary) appears in an error result | GitHub GH-09 (class: credential in a tool result) |
 
-Defects that need a feature (`requires`): none yet. A defect listed here runs only with the features in its "Requires" column on; `--defect all` and a requirement ID take it only when they are active, and naming it without them stops the server (exit 2). The 0.1 profile and the table above are unchanged by them.
+Defects that need a feature (`requires`). A defect listed here runs only with the features in its "Requires" column on; `--defect all` and a requirement ID take it only when they are active, and naming it without them stops the server (exit 2). The 0.1 profile and the table above are unchanged by them.
 
 | Flag | Requirement | Requires | What goes wrong | What the self-test sees |
 |---|---|---|---|---|
+| `lookup-reexecutes` | MWS-ANN-1 | execution-records, lookup | `get_operation` (declared read-only) sends a create with the key when the backend has no record of it, so a lookup writes (fixture property FX-LOOK-2) | MWS-ANN-1: calling the read-only lookup tool changed the state |
 
 Backend defect:
 

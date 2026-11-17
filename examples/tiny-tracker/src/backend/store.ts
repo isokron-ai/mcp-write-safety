@@ -14,6 +14,7 @@ import {
   type RefusedTransaction, type ReplayedTransaction, type SeedState, type TxMeta,
 } from "./commit.js";
 import type { KeyRecordSeam, KeyScope } from "./seams.js";
+import type { EvidenceReader } from "./lookup.js";
 
 export type Status = "open" | "in_progress" | "closed" | "archived";
 export const STATUSES: readonly Status[] = ["open", "in_progress", "closed", "archived"];
@@ -209,7 +210,7 @@ export class Store {
   /** The applied-write log keeps this many entries per ticket (INTERFACES 1.1). */
   static readonly APPLIED_CAP = 20;
   /** Fields that are configuration or bookkeeping, not state: never snapshotted. */
-  static readonly WIRING_FIELDS = ["clock", "bootId", "seed", "journal", "sinks", "stopped", "section", "keyRecords", "runOwner"] as const;
+  static readonly WIRING_FIELDS = ["clock", "bootId", "seed", "journal", "sinks", "stopped", "section", "keyRecords", "runOwner", "evidence"] as const;
 
   readonly projects = new TrackedMap<string, Project>();
   readonly tickets = new TrackedMap<string, Ticket>();
@@ -231,6 +232,12 @@ export class Store {
   keyRecords: KeyRecordSeam | undefined = undefined;
   /** Which principal a run belongs to, when the fixture layer allocated it (undefined: unknown run). Set by startBackend. */
   runOwner: ((run: string) => string | undefined) | undefined = undefined;
+  /**
+   * The read side of the evidence (execution records and lookup by key; stream A), when the execution-records feature
+   * is on. Set by startBackend. The evidence namespace (stream B) answers GET /executions/:id and GET /operations/:key
+   * with `evidence.serve(url.pathname, url.searchParams)`.
+   */
+  evidence: EvidenceReader | undefined = undefined;
 
   constructor(seedProjects: string[] = ["inbox"], readonly clock: Clock = wallClock, readonly bootId: string = randomBytes(8).toString("hex")) {
     for (const key of seedProjects) this.createProject(key, key);

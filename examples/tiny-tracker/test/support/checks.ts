@@ -743,6 +743,9 @@ async function probeArgs(stack: Stack, p: string, t: any): Promise<Record<string
     remove_label: { id: t.id, label_id: t.labels[0].id },
     set_labels: { id: t.id, labels: ["z"], expected_version: t.version },
     close_ticket: { id: t.id },
+    // The lookup tools (feature lookup): a key nobody used, and an execution id.
+    get_operation: { idempotency_key: stack.prefix(`unused-${randomBytes(4).toString("hex")}`) },
+    get_execution: { id: "X-1" },
   };
 }
 

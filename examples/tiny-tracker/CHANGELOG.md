@@ -30,6 +30,14 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 - A failure completing a key record after the journal append no longer skips the ledger: the ledger is told, then the store stops.
 - The 0.1.0 entry below says "41 deliberate defects"; 0.1.0 shipped 47 MCP-layer defects and 1 backend defect.
 
+### Stream A
+- Feature `execution-records`: one execution record per applied write (`X-<seq>`), with the principal, the run and operation tags, the request's `fingerprint_hash` and the committed result's RFC 8785 bytes and digest. Each committed answer, and each replay, carries `Tiny-Tracker-Execution`; `GET /executions/:id` with the caller's token shows that principal's records.
+- Feature `lookup`: `GET /operations/:key` in the caller's own scope; a miss answers "no record of this key now", which never means nothing was written. New read-only tools `get_operation` and `get_execution`, listed only with the feature.
+- Feature `principals`: `TRACKER_BACKEND_TOKENS_FILE` (0600 JSON) gives two or more principals. Every token must differ and none may be on the command line; records and lookups are scoped to the principal.
+- The evidence read side (`EvidenceReader`) with the `?principal=<id>` rule, and `TRACKER_EVIDENCE_LISTEN` (container mode): the evidence routes alone, on another address, behind the evidence token.
+- Six fixture defects, each needing its features: `digest-of-current-state`, `replay-digest-mismatch`, `digest-not-canonical`, `lookup-wrong-record`, `lookup-unscoped` (backend) and `lookup-reexecutes` (MCP layer, MWS-ANN-1).
+- Compatibility rules CMP-20 (`lookup` needs `execution-records`) and CMP-21 (`principals` runs where the backend runs).
+
 ## 0.1.0 (16 Nov 2026) for MWS 0.9
 
 First published version. Follows the MCP Write-Safety Requirements 0.9 (37 requirements).

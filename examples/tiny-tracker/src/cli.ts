@@ -10,6 +10,7 @@ import { checkArgv, checkDistinct, TokenError } from "./tokens.js";
 import { resolveDefects } from "./defects/index.js";
 import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension } from "./backend/http.js";
+import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -97,15 +98,52 @@ async function main(): Promise<void> {
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
   if (tokenDir !== undefined && !needsFixtureLayer(features, fixtureControl)) refusals.push("--token-dir has no effect without a fixture feature or --fixture-control");
-  // ---- lane lead: principals (stream A replaces this refusal when it wires the file and the principals feature) ----
-  if (env.TRACKER_BACKEND_TOKENS_FILE !== undefined) refusals.push("TRACKER_BACKEND_TOKENS_FILE is read from 0.2.0 (feature principals); this build has one principal, p-default, holding TRACKER_BACKEND_TOKEN");
+  // ---- stream A ----
+  // Principals (feature principals, design rule 7): TRACKER_BACKEND_TOKENS_FILE names a 0600 JSON file of principals and
+  // their tokens. Without it there is one principal, p-default, holding TRACKER_BACKEND_TOKEN. In `all` the MCP server
+  // talks to the backend as the first principal, unless TRACKER_BACKEND_TOKEN is another principal's token. Profile 0.1
+  // never reads the file, as 0.1.0 did not; `server` does not either (its backend is another process).
+  let principals: Principal[] | undefined;
+  const principalsFile = env.TRACKER_BACKEND_TOKENS_FILE;
+  if (principalsFile !== undefined && profile !== "0.1" && layout !== "server") {
+    if (!features.includes("principals")) refusals.push("TRACKER_BACKEND_TOKENS_FILE needs the principals feature");
+    else {
+      try {
+        principals = loadPrincipalsFile(principalsFile);
+      } catch (e) {
+        if (e instanceof PrincipalError || (e as NodeJS.ErrnoException).code !== undefined) fail(`${(e as Error).message}. Not starting.`);
+        throw e;
+      }
+      if (env.TRACKER_BACKEND_TOKEN === undefined) env.TRACKER_BACKEND_TOKEN = principals[0].token;
+      else if (mode === "all" && !principals.some((p) => p.token === env.TRACKER_BACKEND_TOKEN)) {
+        refusals.push("with TRACKER_BACKEND_TOKENS_FILE, TRACKER_BACKEND_TOKEN must be one of its principals' tokens (the MCP server uses it)");
+      }
+    }
+  }
+  // Container mode (owner decision): TRACKER_EVIDENCE_LISTEN=HOST:PORT adds a listener that serves only the evidence
+  // routes, behind the evidence token, on that address (0.0.0.0 inside a container). The API stays on loopback.
+  let evidenceListen: { host: string; port: number } | undefined;
+  const listen = env.TRACKER_EVIDENCE_LISTEN;
+  if (listen !== undefined && profile !== "0.1") {
+    const m = /^(\[[0-9a-fA-F:]+\]|[0-9.]+|localhost):([0-9]{1,5})$/.exec(listen);
+    if (!m || Number(m[2]) > 65535) refusals.push(`TRACKER_EVIDENCE_LISTEN must be HOST:PORT (an IP address or localhost), not "${listen}"`);
+    else if (!features.includes("evidence") || layout !== "all") refusals.push("TRACKER_EVIDENCE_LISTEN needs the evidence feature and `tiny-tracker all`");
+    else {
+      evidenceListen = { host: m[1].replace(/^\[|\]$/g, ""), port: Number(m[2]) };
+      const loopback = ["127.0.0.1", "localhost", "::1"].includes(evidenceListen.host);
+      if (!loopback && (mcpDefects.length > 0 || backendDefects.length > 0)) refusals.push("a build with defects keeps every listener on loopback; TRACKER_EVIDENCE_LISTEN on another address is refused");
+    }
+  }
+  // ---- end stream A ----
   if (refusals.length > 0) fail(`${refusals.join("; ")}. Not starting.`);
 
   if (mode === "all" && !env.TRACKER_BACKEND_TOKEN) env.TRACKER_BACKEND_TOKEN = `tt-local-${randomBytes(16).toString("hex")}`;
 
   // Token rules that hold with or without the fixture layer: all tokens differ, and none is on the command line.
   try {
-    const tokens = { backend: env.TRACKER_BACKEND_TOKEN, evidence: env.TRACKER_EVIDENCE_TOKEN, control: env.TRACKER_CONTROL_TOKEN };
+    const tokens: Record<string, string | undefined> = { backend: env.TRACKER_BACKEND_TOKEN, evidence: env.TRACKER_EVIDENCE_TOKEN, control: env.TRACKER_CONTROL_TOKEN };
+    // stream A: every principal's token joins the checks (the backend token is one of them, so it is named once).
+    for (const p of principals ?? []) if (p.token !== env.TRACKER_BACKEND_TOKEN) tokens[`principal ${p.id}`] = p.token;
     checkDistinct(tokens);
     checkArgv(process.argv.slice(2), tokens);
   } catch (e) {
@@ -126,6 +164,7 @@ async function main(): Promise<void> {
         backendDefects: layout === "server" ? null : backendDefects,
         variants: layout === "backend" ? null : variantNames,
         env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN, tokenDir,
+        ...(principals ? { principals } : {}), // stream A
       });
     } catch (e) {
       if (e instanceof layer.TokenError) fail(e.message);
@@ -153,12 +192,14 @@ async function main(): Promise<void> {
         features, extension: backendExtension,
         // Run tags are checked against the registry only when the control listener allocates runs (seams v2.1).
         ...(fixture ? { bootId: fixture.descriptor.bootId, ...(fixtureControl ? { runOwner: fixture.runOwner } : {}) } : {}),
+        ...(principals ? { principals } : {}), ...(evidenceListen ? { evidenceListen } : {}), // stream A
       });
     } catch (e) {
       fail((e as Error).message);
     }
     closers.push(backend.close);
     out.backend = backend.url;
+    if (backend.evidenceUrl) out.evidence_listener = backend.evidenceUrl; // stream A: container mode
     if (backendDefects.length) out.backend_defects = backendDefects;
   }
   if (mode === "all" || mode === "server") {

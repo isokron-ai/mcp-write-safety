@@ -22,14 +22,19 @@ import type { FeatureName } from "../../profile.js";
 import type { RequirementId } from "../../requirements.js";
 import type { FixturePropertyId } from "../../fixture-properties.js";
 import { lostUpdate } from "./lost-update.js";
+import { digestOfCurrentState } from "./digest-of-current-state.js";
+import { replayDigestMismatch } from "./replay-digest-mismatch.js";
+import { digestNotCanonical } from "./digest-not-canonical.js";
+import { lookupWrongRecord } from "./lookup-wrong-record.js";
+import { lookupUnscoped } from "./lookup-unscoped.js";
 
 /** Named places in the backend a defect may replace. */
 export const BACKEND_SEAMS = {
   patchTicket: { wired: true, since: "0.1.0", note: "PATCH /tickets/:id: read, check the version, write, with no await between" },
   inputRules: { wired: true, since: "0.2.0", note: "Idempotency-key format and well-formed strings (feature strict-input)" },
-  digest: { wired: false, since: "0.2.0", note: "The canonical bytes and digest of a committed result (execution records)" },
+  digest: { wired: true, since: "0.2.0", note: "The canonical bytes and digest of a committed result (execution records)" },
   keyRecord: { wired: true, since: "0.1.0", note: "Reading and completing a key record, scoped by principal (src/backend/seams.ts); pending and tombstone states from 0.3.0" },
-  lookup: { wired: false, since: "0.2.0", note: "GET /operations/:key" },
+  lookup: { wired: true, since: "0.2.0", note: "A key's record within the caller's scope: GET /operations/:key and the get_operation tool (src/backend/lookup.ts)" },
   journal: { wired: false, since: "0.3.0", note: "The JSONL journal: one commit line per transaction, flushed before the answer" },
   keyExpiry: { wired: false, since: "0.3.0", note: "Key retention and tombstones" },
 } as const satisfies Record<string, { wired: boolean; since: string; note: string }>;
@@ -48,7 +53,7 @@ export interface BackendDefect {
   apply(ops: BackendOps): void;
 }
 
-export const BACKEND_DEFECTS: BackendDefect[] = [lostUpdate];
+export const BACKEND_DEFECTS: BackendDefect[] = [lostUpdate, digestOfCurrentState, replayDigestMismatch, digestNotCanonical, lookupWrongRecord, lookupUnscoped];
 
 /** The banner a backend defect build prints on stderr (the MCP layer's banner names them with a backend: prefix). */
 export function backendBanner(names: readonly string[]): string {

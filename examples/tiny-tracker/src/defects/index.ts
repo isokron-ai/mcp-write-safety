@@ -50,6 +50,7 @@ import { defect as shapeTextInvitesRetry } from "./shape-text-invites-retry.js";
 import { defect as shapeWrongVersion } from "./shape-wrong-version.js";
 import { defect as shapeMissingFailed } from "./shape-missing-failed.js";
 import { defect as shapeTextSaysAllSaved } from "./shape-text-says-all-saved.js";
+import { defect as lookupReexecutes } from "./lookup-reexecutes.js";
 
 export type { Defect } from "./types.js";
 
@@ -102,6 +103,7 @@ export const DEFECTS: Defect[] = [
   missingAnnotations,
   setLabelsNonDestructive,
   tokenInError,
+  lookupReexecutes,
 ];
 
 /** The defects that need no feature: the 0.1 set (47), the whole of `--defect all` under profile 0.1. */
