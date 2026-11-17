@@ -8,7 +8,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { compareRuns, GENERATORS } from "./repro-known-answers.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+import { compareRuns, GENERATORS, sampleRows } from "./repro-known-answers.js";
 import { COMPAT_RULES } from "../src/compat.js";
 
 const root = (p: string) => fileURLToPath(new URL(`../../${p}`, import.meta.url));
@@ -83,8 +86,20 @@ describe("known-answer reproducibility (test/repro-known-answers.ts)", () => {
     assert.deepEqual(compareRuns([]), ["no runs"]);
   });
 
-  it("has the surface generator registered", () => {
-    assert.ok(GENERATORS.some((g) => g.name === "surface"));
+  it("has the surface, the 0.4.0 selection and the expected/ generator registered", () => {
+    for (const name of ["surface", "select-0.4.0", "expected-sample"]) assert.ok(GENERATORS.some((g) => g.name === name), name);
+  });
+
+  it("the expected/ sample takes the correct builds and every 40th row of the 0.4.0 matrix", () => {
+    const list = JSON.parse(read(root("expected/builds-0.4.0.json"))) as { builds: Array<{ label: string }> };
+    const rows = sampleRows(list.builds);
+    assert.ok(rows.filter((r) => /correct build$/.test(r.label)).length >= 4);
+    assert.ok(rows.length < 30, `${rows.length} rows`);
+  });
+
+  it("the 0.4.0 build list is the selector's output, byte for byte (expected/select-0.4.0.mjs)", async () => {
+    const generator = GENERATORS.find((g) => g.name === "select-0.4.0")!;
+    assert.equal((await generator.generate(0)).toString("utf8"), read(root("expected/builds-0.4.0.json")));
   });
 });
 
@@ -98,16 +113,46 @@ describe("the kit's documents", () => {
     });
   }
 
-  it("the OpenAPI file declares every evidence and control path and the 501 shape", () => {
+  it("the OpenAPI file declares exactly the routes the source serves, the 501 shape and the keyed codes", () => {
     const api = read(root("openapi.yaml"));
     assert.match(api, /^openapi: 3\.1\.\d+$/m);
-    for (const path of ["/projects:", "/tickets:", "/tickets/{id}:", "/batch:", "/export:", "/build:", "/ledger:", "/executions/{id}:",
-      "/operations/{key}:", "/_fixture/runs:", "/_fixture/runs/{run}/reset:", "/_fixture/faults:", "/_fixture/clock:"]) {
-      assert.ok(api.includes(`  ${path}`), path);
+    assert.doesNotMatch(api, /Status: draft|Planned \(0\.[23]\.0\)/, "finalized for 0.4.0");
+    // Every route of src/backend/http.ts, src/backend/durability.ts (fence), src/fixture/evidence.ts and
+    // src/fixture/control.ts, and nothing else.
+    const routes = ["/projects", "/projects/{key}", "/tickets", "/tickets/{id}", "/tickets/{id}/comments", "/tickets/{id}/labels",
+      "/tickets/{id}/labels/{labelId}", "/batch", "/export", "/build", "/ledger", "/executions", "/executions/{id}", "/operations/{key}",
+      "/operations/{key}/fence", "/_fixture/runs", "/_fixture/runs/{run}/reset", "/_fixture/faults", "/_fixture/clock"];
+    const declared = [...api.matchAll(/^  (\/[^:]*):$/gm)].map((m) => m[1]);
+    assert.deepEqual([...declared].sort(), [...routes].sort());
+    for (const code of ["in_progress", "key_fenced", "run_reset", "needs_supervise", "key_expired", "principal_required", "not_enabled", "no_record"]) {
+      assert.match(api, new RegExp(`\\b${code}\\b`), code);
     }
+    assert.match(api, /"410": \{ \$ref: "#\/components\/responses\/KeyExpired" \}/);
     assert.match(api, /available_from/);
     assert.match(api, /Tiny-Tracker-Run/);
-    assert.match(api, /Status: draft/);
+    assert.match(api, /TRACKER_EVIDENCE_LISTEN/);
+  });
+
+  it("the OpenAPI file validates as OpenAPI 3.1 (verify/python/check_openapi.py; skipped without openapi-spec-validator)", async (t) => {
+    const { py } = await import("./support/python.js");
+    const python = process.env.TT_OPENAPI_PYTHON;
+    const r = python
+      ? await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+        const { spawn } = require("node:child_process") as typeof import("node:child_process");
+        const c = spawn(python, ["-I", root("verify/python/check_openapi.py")]);
+        let stdout = "", stderr = "";
+        c.stdout.on("data", (d) => { stdout += d; });
+        c.stderr.on("data", (d) => { stderr += d; });
+        c.on("exit", (code) => resolve({ code, stdout, stderr }));
+        c.on("error", () => resolve({ code: 3, stdout, stderr: "no such python" }));
+      })
+      : await py([root("verify/python/check_openapi.py")]);
+    if (r.code === 3 || (r.code !== 0 && /ENOENT|not found/.test(r.stderr))) {
+      t.skip("openapi-spec-validator is not installed (CI installs it; TT_OPENAPI_PYTHON names a python that has it)");
+      return;
+    }
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /valid OpenAPI 3\.1/);
   });
 
   it("the patterns page lists every MCP-layer defect", async () => {
