@@ -19,8 +19,8 @@ const GATE = process.env.TT_GATE === "1";
 const needPython = spawnSync("python3", ["--version"]).status === 0 || GATE ? false : "python3 is not on PATH";
 
 const verdicts = (r: FxCheckReport) => Object.fromEntries(r.findings.map((f) => [f.id, f.verdict]));
-const run = (f: FakeFixture, extra: { passive?: boolean; second?: boolean } = {}) => fxCheck({
-  backend: f.backend, mcp: f.mcp, control: f.control, passive: extra.passive, dropWaitMs: 800,
+const run = (f: FakeFixture, extra: { probe?: boolean; second?: boolean } = {}) => fxCheck({
+  backend: f.backend, mcp: f.mcp, control: f.control, probe: extra.probe ?? true, dropWaitMs: 800,
   tokens: { evidence: f.tokens.evidence, backend: f.tokens.backend, control: f.tokens.control, ...(extra.second === false ? {} : { second: f.tokens.second }) },
 });
 
@@ -68,13 +68,15 @@ describe("fx-check", () => {
     });
   }
 
-  it("--passive writes nothing; without a second principal FX-LOOK-3 is not checked; missing routes are named", async () => {
+  it("read-only by default (no --probe) writes nothing; without a second principal FX-LOOK-3 is not checked; missing routes are named", async () => {
     const f = await startFakeFixture({ notBuilt: ["/operations"] });
     try {
       const before = f.executions();
-      const passive = verdicts(await run(f, { passive: true }));
+      const passive = verdicts(await run(f, { probe: false }));
       assert.equal(f.executions(), before, "no write");
       assert.equal(passive["FX-DIG-1"], "not checked");
+      assert.equal(passive["FX-LOOK-1"], "not checked");
+      assert.equal(passive["FX-FLT-1"], "not checked");
       assert.equal(passive["FX-BLD-1"], "held");
       const r = await run(f, { second: false });
       const v = verdicts(r);
@@ -91,12 +93,15 @@ describe("fx-check", () => {
     try {
       const env = { TRACKER_EVIDENCE_TOKEN: f.tokens.evidence, TRACKER_BACKEND_TOKEN: f.tokens.backend, TRACKER_CONTROL_TOKEN: f.tokens.control, FX_CHECK_SECOND_TOKEN: f.tokens.second };
       const out = sink();
-      assert.equal(await main(["--backend", f.backend, "--mcp", f.mcp, "--control", f.control], env, out.stream, sink().stream), 1, "a violated property exits 1");
+      assert.equal(await main(["--backend", f.backend, "--mcp", f.mcp, "--control", f.control, "--probe"], env, out.stream, sink().stream), 1, "a violated property exits 1");
       assert.match(out.text(), /^FX-LOOK-3 +violated/m);
       assert.match(out.text(), /fx-check: \d+ held, 1 violated/);
       for (const t of Object.values(f.tokens)) assert.ok(!out.text().includes(t));
       const json = sink();
-      assert.equal(await main(["--backend", f.backend, "--passive", "--json"], env, json.stream, sink().stream), 0);
+      const writesBefore = f.executions();
+      assert.equal(await main(["--backend", f.backend, "--mcp", f.mcp, "--control", f.control, "--json"], env, json.stream, sink().stream), 0, "read-only by default: the unscoped lookup is not probed");
+      assert.equal(f.executions(), writesBefore, "the command line writes nothing without --probe");
+      assert.equal(JSON.parse(json.text()).probes.run, null, "no probe run allocated");
       assert.equal(JSON.parse(json.text()).fx_check, "fx-check/1");
       const err = sink();
       assert.equal(await main(["--backend", `${f.backend}/?t=${f.tokens.evidence}`], env, sink().stream, err.stream), 2);
@@ -106,7 +111,7 @@ describe("fx-check", () => {
       const dir = mkdtempSync(join(tmpdir(), "fxc-"));
       try {
         writeFileSync(join(dir, "evidence.token"), f.tokens.evidence, { mode: 0o600 });
-        assert.equal(await main(["--backend", f.backend, "--passive", "--token-dir", dir], {}, sink().stream, sink().stream), 0, "the token folder is read");
+        assert.equal(await main(["--backend", f.backend, "--token-dir", dir], {}, sink().stream, sink().stream), 0, "the token folder is read");
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

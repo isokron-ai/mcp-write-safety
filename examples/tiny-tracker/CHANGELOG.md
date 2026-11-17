@@ -22,7 +22,7 @@ Groundwork for the shared-fixture releases (0.2.0 on). The default build's surfa
 
 ### Stream C
 - `harness/`: the lost-response contract adapter 0.2.0 (`harness/adapters/tiny_tracker.py`), pinned to the contract at `92bf1ba`. It counts effects from the execution ledger, drops the lost response server-side (`mcp/after-backend-reply/drop`), serves exactly one digest (`result_digest`), recomputes it with the domain tag, and recovers by key alone through `get_operation`. A3's key-only verdict is labelled self-attested until the driver compares recovered digests. `harness/adapter_config.py` prints a config for a running build; `harness/selfcheck.py` exercises the adapter, or runs the driver itself.
-- `fx-check` (`src/fx-check.ts`): checks a running fixture's FX- properties through its evidence API and answers each one held, violated, not checked or not applicable.
+- `fx-check` (`src/fx-check.ts`): checks a running fixture's FX- properties through its evidence API and answers each one held, violated, not checked or not applicable. Read-only by default; `--probe` writes probe tickets in a run of its own and resets it.
 - `expected/generate.mjs`: generates known-answer files keyed by `build_hash`, by running each build; `expected/builds-0.2.0.json` lists the 0.2.0 builds.
 - `verify/python/tt_recount.py`: recounts executions and objects from the export, the ledger, the execution records and (from 0.3.0) the journal, independently of tiny-tracker.
 

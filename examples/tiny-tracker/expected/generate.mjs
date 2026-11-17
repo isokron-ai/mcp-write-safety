@@ -72,7 +72,7 @@ async function buildHash(state, tokens) {
 
 async function fixtureAnswers(state, tokens) {
   const { fxCheck } = await import(pathToFileURL(join(ROOT, "dist", "src", "fx-check.js")).href);
-  const report = await fxCheck({ backend: state.backend, mcp: state.mcp, control: state.control, tokens });
+  const report = await fxCheck({ backend: state.backend, mcp: state.mcp, control: state.control, tokens, probe: true });
   return Object.fromEntries(report.findings.map((f) => [f.id, f.verdict]));
 }
 

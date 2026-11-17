@@ -29,11 +29,11 @@ python3 -I harness/selfcheck.py --config config.tiny-tracker.json --driver /path
 
 ```sh
 TRACKER_EVIDENCE_TOKEN_FILE=~/.tt-tokens/evidence.token TRACKER_BACKEND_TOKEN=... \
-  node dist/src/fx-check.js --backend http://127.0.0.1:4601 --mcp http://127.0.0.1:4600/mcp --control http://127.0.0.1:4602
+  node dist/src/fx-check.js --backend http://127.0.0.1:4601 --mcp http://127.0.0.1:4600/mcp --control http://127.0.0.1:4602 --probe
 ```
 
 - Each property gets one answer: `held`, `violated`, `not checked` (with the reason) or `not applicable` (the build does not run the feature it needs).
-- To probe, it writes a few tickets titled `fx-check probe ...` under its own keys, in a run of its own, and resets that run at the end. `--passive` writes nothing.
+- It is read-only by default: it writes nothing and checks only what is already recorded, so the properties that need a write are `not checked`. With `--probe` it writes a few tickets titled `fx-check probe ...` under its own keys, in a run of its own, and resets that run at the end.
 - FX-LOOK-3 needs a second principal's token in `FX_CHECK_SECOND_TOKEN`.
 - Exit codes: 0 when nothing is violated, 1 when a property is violated, 2 when the setup cannot be used.
 

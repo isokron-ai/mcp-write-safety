@@ -3,7 +3,7 @@
 // API (FIXTURE.md), from outside, the way another harness would. It works
 // against any server that declares the endpoints, not only this one.
 //
-//   fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--passive] [--json]
+//   fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--probe] [--json]
 //
 // Tokens come from the environment or a file, never from the command line:
 //   TRACKER_EVIDENCE_TOKEN (or _FILE, or DIR/evidence.token)   needed
@@ -13,11 +13,12 @@
 //
 // Each property gets one answer: held, violated, not checked (with the
 // reason: an endpoint not built, a token not given) or not applicable (the
-// build does not run the feature it needs). The probes write a few tickets
-// (title "fx-check probe ...") under their own keys and operation tags, in a
-// run of their own when the control listener is given; that run is reset at
-// the end where the build can reset runs. --passive writes nothing and checks
-// only what is already recorded.
+// build does not run the feature it needs). By default fx-check is read-only:
+// it writes nothing and checks only what is already recorded, so the
+// properties that need a write are "not checked". With --probe it writes a
+// few tickets (title "fx-check probe ...") under their own keys and operation
+// tags, in a run of their own when the control listener is given; that run is
+// reset at the end where the build can reset runs.
 //
 // Exit 0: nothing violated. Exit 1: at least one property violated. Exit 2:
 // the command line, a token, or the build descriptor could not be used.
@@ -46,8 +47,8 @@ export interface FxCheckOptions {
   mcp?: string;
   control?: string;
   tokens: { evidence: string; backend?: string; control?: string; second?: string };
-  /** Write nothing; check what is already recorded. */
-  passive?: boolean;
+  /** Write probe tickets (in a run of their own, reset afterwards). Off by default: fx-check is read-only. */
+  probe?: boolean;
   /** How long the fault probe waits for an answer that should never come. */
   dropWaitMs?: number;
 }
@@ -222,7 +223,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
   const ctl = (method: string, path: string, body?: unknown) => request(`${control}${path}`, {
     method, headers: { authorization: `Bearer ${o.tokens.control}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const writes = !o.passive && !!o.tokens.backend;
+  const writes = o.probe === true && !!o.tokens.backend;
   if (writes && control) {
     const r = await ctl("POST", "/_fixture/runs", { label: "fx-check" });
     if (r.status === 201 && typeof r.body?.run_id === "string") run = r.body.run_id;
@@ -259,7 +260,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
 
   const skipWrites = (id: FixturePropertyId) => {
     if (!wants(id)) return true;
-    if (o.passive) { set(id, "not checked", "--passive: this property needs a write"); return true; }
+    if (o.probe !== true) { set(id, "not checked", "read-only run: this property needs a write (--probe)"); return true; }
     if (!o.tokens.backend) { set(id, "not checked", "no backend token (TRACKER_BACKEND_TOKEN or _FILE): this property needs a write"); return true; }
     return false;
   };
@@ -275,7 +276,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
   };
   const dig1 = digNeeds("FX-DIG-1");
   const dig2 = digNeeds("FX-DIG-2");
-  if (dig1 || dig2 || (!o.passive && o.tokens.backend && (wants("FX-LOOK-1") || wants("FX-LOOK-2") || wants("FX-LOOK-3")))) {
+  if (dig1 || dig2 || (o.probe === true && o.tokens.backend && (wants("FX-LOOK-1") || wants("FX-LOOK-2") || wants("FX-LOOK-3")))) {
     k1 = newKey();
     const body = { title: `fx-check probe ${k1}`, project: "inbox" };
     created = await post(k1, body);
@@ -334,7 +335,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
         if (r.domain !== DOMAINS.executionResult) problems.push(`${x.id}: domain ${r.domain}, not ${DOMAINS.executionResult}`);
         for (const p of verifyServed(r)) problems.push(`${x.id}: ${p}`);
       }
-      if (records.length === 0) set("FX-DIG-3", "not checked", "no execution record is recorded yet (run without --passive to make one)");
+      if (records.length === 0) set("FX-DIG-3", "not checked", "no execution record is recorded yet (run with --probe to make one)");
       else set("FX-DIG-3", problems.length ? "violated" : "held", problems.length ? problems.slice(0, 5).join("; ") : `${records.length} execution record(s): each digest is SHA-256 over the domain tag and the served RFC 8785 bytes`, { records: records.length });
     }
   }
@@ -495,7 +496,8 @@ export function formatReport(r: FxCheckReport): string {
   return `${lines.join("\n")}\n`;
 }
 
-const USAGE = `usage: fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--passive] [--json]
+const USAGE = `usage: fx-check --backend URL [--mcp URL] [--control URL] [--token-dir DIR] [--probe] [--json]
+Read-only by default; --probe writes probe tickets in a run of its own and resets it afterwards.
 Tokens from the environment or a file: TRACKER_EVIDENCE_TOKEN (needed), TRACKER_BACKEND_TOKEN, TRACKER_CONTROL_TOKEN,
 FX_CHECK_SECOND_TOKEN (each also as NAME_FILE). Exit 0: nothing violated; 1: a property violated; 2: unusable setup.`;
 
@@ -504,7 +506,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   try {
     ({ values } = parseArgs({ args: argv, options: {
       backend: { type: "string" }, mcp: { type: "string" }, control: { type: "string" }, "token-dir": { type: "string" },
-      passive: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean" },
+      probe: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean" },
     } }));
   } catch (e) {
     err.write(`fx-check: ${(e as Error).message}\n${USAGE}\n`);
@@ -524,7 +526,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   if (!tokens.evidence) { err.write("fx-check: no evidence token (TRACKER_EVIDENCE_TOKEN, TRACKER_EVIDENCE_TOKEN_FILE or --token-dir)\n"); return 2; }
   try {
     const report = await fxCheck({ backend: values.backend, mcp: values.mcp as string | undefined, control: values.control as string | undefined,
-      tokens: { ...tokens, evidence: tokens.evidence }, passive: values.passive === true });
+      tokens: { ...tokens, evidence: tokens.evidence }, probe: values.probe === true });
     out.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
     return report.findings.some((f) => f.verdict === "violated") ? 1 : 0;
   } catch (e) {
