@@ -157,6 +157,12 @@ describe("the kit's documents", () => {
     assert.match(r.stdout, /valid OpenAPI 3\.1/);
   });
 
+  it("every path package.json ships exists (0.4.0: the kit's documents and the 0.4.0 known answers)", () => {
+    const pj = JSON.parse(read(root("package.json"))) as { files: string[] };
+    for (const f of pj.files.filter((x) => x !== "dist/src")) assert.ok(existsSync(root(f)), f);
+    for (const f of ["CONTRIBUTING.md", "openapi.yaml", "docs/STABILITY.md", "docs/patterns.md", "expected/0.4.0.json"]) assert.ok(pj.files.includes(f), f);
+  });
+
   it("the patterns page lists every MCP-layer defect", async () => {
     const { DEFECTS } = await import("../src/defects/index.js");
     const page = read(root("docs/patterns.md"));
