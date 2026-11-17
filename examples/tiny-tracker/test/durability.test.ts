@@ -11,7 +11,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { Worker } from "node:worker_threads";
 import { durableBackend, movableClock, tempDir, TOKEN } from "./support/durable.js";
-import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit, LOCK_UNREADABLE_GRACE_MS, acquireLock, releaseLock } from "../src/backend/journal.js";
+import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit, LOCK_UNREADABLE_GRACE_MS, acquireLock, releaseLock, LEASE_DIR, LEASE_OWNER, leaseTiming, acquireLease, releaseLease, checkLease, LeaseLostError, sweepLeaseLeftovers } from "../src/backend/journal.js";
 import { startBackend } from "../src/start.js";
 import { digestOf, DOMAINS, fingerprintHash } from "../src/digest.js";
 import { DAY_MS, describeRetention, parseExpiryPolicy, parseRetention, retentionSentence } from "../src/backend/expiry.js";
@@ -380,7 +380,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       try {
         assert.equal(JSON.parse(readFileSync(path, "utf8")).pid, process.pid);
-        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")), []);
+        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.") && f !== LEASE_DIR), []);
       } finally {
         await b.close();
       }
@@ -534,7 +534,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
         (fs as any).fsyncSync = fsync;
         syncBuiltinESMExports();
       }
-      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock")), [], "no temp file leaked (the reviewer's probe 2)");
+      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock") && f !== LEASE_DIR), [], "no temp file leaked (the reviewer's probe 2)");
       const old = new Date(Date.now() - 2 * LOCK_UNREADABLE_GRACE_MS);
       const put = (name: string, text: string, age = old) => { writeFileSync(join(t.dataDir, name), text); utimesSync(join(t.dataDir, name), age, age); };
       const dead = JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "x" });
@@ -546,7 +546,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       put("lock.stale-4194999-eeeeeeeeeeee", dead, new Date());
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       try {
-        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")).sort(),
+        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.") && f !== LEASE_DIR).sort(),
           ["lock.stale-4194999-dddddddddddd", "lock.stale-4194999-eeeeeeeeeeee"], "a live process's kept lock and a young file stay");
       } finally {
         await b.close();
@@ -580,7 +580,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
       for (const n of [live, dead]) { writeFileSync(join(t.dataDir, n), ""); utimesSync(join(t.dataDir, n), old, old); }
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       try {
-        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")), [live], "the live writer's temp file stays; the dead one's goes");
+        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.") && f !== LEASE_DIR), [live], "the live writer's temp file stays; the dead one's goes");
       } finally {
         await b.close();
       }
@@ -666,7 +666,7 @@ describe("the lock takeover (G2 fold-in 7)", () => {
         lockHooks.beforeTakeover = undefined;
       }
       assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { pid: process.ppid, started_at: "fresh" }, "the other starter's lock is in place");
-      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")), [], "nothing left aside");
+      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.") && f !== LEASE_DIR), [], "nothing left aside");
       // Without a race the stale lock is taken over as before.
       writeFileSync(path, JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "dead" }));
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
@@ -969,3 +969,72 @@ describe("seams v2.1 shapes, built ahead of the rebase (coordinator note 7)", ()
     }
   });
 });
+
+describe("the data-dir lease (0.4.0, note 19 item 11)", () => {
+  it("a fresh lease of another host is held whatever its pid; once its heartbeat is older than the stale time it is taken over", () => {
+    const t = tempDir("lease-host");
+    try {
+      prepareDataDir(t.dataDir);
+      const path = join(t.dataDir, LEASE_DIR);
+      mkdirSync(path, { mode: 0o700 });
+      writeFileSync(join(path, LEASE_OWNER), JSON.stringify({ pid: 2 ** 22 + 777, host: "another-container", nonce: "00" }));
+      assert.throws(() => acquireLease(t.dataDir, () => {}), (e) => e instanceof DataDirError && /locked by process 4195081 on host another-container/.test(e.message),
+        "a pid on another host is not looked up here: only the heartbeat's age counts");
+      const old = new Date(Date.now() - leaseTiming.staleMs - 5000);
+      utimesSync(path, old, old);
+      const logs: string[] = [];
+      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), {}, "another host's pid is never fenced through the pid lock");
+      assert.match(logs.join(), /its heartbeat stopped/);
+      assert.equal(JSON.parse(readFileSync(join(path, LEASE_OWNER), "utf8")).pid, process.pid);
+      checkLease(t.dataDir);
+      releaseLease(t.dataDir);
+      assert.ok(!existsSync(path), "a clean release removes the lease");
+      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith(LEASE_DIR)), [], "nothing left aside");
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it("the holder is fenced when its lease is moved or replaced: the append answers 503 journal_unavailable and the journal is untouched", async () => {
+    const t = tempDir("lease-fence");
+    const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+    try {
+      assert.equal((await b.api.send("POST", "/tickets", { project: "inbox", title: "one" })).status, 201);
+      const lines = readJournal(join(t.dataDir, JOURNAL_FILE)).lines.length;
+      // Another start's lease in its place (as a takeover would leave it).
+      const path = join(t.dataDir, LEASE_DIR);
+      renameSync(path, `${path}.elsewhere`);
+      mkdirSync(path, { mode: 0o700 });
+      writeFileSync(join(path, LEASE_OWNER), JSON.stringify({ pid: 1, host: "x", nonce: "11" }));
+      const r = await b.api.send("POST", "/tickets", { project: "inbox", title: "two" }, { "idempotency-key": "lease-fence-0001" });
+      assert.equal(r.status, 503, JSON.stringify(r.body));
+      assert.match(JSON.stringify(r.body), /lease is lost/);
+      assert.throws(() => checkLease(t.dataDir), LeaseLostError);
+      assert.equal(readJournal(join(t.dataDir, JOURNAL_FILE)).lines.length, lines, "nothing appended");
+      assert.deepEqual((await b.api.export()).tickets.map((x) => x.title), ["one"], "and nothing applied");
+    } finally {
+      await b.close();
+      assert.equal(JSON.parse(readFileSync(join(t.dataDir, LEASE_DIR, LEASE_OWNER), "utf8")).nonce, "11", "the close leaves the other lease alone");
+      t.cleanup();
+    }
+  });
+
+  it("leftover lease folders of gone processes are swept once older than the stale time; a young one stays", () => {
+    const t = tempDir("lease-sweep");
+    try {
+      prepareDataDir(t.dataDir);
+      const dead = join(t.dataDir, `${LEASE_DIR}.new-${2 ** 22 + 9}-aaaaaaaaaaaa`);
+      const aside = join(t.dataDir, `${LEASE_DIR}.stale-${2 ** 22 + 9}-bbbbbbbbbbbb`);
+      const young = join(t.dataDir, `${LEASE_DIR}.stale-${2 ** 22 + 9}-cccccccccccc`);
+      for (const d of [dead, aside, young]) mkdirSync(d);
+      const old = new Date(Date.now() - leaseTiming.staleMs - 5000);
+      utimesSync(dead, old, old);
+      utimesSync(aside, old, old);
+      assert.equal(sweepLeaseLeftovers(t.dataDir, () => {}), 2);
+      assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith(LEASE_DIR)), [`${LEASE_DIR}.stale-${2 ** 22 + 9}-cccccccccccc`]);
+    } finally {
+      t.cleanup();
+    }
+  });
+});
+

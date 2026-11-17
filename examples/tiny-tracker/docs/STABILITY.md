@@ -51,6 +51,6 @@ A security fix may shorten the overlap. The CHANGELOG then says why.
 
 - Timings, ports chosen by the OS, ids beyond what a schema states, and the order of members in JSON (canonical bytes are served where order matters).
 - Behaviour of a defect build beyond the requirement or `FX-` property it demonstrates.
-- Running more than one server instance against one data dir (a non-goal; the data-dir lock refuses it).
+- Running more than one server instance against one data dir (a non-goal; the data-dir lease and lock refuse it, and a holder that lost its lease appends nothing more).
 
 Questions about this policy are welcome as GitHub issues or discussions.
