@@ -51,8 +51,8 @@ export const FEATURES = [
     summary: "A pending key record before the effect; a same-key call meanwhile answers in_progress." },
   { name: "retention", since: "0.3.0", built: true, layer: "core",
     summary: "A stated key retention (7 days), with tombstones for expired keys." },
-  { name: "clock", since: "0.3.0", built: false, layer: "fixture",
-    summary: "A fixture clock for retention rehearsals, moved only through the control listener." },
+  { name: "clock", since: "0.3.0", built: true, layer: "fixture",
+    summary: "A fixture clock for retention rehearsals (domain \"fixture\": wall time plus an offset), moved forward only through the control listener (POST /_fixture/clock); needs --fixture-control." },
 ] as const satisfies readonly FeatureInfo[];
 
 export type FeatureName = (typeof FEATURES)[number]["name"];

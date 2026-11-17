@@ -11,6 +11,7 @@ import { resolveDefects } from "./defects/index.js";
 import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension } from "./backend/http.js";
 import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
+import type { Clock } from "./clock.js";
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -177,15 +178,23 @@ async function main(): Promise<void> {
   let fixture: Awaited<ReturnType<typeof import("./fixture/index.js")["createFixtureLayer"]>> | undefined;
   let backendExtension: BackendExtension | undefined;
   let serverExtras: ServerExtras = {};
+  /** The clock every timestamp comes from: wall time, or the fixture clock with the clock feature (stream E). */
+  let clock: Clock | undefined;
   if (needsFixtureLayer(features, fixtureControl)) {
     const layer = await import("./fixture/index.js");
+    // ---- stream E: the fixture clock ----
+    if (features.includes("clock")) {
+      const fc = await import("./fixture/clock.js");
+      clock = new fc.FixtureClock(fc.memoryOffset());
+    }
+    // ---- end stream E ----
     try {
       fixture = layer.createFixtureLayer({
         layout, profile, features, control: fixtureControl,
         mcpDefects: layout === "backend" ? null : mcpDefects,
         backendDefects: layout === "server" ? null : backendDefects,
         variants: layout === "backend" ? null : variantNames,
-        env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN, tokenDir,
+        env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN, tokenDir, clock,
         ...(principals ? { principals } : {}), // stream A
       });
     } catch (e) {
@@ -211,7 +220,7 @@ async function main(): Promise<void> {
     try {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
-        features, extension: backendExtension,
+        features, extension: backendExtension, clock,
         // ---- stream D ----
         durability,
         // ---- end stream D ----

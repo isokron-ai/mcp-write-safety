@@ -22,6 +22,7 @@ import type { AddressInfo } from "node:net";
 import { FAULT_POINTS } from "../fault-points.js";
 import { wallClock, type Clock } from "../clock.js";
 import type { BuildDescriptor } from "./descriptor.js";
+import { clockRoute } from "./clock.js";
 import { bearerMatches } from "./tokens.js";
 import { ApiError, type Store } from "../backend/store.js";
 import { CommitSinkError, JournalError } from "../backend/commit.js";
@@ -181,6 +182,10 @@ export async function startControl(options: ControlOptions): Promise<RunningCont
   async function route(req: IncomingMessage, path: string): Promise<{ status: number; body: unknown }> {
     const method = req.method ?? "GET";
     if (path === "/_fixture/clock") {
+      // ---- stream E: the fixture clock answers here when the clock feature is on (src/fixture/clock.ts) ----
+      const clockAnswer = await clockRoute(descriptor.clock, method, () => readBody(req));
+      if (clockAnswer) return clockAnswer;
+      // ---- end stream E ----
       if (method === "GET") return { status: 200, body: { domain: descriptor.clockOffsetMs === 0 ? "wall" : "fixture", offset_ms: descriptor.clockOffsetMs } };
       if (method === "POST") throw notBuilt("0.3.0", "moving the fixture clock");
     }

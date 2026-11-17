@@ -158,6 +158,12 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     check: (c) => has(c.features, "faults") && !c.fixtureControl
       ? "the faults feature needs --fixture-control (faults are armed on the control listener only, never on the command line)" : undefined,
   },
+  // ---- stream E (CMP-60 to CMP-69): the fixture clock and the supervisor ----
+  {
+    id: "CMP-60", post01: false,
+    check: (c) => has(c.features, "clock") && !c.fixtureControl
+      ? "the clock feature needs --fixture-control: the fixture clock moves only through the control listener (without both, the clock is wall time)" : undefined,
+  },
 ];
 
 /** The rules a combination breaks, as messages. Empty: it may start. */

@@ -67,13 +67,17 @@ export class BuildDescriptor {
   readonly startedAt: string;
   restartCount = 0;
   armedFaults: string[] = [];
-  clockOffsetMs = 0;
   journalHead: string | null = null;
   /** Set by the command line once the MCP server has loaded its settings (before the state line is printed). */
   serverSettings: ServerSettings | null = null;
 
   constructor(private readonly input: DescriptorInput, readonly clock: Clock = wallClock) {
     this.startedAt = clock.wallNow().toISOString();
+  }
+
+  /** The clock's offset (0 on the wall clock); the descriptor's clock block names the clock's own domain (G7). */
+  get clockOffsetMs(): number {
+    return this.clock.offsetMs();
   }
 
   /** The configuration part, hashed into build_hash. */
@@ -110,7 +114,7 @@ export class BuildDescriptor {
       process: { layout, boot_id: this.bootId, restart_count: this.restartCount, started_at: this.startedAt },
       journal: { head: this.journalHead },
       faults: { armed: [...this.armedFaults] },
-      clock: { domain: this.clockOffsetMs === 0 ? "wall" as const : "fixture" as const, offset_ms: this.clockOffsetMs },
+      clock: { domain: this.clock.domain, offset_ms: this.clock.offsetMs() },
       build_hash: this.buildHash,
     };
     return { ...body, descriptor_hash: domainDigest(DOMAINS.buildDescriptor, canonicalize(body)) };
