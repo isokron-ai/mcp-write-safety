@@ -24,7 +24,7 @@ import { BUILT_FAULT_POINTS } from "../src/fault-points.js";
 import { FIXTURE_API_VERSION } from "../src/fixture/descriptor.js";
 import { parsePrincipals, type Principal } from "../src/principals.js";
 import { checkCompat, type Combination } from "../src/compat.js";
-import { featureInfo } from "../src/profile.js";
+import { activeFeatures, featureInfo } from "../src/profile.js";
 import { fingerprintHash } from "../src/digest.js";
 import { META_KEYS } from "../src/fixture-properties.js";
 import { RECORD_FIELDS, type ExecutionRecord, type LedgerEntry, type OperationRecord } from "../src/records.js";
@@ -660,11 +660,12 @@ describe("the compatibility rules of stream B (CMP-30 to CMP-33) and the command
     let mcp: Mcp | undefined;
     const t0 = Date.now();
     const r = await runCli(["all", "--features", ALL.join(","), "--fixture-control", "--port", "4624", "--backend-port", "4625", "--control-port", "4626"], env, async (state) => {
-      assert.deepEqual(state.features, ALL);
+      // The default profile (0.2.0) adds execution-records, lookup and principals ahead of the named features.
+      assert.deepEqual(state.features, [...activeFeatures("default", []), ...ALL]);
       const entries = (await call("GET", `${state.backend}/ledger`, EVIDENCE)).body.entries;
       const build = (await call("GET", `${state.backend}/build`, EVIDENCE)).body;
       assert.deepEqual([entries[0].seq, entries[0].kind, entries[0].boot_id], [1, "start", build.process.boot_id]);
-      assert.deepEqual(build.features, [...ALL].sort());
+      assert.deepEqual(build.features, [...state.features].sort());
       assert.equal((await call("POST", `${state.control}/_fixture/faults`, CONTROL, { point: DROP, selector: { tool: "create_ticket", hold_ms: 600_000 } })).status, 201);
       mcp = await connectClient(state.mcp, "2026-07-28");
       held = mcp.client.callTool({ name: "create_ticket", arguments: { title: "held", idempotency_key: "cli-key-00000001" }, _meta: tagged("run-cli-1", "op-1") }).catch((e) => e);
