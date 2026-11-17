@@ -136,6 +136,26 @@ describe("fx-check", () => {
   });
 });
 
+describe("fx-check FX-LOOK-2 on the real lookup-reexecutes build (G1 review fold-in 2)", () => {
+  it("without --mcp the MCP lookup is not checked, never held; with --mcp it is violated, and the probe-run reset removes the defect's write", async () => {
+    const { startBuild } = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);
+    const run = await startBuild(["--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults", "--defect", "lookup-reexecutes"]);
+    try {
+      const noMcp = await fxCheck({ backend: run.state.backend, control: run.state.control, tokens: run.tokens, probe: true });
+      const look2 = noMcp.findings.find((f) => f.id === "FX-LOOK-2")!;
+      assert.equal(look2.verdict, "not checked", look2.reason);
+      assert.match(look2.reason, /get_operation tool was not called: give --mcp/);
+      const withMcp = await fxCheck({ backend: run.state.backend, mcp: run.state.mcp, control: run.state.control, tokens: run.tokens, probe: true });
+      assert.equal(withMcp.findings.find((f) => f.id === "FX-LOOK-2")!.verdict, "violated");
+      assert.equal(withMcp.probes.reset, "reset");
+      const exp = await (await fetch(`${run.state.backend}/export?principal=p-default`, { headers: { authorization: `Bearer ${run.tokens.evidence}` } })).json() as any;
+      assert.deepEqual(exp.tickets.filter((t: any) => /^recovered /.test(t.title)).map((t: any) => t.title), [], "the defect's write was tagged with the probe run and reset with it");
+    } finally {
+      await run.stop();
+    }
+  });
+});
+
 describe("Python recount over what the evidence API serves (three-way recount readiness)", { skip: needPython }, () => {
   it("export, ledger and execution records agree after fx-check's probes; a lost ticket is named", async () => {
     const f = await startFakeFixture();

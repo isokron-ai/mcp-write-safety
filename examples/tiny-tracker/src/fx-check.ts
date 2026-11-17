@@ -413,18 +413,29 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
         await backendGet(`/operations/${encodeURIComponent(key)}`); looked.push("backend");
       }
     }
+    // The MCP lookup tool, where the build has one: the lookup feature, and get_operation not left out by its tool list.
+    const cfgTools = d.config?.tools;
+    const mcpLookupDeclared = features.includes("lookup") && (cfgTools === null || cfgTools === undefined || (Array.isArray(cfgTools) && cfgTools.includes("get_operation")));
+    let mcpLookupProbed = false;
     if (o.mcp) {
       const mcp = new Mcp(o.mcp);
       await mcp.initialize();
       if ((await mcp.tools()).includes("get_operation")) {
-        for (const key of [k1!, miss]) for (let i = 0; i < 2; i++) { await mcp.call("get_operation", { idempotency_key: key }); looked.push("get_operation"); }
+        // Tagged with the probe run (and its own operation tag), so a write a defective lookup makes is attributed to
+        // the probe run and removed by its reset.
+        const runMeta: Record<string, string> = run ? { [META_KEYS.run]: run } : {};
+        for (const key of [k1!, miss]) for (let i = 0; i < 2; i++) { await mcp.call("get_operation", { idempotency_key: key }, { [META_KEYS.operation]: opTag(), ...runMeta }); looked.push("get_operation"); }
+        mcpLookupProbed = true;
       }
     }
     const after = { executions: await executionCount(), tickets: listOf((await ev("/export")).body, "tickets")?.length };
     if (before.executions === undefined) set("FX-LOOK-2", "not checked", "neither /executions nor /ledger answers, so executions cannot be counted");
     else {
       const same = before.executions === after.executions && before.tickets === after.tickets;
-      set("FX-LOOK-2", same ? "held" : "violated", same ? `${looked.length} lookups (${[...new Set(looked)].join(", ")}; of a key written and of a key never written) made no execution and no object`
+      if (same && mcpLookupDeclared && !mcpLookupProbed) {
+        // A held answer would cover only the backend routes: the build has an MCP lookup tool that was not called.
+        set("FX-LOOK-2", "not checked", `the backend lookups (${looked.length}) made no execution and no object, but the build's get_operation tool was not called: give --mcp`, { before, after, lookups: looked.length });
+      } else set("FX-LOOK-2", same ? "held" : "violated", same ? `${looked.length} lookups (${[...new Set(looked)].join(", ")}; of a key written and of a key never written) made no execution and no object`
         : `lookups changed the record: executions ${before.executions} to ${after.executions}, tickets ${before.tickets} to ${after.tickets}`, { before, after, lookups: looked.length });
     }
   }
