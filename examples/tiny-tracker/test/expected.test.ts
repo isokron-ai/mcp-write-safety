@@ -63,4 +63,23 @@ describe("known-answer generator (expected/)", () => {
     assert.equal(check.code, 0, check.stdout + check.stderr);
     assert.match(gen.table(a), /^# Known answers for tiny-tracker 0\.1\.0/);
   });
+
+  it("writes the two-principal file whenever principals are in effect, so FX-LOOK-3 is checked on the Lv rows (note 19 item 6)", async () => {
+    const gen = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);
+    // Named, or from the default profile (the Lv level), yes; profile 0.1 or a list that leaves it out, no.
+    assert.equal(gen.principalsInEffect(["--features", "evidence,principals"]), true);
+    assert.equal(gen.principalsInEffect(["--features", "evidence,strict-input,ledger,faults"]), true);
+    assert.equal(gen.principalsInEffect(["--profile", "0.1"]), false);
+    assert.equal(gen.principalsInEffect(["--profile=0.1"]), false);
+    const run = await gen.startBuild(["--features", "evidence,strict-input,ledger,faults"]);
+    try {
+      assert.ok(run.env.TRACKER_BACKEND_TOKENS_FILE, "the Lv build gets the principals file");
+      const { fxCheck } = await import("../src/fx-check.js");
+      const r = await fxCheck({ backend: run.state.backend, mcp: run.state.mcp, control: run.state.control, tokens: run.tokens, probe: true });
+      const look3 = r.findings.find((f) => f.id === "FX-LOOK-3")!;
+      assert.equal(look3.verdict, "held", look3.reason);
+    } finally {
+      await run.stop();
+    }
+  });
 });

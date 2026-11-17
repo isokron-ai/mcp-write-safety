@@ -41,7 +41,28 @@ const CLI = join(ROOT, "dist", "src", "cli.js");
 const PIN = JSON.parse(readFileSync(join(ROOT, "harness", "contract.json"), "utf8"));
 const PACKAGE = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
+const { effectiveFeatures, parseFeatures, parseProfile } = await import(pathToFileURL(join(ROOT, "dist", "src", "profile.js")).href);
+
 const token = (name) => `${name}-${randomBytes(20).toString("hex")}`;
+
+/**
+ * Whether a build runs with the principals feature: named with --features, or from the profile (not --profile 0.1),
+ * and not turned off by a variant. The CLI's own rule (src/profile.ts effectiveFeatures) decides, from the build.
+ */
+export function principalsInEffect(args, env = {}) {
+  const value = (flag) => {
+    let v;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === flag) v = args[i + 1];
+      else if (args[i].startsWith(`${flag}=`)) v = args[i].slice(flag.length + 1);
+    }
+    return v;
+  };
+  const variants = (env.TRACKER_VARIANTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const profile = parseProfile(value("--profile") ?? env.TRACKER_PROFILE);
+  const { features } = effectiveFeatures(profile, parseFeatures(value("--features") ?? env.TRACKER_FEATURES), variants);
+  return features.includes("principals");
+}
 
 /**
  * Starts one build; resolves with its state line, its tokens, and a stop function. `{DATA_DIR}` in the arguments is a
@@ -55,8 +76,9 @@ export function startBuild(args, extraEnv = {}, reuse = undefined) {
   args = args.map((a) => a.replaceAll("{DATA_DIR}", dataDir));
   extraEnv = Object.fromEntries(Object.entries(extraEnv).map(([k, v]) => [k, String(v).replaceAll("{WORK}", work)]));
   const env = { PATH: process.env.PATH ?? "", TRACKER_BACKEND_TOKEN: tokens.backend, TRACKER_EVIDENCE_TOKEN: tokens.evidence, TRACKER_CONTROL_TOKEN: tokens.control, ...extraEnv };
-  if (args.flatMap((a) => a.split(",")).includes("principals")) {
-    // Two principals: the default one (the MCP server's backend token) and a second for FX-LOOK-3.
+  if (principalsInEffect(args, env)) {
+    // Two principals: the default one (the MCP server's backend token) and a second for FX-LOOK-3, whenever the build
+    // runs with principals, named or from the profile (0.4.0, note 19 item 6: the Lv rows took it from the profile).
     const file = join(work, "principals.json");
     writeFileSync(file, JSON.stringify({ principals: [{ id: "p-default", token: tokens.backend }, { id: "p-second", token: tokens.second }] }), { mode: 0o600 });
     env.TRACKER_BACKEND_TOKENS_FILE = file;
