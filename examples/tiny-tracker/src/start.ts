@@ -2,7 +2,8 @@
 
 import { createBuild } from "./mcp/build.js";
 import { ConfigError, loadConfig, type ServerConfig } from "./mcp/config.js";
-import { startMcpServer, type RunningMcpServer, type ServerExtras } from "./mcp/server.js";
+import { ListenError, startMcpServer, type McpListenOptions, type RunningMcpServer, type ServerExtras } from "./mcp/server.js";
+import { resolveTransport, TransportError } from "./transport.js";
 import type { Build } from "./mcp/types.js";
 import { applyVariants } from "./variants/index.js";
 
@@ -25,6 +26,11 @@ export interface StartServerOptions {
   extras?: ServerExtras;
   /** The backend's key retention in ms (feature retention; --key-retention), stated in the tools. Default: 7 days. */
   retentionMs?: number;
+  /**
+   * Where the MCP listener accepts connections and whether /mcp needs a bearer token. Default: from `env`
+   * (TRACKER_CONTAINER, TRACKER_MCP_TOKEN or _FILE; src/transport.ts), which is loopback with no token when unset.
+   */
+  listen?: McpListenOptions;
 }
 
 export interface StartedServer extends RunningMcpServer {
@@ -59,6 +65,19 @@ export async function startServer(options: StartServerOptions): Promise<StartedS
   if (build.defects.length > 0 && !isLoopbackUrl(config.backendUrl)) {
     throw new ConfigError("A build with defects only talks to a backend on 127.0.0.1 or localhost. Not starting.");
   }
-  const running = await startMcpServer(build, config, options.port ?? 0, options.extras ?? {});
+  let listen: McpListenOptions;
+  try {
+    listen = options.listen ?? resolveTransport("server", options.env) ?? {};
+  } catch (e) {
+    if (e instanceof TransportError) throw new ConfigError(e.message);
+    throw e;
+  }
+  let running: RunningMcpServer;
+  try {
+    running = await startMcpServer(build, config, options.port ?? 0, options.extras ?? {}, listen);
+  } catch (e) {
+    if (e instanceof ListenError) throw new ConfigError(e.message);
+    throw e;
+  }
   return { ...running, build, config, variants };
 }
