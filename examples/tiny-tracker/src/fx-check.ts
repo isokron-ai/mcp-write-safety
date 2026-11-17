@@ -673,10 +673,22 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
       const first = await send();
       // Just inside the stated retention: a minute short of it (half of it when it is two minutes or less).
       const advance = stated > 120_000 ? stated - 60_000 : Math.floor(stated / 2);
+      // The clock route's 200 is not taken on trust (note 26 item 6): /build's clock.offset_ms must move by the advance.
+      const offsetNow = async (): Promise<number | undefined> => {
+        const b = await ev("/build");
+        const v = b.status === 200 ? b.body?.clock?.offset_ms : undefined;
+        return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+      };
+      const offsetBefore = first.status === 201 ? await offsetNow() : undefined;
       const moved = first.status === 201 ? await ctl("POST", "/_fixture/clock", { advance_ms: advance }) : undefined;
+      const offsetAfter = moved?.status === 200 ? await offsetNow() : undefined;
       if (first.status !== 201) set("FX-KEY-1", "not checked", `the probe create answered ${first.status}`);
       else if (moved?.status !== 200) set("FX-KEY-1", "not checked", `moving the fixture clock answered ${moved?.status}`);
-      else {
+      else if (offsetBefore === undefined || offsetAfter === undefined) set("FX-KEY-1", "not checked", "the clock move answered 200, but /build names no clock.offset_ms to confirm it");
+      else if (offsetAfter - offsetBefore < advance) {
+        set("FX-KEY-1", "not checked", `the clock move by ${advance} ms answered 200, but /build's clock.offset_ms went from ${offsetBefore} to ${offsetAfter}: the clock did not move, so the retention was not waited out`,
+          { offset_before_ms: offsetBefore, offset_after_ms: offsetAfter, advance_ms: advance });
+      } else {
         const again = await send();
         // A replay of the same write (its bytes are FX-DIG-2's property, not this one's).
         const replayed = again.status === first.status && again.headers.get("idempotent-replayed") === "true"

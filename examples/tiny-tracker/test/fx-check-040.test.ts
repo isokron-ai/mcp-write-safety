@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createServer, request as httpRequest, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { DATA_DIR_LEFTOVER_PREFIXES, fxCheck, isDataDirFile, statedRetentionMs, type FxCheckReport } from "../src/fx-check.js";
 
 const GENERATE = pathToFileURL(fileURLToPath(new URL("../../expected/generate.mjs", import.meta.url))).href;
@@ -45,6 +47,36 @@ describe("fx-check 0.4.0: the stated retention (FX-KEY-2) and keys kept that lon
       }
     });
   }
+
+  // Note 26 item 6: a generic server's clock route may answer 200 and not move. A control listener in front of the real
+  // one answers POST /_fixture/clock 200 without passing it on; everything else is passed on.
+  it("a clock move answered 200 that /build does not show: FX-KEY-1 not checked, never held", async () => {
+    const run = await start(["--features", L3]);
+    const real = new URL(run.state.control);
+    const front: Server = createServer((req, res) => {
+      if (req.method === "POST" && req.url === "/_fixture/clock") {
+        req.resume();
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ domain: "fixture", offset_ms: 0 }));
+        return;
+      }
+      const up = httpRequest({ host: real.hostname, port: real.port, path: req.url, method: req.method, headers: { ...req.headers, host: real.host } }, (r) => {
+        res.writeHead(r.statusCode ?? 502, r.headers);
+        r.pipe(res);
+      });
+      up.on("error", () => res.writeHead(502).end());
+      req.pipe(up);
+    });
+    await new Promise<void>((resolve) => front.listen(0, "127.0.0.1", resolve));
+    try {
+      const r = await check(run, { control: `http://127.0.0.1:${(front.address() as AddressInfo).port}` });
+      const k = verdict(r, "FX-KEY-1");
+      assert.equal(k.verdict, "not checked", k.reason);
+      assert.match(k.reason, /answered 200, but \/build's clock\.offset_ms went from 0 to 0: the clock did not move/);
+    } finally {
+      await new Promise<void>((resolve) => front.close(() => resolve()));
+      await run.stop();
+    }
+  });
 
   it("without the clock feature FX-KEY-1 is not checked, and says why", async () => {
     const run = await start(["--features", "evidence,strict-input,execution-records,lookup,principals,ledger,faults,retention"]);
