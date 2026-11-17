@@ -6,7 +6,8 @@
 //                   L2   the 0.2.0 evidence set (evidence, strict-input, execution-records, lookup, principals,
 //                        ledger, faults)
 //                   L3   L2 with the 0.3.0 in-memory features (inflight, retention, clock)
-//                   L3d  L3 with durable, on a data dir of the row's own ({DATA_DIR})
+//                   L3d  L2 with inflight, retention and durable, on a data dir of the row's own ({DATA_DIR}); no
+//                        fixture clock (CMP-65: durable runs on the wall clock), so FX-KEY-1 is not checked there
 //                   Lv   evidence, strict-input, ledger, faults: lookup and the other core features only from the
 //                        default profile, so the key-store variants that turn lookup off can run (CMP-5, CMP-53)
 //   mcp defect    none, or one of the MCP-layer defects (src/defects)
@@ -36,7 +37,8 @@ const EVIDENCE_02 = ["evidence", "strict-input", "execution-records", "lookup", 
 export const LEVELS = [
   { id: "L2", features: EVIDENCE_02, dataDir: false },
   { id: "L3", features: [...EVIDENCE_02, "inflight", "retention", "clock"], dataDir: false },
-  { id: "L3d", features: [...EVIDENCE_02, "inflight", "retention", "clock", "durable"], dataDir: true },
+  // CMP-65 (G2 fold-in 9): durable runs on the wall clock, without the fixture clock.
+  { id: "L3d", features: [...EVIDENCE_02, "inflight", "retention", "durable"], dataDir: true },
   { id: "Lv", features: ["evidence", "strict-input", "ledger", "faults"], dataDir: false },
 ];
 
