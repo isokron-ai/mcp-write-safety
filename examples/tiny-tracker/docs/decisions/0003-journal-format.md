@@ -18,6 +18,7 @@ A delayed-recovery check (24 hours) should not depend on one process staying up.
    - Aborted lines carry a reason: `refused`, `journal_unavailable`, `fault`, `internal_error` or `orphan_at_start`.
 6. **Fences and runs are journalled (seams v2.1).**
    - A run reset that fences a pending key record writes a `fence` line (`principal`, `key`, `run`, `pending_jseq`, `reset_seq`) after the reset's commit line. It ends that pending line (no `aborted` line), and at load it restores the fence, so the key stays refused (409 `key_fenced`) after a restart.
+   - **Fenced keys never expire** (owner decision, 16 Nov 2026). A fence lasts for the life of the data dir, like a tombstone: key retention (decision 0004) does not remove it, and a fenced key is never reusable. A write in flight when its run was reset can therefore never land later under that key, across any restart.
    - Allocating a run writes a `run-alloc` line (`run_id`, `principal`, `created_at`, `label`) before the run is answered; at load the run registry is rebuilt from these lines, so run-ownership checks (403 `run_not_owned`, `run_not_allocated`) hold after a `--supervise` restart.
    - Neither takes a commit sequence.
 7. **`durable` requires `strict-input`** (compat rule CMP-50): every line is checksummed over RFC 8785 bytes, which a string with a lone surrogate does not have, so such input is refused at the door instead of failing the journal append.
