@@ -42,7 +42,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
 # prepack cleans and builds (tsc); the tarball holds exactly the package's "files".
-RUN npm pack --no-audit --no-fund --pack-destination /out
+RUN mkdir -p /out && npm pack --no-audit --no-fund --pack-destination /out
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production \
