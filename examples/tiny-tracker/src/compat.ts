@@ -261,7 +261,7 @@ const KEY_VARIANTS = ["key-store-honest", "key-store-durable", "settle-by-lookup
     id: "CMP-55", post01: false,
     check: (c) => {
       if (!has(c.variants, "settle-by-lookup")) return undefined;
-      if (c.keyExpiry === "forget") return "the settle-by-lookup variant needs the refuse key-expiry policy: under forget a missing record may be a forgotten applied write, and the lookup would report it not applied (drop --key-expiry forget)";
+      if (c.keyExpiry?.trim() === "forget") return "the settle-by-lookup variant needs the refuse key-expiry policy: under forget a missing record may be a forgotten applied write, and the lookup would report it not applied (drop --key-expiry forget)";
       if (has(c.backendDefects, "key-expires-early")) return "the settle-by-lookup variant does not run with the key-expires-early backend defect: a record that expired early would be settled as a miss";
       return undefined;
     },

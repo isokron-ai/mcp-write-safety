@@ -320,6 +320,8 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     assert.deepEqual(checkCompat(sbl), []);
     assert.deepEqual(checkCompat({ ...sbl, keyExpiry: "refuse" }), []);
     assert.match(checkCompat({ ...sbl, keyExpiry: "forget" }).join(), /settle-by-lookup variant needs the refuse key-expiry policy/);
+    // G2 round 2, item 4: the parser trims the value, so the rule does too.
+    for (const v of [" forget", "forget ", "\tforget\n"]) assert.match(checkCompat({ ...sbl, keyExpiry: v }).join(), /needs the refuse key-expiry policy/, JSON.stringify(v));
     assert.match(checkCompat({ ...sbl, backendDefects: ["key-expires-early"] }).join(), /does not run with the key-expires-early backend defect/);
     assert.deepEqual(checkCompat({ ...base, features: ["inflight", "retention"], keyExpiry: "forget" }), [], "forget alone is fine");
     const r = await runCli(["all", "--features", "inflight,retention", "--key-expiry", "forget", "--port", "0", "--backend-port", "0"],
