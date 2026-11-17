@@ -259,6 +259,11 @@ function removeStaleLock(path: string, stale: { text: string; ino: number }): { 
  */
 export const LOCK_UNREADABLE_GRACE_MS = 10_000;
 
+/** When this process started (wall clock, ms): a lock naming this pid written before it belongs to an earlier process. */
+export function processStartMs(): number {
+  return performance.timeOrigin;
+}
+
 /**
  * Creates the lock whole (G2 round 2, item 1): the content goes to a private temp file, flushed, which is then linked
  * into place, so the lock never exists empty for another starter to read. link(2) refuses if a lock exists (EEXIST),
@@ -340,7 +345,11 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     if (!Number.isSafeInteger(pid) && Date.now() - mtimeMs < LOCK_UNREADABLE_GRACE_MS) {
       throw new DataDirError(`the data dir ${dir} has a lock that is being written (or was torn less than ${LOCK_UNREADABLE_GRACE_MS / 1000} s ago); one server per data dir`);
     }
-    if (pid === process.pid && !ABANDONED.has(real)) {
+    // A lock naming this pid is this process's (another spelling of a dir it holds), unless it was written before this
+    // process started: then it is an earlier process that had the same pid, as on every start in a container where the
+    // server is pid 1 (G2 round 2, item 3), and it is stale.
+    const earlierSamePid = pid === process.pid && typeof parsed?.started_at === "string" && Date.parse(parsed.started_at) < processStartMs();
+    if (pid === process.pid && !ABANDONED.has(real) && !earlierSamePid) {
       throw new DataDirError(`the data dir ${dir} is already open in this process (its lock names this process); one writer per data dir`);
     }
     if (Number.isSafeInteger(pid) && pid !== process.pid && alive(pid)) {
