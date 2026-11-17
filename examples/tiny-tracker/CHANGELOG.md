@@ -2,6 +2,15 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
+## Unreleased
+
+### Stream F (0.4.0 contract kit)
+- `tiny-tracker stdio`: the MCP server over stdin and stdout, from the same server factory as the HTTP transport, through the SDK's `./stdio` export. The backend runs in the same process unless `--backend-url` names one. The state line goes to stderr. Fixture-layer features run over Streamable HTTP only for now (CMP-70).
+- Container mode (`TRACKER_CONTAINER=1`, set by the image) listens on every interface and refuses to start without a bearer token for `/mcp` (`TRACKER_MCP_TOKEN` or a 0600 `TRACKER_MCP_TOKEN_FILE`). Outside a container the token is optional; when set, `/mcp` needs it. Host and Origin checks stay loopback-only.
+- Resource caps on the MCP listener: request body 4 MiB, 256 connections, 64 requests in flight (503 beyond), header and request timeouts, and a POST unanswered for 120 s is cut off. A stdio message is capped at 4 MiB.
+- A data dir is created 0700, and one open to others is refused (`src/private-dir.ts`, for the durable feature).
+- `Dockerfile`, a public CI workflow (Linux, macOS, Windows; Node 22 and 24; known-answer reproducibility; the container start refusal), `CONTRIBUTING.md`, `docs/STABILITY.md`, `docs/patterns.md` and a draft `openapi.yaml` for the backend, evidence and control APIs.
+
 ## 0.3.0 (unreleased) for MWS 0.9
 
 Durability: a journal (`durable`, opt-in with `--data-dir`), in-flight key records (`inflight`) and a stated key retention (`retention`), both on in the default profile; the fixture clock, supervised restarts and crash fault points. `--profile 0.1` keeps the surface of the published 0.1.0.
