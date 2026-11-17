@@ -241,35 +241,84 @@ function removeStaleLock(path: string, staleText: string): boolean {
  * a directory this process holds), refuses the start. The takeover is a compare-and-remove (removeStaleLock), then an
  * O_EXCL create, so two starters can never both hold the dir.
  */
+/**
+ * How long a lock that is empty or does not parse counts as one being written right now (G2 round 2, item 1). Locks are
+ * created whole (createLock), so such a file is a crash leftover or a writer on a filesystem without link(2); a
+ * young one is held, an older one is stale.
+ */
+export const LOCK_UNREADABLE_GRACE_MS = 10_000;
+
+/**
+ * Creates the lock whole (G2 round 2, item 1): the content goes to a private temp file, flushed, which is then linked
+ * into place, so the lock never exists empty for another starter to read. link(2) refuses if a lock exists (EEXIST),
+ * which is the O_EXCL of the old create. Where link is not supported, an O_EXCL create with the content written at
+ * once is the fallback; a starter that reads it empty treats it as held (LOCK_UNREADABLE_GRACE_MS).
+ * Returns false when a lock exists.
+ */
+function createLock(path: string, content: string): boolean {
+  const tmp = `${path}.new-${process.pid}-${randomBytes(6).toString("hex")}`;
+  const fd = openSync(tmp, "wx", 0o600);
+  try {
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    linkSync(tmp, path);
+    return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") return false;
+    if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EOPNOTSUPP" && code !== "ENOSYS") throw e;
+    try {
+      const lfd = openSync(path, "wx", 0o600);
+      try {
+        writeSync(lfd, content);
+        fsyncSync(lfd);
+      } finally {
+        closeSync(lfd);
+      }
+      return true;
+    } catch (e2) {
+      if ((e2 as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw e2;
+    }
+  } finally {
+    try { unlinkSync(tmp); } catch { /* gone */ }
+  }
+}
+
 export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) => void): void {
   const path = join(dir, LOCK_FILE);
   const real = heldKey(dir);
   if (HELD.has(real)) throw new DataDirError(`the data dir ${dir} is already open in this process; one writer per data dir`);
   for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const fd = openSync(path, "wx", 0o600);
-      // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
-      writeSync(fd, JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString() }));
-      fsyncSync(fd);
-      closeSync(fd);
+    // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
+    if (createLock(path, JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString() }))) {
       HELD.add(real);
       ABANDONED.delete(real);
       return;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     }
     let text: string;
+    let mtimeMs: number;
     try {
       text = readFileSync(path, "utf8");
+      mtimeMs = statSync(path).mtimeMs;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; // removed meanwhile: try to create it again
       throw e;
     }
     let pid = NaN;
+    let parsed: { pid?: unknown; started_at?: unknown } | undefined;
     try {
-      pid = Number(JSON.parse(text).pid);
+      parsed = JSON.parse(text);
+      pid = Number(parsed!.pid);
     } catch {
-      // A lock torn at a crash holds no live pid.
+      // Empty or torn: see below.
+    }
+    if (!Number.isSafeInteger(pid) && Date.now() - mtimeMs < LOCK_UNREADABLE_GRACE_MS) {
+      throw new DataDirError(`the data dir ${dir} has a lock that is being written (or was torn less than ${LOCK_UNREADABLE_GRACE_MS / 1000} s ago); one server per data dir`);
     }
     if (pid === process.pid && !ABANDONED.has(real)) {
       throw new DataDirError(`the data dir ${dir} is already open in this process (its lock names this process); one writer per data dir`);

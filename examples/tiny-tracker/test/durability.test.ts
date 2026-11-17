@@ -5,10 +5,10 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { durableBackend, movableClock, tempDir, TOKEN } from "./support/durable.js";
-import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit } from "../src/backend/journal.js";
+import { readJournal, decodeLine, encodeLine, DataDirError, JournalCorruptError, JOURNAL_FILE, LOCK_FILE, prepareDataDir, lineChecksum, lockHooks, flushLimit, LOCK_UNREADABLE_GRACE_MS } from "../src/backend/journal.js";
 import { startBackend } from "../src/start.js";
 import { digestOf, DOMAINS, fingerprintHash } from "../src/digest.js";
 import { DAY_MS, describeRetention, parseExpiryPolicy, parseRetention, retentionSentence } from "../src/backend/expiry.js";
@@ -297,6 +297,38 @@ describe("the flush limit on macOS (G2 fold-in 13)", () => {
 });
 
 describe("the lock takeover (G2 fold-in 7)", () => {
+  it("round 2, item 1: a lock is never seen empty; an empty or unparseable lock written just now is held, an old one is stale", async () => {
+    const t = tempDir("lockempty");
+    try {
+      prepareDataDir(t.dataDir);
+      const path = join(t.dataDir, LOCK_FILE);
+      // Another starter between its create and its write: before the fix this start read "", called it stale and took over.
+      for (const text of ["", "{\"pid\":"]) {
+        writeFileSync(path, text);
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /lock that is being written/, JSON.stringify(text));
+        assert.equal(readFileSync(path, "utf8"), text, "left alone");
+        // The same file from a crash long ago: stale, taken over.
+        const old = new Date(Date.now() - 2 * LOCK_UNREADABLE_GRACE_MS);
+        utimesSync(path, old, old);
+        const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+        assert.equal(JSON.parse(readFileSync(path, "utf8")).pid, process.pid);
+        await b.close();
+      }
+      // The lock this start creates is whole the moment it exists: it is linked in, and no temp file is left.
+      lockHooks.beforeTakeover = undefined;
+      const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      try {
+        assert.equal(JSON.parse(readFileSync(path, "utf8")).pid, process.pid);
+        assert.deepEqual(readdirSync(t.dataDir).filter((f) => f.startsWith("lock.")), []);
+      } finally {
+        await b.close();
+      }
+    } finally {
+      t.cleanup();
+    }
+  });
+
+
   it("a second spelling of a held dir is refused (HELD keys on the real path), and a lock naming this process is held, not stale", async () => {
     const t = tempDir("lockpath");
     try {
