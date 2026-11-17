@@ -120,9 +120,13 @@ const SAID_NO: Record<string, string[]> = {
   'conflict-as-generic-error': ['MWS-CONC-6 ticket:set_labels'],
 };
 
-test('the expectations cover every tiny-tracker defect', { skip }, async () => {
-  const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string }[] };
-  assert.deepEqual(DEFECTS.map((d) => d.name).sort(), Object.keys(EXPECT).sort());
+test('the expectations cover every tiny-tracker defect the default profile runs', { skip }, async () => {
+  const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string; requires?: readonly string[] }[] };
+  // From tiny-tracker 0.3.0 some defects need a feature the default profile does not turn on (inflight, a backend
+  // feature): this harness starts `server` with the default profile, where they cannot run, so they have no row here.
+  const profile = (await import(join(dir!, 'dist', 'src', 'profile.js'))) as { PROFILE_FEATURES: Record<string, readonly string[]> };
+  const runs = DEFECTS.filter((d) => (d.requires ?? []).every((f) => profile.PROFILE_FEATURES['default'].includes(f)));
+  assert.deepEqual(runs.map((d) => d.name).sort(), Object.keys(EXPECT).sort());
 });
 
 for (const protocol of [undefined, '2025-11-25']) {
