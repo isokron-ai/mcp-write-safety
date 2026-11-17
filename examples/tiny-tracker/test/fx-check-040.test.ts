@@ -91,3 +91,18 @@ describe("fx-check 0.4.0: durability across a restart (FX-DUR-1) and one journal
     });
   }
 });
+
+describe("replay-digest-mismatch under the 0.3.0 key records (found by the 0.4.0 matrix)", () => {
+  for (const features of [L3, `${L3},durable`]) {
+    it(`FX-DIG-2 is violated with ${features.endsWith("durable") ? "durable" : "inflight and retention"} too, and keyed repeats still answer`, async () => {
+      const run = await start(["--features", features, ...(features.endsWith("durable") ? ["--data-dir", "{DATA_DIR}"] : []), "--backend-defect", "replay-digest-mismatch"]);
+      try {
+        const r = await check(run);
+        assert.equal(verdict(r, "FX-DIG-2").verdict, "violated", verdict(r, "FX-DIG-2").reason);
+        assert.equal(verdict(r, "FX-KEY-1").verdict, "held", verdict(r, "FX-KEY-1").reason);
+      } finally {
+        await run.stop();
+      }
+    });
+  }
+});

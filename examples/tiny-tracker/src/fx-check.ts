@@ -595,13 +595,15 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
       if (again.status !== p.status) problems.push(`the repeat after the restart answered ${again.status}, the first write ${p.status}`);
       else {
         if (again.headers.get("idempotent-replayed") !== "true") problems.push("the repeat after the restart is not marked as a replay");
-        if (canonicalize(again.body ?? null) !== p.canonical) problems.push("the repeat after the restart answers other bytes than the first write");
+        // The same write, not the same bytes: whether a replay's bytes equal the first answer's is FX-DIG-2's property.
+        const firstId = (JSON.parse(p.canonical) as any)?.ticket?.id;
+        if (firstId !== undefined && again.body?.ticket?.id !== firstId) problems.push(`the repeat after the restart names ticket ${again.body?.ticket?.id}, the first write ${firstId}`);
         const x = again.headers.get("tiny-tracker-execution");
         if (p.execution_id && x !== null && x !== p.execution_id) problems.push(`the repeat names execution ${x}, the first write ${p.execution_id}`);
       }
       if (before !== undefined && after !== undefined && after !== before) problems.push(`the repeat made ${after - before} new execution(s)`);
       set("FX-DUR-1", problems.length ? "violated" : "held", problems.length ? problems.join("; ")
-        : `after the restart (boot ${p.boot_id} → ${bootNow}) the keyed repeat was answered as a replay of ${p.execution_id ?? "the first write"}, with the same bytes and no new execution`,
+        : `after the restart (boot ${p.boot_id} → ${bootNow}) the keyed repeat was answered as a replay of ${p.execution_id ?? "the first write"}, naming the same ticket, with no new execution`,
         { key: p.key, boot_before: p.boot_id, boot_after: bootNow });
     }
   } else if (o.durability?.plant && wants("FX-DUR-1")) {
@@ -677,7 +679,9 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
       else if (moved?.status !== 200) set("FX-KEY-1", "not checked", `moving the fixture clock answered ${moved?.status}`);
       else {
         const again = await send();
-        const replayed = again.status === first.status && again.headers.get("idempotent-replayed") === "true" && canonicalize(again.body ?? null) === canonicalize(first.body ?? null);
+        // A replay of the same write (its bytes are FX-DIG-2's property, not this one's).
+        const replayed = again.status === first.status && again.headers.get("idempotent-replayed") === "true"
+          && again.body?.ticket?.id !== undefined && again.body?.ticket?.id === first.body?.ticket?.id;
         set("FX-KEY-1", replayed ? "held" : "violated", replayed
           ? `${advance} ms after the write (stated retention ${stated} ms) the keyed repeat was still answered as a replay`
           : `${advance} ms after the write, inside the stated retention of ${stated} ms, the keyed repeat answered ${again.status}${again.body?.error ? ` ${again.body.error}` : ""}, not a replay`,
