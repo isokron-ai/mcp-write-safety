@@ -181,7 +181,7 @@ describe("the data dir and its lock (G13, X5)", () => {
         const open = join(t.dir, "open");
         mkdirSync(open, { mode: 0o755 });
         chmodSync(open, 0o755);
-        assert.throws(() => prepareDataDir(open), /other users/);
+        assert.throws(() => prepareDataDir(open), /group or others \(chmod 700\)/); // stream F's private-dir message
         symlinkSync(t.dataDir, join(t.dir, "link"));
         assert.throws(() => prepareDataDir(join(t.dir, "link")), /symbolic link/);
       }

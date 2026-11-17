@@ -32,6 +32,7 @@ import { closeSync, existsSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, 
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
+import { ensurePrivateDir, PrivateDirError } from "../private-dir.js";
 import { storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
 import type { AbortReason, JournalSeam, KeyScope } from "./seams.js";
 import type { Store } from "./store.js";
@@ -115,22 +116,25 @@ export function decodeLine(text: string): JournalLine | undefined {
 }
 
 /**
- * The data dir: created 0700, or an existing one checked. Refused: a symlink, a non-directory, one other users can
- * reach, one owned by another user, one that is not empty and was not made by tiny-tracker. (The same rules as the
- * --token-dir folder; stream F's src/private-dir.ts covers both once merged.)
+ * The data dir: created 0700, or an existing one checked. The private-directory rules (created 0700; a symlink, a
+ * non-directory or one open to group or others refused) are stream F's src/private-dir.ts, brought in at the 0.3.0
+ * integration; F integrates fully at 0.4.0. Here also: one owned by another user, or one that is not empty and was not
+ * made by tiny-tracker, is refused.
  */
 export function prepareDataDir(dir: string, platform: string = process.platform): void {
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const existed = existsSync(dir);
+  try {
+    ensurePrivateDir(dir, `--data-dir ${dir}`, platform);
+  } catch (e) {
+    if (e instanceof PrivateDirError) throw new DataDirError(e.message);
+    throw e;
+  }
+  if (!existed) {
     writeFileSync(join(dir, MARKER_FILE), `${JOURNAL_FORMAT}\n`, { mode: 0o600 });
     return;
   }
-  const st = lstatSync(dir);
-  if (st.isSymbolicLink()) throw new DataDirError(`--data-dir ${dir} is a symbolic link; name the directory itself`);
-  if (!st.isDirectory()) throw new DataDirError(`--data-dir ${dir} is not a directory`);
-  if (platform !== "win32") {
-    if ((st.mode & 0o077) !== 0) throw new DataDirError(`--data-dir ${dir} can be reached by other users (mode ${(st.mode & 0o777).toString(8)}); chmod 700 it or use a new directory`);
-    if (typeof process.getuid === "function" && st.uid !== process.getuid()) throw new DataDirError(`--data-dir ${dir} belongs to another user`);
+  if (platform !== "win32" && typeof process.getuid === "function" && statSync(dir).uid !== process.getuid()) {
+    throw new DataDirError(`--data-dir ${dir} belongs to another user`);
   }
   if (!existsSync(join(dir, MARKER_FILE))) {
     if (readdirSync(dir).length > 0) throw new DataDirError(`--data-dir ${dir} is not empty and was not created by tiny-tracker; use an empty or new directory`);
