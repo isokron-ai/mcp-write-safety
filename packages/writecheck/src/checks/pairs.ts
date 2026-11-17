@@ -139,7 +139,9 @@ export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateCon
   // counts test.silent_loss from isError alone. Where the requirement verdict reads a shown conflict and differs, the record
   // says so, and the record's verdict is the one that counts.
   return conc3Verdicts(out, res, gateConfigured).map((r) =>
-    out.verdict?.verdict === 'reproduced' && r.verdict !== 'violated' && r.verdict !== 'platform'
+    // why: review round 2 item 1: only where a shown conflict or a needs-reading pair is why the two differ (not, for example,
+    // a record that is not tested because the validity arm failed, which has no such numbers).
+    out.verdict?.verdict === 'reproduced' && r.verdict !== 'violated' && r.verdict !== 'platform' && Number(r.numbers['conflict_shown'] ?? 0) + Number(r.numbers['needs_reading'] ?? 0) > 0
       ? { ...r, notes: [...r.notes, `The experiment's mechanical rule (${out.verdict.criterion}) says reproduced, because it counts a call without isError as a success; this record reads what the answers say (numbers conflict_shown and needs_reading), so its verdict is ${r.verdict}, and that verdict is the one that counts.`] }
       : r,
   );

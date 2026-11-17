@@ -204,6 +204,20 @@ test('held request: a trial whose answer shows a conflict (declared patterns.con
   assert.equal(dflt.numbers['needs_reading'], 4);
 });
 
+test('CONC-3 pairs: the mechanical-rule note is not given on a record that is not tested for a failed validity arm (review round 2, item 1)', () => {
+  const res = M().resources[0]!;
+  const exp = pairsExperiment(res, 40, 'separate');
+  const half = (text: string) => ({ ok: true, isError: false, text, data: null, tool: 'ticket_update', shape: null });
+  const reps = Array.from({ length: 40 }, (_, i) => ({ rep: i, valid: true, pairs: 1, overlapped: 1, steps: { race: `test.r${i}.race` }, env: { race: { both_ok: true, a: half('modified 1'), b: half('ok') }, final: { ok: true, obj: { assignee: 'bob', status: 'blocked' } } } }));
+  const out = recount(exp, { validity: { role: 'validity', description: '', reps_planned: 1, counts: {}, reps: [] }, test: { role: 'test', description: '', reps_planned: 40, counts: {}, reps } }, [], null);
+  out.arms['validity']!.counts = { valid: 1, both_kept: 0 };
+  assert.equal(out.verdict.verdict, 'reproduced', 'the experiment rule reads isError only');
+  const r = pairsVerdicts(out, res, false)[0]!;
+  assert.equal(r.verdict, 'not tested');
+  assert.match(r.reason, /not independent/);
+  assert.ok(!r.notes.some((n) => /mechanical rule/.test(n)), 'no shown conflict or needs-reading pair is why the two differ');
+});
+
 test('CONC-3: an answer that showed a conflict while its own change took effect and the other writer lost is recorded, not counted (review item 3)', () => {
   const res = M().resources[0]!;
   // assignee (writer A, field 0) = bob is in effect; status (writer B, field 1) stays blocked, so B's change is lost.
