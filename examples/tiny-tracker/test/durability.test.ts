@@ -352,6 +352,33 @@ describe("the lock takeover (G2 fold-in 7)", () => {
     }
   });
 
+  it("round 2, item 2: a third starter in the window: the lock moved aside is never unlinked; this start refuses and names it", async () => {
+    const t = tempDir("lockthird");
+    try {
+      prepareDataDir(t.dataDir);
+      const path = join(t.dataDir, LOCK_FILE);
+      writeFileSync(path, JSON.stringify({ pid: 2 ** 22 + 12345, started_at: "dead" }));
+      const A = JSON.stringify({ pid: process.ppid, started_at: "A" });
+      const C = JSON.stringify({ pid: process.ppid, started_at: "C" });
+      // A takes the stale lock over between this start's check and its rename; C creates a lock between the rename and
+      // the link back. Before the fix this start then unlinked the moved file: A's live lock.
+      lockHooks.beforeTakeover = (p) => { unlinkSync(p); writeFileSync(p, A); };
+      lockHooks.afterAside = (p) => { writeFileSync(p, C); };
+      try {
+        await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), /a lock this start moved aside is kept at/);
+      } finally {
+        lockHooks.beforeTakeover = undefined;
+        lockHooks.afterAside = undefined;
+      }
+      assert.equal(readFileSync(path, "utf8"), C, "C's lock is in place");
+      const aside = readdirSync(t.dataDir).filter((f) => f.startsWith("lock.stale-"));
+      assert.equal(aside.length, 1, "A's lock is kept, not unlinked");
+      assert.equal(readFileSync(join(t.dataDir, aside[0]), "utf8"), A);
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it("two starters on a stale lock: the one that comes second never removes the other's fresh lock", async () => {
     const t = tempDir("lockrace");
     try {

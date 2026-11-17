@@ -30,7 +30,7 @@
 // that no commit or aborted line names is ended at start by an aborted line
 // (reason orphan_at_start), written before the backend serves.
 
-import { closeSync, existsSync, fsyncSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
@@ -196,43 +196,54 @@ export function alive(pid: number, procRoot = "/proc"): boolean {
   return true;
 }
 
-/** Test seam (G2 fold-in 7): called after a lock was judged stale and before it is taken over. */
-export const lockHooks: { beforeTakeover?: (path: string) => void } = {};
+/** Test seams (G2 fold-in 7, round 2): after a lock was judged stale and before it is taken over; after it was moved aside. */
+export const lockHooks: { beforeTakeover?: (path: string) => void; afterAside?: (path: string) => void } = {};
 
 /**
- * Removes a stale lock without ever removing another starter's fresh one (G2 fold-in 7). The lock is renamed aside
- * (atomic: of two starters only one moves a given file) and the moved file is compared with the stale text this starter
- * read. The same text: the stale lock is gone, and the caller creates its own with O_EXCL. Another text: a second
- * starter took the lock over in between, so the moved file is linked back (link refuses if a lock exists again) and the
- * caller reads the lock afresh. Returns false when the lock could not be put back (a third starter created one in the
- * same instant); the caller then refuses to start.
+ * Removes a stale lock without ever destroying another starter's lock (G2 fold-in 7; round 2, item 2). The lock is
+ * renamed aside (atomic: of several starters only one moves a given file). Only when the moved file is proven to be the
+ * stale lock this starter read (the same inode and the same text) is it removed: "removed". Otherwise another starter
+ * took the lock over in between, and the moved file is that starter's live lock: it is linked back ("restored"; the
+ * caller reads the lock again, and its live pid refuses this start). If a lock exists again (a third starter, EEXIST),
+ * or link is not supported and the slot is taken, the moved file is left where it is, never unlinked: "left", and the
+ * caller refuses to start, naming it. Where link is not supported and the slot is free, it is renamed back.
  */
-function removeStaleLock(path: string, staleText: string): boolean {
+function removeStaleLock(path: string, stale: { text: string; ino: number }): { result: "removed" | "restored" | "left"; aside: string } {
   const aside = `${path}.stale-${process.pid}-${randomBytes(6).toString("hex")}`;
   try {
     renameSync(path, aside);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return true; // another starter removed it first
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { result: "removed", aside }; // another starter removed it first
     throw e;
   }
-  let moved: string | undefined;
+  lockHooks.afterAside?.(path);
+  let proven = false;
   try {
-    moved = readFileSync(aside, "utf8");
+    proven = statSync(aside).ino === stale.ino && readFileSync(aside, "utf8") === stale.text;
   } catch {
-    // unreadable: treat it as not the stale lock
+    // unreadable: not proven stale
   }
-  if (moved === staleText) {
+  if (proven) {
     unlinkSync(aside);
-    return true;
+    return { result: "removed", aside };
   }
-  let restored = true;
   try {
     linkSync(aside, path);
-  } catch {
-    restored = false;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== "EEXIST" && !existsSync(path)) {
+      try {
+        renameSync(aside, path);
+        return { result: "restored", aside };
+      } catch {
+        // left below
+      }
+    }
+    return { result: "left", aside };
   }
+  // Linked back: the lock is in place under its own name again; the aside name is only a second link to it.
   unlinkSync(aside);
-  return restored;
+  return { result: "restored", aside };
 }
 
 /**
@@ -302,9 +313,18 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     }
     let text: string;
     let mtimeMs: number;
+    let ino: number;
     try {
-      text = readFileSync(path, "utf8");
-      mtimeMs = statSync(path).mtimeMs;
+      // One descriptor for the text and the inode, so the takeover can prove it removes exactly this file.
+      const fd = openSync(path, "r");
+      try {
+        const st = fstatSync(fd);
+        mtimeMs = st.mtimeMs;
+        ino = st.ino;
+        text = readFileSync(fd, "utf8");
+      } finally {
+        closeSync(fd);
+      }
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; // removed meanwhile: try to create it again
       throw e;
@@ -327,9 +347,11 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
       throw new DataDirError(`the data dir ${dir} is locked by process ${pid}; one server per data dir (more than one instance is not supported)`);
     }
     lockHooks.beforeTakeover?.(path);
-    if (!removeStaleLock(path, text)) {
-      throw new DataDirError(`the data dir ${dir}: another start took the lock over at the same moment; one server per data dir`);
+    const taken = removeStaleLock(path, { text, ino });
+    if (taken.result === "left") {
+      throw new DataDirError(`the data dir ${dir}: other starts took the lock over at the same moment; a lock this start moved aside is kept at ${taken.aside} (it may be a running server's); one server per data dir`);
     }
+    if (taken.result === "restored") continue; // another starter's lock: read it again (its live pid refuses this start)
     log(`tiny-tracker: taking over a stale data-dir lock (process ${Number.isNaN(pid) ? "unknown" : pid} is gone)`);
     ABANDONED.delete(real);
   }
