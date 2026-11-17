@@ -56,6 +56,17 @@ The requirement titles here are short labels; the normative text is in [`spec/mw
 | The key goes to the backend, which keeps the record; a repeat is answered with the first outcome, a reused key with other arguments is refused, a retry after a lost answer keeps the key, and the record survives a server restart | `createTicket` | MWS-RETRY-2 | `idempotency-key-dropped`, `idempotency-key-ignores-args`, `retry-without-key`, `key-store-in-memory` |
 | Nothing is written before the confirmation (`input_required`) is answered | `closeTicket` | MWS-RETRY-3 | `close-before-confirm` |
 | **Variant** `key-store-honest`: where the backend keeps no keys, the server keeps them with a journal of used keys; after a restart a journalled key is refused, never applied twice | `src/variants/key-store-honest.ts` | MWS-RETRY-2 (`held`, with notes) | (correct alternative; no defect) |
+| **Variant** `key-store-durable` (0.3.0): where the backend keeps no keys, the server records the key as pending before the call and completes it after, in its own fsynced journal; after a restart a done key is answered with its stored result and a pending one as unknown | `src/variants/key-store-durable.ts` | MWS-RETRY-2, Annex B-5 | (correct alternative; no defect) |
+| **Variant** `settle-by-client-reference` (0.3.0): for a backend with no key and no lookup, a reference derived from the key is written into the created object and read back to settle a lost answer | `src/variants/settle-by-client-reference.ts` | MWS-RETRY-2, MWS-RES-1 | (correct alternative; no defect) |
+
+## Lost answers and keys in flight (0.2.0, 0.3.0)
+
+| Pattern | Correct code | Requirement | Broken by |
+|---|---|---|---|
+| A lookup by key only reads: when the backend has no record of the key, `get_operation` says "no record of this key now" and sends nothing | `getOperation` (`src/mcp/tools/operations.ts`), feature `lookup` | MWS-ANN-1, FX-LOOK-2 | `lookup-reexecutes` |
+| A same-key call while the first is still pending (409 `in_progress`) is answered `unknown`, repeat with the same key, never "not applied" | the keyed-state answers (`src/mcp/keyed-states.ts`), feature `inflight` | MWS-RES-2 | `in-progress-reported-not-applied` |
+| After a lost backend answer, a lookup miss is final only behind a key fence (`settle-by-lookup`); a bare miss is `unknown`, because the held request can still land | the variant `settle-by-lookup` (`src/variants/settle-by-lookup.ts`), feature `inflight` | MWS-RES-1 | `settle-miss-reported-not-applied` |
+| An expired key whose arguments match is answered applied and replayed, with the receipt id from its tombstone (410 `key_expired`), never "not applied" | the keyed-state answers, feature `retention` | MWS-RETRY-2 (rule 4, B10) | (no MCP-layer defect; the backend's `key-expires-early` shortens the retention) |
 
 ## Inputs: refuse rather than guess
 
@@ -100,4 +111,19 @@ The requirement titles here are short labels; the normative text is in [`spec/mw
 |---|---|---|---|
 | The backend's PATCH reads, checks the version and writes with no await between (one synchronous commit section) | `Store.commit`, `Store.patchTicket` (`src/backend/store.ts`) | MWS-CONC-3, `platform` verdict | `--backend-defect lost-update`: the platform itself loses updates, so a tester reports `platform`, not `violated` |
 
-Fixture defects (`FX-` properties, from 0.2.0) get their own rows here as each release builds them; [FIXTURE.md](../FIXTURE.md) lists the planned ones.
+## The fixture's own evidence (`FX-` properties, backend defects)
+
+These defects break the evidence a harness reads, not an MCP requirement: `fx-check` and the recount see them, and the contract driver mostly does not. Switch one on with `--backend-defect <name>` and the features it needs.
+
+| Pattern | Correct code | Property | Broken by |
+|---|---|---|---|
+| The execution record's digest is taken over the committed result, once, so it never changes after a later write | the execution log (`src/backend/execution.ts`), feature `execution-records` | FX-DIG-1 | `digest-of-current-state` |
+| A replay serves the same execution record id, bytes and digest as the first answer | the keyed replay in `src/backend/http.ts` | FX-DIG-2 | `replay-digest-mismatch` |
+| The served bytes are RFC 8785 canonical JSON under a domain tag, so any language recomputes the digest | `src/digest.ts` | FX-DIG-3 | `digest-not-canonical` |
+| A lookup returns the record of exactly the key asked for | `src/backend/lookup.ts`, feature `lookup` | FX-LOOK-1 | `lookup-wrong-record` |
+| A lookup sees only the caller's principal | the same, feature `principals` | FX-LOOK-3 | `lookup-unscoped` |
+| Key records are journalled, so they survive a restart | the journal (`src/backend/journal.ts`, `src/backend/keyrecords.ts`), feature `durable` | FX-DUR-1 | `key-record-not-durable` |
+| The effect and its key record are committed in one journal line | the same | FX-DUR-2 | `key-record-after-effect` |
+| A key is kept for at least the stated retention, measured in the clock's domain | `src/backend/expiry.ts`, feature `retention` | FX-KEY-1 | `key-expires-early` |
+
+[FIXTURE.md](../FIXTURE.md) lists every FX- property and the defects still planned.
