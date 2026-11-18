@@ -555,9 +555,10 @@ export const schemaCheck: CheckModule = {
         stale = true;
         if (x.timed_out || x.transport_error !== null || (!!x.result_type && x.result_type !== 'complete')) return `the put-back${shown !== undefined ? ` of ${c.prop} = ${short(JSON.stringify(shown), 40)}` : ''} has an unknown outcome`;
         if (!x.ok) return `the put-back${shown !== undefined ? ` of ${c.prop} = ${short(JSON.stringify(shown), 40)}` : ''} was refused (${short(x.text ?? x.rpc_error?.message ?? '', 120)})`;
-        const back = await d.readOnce(label, ctx.session.stepId(`in.${tool}.${c.prop}.${c.name}.restore.read`));
-        if (!back.ok) return 'the object did not read back after the put-back';
         const ign = [...res.read.ignore, ...res.server_managed, ...(res.version ? [res.version.read] : [])];
+        // why: a server may apply the put-back after answering it; the read-back waits, within the settle window, for it to show.
+        const back = await d.readSettled(label, `in.${tool}.${c.prop}.${c.name}.restore`, (o) => withoutIgnored(diff(before, o), ign).length === 0);
+        if (!back.ok) return 'the object did not read back after the put-back';
         const left = withoutIgnored(diff(before, back.obj), ign).map((e) => e.path);
         if (left.length) return `after the put-back the object does not read as it was before the probe (at ${left.slice(0, 4).join(', ')})`;
         return true;

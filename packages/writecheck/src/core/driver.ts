@@ -108,24 +108,46 @@ export class Driver {
     return { ...r, carried: carriedBy(this.res, this.res.update!.tool, args, sent) };
   }
 
-  /** Put both fields back to the baseline (sequentially), and check it took. */
+  /** Put both fields back to the baseline, and check it took. */
   async reset(label = 'RESET'): Promise<boolean> {
     if (!this.baseline) return true;
-    for (const [i, f] of this.fields.entries()) {
-      const cur = await this.readOnce(label, this.session.stepId(`reset.${this.res.name}.read`));
+    const baseline = this.baseline;
+    const atBase = (o: unknown, i: number): boolean => JSON.stringify(getPath(o, this.fields[i]!.path)) === JSON.stringify(baseline[i]);
+    const allAtBase = (o: unknown): boolean => this.fields.every((_, i) => atBase(o, i));
+    let cur = await this.readOnce(label, this.session.stepId(`reset.${this.res.name}.read`));
+    if (!cur.ok) return false;
+    // why: a full_replace write carries every field from the read it was built from. Where the server applies an update
+    // after answering it, a read taken just after one field's write can still show that field's old value, and the next
+    // field's write would send the old value back. So every differing field goes back in one write built from one read.
+    if (this.res.update!.mode === 'full_replace') {
+      const differ = this.fields.map((_, i) => i).filter((i) => !atBase(cur.obj, i));
+      if (!differ.length) return true;
+      const last = differ[differ.length - 1]!;
+      const obj = differ.slice(0, -1).reduce((o, i) => setPath(o, this.fields[i]!.path, baseline[i]), cur.obj);
+      const r = await this.update(label, this.fields[last]!, baseline[last], { step: this.session.stepId(`reset.${this.res.name}.all`), base: { obj, version: cur.version } });
+      if (r.ok) return (await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase)).settled;
+      // the one write was refused: fall back to one field at a time, so a field the tool refuses can go back through the control
+      cur = await this.readSettled(label, `reset.${this.res.name}.reread`);
       if (!cur.ok) return false;
-      if (JSON.stringify(getPath(cur.obj, f.path)) === JSON.stringify(this.baseline[i])) continue;
-      const r = await this.update(label, f, this.baseline[i], { step: this.session.stepId(`reset.${this.res.name}.${i}`), base: { obj: cur.obj, version: cur.version } });
+    }
+    for (const [i, f] of this.fields.entries()) {
+      if (atBase(cur.obj, i)) continue;
+      const r = await this.update(label, f, baseline[i], { step: this.session.stepId(`reset.${this.res.name}.${i}`), base: { obj: cur.obj, version: cur.version } });
       if (!r.ok) {
         // why: research builds N3: a server that refuses to take over a field another writer (the control arm) owns cannot be
         // reset through the tool under test; the tester puts its own object back through the declared control.patch instead.
         if (!this.res.control?.patch) return false;
         this.resetViaControl++;
-        const c = await this.controlPatch(f, this.baseline[i], this.session.stepId(`reset.${this.res.name}.${i}.control`)).catch(() => null);
+        const c = await this.controlPatch(f, baseline[i], this.session.stepId(`reset.${this.res.name}.${i}.control`)).catch(() => null);
         if (!c?.ok) return false;
       }
+      // why: the next field's write is built from this read (its version, and in full_replace mode the whole object), so it
+      // waits, within the settle window, until this field shows its baseline value. The check below covers the last field.
+      if (i === this.fields.length - 1) break;
+      cur = await this.readSettled(label, `reset.${this.res.name}.${i}.after`, (o) => atBase(o, i));
+      if (!cur.ok) return false;
     }
-    const after = await this.readSettled(label, `reset.${this.res.name}.check`, (o) => this.fields.every((f, i) => JSON.stringify(getPath(o, f.path)) === JSON.stringify(this.baseline![i])));
+    const after = await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase);
     return after.settled;
   }
 
