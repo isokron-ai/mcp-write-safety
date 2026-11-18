@@ -15,6 +15,7 @@
     "manifest",
     "plan",
     "results",
+    "cells",
     "not_built",
     "measurements",
     "leftovers",
@@ -326,6 +327,149 @@
               null
             ],
             "description": "Spec 8.2 rule 3: for a requirement that lists platform, every violated or platform record carries server, platform or unresolved; null otherwise. A violated record is never quoted without it."
+          },
+          "cell": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+@.+$",
+            "description": "The cell this record belongs to (docs/CELLS.md): <requirement>@<tool>, or <requirement>@(server) for a server-level requirement. Absent on records that belong to no cell."
+          },
+          "validity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "class",
+              "counts",
+              "failed",
+              "synthetic_fault",
+              "evidence"
+            ],
+            "description": "Evidence validity (docs/CELLS.md): present on every violated record.",
+            "properties": {
+              "class": {
+                "enum": [
+                  "valid",
+                  "platform",
+                  "harness-suspect"
+                ]
+              },
+              "counts": {
+                "type": "boolean"
+              },
+              "failed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "synthetic_fault": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "acknowledged": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "read_back": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "synthetic_fault": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "cells": {
+      "type": "array",
+      "description": "One entry per cell: a MUST requirement on a declared write tool, or a server-level MUST requirement (docs/CELLS.md). Not an aggregate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "requirement",
+          "tool",
+          "scope",
+          "verdict",
+          "applicable",
+          "rule",
+          "reason",
+          "resources",
+          "records"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+$"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "tool",
+              "server"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "violated",
+              "platform",
+              "held",
+              "not observed",
+              "not tested",
+              "not applicable",
+              "self-attested"
+            ]
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "rule": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "validity": {
+            "enum": [
+              "valid",
+              "platform",
+              "harness-suspect"
+            ]
           }
         }
       }

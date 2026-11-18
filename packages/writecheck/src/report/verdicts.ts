@@ -43,16 +43,54 @@ export interface Result {
    * unresolved (no control arm ran, so the behavior may be the backend's). Null for every other record.
    */
   attribution: 'server' | 'platform' | 'unresolved' | null;
+  /**
+   * The cell this record belongs to (docs/CELLS.md): `<requirement>@<tool>` for a MUST requirement on a declared write tool, or
+   * `<requirement>@(server)` for a server-level MUST requirement. Set by the cell pass at the end of a run (checks/cells.ts), never
+   * by a check: a check only names the tool in write_path, and every record for that requirement and tool, under any resource or
+   * scenario, lands in the same cell. Absent on records that belong to no cell (SHOULD requirements, read tools, the catalog).
+   */
+  cell?: string;
+  /** Evidence validity (report/validity.ts): present on every `violated` record, absent otherwise. */
+  validity?: Validity;
 }
 
-export function result(id: RequirementId, wp: WritePath, scenario: { id: string; version: string }, verdict: Verdict, reason: string, o: { numbers?: Record<string, unknown>; steps?: string[]; notes?: string[]; attribution?: 'server' | 'platform' | 'unresolved' } = {}): Result {
+/**
+ * Whether a `violated` record counts toward a rating (docs/CELLS.md, "Validity"). `valid`: it counts. `platform`: it counts, and
+ * is printed as "attribution unresolved" (no control arm decided whether the backend does the same). `harness-suspect`: it does
+ * not count until a re-run reproduces it; `failed` names the rules it did not meet.
+ */
+export interface Validity {
+  class: 'valid' | 'platform' | 'harness-suspect';
+  counts: boolean;
+  /** The validity rules (V-*) the record did not meet; empty for valid and platform. */
+  failed: string[];
+  /** The violation was seen under a fault the gate injected (a status the real backend may never send); printed, not disqualifying. */
+  synthetic_fault: boolean;
+  /** What the check stated about its evidence, where it said (Evidence below); null members were not stated. */
+  evidence: Evidence;
+}
+
+/** What a check can state about the evidence behind a `violated` record (all optional; the validity pass fills what it can see). */
+export interface Evidence {
+  /** Every write the violation rests on was acknowledged as a success by the server. */
+  acknowledged?: boolean | null;
+  /** The final state was read back after the writes. */
+  read_back?: boolean | null;
+  /** The violation was provoked with a fault the gate injected. */
+  synthetic_fault?: boolean | null;
+}
+
+export function result(id: RequirementId, wp: WritePath, scenario: { id: string; version: string }, verdict: Verdict, reason: string, o: { numbers?: Record<string, unknown>; steps?: string[]; notes?: string[]; attribution?: 'server' | 'platform' | 'unresolved'; evidence?: Evidence } = {}): Result {
   const notes = [...(o.notes ?? [])];
   const listed = PLATFORM_LISTED.includes(id);
   const attribution = !listed || (verdict !== 'violated' && verdict !== 'platform') ? null : verdict === 'platform' ? 'platform' : (o.attribution ?? 'unresolved');
   // why: the general note says no control arm ran; where one ran and the record already says why it does not decide (too few
   // overlapped pairs, not the same schedule), that note would be untrue (gate-2 Grafana 3 on d3b536f).
   if (attribution === 'unresolved' && !notes.some((n) => /attribution stays unresolved/i.test(n))) notes.push(RULE3_NOTE);
-  return { attribution, requirement: id, level: requirement(id).level, write_path: wp, scenario, verdict, reason, numbers: o.numbers ?? {}, steps: o.steps ?? [], notes };
+  const out: Result = { attribution, requirement: id, level: requirement(id).level, write_path: wp, scenario, verdict, reason, numbers: o.numbers ?? {}, steps: o.steps ?? [], notes };
+  // why: F6: a check that knows its evidence says so here; the validity pass (report/validity.ts) completes the block at the end of the run.
+  if (verdict === 'violated' && o.evidence) out.validity = { class: 'valid', counts: true, failed: [], synthetic_fault: o.evidence.synthetic_fault === true, evidence: { ...o.evidence } };
+  return out;
 }
 
 export const RULE3_NOTE = 'Attribution: unresolved. No control arm ran, so the behavior may be the backend\'s (spec 8.2, rule 3).';

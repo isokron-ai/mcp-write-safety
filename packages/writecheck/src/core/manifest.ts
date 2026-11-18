@@ -272,6 +272,23 @@ export interface ReviewSpec {
   answers: Record<string, { answer: boolean; note: string | null }>;
 }
 
+/** F5 (rating method 0.4): the pair budget per probabilistic requirement, 2 repeats of 1500 barrier pairs. */
+export const PAIR_BUDGET = { repeats: 2, pairs: 1500 } as const;
+export const MAX_WRITE_BUDGET = 250_000;
+/**
+ * F5: the write budget when none is declared, sized to fit the run: 1000 for everything but the pairs, and for each resource
+ * with an update tool and two fields, four writes per barrier pair (two writes and the reset) in each repeat, twice where a
+ * control block can run the control arm, plus the RETRY-2 overlapped pairs of a resource with an idempotency block.
+ */
+export function defaultWriteBudget(resources: ResourceSpec[], pairs: number, repeats: number): number {
+  let n = 1000;
+  for (const r of resources) {
+    if (r.update && r.fields) n += (repeats * (pairs + 1)) * 4 * (r.control ? 2 : 1);
+    if (r.idempotency) n += pairs * 4;
+  }
+  return Math.min(MAX_WRITE_BUDGET, Math.max(500, n));
+}
+
 export interface Manifest {
   mws: string;
   /** The first part of every name the run gives its objects (`<prefix>-<run>-…`); default mwsc. */
@@ -310,7 +327,20 @@ export interface Manifest {
     guard: ({ tool: string; args: unknown; path: string | null; pattern: string; read_only: boolean; read_only_call?: boolean } & Decode) | null;
     refuse_fingerprints: string[];
   };
-  limits: { write_budget: number; writes_per_second: number; pairs: number; stale_reps: number; gate_reps: number; timeout_ms: number; max_fuzz_cases: number };
+  limits: {
+    write_budget: number;
+    writes_per_second: number;
+    /** Barrier pairs per repeat (MWS-CONC-3 tier 2). Default: pair_budget.pairs. */
+    pairs: number;
+    /** Repeats of the barrier pairs. Default: pair_budget.repeats, or 1 where `pairs` is declared (a declared size keeps its old meaning). */
+    pair_repeats: number;
+    /** F5: the pair budget a rating asks of a probabilistic requirement (default 2 × 1500); a run below it reports "not observed (below budget)". */
+    pair_budget: { repeats: number; pairs: number };
+    stale_reps: number;
+    gate_reps: number;
+    timeout_ms: number;
+    max_fuzz_cases: number;
+  };
   /** backend.gate: exactly one route (rewrite_env: base-URL rewrite; node_import: the in-process hook). */
   backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
   /** Arguments for other tools (annotation effects), bound to a resource whose scratch object `{{id}}` names. */
@@ -1111,7 +1141,13 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
-  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases'], 'limits');
+  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'pair_repeats', 'pair_budget', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases'], 'limits');
+  const pb = lim['pair_budget'] === undefined ? {} : obj(lim['pair_budget'], 'limits.pair_budget');
+  keys(pb, ['repeats', 'pairs'], 'limits.pair_budget');
+  const pairBudget = { repeats: num(pb['repeats'], PAIR_BUDGET.repeats, 1, 10, 'limits.pair_budget.repeats'), pairs: num(pb['pairs'], PAIR_BUDGET.pairs, 1, 5000, 'limits.pair_budget.pairs') };
+  const pairsDeclared = lim['pairs'] !== undefined;
+  const pairs = num(lim['pairs'], pairBudget.pairs, 1, 5000, 'limits.pairs');
+  const pairRepeats = num(lim['pair_repeats'], pairsDeclared ? 1 : pairBudget.repeats, 1, 10, 'limits.pair_repeats');
   let backend: Manifest['backend'] = null;
   if (o['backend'] !== undefined) {
     const b = obj(o['backend'], 'backend');
@@ -1159,9 +1195,12 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
-      write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
+      // why: F5: the default is sized to fit the pair budget the run will send (see defaultWriteBudget); a declared budget stays a hard cap.
+      write_budget: num(lim['write_budget'], defaultWriteBudget(resources, pairs, pairRepeats), 1, MAX_WRITE_BUDGET, 'limits.write_budget'),
       writes_per_second: num(lim['writes_per_second'], 5, 0.1, 1000, 'limits.writes_per_second'),
-      pairs: num(lim['pairs'], 40, 1, 1000, 'limits.pairs'),
+      pairs,
+      pair_repeats: pairRepeats,
+      pair_budget: pairBudget,
       stale_reps: num(lim['stale_reps'], 3, 1, 100, 'limits.stale_reps'),
       gate_reps: num(lim['gate_reps'], 2, 1, 100, 'limits.gate_reps'),
       timeout_ms: num(lim['timeout_ms'], 30_000, 100, 600_000, 'limits.timeout_ms'),

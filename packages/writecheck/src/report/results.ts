@@ -7,6 +7,7 @@
  */
 
 import type { Measurements } from '../checks/catalog.js';
+import type { Cell } from '../checks/cells.js';
 import type { Observation } from '../checks/types.js';
 import type { CleanupReport, Leftover } from '../core/cleanup.js';
 import type { McpRecord } from './protocol.js';
@@ -26,6 +27,8 @@ export interface ResultsDoc {
   manifest: { path: string; sha256: string };
   plan: { hash: string };
   results: Result[];
+  /** One entry per cell (MUST requirement × declared write tool, plus the server-level requirements): docs/CELLS.md. Not an aggregate: no total, no percentage. */
+  cells: Cell[];
   not_built: NotRun[];
   measurements: Measurements | null;
   leftovers: Leftover[];
@@ -44,7 +47,7 @@ export interface ResultsDoc {
 }
 
 /** The top-level keys the schema allows, in order (a test checks the schema file against this). */
-export const RESULTS_KEYS = ['format', 'scope', 'suite', 'spec', 'run', 'target', 'manifest', 'plan', 'results', 'not_built', 'measurements', 'leftovers', 'cleanup', 'observations', 'evidence', 'safety'] as const;
+export const RESULTS_KEYS = ['format', 'scope', 'suite', 'spec', 'run', 'target', 'manifest', 'plan', 'results', 'cells', 'not_built', 'measurements', 'leftovers', 'cleanup', 'observations', 'evidence', 'safety'] as const;
 
 export function scopeSentence(o: { server: string; catalog: string; resources: { name: string; tool: string; fields: string[] }[]; notBuiltCount: number }): string {
   const res = o.resources.map((r) => (r.fields.length ? `${r.name} through ${r.tool} (fields ${r.fields.join(', ')})` : `${r.name} through ${r.tool}`)).join('; ');

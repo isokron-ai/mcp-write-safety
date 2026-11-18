@@ -63,9 +63,11 @@ Target hosts are listed on the plan's "Hosts reached or given to the server" lin
 
 | Key | Default | Meaning |
 |---|---|---|
-| `write_budget` | 500 | Writes a run may make; the plan states how many it will make at most |
+| `write_budget` | sized to fit | Writes a run may make; the plan states how many it will make at most. Undeclared, it is 1000 plus, for each resource with an update tool and two fields, 4 writes per barrier pair per repeat (doubled where a control block runs the control arm), plus `pairs` × 4 for each resource with an idempotency block (at least 500, at most 250000). A declared value is a hard cap |
 | `writes_per_second` | 5 | Pace of writes |
-| `pairs` | 40 | Simultaneous pairs per concurrency test; 30 overlapped pairs are needed before `not observed` (spec 8.2, rule 6) |
+| `pairs` | `pair_budget.pairs` (1500) | Simultaneous pairs per repeat of the MWS-CONC-3 barrier-pair test (and the cap of the MWS-RETRY-2 step (d) pairs); 30 overlapped pairs are needed before `not observed` (spec 8.2, rule 6) |
+| `pair_repeats` | `pair_budget.repeats` (2); 1 where `pairs` is declared | Repeats of the barrier-pair test, each with fresh server processes |
+| `pair_budget` | `{ repeats: 2, pairs: 1500 }` | The budget the record is judged against (rating method 0.4): a run below it says "Not observed, below the pair budget", at it "Not observed at the full pair budget". Pairs never give `held`; a stopped repeat gives `not tested` |
 | `stale_reps` | 3 | Repetitions of each forced stale write |
 | `gate_reps` | 2 | Repetitions of each held-request schedule |
 | `timeout_ms` | 30000 | Per call |
