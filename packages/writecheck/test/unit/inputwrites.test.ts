@@ -110,3 +110,12 @@ test('verdicts: a bystander lost around a call that spec 7.3, rule 1 covers keep
   assert.equal(v['MWS-IN-1'], 'not tested');
   assert.ok(rs.find((r) => r.requirement === 'MWS-IN-1')!.numbers['bystanders_lost']);
 });
+
+test('the tenant guard and the canary tools are never probed, even where they are not marked read-only (guard B2)', () => {
+  const guarded = parseManifestText(text.replace('guard: { tool: list_projects', 'guard: { tool: add_label'), TT_MANIFEST);
+  const r = guarded.resources.find((x) => x.name === 'ticket')!;
+  assert.match(writeCallGate({ manifest: guarded, tools }, r, writeCallFor(guarded, r, 'add_label'), 'add_label') ?? '', /tenant guard/);
+  const canary = parseManifestText(text.replace('- { name: projects, tool: list_projects', '- { name: projects, tool: set_labels'), TT_MANIFEST);
+  const r2 = canary.resources.find((x) => x.name === 'ticket')!;
+  assert.match(writeCallGate({ manifest: canary, tools }, r2, writeCallFor(canary, r2, 'set_labels'), 'set_labels') ?? '', /canary/);
+});

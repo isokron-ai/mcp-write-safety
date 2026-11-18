@@ -111,6 +111,10 @@ export function writeCallFor(m: Manifest, res: ResourceSpec, tool: string): Writ
 /** Why the probes of a declared call cannot be sent, or null where they may (checked at plan time and again at run time). */
 export function writeCallGate(ctx: Pick<PlanContext, 'manifest' | 'tools'> & { session?: object }, res: ResourceSpec, c: WriteCall | null, tool: string): string | null {
   if (!toolByName(ctx.tools, tool)) return `${tool} is not in tools/list`;
+  // why: the tenant guard and the canaries are calls the operator vouches for exactly as declared (a read, or a declared read-only
+  // call that the run sends a fixed number of times); a probe would be another call, which nothing vouches for.
+  if (ctx.manifest.target.guard?.tool === tool) return `${tool} is the tenant guard (target.guard); the declaration vouches only for the guard call itself, so no other call is sent to it`;
+  if ((ctx.manifest.canaries ?? []).some((x) => x.tool === tool)) return `${tool} is a canary (canaries); the declaration vouches only for the canary call itself, so no other call is sent to it`;
   if (!c) return `the declaration gives no call of ${tool} that succeeds to start the probes from (a create, creates, delete, selector with narrow, multi, input_required, calls or versioned entry); spec MWS-IN-1 sends each probe in a call that is otherwise valid, after a base call that succeeded`;
   const roots = [...templateRoots(c.args)].filter((r) => !FILLED.has(r) && !Object.hasOwn(res.vars, r));
   if (roots.length) return `the declared call of ${tool} (${c.source}) uses {{${roots.join('}}, {{')}}}, which this check does not fill, so no base call was made`;
