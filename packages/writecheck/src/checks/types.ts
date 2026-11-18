@@ -513,7 +513,18 @@ export type SecondClause = { v: 'held' | 'violated' | 'unread'; why: string; not
  * or a version (undefined: not known to the tester, taken as given), and whether the text names a read tool or the object to
  * read (`maybe`: it names the object, and whether as the read to make first needs a declared patterns.read_named).
  */
-export type ShapeReadOptions = { carriedKey?: boolean; carriedVersion?: boolean; textNamesRead?: boolean | 'maybe'; /** The lost-answer trial of MWS-RES-2: a declared patterns.write_failed reads the error's statement that the write failed. */ lostAnswer?: boolean };
+export type ShapeReadOptions = { carriedKey?: boolean; carriedVersion?: boolean; textNamesRead?: boolean | 'maybe'; /** The lost-answer trial of MWS-RES-2: a declared patterns.write_failed reads the error's statement that the write failed. */ lostAnswer?: boolean; /** The lost-answer trial (R10-11): the follow-through repeat with the version the call carried, where it was sent. */ followThrough?: FollowThroughRead | null };
+
+/**
+ * The follow-through of MWS-RES-2's lost-answer trial (spec R10-11): where the error names the version the call carried, the
+ * tester sends the call again once with that version, with no fault, and reads back. `applied_again`: the repeat was applied a
+ * second time (seen through a change of the version, or of the state where no version is declared); null where the read-back
+ * could not tell. `how` says what was compared.
+ */
+export interface FollowThroughRead {
+  applied_again: boolean | null;
+  how: string;
+}
 
 /** The pattern kind that reads an error's statement that the write failed: write_failed in the lost-answer trial where declared, else not_applied (f573a24). */
 export const failedKind = (lostAnswer = false): 'write_failed' | 'not_applied' => (lostAnswer && fromDeclaration('write_failed') ? 'write_failed' : 'not_applied');
@@ -543,8 +554,8 @@ export function readSecondClause(b: Pick<CallBrief, 'text' | 'data'> & Partial<P
  * The second clause read from an adopted result shape (spec 7.3, rule 11; B-9 v2). `outcome: "unknown"` says the outcome is
  * not known (held), unless `repeat`, as given or as read under "How a tester uses it", is `yes`: it tells the caller to repeat
  * the open write without a read first and without a key or a version, the kind `retry-invited` (violated). `same_key`,
- * `same_version` and `read_first` are the repeats the requirement allows where they name what they say (the follow-through repeat
- * with the version is not built here, and the record says so). Otherwise each change that stayed applied must be identified:
+ * `same_version` and `read_first` are the repeats the requirement allows where they name what they say (`same_version` is decided
+ * by the follow-through repeat with the version, where the trial sent it: R10-11). Otherwise each change that stayed applied must be identified:
  * under `applied`, listed in `changed` (JSON Pointers) or the object named; under `partial`, listed in `changed` or an item listed
  * as applied. `not_applied` with a change in effect is a stated failure.
  */
@@ -563,7 +574,14 @@ function secondClauseByShape(b: Partial<Pick<CallBrief, 'tool' | 'shape'>> & Pic
   if (open && (s.repeat === 'same_key' || s.repeat === 'same_version') && (s.repeat === 'same_key' ? o.carriedKey : o.carriedVersion) === undefined) return { v: 'unread', why: `its adopted result shape says ${quoteField('repeat', s.repeat)}, and whether the call carried ${s.repeat === 'same_key' ? 'an idempotency key' : 'a version'} is not known to the tester, so whether the repeat it allows is guarded is not known (B-9 v2: on a call that carried none it means "yes")`, notes: [decidedByShape(rf, b)], blocksHeld: true };
   // why: MWS-RES-2 and B-9 v2: same_version on a call that carried a version names it, and the follow-through (the repeat sent once
   // with that version, no fault, then read back) decides whether it guards the repeat; it is not built, so no held (as for the text).
-  if (open && rep === 'same_version') return { v: 'unread', why: `it says the outcome is not known and allows a repeat with the version the call carried (${quoteField('outcome', 'unknown')}, ${quoteField('repeat', 'same_version')}); the follow-through that would show whether that version guards the repeat is not built in this preview`, notes: [decidedByShape(rf, b)], blocksHeld: true };
+  if (open && rep === 'same_version') {
+    const ft = o.followThrough;
+    // why: R10-11: the follow-through decides: a repeat with that version that was applied again is retry-invited; a conflict, or a
+    // success that applied nothing again (NF-24), meets the requirement.
+    if (ft && ft.applied_again === true) return { v: 'violated', why: `it says the outcome is not known and allows a repeat with the version the call carried (${quoteField('outcome', 'unknown')}, ${quoteField('repeat', 'same_version')}), and the follow-through repeat with that version, sent with no fault, was applied again: the version did not guard the repeat (${ft.how})`, notes: [decidedByShape(rf, b)], kind: 'retry-invited' };
+    if (ft && ft.applied_again === false) return { v: 'held', why: `says that it is not known whether the change was applied and allows a repeat with the version the call carried (${quoteField('outcome', 'unknown')}, ${quoteField('repeat', 'same_version')}); the follow-through repeat with that version, sent with no fault, was not applied again (${ft.how})`, notes: [decidedByShape(rf, b)] };
+    return { v: 'unread', why: `it says the outcome is not known and allows a repeat with the version the call carried (${quoteField('outcome', 'unknown')}, ${quoteField('repeat', 'same_version')}); ${ft ? `the follow-through repeat with that version could not show whether it was applied again (${ft.how})` : 'the follow-through repeat with that version was not sent in this trial'}, so whether that version guards the repeat is not known`, notes: [decidedByShape(rf, b)], blocksHeld: true };
+  }
   // why: B-9 v2 (SF-3): a repeat: yes with no well-formed outcome still invites a repeat of an open write (changes are in effect).
   if (!s.outcome) {
     if (rep === 'yes' && s.repeat !== undefined) return { v: 'violated', why: `${changed.join(', ')} stayed changed, the outcome member decides nothing, and it tells the caller to send the same call again (${quoteField('repeat', s.repeat)}${asRead})`, notes: [decidedByShape(rf, b)], kind: 'retry-invited' };

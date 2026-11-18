@@ -154,6 +154,9 @@ export const createsCheck: CheckModule = {
       writes += 3;
     }
     for (const f of res.failures) {
+      // why: B-GAP F4: a resource with no object under test (no update block) has its declared failures run by the write-faults
+      // check, on a scratch object or under the key the call carries, where what the call could change is read around it.
+      if (!res.update) continue;
       // why: Action CI SH-4: a failure call that names the object is not sent without an object under test (C6); the plan does not list it.
       if (namesObject(f.args) && (!res.update || !res.fields)) continue;
       calls.push(`MWS-RES-2 declared failure ${f.name}: ${f.tool}; ${res.read.tool}`);
@@ -190,6 +193,8 @@ export const createsCheck: CheckModule = {
       await d.reset();
     }
     for (const f of res.failures) {
+      // why: B-GAP F4: without an object under test (no update block) the write-faults check runs the declared failures.
+      if (!res.update) continue;
       // why: dogfood C6: a failure call that names the object ({{id}}) needs an object under test; without one it is not sent.
       if (d.id === null && namesObject(f.args)) {
         obs.failures.push({ name: f.name, tool: f.tool, call: { step: '', ok: false, isError: false, rpc_error: null, text: null, data: null, indeterminate: true }, changed: null, skipped: `${res.name} has no object under test (no update block or fixture), so {{id}} in ${f.tool}'s arguments has no value; the call was not sent` } as never);
