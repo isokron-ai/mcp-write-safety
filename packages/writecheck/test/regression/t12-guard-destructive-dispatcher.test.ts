@@ -75,8 +75,11 @@ async function plan(manifest: string, tools: unknown[]) {
 test('t12: plan --catalog no longer says the run would refuse the SELECT guard through the destructive-marked mysql_query', async () => {
   const r = await plan(T12, [MYSQL_QUERY]);
   assert.doesNotMatch(r.warning ?? '', /target\.guard/, r.warning ?? '');
-  assert.ok(r.plan.warnings.some((w) => /tenant guard runs through mysql_query, which declares destructiveHint: true/.test(w)), r.plan.warnings.join(' | '));
-  assert.match(r.log, /reads every pre-made fixture whole before the first guard call and after the third/);
+  const w = r.plan.warnings.find((x) => /runs through a tool that declares destructiveHint: true \(a dispatcher\)/.test(x)) ?? '';
+  assert.ok(w.startsWith(`the tenant guard mysql_query {"sql":"SELECT name FROM mwsc_items WHERE id = 'mwsc-fx-1'"} runs through`), r.plan.warnings.join(' | '));
+  assert.match(w, /these reads go out before the tenant check matches/);
+  assert.match(w, /Tables, columns, schemas and counters the manifest does not read, and a write undone within one call, are not compared/);
+  assert.match(r.log, /with no ignored field left out/);
   assert.equal(r.plan.writes_at_most >= 3, true);
 });
 
@@ -90,12 +93,21 @@ test('t12: the same guard without read_only_call is refused', async () => {
   assert.notEqual(m, T12);
   const r = await plan(m, [MYSQL_QUERY]);
   assert.match(r.warning ?? '', /run would refuse: target\.guard: mysql_query declares readOnlyHint: false or destructiveHint: true/);
-  assert.ok(!r.plan.warnings.some((w) => /destructiveHint: true \(a dispatcher/.test(w)));
+  assert.ok(!r.plan.warnings.some((w) => /destructiveHint: true \(a dispatcher\)/.test(w)));
 });
 
 test('t12: a manifest that reads the fixture through another tool keeps the refusal', async () => {
   const m = T12.replace('read: { tool: mysql_query, args: { sql: "SELECT id, name', 'read: { tool: mysql_get, args: { sql: "SELECT id, name');
   assert.notEqual(m, T12);
-  const r = await plan(m, [MYSQL_QUERY, { name: 'mysql_get', inputSchema: { type: 'object' } }]);
+  const r = await plan(m, [MYSQL_QUERY, { name: 'mysql_get', inputSchema: { type: 'object' }, annotations: { readOnlyHint: false } }]);
   assert.match(r.warning ?? '', /run would refuse: target\.guard: mysql_query declares destructiveHint: true; .*this manifest reads through mysql_get/);
+});
+
+test('t12 review F2/F3: the plan says the run would refuse a write word in the guard, or a second tool that may read', async () => {
+  const m = T12.replace("WHERE id = 'mwsc-fx-1'\" }, path", "WHERE id = 'mwsc-fx-1' FOR UPDATE\" }, path");
+  assert.notEqual(m, T12);
+  const r = await plan(m, [MYSQL_QUERY]);
+  assert.match(r.warning ?? '', /run would refuse: target\.guard: mysql_query declares destructiveHint: true, and the declared call's arguments .*"FOR UPDATE"/);
+  const r2 = await plan(T12, [MYSQL_QUERY, { name: 'mysql_describe', inputSchema: { type: 'object' } }]);
+  assert.match(r2.warning ?? '', /run would refuse: .*this server offers mysql_describe, which declare neither readOnlyHint: false nor destructiveHint: true/);
 });
