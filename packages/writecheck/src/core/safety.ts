@@ -41,20 +41,36 @@ export function productionReason(host: string): string | null {
 const URL_IN_ARG = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,]+/gi;
 
 /**
- * A variable whose name says it holds a host on its own (`MYSQL_HOST`, `DB_HOSTNAME`, `CACHE_SERVER`, `API_ADDR`, `HOST`):
- * the word must end the name and start it or follow an underscore, so `HOST_HEADER` and `GHOST` are not hosts. `PGHOST` is
- * the one widely used name without the underscore.
+ * A backend host given without a URL: in a host variable (`DB_HOST=b0` with `DB_PORT=3306`) or after a host flag
+ * (`--db-host b0 --db-port 3306`). The rule, on the words of the name (split on `_`, and on `-` for a flag):
+ *   - the last word is HOST, HOSTNAME or HOSTS: any hostname or IP address is a host (`PGHOST` counts as one of these);
+ *   - the last word is SERVER(S), ADDR(S), ADDRESS(ES), ENDPOINT(S), NODES, BROKERS, SEEDS or SENTINELS: only a value with a
+ *     dot, an IP address or a port of its own is a host (a single word such as `production` is a name, not a host);
+ *   - a name with a LISTEN or BIND word is where the server listens, not a target; so is a variable of one word (`HOST`,
+ *     `PORT`, `ADDR`) and an unprefixed host flag (`--host`, `-h`) on server.launch.command;
+ *   - `HOST_HEADER` (HOST is not the last word) and `GHOST` (not a word of its own) are not host names.
+ * The port is the sibling with PORT for the last word (`DB_HOST` → `DB_PORT`, `PGHOST` → `PGPORT`, in any case), or the
+ * matching port flag after the host flag (`--db-host` → `--db-port`; `--host`, `-h`, `-H` → `--port`, `-p`).
  */
-const HOST_VAR = /^(?:(?:.*_)?(?:HOST|HOSTNAME|SERVER|ADDR|ADDRESS|ENDPOINT)|PGHOST)$/i;
-/** The variable that holds the port for a host variable: the same prefix with PORT (`MYSQL_HOST` → `MYSQL_PORT`, `HOST` → `PORT`, `PGHOST` → `PGPORT`). */
-const portVarOf = (name: string): string => (/^PGHOST$/i.test(name) ? 'PGPORT' : `${name.replace(/[^_]*$/, '')}PORT`);
-/** Command-line flags followed by a host (`--host x`, `--host=x`, `-h x`), and the one that gives its port (`--port n`, `--port=n`). */
-const HOST_FLAGS = new Set(['--host', '--hostname', '-h']);
-const PORT_FLAG = '--port';
+const LENIENT_WORDS = new Set(['HOST', 'HOSTNAME', 'HOSTS']);
+const STRICT_WORDS = new Set(['SERVER', 'SERVERS', 'ADDR', 'ADDRS', 'ADDRESS', 'ADDRESSES', 'ENDPOINT', 'ENDPOINTS', 'NODES', 'BROKERS', 'SEEDS', 'SENTINELS']);
+const LISTEN_WORDS = new Set(['LISTEN', 'BIND']);
+/** For a host name: whether its values need a dot, an IP or a port (strict), and the words before the last one. Null when it is not a host name. */
+function hostName(name: string, split: RegExp): { strict: boolean; prefix: string[] } | null {
+  const w = name.toUpperCase().split(split).filter(Boolean);
+  if (w.length === 1 && w[0] === 'PGHOST') return { strict: false, prefix: ['PG'] };
+  const last = w.at(-1) ?? '';
+  if (w.some((x) => LISTEN_WORDS.has(x))) return null;
+  if (LENIENT_WORDS.has(last)) return { strict: false, prefix: w.slice(0, -1) };
+  if (STRICT_WORDS.has(last)) return { strict: true, prefix: w.slice(0, -1) };
+  return null;
+}
 
 const LABEL = /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/i;
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 const NOT_A_HOST = new Set(['true', 'false', 'yes', 'no', 'on', 'off', 'none', 'null', 'undefined']);
+/** The last label of a file name, not of a host (`config.yaml`, `prod.env`). */
+const FILE_EXT = new Set(['yaml', 'yml', 'json', 'jsonc', 'json5', 'toml', 'ini', 'cfg', 'conf', 'config', 'env', 'properties', 'txt', 'js', 'mjs', 'cjs', 'ts', 'sql', 'db', 'sqlite', 'sqlite3', 'log', 'xml', 'csv', 'pem', 'key', 'crt', 'cert', 'lock']);
 /** Addresses a server listens on, not hosts it reaches. */
 const UNSPECIFIED = new Set(['0.0.0.0', '[::]']);
 const portOk = (p: string | undefined): p is string => !!p && /^\d{1,5}$/.test(p) && +p >= 1 && +p <= 65535;
@@ -65,17 +81,21 @@ const ipv6 = (v: string): string | null => {
     return null;
   }
 };
+const unquote = (v: string): string => (/^(["']).*\1$/s.test(v) && v.length >= 2 ? v.slice(1, -1).trim() : v);
 
 /**
- * A bare host (no scheme) given as `host` or `host:port`, normalized like URL.host (lower case, an IPv6 address in brackets),
- * with `port` added when the value has none; or null when the value is not a hostname or an IP address: empty, a flag word
- * (`true`, `off`), a number on its own, a path, or a listen-on-everything address (`0.0.0.0`, `::`).
+ * A bare host (no scheme) given as `host` or `host:port`, normalized as URL.host is (lower case, an internationalized name in
+ * its ASCII form, an IPv6 address in brackets), with `port` added when the value has none; or null when the value is not a
+ * hostname or an IP address: empty, a flag word (`true`, `off`), a number on its own, a path or a file name, or a
+ * listen-on-everything address (`0.0.0.0`, `::`). With `strict`, a single word without a port is not a host either.
+ * One pair of surrounding quotes is dropped, and so is a named instance (`host\INSTANCE`).
  */
-export function bareHost(value: string | undefined, port?: string): string | null {
-  const v = (value ?? '').trim().toLowerCase();
-  if (!v || NOT_A_HOST.has(v) || /[/\\\s@?#]/.test(v)) return null;
+export function bareHost(value: string | undefined, port?: string, strict = false): string | null {
+  const v = unquote((value ?? '').trim()).toLowerCase().replace(/\\[a-z0-9_$-]+$/, '');
+  if (!v || NOT_A_HOST.has(v) || /[/\\\s@?#,]/.test(v)) return null;
   let host: string | null;
   let p: string | undefined;
+  let ip = true;
   const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(v);
   if (bracketed) [host, p] = [ipv6(bracketed[1]!), bracketed[2]];
   else if ((v.match(/:/g) ?? []).length >= 2) host = ipv6(v);
@@ -84,14 +104,92 @@ export function bareHost(value: string | undefined, port?: string): string | nul
     if (!hp) return null;
     [host, p] = [hp[1]!.replace(/\.$/, ''), hp[2]];
     const labels = host.split('.');
-    if (!labels.every((l) => LABEL.test(l))) return null;
     // digits and dots make a host only as a whole IPv4 address (`3306` and `1.2` are not hosts)
-    if (labels.every((l) => /^\d+$/.test(l)) && !IPV4.test(host)) return null;
+    if (labels.every((l) => /^\d+$/.test(l))) {
+      if (!IPV4.test(host)) return null;
+    } else {
+      ip = false;
+      if (labels.length > 1 && FILE_EXT.has(labels.at(-1)!)) return null;
+      try {
+        host = new URL(`http://${host}/`).hostname; // an internationalized name in its ASCII form, as for a URL host
+      } catch {
+        return null;
+      }
+      if (!host.split('.').every((l) => LABEL.test(l))) return null;
+    }
   }
   if (!host || UNSPECIFIED.has(host)) return null;
   if (p !== undefined && !portOk(p)) return null;
+  if (strict && !ip && !host.includes('.') && p === undefined) return null;
   const withPort = p ?? (portOk(port?.trim()) ? port!.trim() : undefined);
   return withPort ? `${host}:${+withPort}` : host;
+}
+
+/**
+ * The hosts in one value: a comma-separated list is read item by item (`a:27017,b:27017`), and `host,1433` (the second item
+ * only a port) is one host with its port. A URL is not read here (it is read as a URL).
+ */
+export function hostsIn(value: string, port?: string, strict = false): string[] {
+  const v = unquote(value.trim());
+  if (v.includes('://')) return [];
+  const parts = v.split(',').map((s) => s.trim());
+  if (parts.length === 2 && /^\d+$/.test(parts[1]!) && !parts[0]!.includes(':')) {
+    const h = bareHost(`${parts[0]}:${parts[1]}`, undefined, strict);
+    return h ? [h] : [];
+  }
+  return parts.map((s) => bareHost(s, port, strict)).filter((h): h is string => !!h);
+}
+
+type Found = { host: string; where: string };
+
+/** Hosts in host variables (prefixed names only), each with its sibling port. */
+function varHosts(vars: Map<string, { value: string; where: string }>, out: Found[]): void {
+  const upper = new Map([...vars].map(([k, v]) => [k.toUpperCase(), v.value]));
+  for (const [k, { value, where }] of vars) {
+    const n = hostName(k, /_/);
+    if (!n || (!n.prefix.length && k.toUpperCase() !== 'PGHOST')) continue;
+    const portVar = k.toUpperCase() === 'PGHOST' ? 'PGPORT' : `${n.prefix.join('_')}_PORT`;
+    for (const host of hostsIn(value, upper.get(portVar), n.strict)) out.push({ host, where });
+  }
+}
+
+/** Hosts after host flags in one command line, and in `-e NAME=value` / `--env NAME=value` / `--env=NAME=value` variables. */
+function argvHosts(cmd: string[], where: string, launch: boolean, out: Found[]): void {
+  const vars = new Map<string, { value: string; where: string }>();
+  const hosts: { i: number; key: string; strict: boolean; value: string; at: number; short?: 'h' | 'H' }[] = [];
+  const ports: { i: number; key: string; value: string }[] = [];
+  for (const [i, x] of cmd.entries()) {
+    const setVar = (s: string | undefined, at: number) => {
+      const eq = s?.indexOf('=') ?? -1;
+      if (s && eq > 0) vars.set(s.slice(0, eq), { value: s.slice(eq + 1), where: `${where}[${at}]` });
+    };
+    if (x === '-e' || x === '--env') setVar(cmd[i + 1], i + 1);
+    else if (x.startsWith('--env=')) setVar(x.slice(6), i);
+    else if (x === '-h' || x === '-H') {
+      if (cmd[i + 1] !== undefined) hosts.push({ i, key: '', strict: x === '-H', value: cmd[i + 1]!, at: i + 1, short: x === '-h' ? 'h' : 'H' });
+    } else if (x === '-p') {
+      if (cmd[i + 1] !== undefined) ports.push({ i, key: '', value: cmd[i + 1]! });
+    } else if (/^--[a-z0-9]/i.test(x)) {
+      const eq = x.indexOf('=');
+      const name = x.slice(2, eq > 0 ? eq : undefined);
+      const [value, at] = eq > 0 ? [x.slice(eq + 1), i] : [cmd[i + 1], i + 1];
+      if (value === undefined) continue;
+      const words = name.toUpperCase().split(/[-_]/).filter(Boolean);
+      if (words.at(-1) === 'PORT') ports.push({ i, key: words.slice(0, -1).join('-'), value });
+      const n = hostName(name, /[-_]/);
+      if (n && !(launch && !n.prefix.length)) hosts.push({ i, key: n.prefix.join('-'), strict: n.strict, value, at });
+    }
+  }
+  const unprefixedPort = ports.some((p) => p.key === '');
+  for (const [k, h] of hosts.entries()) {
+    if (h.short && (launch || (h.short === 'h' && !unprefixedPort))) continue; // -h is help unless a port is given; -H needs a port or a host-like value
+    const prev = hosts[k - 1]?.i ?? -1;
+    const next = hosts[k + 1]?.i ?? Infinity;
+    const same = ports.filter((p) => p.key === h.key);
+    const port = (same.find((p) => p.i > h.i && p.i < next) ?? same.filter((p) => p.i < h.i && p.i > prev).at(-1))?.value;
+    for (const host of hostsIn(h.value, port, h.strict && !(h.short === 'H' && unprefixedPort))) out.push({ host, where: `${where}[${h.at}]` });
+  }
+  varHosts(vars, out);
 }
 
 /** Every host the run would reach directly, or that the server is pointed at through a passed-through variable. */
@@ -117,34 +215,15 @@ export function targetHosts(m: Manifest, env: NodeJS.ProcessEnv): { host: string
   argv(m.server.stdio, 'server.stdio');
   argv(m.server.launch?.command, 'server.launch.command');
   // why: a server is as often pointed at its backend by a host and a port in separate variables (`DB_HOST=b0`, `DB_PORT=3306`)
-  // or flags (`--host b0 --port 3306`), with no URL anywhere (corpus batch runs, 17 Nov). Such a host is shown in the plan and
-  // checked like the rest. The variables are the ones the server is started with (a literal wins, as in Session.serverEnv);
-  // the port comes from the sibling *_PORT variable, or from --port on the same command line.
+  // or flags (`--db-host b0 --db-port 3306`), with no URL anywhere (corpus batch runs, 17 Nov). Such a host is shown in the plan
+  // and checked like the rest. The variables are the ones the server is started with (a literal wins, as in Session.serverEnv).
+  // A shell string (`sh -c "…"`) is not parsed.
   const vars = new Map<string, { value: string; where: string }>();
   for (const n of [...m.server.env_passthrough, ...m.server.env_public]) if (env[n] !== undefined) vars.set(n, { value: env[n]!, where: `server environment ${n}` });
   for (const [k, v] of Object.entries(m.server.env)) vars.set(k, { value: v, where: `server.env ${k}` });
-  for (const [k, { value, where }] of vars) {
-    if (!HOST_VAR.test(k) || value.includes('://')) continue; // a URL value is read above
-    const host = bareHost(value, vars.get(portVarOf(k))?.value);
-    if (host) out.push({ host, where });
-  }
-  const flags = (cmd: string[] | null | undefined, where: string) => {
-    const a = cmd ?? [];
-    let port: string | undefined;
-    for (const [i, x] of a.entries()) {
-      if (x === PORT_FLAG) port ??= a[i + 1];
-      else if (x.startsWith(`${PORT_FLAG}=`)) port ??= x.slice(PORT_FLAG.length + 1);
-    }
-    for (const [i, x] of a.entries()) {
-      const eq = x.startsWith('--') ? x.indexOf('=') : -1;
-      const [flag, value, at] = eq > 0 ? [x.slice(0, eq), x.slice(eq + 1), i] : [x, a[i + 1], i + 1];
-      if (!HOST_FLAGS.has(flag) || value === undefined || value.includes('://')) continue; // a URL argument is read above
-      const host = bareHost(value, port);
-      if (host) out.push({ host, where: `${where}[${at}]` });
-    }
-  };
-  flags(m.server.stdio, 'server.stdio');
-  flags(m.server.launch?.command, 'server.launch.command');
+  varHosts(vars, out);
+  argvHosts(m.server.stdio ?? [], 'server.stdio', false, out);
+  argvHosts(m.server.launch?.command ?? [], 'server.launch.command', true, out);
   for (const r of m.resources) if (r.control) add(r.control.base ?? env[r.control.base_env!], `resources.${r.name}.control`);
   return out;
 }

@@ -51,6 +51,12 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
 | `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
 
+Target hosts are listed on the plan's "Hosts reached or given to the server" line, and one that looks like production is refused unless listed in `allow_hosts`. They are the server URL, the control bases, any URL in the server's environment or command line, and a host given without a URL:
+
+- a variable the server is started with whose last word (split on `_`) is `HOST`, `HOSTNAME` or `HOSTS` (also `PGHOST`), with any hostname or IP address; or `SERVER(S)`, `ADDR(S)`, `ADDRESS(ES)`, `ENDPOINT(S)`, `NODES`, `BROKERS`, `SEEDS`, `SENTINELS`, with a value that has a dot, is an IP address or carries a port. The port comes from the same name with `PORT` as the last word (`DB_HOST` → `DB_PORT`, `PGHOST` → `PGPORT`, any case). A comma-separated value is read item by item; `host,1433` is one host and its port.
+- the same names as flags in `server.stdio` or `server.launch.command` (`--host`, `--db-host`, `--server`, `--addr`, `--x=y` or `--x y`), with the port from the matching port flag after it (`--db-port`; `--port` or `-p` for an unprefixed one); `-H`; `-h` only when `-p` or `--port` is given; and `-e NAME=value`, `--env NAME=value`, `--env=NAME=value`, read as variables.
+- not read: a one-word variable (`HOST`, `PORT`), a name with a `LISTEN` or `BIND` word, and an unprefixed host flag on `server.launch.command` (each is where the server listens); a value that is not a hostname or an IP address (empty, `true`, a number alone, a path, a file name, `0.0.0.0`); `*_URI` and `*_URL` values without a scheme; and a shell string (`sh -c "…"`), which is not parsed: give a host there as a variable or a flag of its own to have it checked.
+
 ## limits
 
 | Key | Default | Meaning |
