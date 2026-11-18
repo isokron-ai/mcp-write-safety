@@ -41,6 +41,46 @@ export interface ToolTemplate {
   args: unknown;
 }
 
+/**
+ * How a tool's wrapped results (structuredContent `{"result": "<a JSON document as a string>"}`) are read, where the declaration
+ * says so: `json` decodes them for a tool whose outputSchema does not mark them; `none` never decodes them, even where the
+ * outputSchema marks them. Absent unless declared (the outputSchema decides).
+ */
+export type DecodeMode = 'json' | 'none';
+export type Decode = { decode?: DecodeMode };
+
+const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it)';
+
+/** Parse an optional `decode` member. */
+function decodeOf(v: unknown, where: string): Decode {
+  if (v === undefined) return {};
+  if (v !== 'json' && v !== 'none') throw fail(`${where}.decode`, DECODE_WHY);
+  return { decode: v };
+}
+
+/**
+ * Every tool the declaration names a decode for (server.decode, target.guard, each resource's read and list), one mode per tool;
+ * two different modes for one tool are refused.
+ */
+export function declaredDecodes(m: Pick<Manifest, 'server' | 'target' | 'resources'>): Map<string, DecodeMode> {
+  const out = new Map<string, DecodeMode>();
+  const where = new Map<string, string>();
+  const add = (tool: string, mode: DecodeMode | undefined, at: string) => {
+    if (!mode) return;
+    const had = out.get(tool);
+    if (had && had !== mode) throw fail(at, `decode: ${mode} for ${tool}, which ${where.get(tool)} declares decode: ${had} (one mode per tool: a wrapped result is decoded for every call of the tool or for none)`);
+    out.set(tool, mode);
+    where.set(tool, at);
+  };
+  for (const [tool, mode] of Object.entries(m.server?.decode ?? {})) add(tool, mode, `server.decode.${tool}`);
+  if (m.target?.guard) add(m.target.guard.tool, m.target.guard.decode, 'target.guard.decode');
+  (m.resources ?? []).forEach((r, i) => {
+    add(r.read.tool, r.read.decode, `resources[${i}].read.decode`);
+    if (r.list) add(r.list.tool, r.list.decode, `resources[${i}].list.decode`);
+  });
+  return out;
+}
+
 export interface FieldSpec {
   /** Where the field is in the object the read returns. */
   path: string;
@@ -79,7 +119,7 @@ export interface ControlSpec {
 }
 
 /** A list call and how to pick items out of its result. */
-export interface ListSpec extends ToolTemplate {
+export interface ListSpec extends ToolTemplate, Decode {
   items: string;
   id: string;
   name: string;
@@ -160,7 +200,7 @@ export interface ResourceSpec {
   vars: Record<string, unknown>;
   create: (ToolTemplate & { id: string | null; id_regex: string | null; name_path: string | null }) | null;
   /** The read tool: `object` is where the object is in the result; with `items` and `match`, the result is a list and the object is the item whose `match` equals the id. */
-  read: ToolTemplate & { object: string; settle_ms: number; ignore: string[]; items: string | null; match: string | null };
+  read: ToolTemplate & Decode & { object: string; settle_ms: number; ignore: string[]; items: string | null; match: string | null };
   /** Null for a resource the tester only creates and deletes (no update tool declared). */
   /**
    * override: an argument the declared update arguments set that is an explicit override (spec NF-7), such as overwrite: true;
@@ -254,6 +294,8 @@ export interface Manifest {
     processes: 'separate' | 'same';
     /** Annex E (R8-3): the declaration's means to stop and start the server (the tester's own launch command), and the kind of stop. */
     restart: { stop: 'graceful' | 'kill' } | null;
+    /** Per tool: how its wrapped results are read (`json` or `none`); absent unless declared. */
+    decode?: Record<string, DecodeMode>;
   };
   target: {
     environment: string;
@@ -265,7 +307,7 @@ export interface Manifest {
      * whose only tool is a dispatcher (PostHog `cli` mode: `exec`, readOnlyHint: false). The guard then rests on that
      * declaration, not on an annotation; the run verifies it (three identical answers) and fails closed.
      */
-    guard: { tool: string; args: unknown; path: string | null; pattern: string; read_only: boolean; read_only_call?: boolean } | null;
+    guard: ({ tool: string; args: unknown; path: string | null; pattern: string; read_only: boolean; read_only_call?: boolean } & Decode) | null;
     refuse_fingerprints: string[];
   };
   limits: { write_budget: number; writes_per_second: number; pairs: number; stale_reps: number; gate_reps: number; timeout_ms: number; max_fuzz_cases: number };
@@ -417,14 +459,14 @@ function control(v: unknown, where: string): ControlSpec {
 export const RESERVED_VARS = ['prefix', 'id', 'field', 'value', 'object', 'version', 'key', 'scope', 'marker', 'ids', 'batch', 'missing_id', 'names_inserted', 'position', 'element_id', 'n'];
 
 function listSpec(v: unknown, where: string): ListSpec {
-  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next']);
+  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode']);
   let next: ListSpec['next'] = null;
   if (l['next'] !== undefined) {
     const n = obj(l['next'], `${where}.next`);
     keys(n, ['path', 'arg'], `${where}.next`);
     next = { path: path(n['path'], `${where}.next.path`), arg: str(n['arg'], `${where}.next.arg`) };
   }
-  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next };
+  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...decodeOf(l['decode'], where) };
 }
 
 const optBool = (v: unknown, where: string): boolean | null => {
@@ -486,7 +528,7 @@ function resource(v: unknown, i: number): ResourceSpec {
   const name = str(o['name'], `${w}.name`, /^[a-z][a-z0-9_-]{0,39}$/);
   const vars = o['vars'] === undefined ? {} : obj(o['vars'], `${w}.vars`);
   for (const k of Object.keys(vars)) if (RESERVED_VARS.includes(k)) throw fail(`${w}.vars.${k}`, 'a reserved template name');
-  const read = tool(o['read'], `${w}.read`, ['object', 'settle_ms', 'ignore', 'items', 'match']);
+  const read = tool(o['read'], `${w}.read`, ['object', 'settle_ms', 'ignore', 'items', 'match', 'decode']);
   if ((read['items'] === undefined) !== (read['match'] === undefined)) throw fail(`${w}.read`, 'items and match go together (a list read: the object is the item whose match field equals the id)');
   let update: ResourceSpec['update'] = null;
   let f: ResourceSpec['fields'] = null;
@@ -746,7 +788,7 @@ function resource(v: unknown, i: number): ResourceSpec {
     restorable: restorableOf(o['restorable'], `${w}.restorable`, !!update),
     no_version_check: strList(o['no_version_check'], `${w}.no_version_check`),
     create,
-    read: { tool: read.tool, args: read.args, object: read['object'] === undefined ? '$' : path(read['object'], `${w}.read.object`), settle_ms: num(read['settle_ms'], 0, 0, 60_000, `${w}.read.settle_ms`), ignore: strList(read['ignore'], `${w}.read.ignore`).map((p, j) => path(p, `${w}.read.ignore[${j}]`)), items: read['items'] === undefined ? null : path(read['items'], `${w}.read.items`), match: read['match'] === undefined ? null : path(read['match'], `${w}.read.match`) },
+    read: { tool: read.tool, args: read.args, object: read['object'] === undefined ? '$' : path(read['object'], `${w}.read.object`), settle_ms: num(read['settle_ms'], 0, 0, 60_000, `${w}.read.settle_ms`), ignore: strList(read['ignore'], `${w}.read.ignore`).map((p, j) => path(p, `${w}.read.ignore[${j}]`)), items: read['items'] === undefined ? null : path(read['items'], `${w}.read.items`), match: read['match'] === undefined ? null : path(read['match'], `${w}.read.match`), ...decodeOf(read['decode'], `${w}.read`) },
     update,
     fields: f,
     version,
@@ -993,7 +1035,13 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
-  keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart'], 'server');
+  keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart', 'decode'], 'server');
+  let serverDecode: Record<string, DecodeMode> | null = null;
+  if (s['decode'] !== undefined) {
+    const d = obj(s['decode'], 'server.decode');
+    serverDecode = {};
+    for (const [tool, v] of Object.entries(d)) serverDecode[tool] = decodeOf(v, `server.decode.${tool}`).decode!;
+  }
   const stdio = s['stdio'] === undefined ? null : strList(s['stdio'], 'server.stdio');
   const url = optStr(s['url'], 'server.url');
   let launch: Manifest['server']['launch'] = null;
@@ -1049,7 +1097,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const environment = str(t['environment'], 'target.environment');
   let guard: Manifest['target']['guard'] = null;
   if (t['guard'] !== undefined) {
-    const g = tool(t['guard'], 'target.guard', ['path', 'pattern', 'read_only', 'read_only_call']);
+    const g = tool(t['guard'], 'target.guard', ['path', 'pattern', 'read_only', 'read_only_call', 'decode']);
     if (g['read_only'] !== undefined && typeof g['read_only'] !== 'boolean') throw fail('target.guard.read_only', 'true or false');
     if (g['read_only_call'] !== undefined && typeof g['read_only_call'] !== 'boolean') throw fail('target.guard.read_only_call', 'true or false');
     // why: a declared read-only call is the exact call the operator read; a template could make it another call.
@@ -1060,7 +1108,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     } catch (e) {
       throw fail('target.guard.pattern', (e as Error).message);
     }
-    guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}) };
+    guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
   keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases'], 'limits');
@@ -1105,10 +1153,10 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   // why: a pre-made object is written to; its name must carry the tester's own mark, never only a team prefix that real objects may share (review).
   for (const r of resources) if (r.fixture && !r.fixture.name.startsWith('mwsc-')) throw fail(`resources.${r.name}.fixture.name`, 'a pre-made fixture is accepted only if its name starts with mwsc-');
   for (const r of resources) if (r.scope && !resources.some((x) => x.name === r.scope!.resource && x.create && x.key)) throw fail(`resources.${r.name}.scope.resource`, `${r.scope.resource} must be a resource with create and key (the tester creates the scopes it uses)`);
-  return {
+  const m: Manifest = {
     mws,
     prefix,
-    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart },
+    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
       write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
@@ -1125,6 +1173,9 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     ...topLevel(o),
     source,
   };
+  // why: one decode mode per tool (refused here, before anything runs).
+  declaredDecodes(m);
+  return m;
 }
 
 /** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */
