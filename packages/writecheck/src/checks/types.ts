@@ -9,7 +9,7 @@
  *             recorded run, so a rule fixed later can be applied to old evidence.
  */
 
-import type { Carried } from '../core/session.js';
+import type { CallResult, Carried } from '../core/session.js';
 import type { Driver } from '../core/driver.js';
 import type { Ledger } from '../core/ledger.js';
 import type { Manifest, ResourceSpec, ReviewSpec } from '../core/manifest.js';
@@ -161,15 +161,19 @@ export interface CallBrief {
   shape?: ShapeCapture | null;
   /** Whether the call carried an idempotency key and a version, where the trial recorded it (B-9: same_key / same_version); absent in older evidence. */
   carried?: Carried;
+  /** `data` is the JSON document a wrapped result carried as a string in structuredContent.result, and why it was decoded; absent otherwise. */
+  decoded?: CallResult['decoded'];
+  /** Where `decoded` is set: structuredContent as received (clipped like `data`), so a reader sees both. */
+  raw_structured?: unknown;
 }
 
-export function brief(r0: { step: string; ok: boolean; isError: boolean; rpc_error: { code: number; message: string } | null; text: string | null; data: unknown; timed_out: boolean; transport_error: string | null; result_type?: string | null; tool?: string; shape?: ShapeCapture | null; prose_text?: string | null; carried?: Carried }, max = 2000): CallBrief {
+export function brief(r0: { step: string; ok: boolean; isError: boolean; rpc_error: { code: number; message: string } | null; text: string | null; data: unknown; timed_out: boolean; transport_error: string | null; result_type?: string | null; tool?: string; shape?: ShapeCapture | null; prose_text?: string | null; carried?: Carried; decoded?: CallResult['decoded']; raw_structured?: unknown }, max = 2000): CallBrief {
   // why: B-9 v2: for a tool that adopts the shape, the text kept is what the patterns read (readText); `shape` is kept even when null.
   const r = { ...r0, text: readText(r0) };
   const d = JSON.stringify(r.data ?? null);
   const clipped = (r.text?.length ?? 0) > max || d.length > max * 2;
   // why: an identifier past the clip must still be found (MWS-RES-3, RES-4, ATOM-1); the full answer is kept for the search only then.
-  return { step: r.step, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : r.text.length > max ? `${r.text.slice(0, max)}…` : r.text, data: d.length > max * 2 ? { clipped: true, bytes: d.length } : r.data, indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ...(clipped ? { hay: `${r.text ?? ''}\n${d}`.slice(0, 256 * 1024) } : {}), ...(clipped && adoptedBy(r.tool ?? null) && isObjLike(r.data) && 'mws' in r.data ? { phay: `${r.text ?? ''}\n${JSON.stringify(patternData({ tool: r.tool, data: r.data }))}`.slice(0, 256 * 1024) } : {}), ...(r.result_type && r.result_type !== 'complete' ? { result_type: r.result_type } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.shape !== undefined ? { shape: r.shape } : {}), ...(r.carried ? { carried: r.carried } : {}) };
+  return { step: r.step, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : r.text.length > max ? `${r.text.slice(0, max)}…` : r.text, data: d.length > max * 2 ? { clipped: true, bytes: d.length } : r.data, indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ...(clipped ? { hay: `${r.text ?? ''}\n${d}`.slice(0, 256 * 1024) } : {}), ...(clipped && adoptedBy(r.tool ?? null) && isObjLike(r.data) && 'mws' in r.data ? { phay: `${r.text ?? ''}\n${JSON.stringify(patternData({ tool: r.tool, data: r.data }))}`.slice(0, 256 * 1024) } : {}), ...(r.result_type && r.result_type !== 'complete' ? { result_type: r.result_type } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.shape !== undefined ? { shape: r.shape } : {}), ...(r.carried ? { carried: r.carried } : {}), ...(r.decoded ? { decoded: r.decoded, raw_structured: ((rs) => (rs.length > max * 2 ? { clipped: true, bytes: rs.length } : r.raw_structured))(JSON.stringify(r.raw_structured ?? null)) } : {}) };
 }
 
 const isObjLike = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -349,15 +353,23 @@ export function mcpDefinedError(e: { code: number; message: string } | null | un
   return null;
 }
 
+/**
+ * Is the answer's whole text the serialized wrapper of a decoded result (one text block that repeats structuredContent as
+ * received, `{"result": "<JSON>"}`)? Then the decoded document is read in its place (session.toCallResult records it).
+ */
+export const textIsWrapper = (b: { decoded?: { text_mirrors?: string } | null }): boolean => b.decoded?.text_mirrors === 'structuredContent';
+
 /** The strings an answer says: its text (the string values of a text that is JSON), the string values of its data, and a JSON-RPC message; never field names. */
-export function saidStrings(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBrief, 'tool' | 'shape'>> & { rpc_error?: { message: string } | null }): string {
+export function saidStrings(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBrief, 'tool' | 'shape' | 'decoded'>> & { rpc_error?: { message: string } | null }): string {
   const out: string[] = [];
   const walk = (v: unknown): void => {
     if (typeof v === 'string') out.push(v);
     else if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === 'object') Object.values(v).forEach(walk);
   };
-  if (b.text) {
+  // why: PR #7 round 3: a text that is the serialized wrapper of a decoded result says what the decoded document says, which is
+  // walked below; walking the wrapper would hand its inner JSON (field names and all) to the patterns as one string.
+  if (b.text && !textIsWrapper(b)) {
     try {
       walk(JSON.parse(b.text));
     } catch {

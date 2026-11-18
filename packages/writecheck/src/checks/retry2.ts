@@ -14,7 +14,7 @@ import { deepEqual, short } from '../core/util.js';
 import { VIOLATED_CAVEAT } from '../report/verdicts.js';
 import { fromDeclaration, outcomeByField, saidBy, says } from './says.js';
 import { decidedByShape, patternData, quoteField, reservedCode, shapeOf } from './shape.js';
-import { identifiesChange, identifiesChangeText, mentions, saysUnknownText, textStatement, valueMentioned, type CallBrief, mayBeUnknown, mayIdentify } from './types.js';
+import { identifiesChange, identifiesChangeText, mentions, saysUnknownText, textIsWrapper, textStatement, valueMentioned, type CallBrief, mayBeUnknown, mayIdentify } from './types.js';
 
 /** One keyed call as observed. */
 export interface CallObs extends CallBrief {
@@ -91,9 +91,10 @@ const strings = (v: unknown, out: string[]): string[] => {
  * What an answer says, for the patterns (spec 7.3, rule 11): its text, and the string values of its structured content
  * and of a text that is JSON, never the field names (a field named `replayed` set to false says nothing about a replay).
  */
-export function textOf(c: Pick<CallBrief, 'text' | 'data' | 'rpc_error'> & Partial<Pick<CallBrief, 'tool' | 'shape'>>): string {
+export function textOf(c: Pick<CallBrief, 'text' | 'data' | 'rpc_error'> & Partial<Pick<CallBrief, 'tool' | 'shape' | 'decoded'>>): string {
   const parts: string[] = [];
-  if (c.text) {
+  // why: PR #7 round 3: the serialized wrapper of a decoded result is read through the decoded document (below), never as text.
+  if (c.text && !textIsWrapper(c)) {
     try {
       strings(JSON.parse(c.text), parts);
     } catch {
