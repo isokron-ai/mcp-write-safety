@@ -29,6 +29,7 @@ import { Forwarder } from './forwarder.js';
 import { HookGate } from './hookgate.js';
 import { PostgresSession } from './wire/postgres.js';
 import { WireGate } from './wire/proxy.js';
+import { RedisSession } from './wire/redis.js';
 import { wireProtocolOf, wireRefusal } from './wire/url.js';
 
 /** What the wire gate knows of a request beyond method and path (docs/WIRE-GATE.md §4, §5). */
@@ -155,8 +156,8 @@ export function createGate(m: Manifest, env: NodeJS.ProcessEnv, o: { stateDir: s
     if (wire) {
       const why = wireRefusal(upstream);
       if (why) throw new WritecheckError(`backend.gate.rewrite_env: ${g.rewrite_env} holds a ${wire} URL the wire gate cannot stand in for: ${why}`, 2);
-      if (wire !== 'postgres') throw new WritecheckError(`backend.gate.rewrite_env: the ${wire} wire gate is not built yet`, 2);
-      const codec = (k: string) => new PostgresSession(k);
+      if (wire === 'mongodb') throw new WritecheckError(`backend.gate.rewrite_env: the ${wire} wire gate is not built yet`, 2);
+      const codec = wire === 'postgres' ? (k: string) => new PostgresSession(k) : (k: string) => new RedisSession(k);
       return new WireGate(wire, g.rewrite_env, upstream, o.egress, g.hold_timeout_ms, codec);
     }
     return new Forwarder(g.rewrite_env, upstream, o.egress, g.hold_timeout_ms);
