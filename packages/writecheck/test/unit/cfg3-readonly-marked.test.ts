@@ -91,17 +91,46 @@ test('MWS-CFG-3: a tool marked read-only that writes in read-only mode is violat
   assert.equal(cfg3([refused('ticket_update'), marked({ ok: false, effect: 'status' })]).verdict, 'violated');
 });
 
-test('MWS-CFG-3: a tool marked read-only that changes nothing counts toward held, even answered as a success', () => {
+test('MWS-CFG-3, no change: a tool marked read-only answered as a success with the object read back unchanged counts toward held', () => {
   const v = cfg3([refused('ticket_update'), refused('ticket_delete'), marked({})]);
   assert.equal(v.verdict, 'held', v.reason);
   assert.match(v.reason, /every declared write tool \(2\) was absent or refused/);
-  assert.match(v.reason, /ticket_query changed nothing on read-back/);
+  assert.match(v.reason, /\(ticket_query\) was called as well, and the object read back unchanged/);
   assert.ok(v.notes.some((n) => /ticket_query \(marked read-only: annotated readOnlyHint: true\): listed; answered as a success; no change on read-back/.test(n)), v.notes.join(' | '));
-  // Refused, or not called (its scratch object could not be made): still no write seen through it, and the record says so.
-  assert.equal(cfg3([refused('ticket_update'), marked({ ok: false })]).verdict, 'held');
-  const nc = cfg3([refused('ticket_update'), marked({ step: null, skipped: 'scratch object: no create' })]);
-  assert.equal(nc.verdict, 'held');
-  assert.match(nc.reason, /ticket_query could not be called or read back/);
+});
+
+test('MWS-CFG-3, refused: a tool marked read-only that read-only mode refuses counts toward held', () => {
+  const v = cfg3([refused('ticket_update'), marked({ ok: false })]);
+  assert.equal(v.verdict, 'held', v.reason);
+  assert.ok(v.notes.some((n) => /^ticket_query \(marked read-only: annotated readOnlyHint: true\): listed; refused; no change on read-back$/.test(n)), v.notes.join(' | '));
+  // Absent in the mode and refused as an unknown tool: also a refusal.
+  assert.equal(cfg3([refused('ticket_update'), marked({ ok: false, absent: true })]).verdict, 'held');
+});
+
+test('MWS-CFG-3, call failed: a tool marked read-only whose call failed without a refusal, or could not be made, leaves the record not tested and names it and why', () => {
+  for (const failed of ['the call timed out', 'the connection failed (socket closed)', 'an error MCP defines for the case, not a refusal: a request the server says does not satisfy the request schema (spec 7.3, rule 9)']) {
+    const v = cfg3([refused('ticket_update'), marked({ ok: false, failed, observed: true })]);
+    assert.equal(v.verdict, 'not tested', `${failed}: ${v.reason}`);
+    assert.ok(v.reason.includes(`ticket_query, marked read-only, could not be checked (ticket_query: the call failed: ${failed})`), v.reason);
+    assert.match(v.reason, /"no object changed" is not shown for every tool marked read-only that was called/);
+    assert.doesNotMatch(v.reason, /absent or refused" is not shown/, 'the declared write tools are not what keeps it open');
+    assert.ok(v.notes.some((n) => n.includes(`ticket_query (marked read-only: annotated readOnlyHint: true): listed; the call failed (${failed})`)), v.notes.join(' | '));
+  }
+  const setup = cfg3([refused('ticket_update'), marked({ ok: false, step: null, observed: false, failed: 'its scratch object could not be made (no create)' })]);
+  assert.equal(setup.verdict, 'not tested');
+  assert.match(setup.reason, /ticket_query: not called: its scratch object could not be made \(no create\)/);
+  const threw = cfg3([refused('ticket_update'), marked({ ok: false, step: null, skipped: 'boom' })]);
+  assert.equal(threw.verdict, 'not tested');
+  assert.match(threw.reason, /ticket_query: not called: boom/);
+});
+
+test('MWS-CFG-3, read-back failed: a tool marked read-only whose object could not be read back leaves the record not tested and names it and why', () => {
+  for (const ok of [true, false]) {
+    const v = cfg3([refused('ticket_update'), marked({ ok, observed: false })]);
+    assert.equal(v.verdict, 'not tested', v.reason);
+    assert.match(v.reason, /ticket_query, marked read-only, could not be checked \(ticket_query: its object could not be read back\)/);
+    assert.ok(v.notes.some((n) => /; not read back$/.test(n)), v.notes.join(' | '));
+  }
 });
 
 test('MWS-CFG-3: a genuine write tool answered as a success with no change still leaves the record not tested', () => {
@@ -121,6 +150,13 @@ test('MWS-CFG-2: under a deny-list, a write through a tool marked read-only is v
   const ok = cfg2([refused('ticket_update'), marked({})]);
   assert.equal(ok.verdict, 'held', ok.reason);
   assert.match(ok.reason, /every declared write tool \(1\)/);
+  assert.equal(cfg2([refused('ticket_update'), marked({ ok: false })]).verdict, 'held', 'refused');
+  const failed = cfg2([refused('ticket_update'), marked({ ok: false, failed: 'the call timed out' })]);
+  assert.equal(failed.verdict, 'not tested');
+  assert.match(failed.reason, /ticket_query, marked read-only, could not be checked \(ticket_query: the call failed: the call timed out\)/);
+  const unread = cfg2([refused('ticket_update'), marked({ observed: false })]);
+  assert.equal(unread.verdict, 'not tested');
+  assert.match(unread.reason, /ticket_query: its object could not be read back/);
   const open = cfg2([{ tool: 'ticket_update', absent: false, ok: true, effect: null, step: 's' }, marked({})]);
   assert.equal(open.verdict, 'not tested');
   assert.doesNotMatch(open.reason, /ticket_query/);

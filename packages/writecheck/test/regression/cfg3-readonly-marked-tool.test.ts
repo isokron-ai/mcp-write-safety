@@ -47,7 +47,7 @@ test('CFG-3: a read-only-marked tool with a calls entry that changes nothing is 
     const rows = cfg3(r.doc.results);
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!.verdict, 'held', rows[0]!.reason);
-    assert.match(rows[0]!.reason, /ticket_query changed nothing on read-back/);
+    assert.match(rows[0]!.reason, /\(ticket_query\) was called as well, and the object read back unchanged/);
     assert.ok(rows[0]!.notes.some((n) => /^ticket_query \(marked read-only: annotated readOnlyHint: true\): listed; answered as a success; no change on read-back$/.test(n)), rows[0]!.notes.join(' | '));
     assert.deepEqual(r.doc.leftovers, []);
   } finally {

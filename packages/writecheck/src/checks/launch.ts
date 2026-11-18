@@ -15,8 +15,10 @@
  *   MWS-CFG-3  read-only mode: every declared write tool, listed or not, whatever its annotations, is
  *              absent or refused, and no object changes. Each tool marked read-only (readOnlyHint: true, or a
  *              declared read tool) that has an entry in the manifest's `calls` is called too, with that entry's
- *              arguments and resource as the annotation checks call it: a change through it is violated, and no
- *              change counts as held (it is a read unless it writes); one with no `calls` entry is not called
+ *              arguments and resource as the annotation checks call it: a change through it is violated; a refusal,
+ *              or an answer with the object read back unchanged, counts as held (it is a read unless it writes);
+ *              a call that failed without a refusal (timeout, lost connection, an error MCP defines) or an
+ *              object not read back leaves it not tested; one with no `calls` entry is not called
  *
  * A server the tester cannot start at all (with no setting) makes these `not tested`.
  */
@@ -99,9 +101,12 @@ interface Cfg3Call {
   defined?: string;
   /**
    * A tool marked read-only (how: readOnlyMarkedCalls), called because the manifest's `calls` gives it arguments. It is a read
-   * unless it changes something: a change is a violation, and no change (whatever the answer) does not leave the record open.
+   * unless it changes something: a change is a violation; a refusal, or an answer with the object read back unchanged, counts
+   * toward held; a call that failed without a refusal, or an object that could not be read back, leaves the record not tested.
    */
   marked?: string;
+  /** A tool marked read-only whose call failed without a refusal (a timeout, a lost connection, an error MCP defines for the case), or could not be set up: why. */
+  failed?: string;
 }
 
 interface LaunchObs {
@@ -249,10 +254,11 @@ async function writeProbe(ctx: Omit<RunContext, 'driver'>, res: ResourceSpec, d:
 }
 
 async function cfg3(ctx: Omit<RunContext, 'driver'>, env: string, on: string, start: (e: Record<string, string>, t: string) => Promise<{ label: string; r: LaunchResult }>, envOverride?: Record<string, string>, o: { marked?: boolean } = {}): Promise<LaunchObs['cfg3']> {
-  const prep: { tool: string; marked?: string; run: (label: string) => Promise<{ ok: boolean; effect: string | null; step: string; observed?: boolean; pending?: boolean; defined?: string }> }[] = [];
+  type Ran = { ok: boolean; effect: string | null; step: string; observed?: boolean; pending?: boolean; defined?: string; failed?: string };
+  const prep: { tool: string; marked?: string; run: (label: string) => Promise<Ran> }[] = [];
   const main = 'MAIN';
   const seen = new Set<string>();
-  const add = (tool: string, run: (label: string) => Promise<{ ok: boolean; effect: string | null; step: string; observed?: boolean; pending?: boolean; defined?: string }>, marked?: string) => {
+  const add = (tool: string, run: (label: string) => Promise<Ran>, marked?: string) => {
     if (seen.has(tool)) return;
     seen.add(tool);
     prep.push({ tool, run, ...(marked !== undefined ? { marked } : {}) });
@@ -388,7 +394,7 @@ async function cfg3(ctx: Omit<RunContext, 'driver'>, env: string, on: string, st
     if (!res || !d || (d.unusable && /\{\{\s*id/.test(JSON.stringify(c.args)))) continue;
     add(tool, async (label) => {
       const s = await scratch({ ...ctx, driver: d }, res, { tag: 'c3c', purpose: `MWS-CFG-3 object for ${tool}`, label: main });
-      if (!s.ok) return { ok: false, effect: null, step: '' };
+      if (!s.ok) return { ok: false, effect: null, step: '', ...(how !== undefined ? { failed: `its scratch object could not be made (${s.reason})` } : {}) };
       const r0 = await s.driver!.readOnce(main, ctx.session.stepId('cfg3.call.read'));
       const before = r0.obj;
       const step = ctx.session.stepId(`cfg3.${tool}`);
@@ -399,7 +405,11 @@ async function cfg3(ctx: Omit<RunContext, 'driver'>, env: string, on: string, st
       const observed = r0.ok && after.ok;
       // why: an input_required or task answer is neither a refusal nor a success; it is not counted as refused.
       if (r.result_type && r.result_type !== 'complete') return { ok: true, effect: ch.length ? ch.slice(0, 5).join(', ') : null, step, observed, pending: true };
-      return { ok: r.ok, effect: ch.length ? ch.slice(0, 5).join(', ') : null, step, observed };
+      // why: for a tool marked read-only, a call that failed without a refusal shows nothing about the mode (review of PR #9); an
+      // unknown-tool error is the tool being absent, which is a refusal.
+      const defined = mcpDefinedError(r.rpc_error);
+      const failed = how === undefined ? null : r.timed_out ? 'the call timed out' : r.transport_error !== null ? `the connection failed (${short(r.transport_error, 100)})` : defined && defined !== 'an unknown tool' ? `an error MCP defines for the case, not a refusal: ${defined}` : null;
+      return { ok: r.ok, effect: ch.length ? ch.slice(0, 5).join(', ') : null, step, observed, ...(failed ? { failed } : {}) };
     }, how);
   }
   const s = await start(envOverride ?? { [env]: on }, 'cfg3');
@@ -411,7 +421,7 @@ async function cfg3(ctx: Omit<RunContext, 'driver'>, env: string, on: string, st
     for (const p of prep) {
       try {
         const r = await p.run(s.label);
-        out.calls.push({ tool: p.tool, absent: !listed.has(p.tool), ok: r.ok, effect: r.effect, step: r.step || null, observed: !!r.observed || !!r.effect, ...(r.pending ? { pending: true } : {}), ...(r.defined ? { defined: r.defined } : {}), ...(p.marked !== undefined ? { marked: p.marked } : {}) });
+        out.calls.push({ tool: p.tool, absent: !listed.has(p.tool), ok: r.ok, effect: r.effect, step: r.step || null, observed: !!r.observed || !!r.effect, ...(r.pending ? { pending: true } : {}), ...(r.defined ? { defined: r.defined } : {}), ...(p.marked !== undefined ? { marked: p.marked } : {}), ...(r.failed ? { failed: r.failed } : {}) });
       } catch (e) {
         out.calls.push({ tool: p.tool, absent: !listed.has(p.tool), ok: false, effect: null, step: null, skipped: (e as Error).message, ...(p.marked !== undefined ? { marked: p.marked } : {}) });
       }
@@ -448,10 +458,19 @@ const named = (c: Cfg3Call) => (c.marked !== undefined ? `${c.tool} (marked read
 function markedLine(calls: Cfg3Call[]): string {
   const m = calls.filter((c) => c.marked !== undefined && !c.effect);
   if (!m.length) return '';
-  const seen = m.filter((c) => c.step && c.observed);
-  const other = m.filter((c) => !(c.step && c.observed));
-  return ` ${m.length === 1 ? 'The tool' : 'The tools'} marked read-only with a calls entry (${m.map((c) => c.tool).join(', ')}) ${m.length === 1 ? 'was' : 'were'} called as well${seen.length ? `; ${seen.map((c) => c.tool).join(', ')} changed nothing on read-back` : ''}${other.length ? `; ${other.map((c) => c.tool).join(', ')} could not be called or read back` : ''} (a read, unless it changes something).`;
+  return ` ${m.length === 1 ? 'The tool' : 'The tools'} marked read-only with a calls entry (${m.map((c) => c.tool).join(', ')}) ${m.length === 1 ? 'was' : 'were'} called as well, and the object read back unchanged (a read, unless it changes something).`;
 }
+
+/**
+ * Tools marked read-only that wrote nothing seen, but whose call failed without a refusal or could not be made, or whose object
+ * could not be read back: no change is not shown, so they keep the record from held (review of PR #9). A refusal or an answer
+ * with the object read back unchanged counts toward held.
+ */
+const markedOpen = (calls: Cfg3Call[]): Cfg3Call[] => calls.filter((c) => c.marked !== undefined && !c.effect && (!!c.skipped || !c.step || !!c.failed || c.observed !== true));
+const openWhy = (c: Cfg3Call): string => (c.skipped ? `not called: ${c.skipped}` : c.failed ? (c.step ? `the call failed: ${c.failed}` : `not called: ${c.failed}`) : !c.step ? 'not called' : 'its object could not be read back');
+const openPart = (m: Cfg3Call[]): string => `${m.map((c) => c.tool).join(', ')}, marked read-only, could not be checked (${m.map((c) => `${c.tool}: ${openWhy(c)}`).join('; ')})`;
+/** A note's answer for a call: a failure that is not a refusal is named as such. */
+const answered = (c: Cfg3Call): string => (c.ok ? 'answered as a success' : c.failed ? `the call failed (${c.failed})` : 'refused');
 
 export function launchVerdicts(o: LaunchObs): Result[] {
   const sc = { id: ID, version: VERSION };
@@ -503,11 +522,12 @@ export function launchVerdicts(o: LaunchObs): Result[] {
       const writeTools = calls.filter((c) => c.marked === undefined);
       // why: R7-6: a write tool that had no effect (the read-back shows no write) meets "refused or had no effect"; one whose effect could not be read back does not.
       const unclear = writeTools.filter((c) => !c.effect && (c.skipped || (!c.step && !c.absent) || (c.ok && !c.absent && c.observed !== true)));
-      const notes = calls.map((c) => (c.absent && !c.step && !c.skipped ? `${named(c)}: not listed with this setting, and not called` : `${named(c)}: ${c.skipped ? `not called (${c.skipped})` : `${c.absent ? 'not listed; ' : 'listed; '}${c.ok ? 'answered as a success' : 'refused'}${c.effect ? `; changed ${c.effect}` : c.observed ? '; no write on read-back' : ''}`}`));
+      const mOpen = markedOpen(calls);
+      const notes = calls.map((c) => (c.absent && !c.step && !c.skipped && !c.failed ? `${named(c)}: not listed with this setting, and not called` : `${named(c)}: ${c.skipped ? `not called (${c.skipped})` : `${c.absent ? 'not listed; ' : 'listed; '}${answered(c)}${c.effect ? `; changed ${c.effect}` : c.observed ? '; no write on read-back' : c.marked !== undefined ? '; not read back' : ''}`}`));
       const what = `${f.env}=${JSON.stringify(f.value)} (a deny-list naming a tool it does not have)`;
       if (took.length) out.push(result('MWS-CFG-2', w, sc, 'violated', `The server started with ${what}, and ${took.map(named).join(', ')} still wrote (${took.map((c) => c.effect).join('; ')}).`, { steps: took.map((c) => c.step!).filter(Boolean), notes }));
       else if (!writeTools.length) out.push(result('MWS-CFG-2', w, sc, 'not tested', `the server started with ${what}, and the manifest declares no write tool to call${calls.length ? ` (no write was seen through ${calls.map((c) => c.tool).join(', ')}, marked read-only)` : ''}`, calls.length ? { notes } : {}));
-      else if (unclear.length) out.push(result('MWS-CFG-2', w, sc, 'not tested', `the server started with ${what}; no write was seen to take effect, but ${unclear.map((c) => c.tool).join(', ')} answered as a success or could not be called`, { notes }));
+      else if (unclear.length || mOpen.length) out.push(result('MWS-CFG-2', w, sc, 'not tested', `the server started with ${what}; no write was seen to take effect, but ${[...(unclear.length ? [`${unclear.map((c) => c.tool).join(', ')} answered as a success or could not be called`] : []), ...(mOpen.length ? [openPart(mOpen)] : [])].join(', and ')}`, { notes }));
       else out.push(result('MWS-CFG-2', w, sc, 'held', `The server started with ${what}, with every declared write tool (${writeTools.length}) absent, refusing, or without effect on read-back.${markedLine(calls)}`, { notes }));
     }
   }
@@ -524,19 +544,22 @@ export function launchVerdicts(o: LaunchObs): Result[] {
       // why: an unlisted tool called anyway that answered as a success shows "no object changed" only where its read-back ran.
       const unclear = writeTools.filter((c) => !c.effect && (c.skipped || !c.step || (c.ok && !c.absent) || (c.ok && c.absent && c.observed !== true)));
       // why: CFG-3 calls each declared write tool "whether or not it is listed"; one not listed and not called leaves it open (review).
-      const notes = o.cfg3.calls.map((c) => (c.absent && !c.step && !c.skipped ? `${named(c)}: not listed in this mode, and not called (no call the tester can make)` : `${named(c)}: ${c.skipped ? `not called (${c.skipped})` : c.absent ? 'not listed; called anyway: ' : 'listed; '}${c.skipped ? '' : `${c.ok ? 'answered as a success' : 'refused'}${c.effect ? `; changed ${c.effect}` : c.marked !== undefined ? (c.step && c.observed ? '; no change on read-back' : '; not read back') : ''}`}`));
+      const mOpen = markedOpen(o.cfg3.calls);
+      const notes = o.cfg3.calls.map((c) => (c.absent && !c.step && !c.skipped && !c.failed ? `${named(c)}: not listed in this mode, and not called (no call the tester can make)` : `${named(c)}: ${c.skipped ? `not called (${c.skipped})` : c.absent ? 'not listed; called anyway: ' : 'listed; '}${c.skipped ? '' : `${answered(c)}${c.effect ? `; changed ${c.effect}` : c.marked !== undefined ? (c.step && c.observed ? '; no change on read-back' : '; not read back') : ''}`}`));
       const markedTook = took.filter((c) => c.marked !== undefined);
       if (took.length) out.push(result('MWS-CFG-3', w, sc, 'violated', `In read-only mode, ${took.map(named).join(', ')} still wrote (${took.map((c) => c.effect).join('; ')}).${markedTook.length ? ` ${markedTook.map((c) => c.tool).join(', ')} ${markedTook.length > 1 ? 'are' : 'is'} marked read-only, and the mode let ${markedTook.length > 1 ? 'them' : 'it'} write: MWS-CFG-3 asks the mode to refuse every write tool whatever its annotations declare.` : ''}`, { steps: took.map((c) => c.step!).filter(Boolean), notes }));
       else if (!writeTools.length) out.push(result('MWS-CFG-3', w, sc, 'not tested', `the manifest declares no write tool to call${o.cfg3.calls.length ? ` (no write was seen through ${o.cfg3.calls.map((c) => c.tool).join(', ')}, marked read-only)` : ''}`, o.cfg3.calls.length ? { notes } : {}));
-      else if (unclear.length) {
+      else if (unclear.length || mOpen.length) {
         // why: gate-2 K8s B18: a tool the tester has no call for is a missing test, not a finding; the record names the key that gives it one.
         const uncalled = unclear.filter((c) => !c.step);
         const succeeded = unclear.filter((c) => c.step);
         const parts = [
           ...(succeeded.length ? [`${succeeded.map((c) => c.tool).join(', ')} ${succeeded.length > 1 ? 'were' : 'was'} answered as a success`] : []),
           ...(uncalled.length ? [`${uncalled.map((c) => c.tool).join(', ')} ${uncalled.length > 1 ? 'were' : 'was'} not called (${uncalled.map((c) => c.skipped && !/gives no arguments/.test(c.skipped) ? `${c.tool}: ${c.skipped}` : `${c.tool}: no call declared; give one as calls.${c.tool}: { resource, args }, the arguments for a call on a scratch object of that resource, or on an object the arguments name`).join('; ')})`] : []),
+          ...(mOpen.length ? [openPart(mOpen)] : []),
         ];
-        out.push(result('MWS-CFG-3', w, sc, 'not tested', `in read-only mode no write was seen to take effect, but ${parts.join(', and ')}, so "absent or refused" is not shown for every declared write tool (the test calls each one, listed or not)`, { notes }));
+        const so = [...(unclear.length ? ['"absent or refused" is not shown for every declared write tool (the test calls each one, listed or not)'] : []), ...(mOpen.length ? ['"no object changed" is not shown for every tool marked read-only that was called'] : [])];
+        out.push(result('MWS-CFG-3', w, sc, 'not tested', `in read-only mode no write was seen to take effect, but ${parts.join(', and ')}, so ${so.join(', and ')}`, { notes }));
       }
       else out.push(result('MWS-CFG-3', w, sc, 'held', `In read-only mode, every declared write tool (${writeTools.length}) was absent or refused, and no object changed.${markedLine(o.cfg3.calls)}`, { notes }));
     }
