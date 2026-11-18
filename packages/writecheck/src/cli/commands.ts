@@ -11,6 +11,7 @@
  *            <folder>/recheck/.
  */
 
+import { cellPass, inputRequiredTools } from '../checks/cells.js';
 import type { Loss } from '../checks/bystanders.js';
 import { withLaterLoss, withLoss, type LaterLoss } from '../checks/targeting.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -179,7 +180,9 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   const k = (r: Result) => `${r.requirement} ${writePathKey(r.write_path)} ${r.scenario.id}`;
   const before = new Map(doc.results.map((r) => [k(r), r.verdict]));
   const changed = results.filter((r) => before.get(k(r)) !== r.verdict).map((r) => ({ key: k(r), before: before.get(k(r)) ?? '(none)', after: r.verdict }));
-  const out: ResultsDoc = { ...doc, results, scope: `${doc.scope} Rechecked offline with this release's rules.` };
+  // why: F1/F6: the cells and validity are re-derived from the rechecked records (docs/CELLS.md).
+  const celled = cellPass(manifest, tools, results, { stopped: doc.run.stopped_reason, input_required_tools: inputRequiredTools(doc.target.mcp) });
+  const out: ResultsDoc = { ...doc, results: celled.results, cells: celled.cells, scope: `${doc.scope} Rechecked offline with this release's rules.` };
   const dir = join(o.dir, 'recheck');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'results.json'), JSON.stringify(out, null, 2) + '\n');
@@ -311,6 +314,8 @@ export async function catalogCommand(o: { manifest?: string; catalog?: string; o
     manifest: manifestInfo,
     plan: { hash: '' },
     results,
+    // why: catalog only: no tool was called and no declaration names the write tools, so there are no cells (docs/CELLS.md).
+    cells: [],
     not_built: [],
     measurements: measure(tools, {}),
     leftovers: [],

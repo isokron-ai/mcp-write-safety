@@ -19,6 +19,7 @@
 import { anyLoss, compare, inventory, withEarlier, type Inventory, type Loss } from '../checks/bystanders.js';
 import { withLaterLoss, withLoss, type LaterLoss } from '../checks/targeting.js';
 import { everyRequirement } from '../checks/coverage.js';
+import { cellPass, inputRequiredTools } from '../checks/cells.js';
 import { randomBytes } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -687,6 +688,9 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   annotateInputs(results, mcp);
   // why: writesafe self-test T5 (spec 5.3): every requirement has a record, if only `not tested` with the reason.
   results.push(...everyRequirement(results, plan?.not_built ?? [], stopped ?? null));
+  // why: F1/F6 (docs/CELLS.md): every MUST cell gets a record, duplicates go, records are stamped with their cell and validity.
+  const celled = cellPass(manifest, tools, results, { stopped: stopped ?? null, input_required_tools: inputRequiredTools(mcp) });
+  results.splice(0, results.length, ...celled.results);
   const doc: ResultsDoc = {
     format: RESULTS_FORMAT,
     scope: scopeSentence({ server: serverLabel(manifest), catalog: fingerprint || 'sha256:unknown', resources: manifest.resources.map((r) => ({ name: r.name, tool: r.update?.tool ?? r.create?.tool ?? r.read.tool, fields: r.fields?.map((f) => f.path) ?? [] })), notBuiltCount: plan?.not_built.length ?? 0 }),
@@ -697,6 +701,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     manifest: { path: 'manifest' + (o.manifest.endsWith('.json') ? '.json' : '.yaml'), sha256: manifest.source.sha256 },
     plan: { hash },
     results,
+    cells: celled.cells,
     not_built: plan?.not_built ?? [],
     measurements,
     leftovers,

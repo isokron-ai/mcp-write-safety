@@ -78,10 +78,25 @@ export function renderMarkdown(d: ResultsDoc): string {
   L.push('## Violations');
   L.push('');
   if (!vio.length) L.push('No requirement was violated in this run. That is not a statement that the server is safe: see what was not tested, below.');
-  for (const r of vio) L.push(`- **${r.requirement}** (${r.level}) on \`${writePathKey(r.write_path)}\`: ${r.reason}${r.attribution ? ` Attribution: ${r.attribution}.` : ''} Requirement: ${requirementLink(r.requirement)} (in the MWS repository).${r.steps.length ? ` Trace: ${r.steps.slice(0, 4).map((x) => `\`${x}\``).join(', ')}${r.steps.length > 4 ? ', …' : ''}.` : ''}`);
+  for (const r of vio) L.push(`- **${r.requirement}** (${r.level}) on \`${writePathKey(r.write_path)}\`: ${r.reason}${r.attribution ? ` Attribution: ${r.attribution}.` : ''}${r.validity ? ` Evidence: ${r.validity.class}${r.validity.failed.length ? ` (rules not met: ${r.validity.failed.join(', ')})` : ''}${r.validity.synthetic_fault ? ', under an injected fault' : ''}.` : ''} Requirement: ${requirementLink(r.requirement)} (in the MWS repository).${r.steps.length ? ` Trace: ${r.steps.slice(0, 4).map((x) => `\`${x}\``).join(', ')}${r.steps.length > 4 ? ', …' : ''}.` : ''}`);
   if (vio.some((r) => r.steps.length)) {
     L.push('');
     L.push('Each trace id is the `step` of lines in `capture/capture.jsonl` (the request and the answer, redacted): `grep \'"step":"<id>"\' capture/capture.jsonl`.');
+  }
+  // F1 (docs/CELLS.md): one row per declared write tool, one column per MUST requirement; each entry is the cell's verdict.
+  const cells = d.cells ?? [];
+  if (cells.length) {
+    const ABBR: Record<string, string> = { violated: 'V', platform: 'P', held: 'H', 'not observed': 'NO', 'not tested': 'NT', 'not applicable': 'na', 'self-attested': 'SA' };
+    const reqs = [...new Set(cells.map((c) => c.requirement))];
+    const short = (id: string) => id.replace(/^MWS-/, '');
+    L.push('');
+    L.push('## Cells');
+    L.push('');
+    L.push('One MUST requirement on one declared write tool (or on the server), merged across resources and scenarios (docs/CELLS.md). V violated, P platform, H held, NO not observed, NT not tested, na not applicable (with its rule in the records), SA self-attested. Read tools are not cells.');
+    L.push('');
+    L.push(`| Tool | ${reqs.map(short).join(' | ')} |`);
+    L.push(`|---|${reqs.map(() => '---').join('|')}|`);
+    for (const tool of [...new Set(cells.map((c) => c.tool))]) L.push(`| ${esc(tool)} | ${reqs.map((q) => { const c = cells.find((x) => x.tool === tool && x.requirement === q); return c ? ABBR[c.verdict] : ''; }).join(' | ')} |`);
   }
   L.push('');
   L.push('Verdicts: `violated` (reproduced; if a control ran, the platform API did not do the same), `platform` (the platform API does the same), `held` (the situation was forced and the server did the right thing), `not observed` (attempted, not forced, nothing seen; not evidence of safety), `not tested` (with the reason), `not applicable`, `self-attested`. There is no total and no score.');
