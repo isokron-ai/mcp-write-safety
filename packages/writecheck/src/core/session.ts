@@ -60,7 +60,7 @@ export interface CallResult {
    * wrapped result, as Python FastMCP returns): `basis` says why it was decoded (the tool's outputSchema marks a wrapped
    * result, or the manifest declares `decode: json`). Absent for every other result.
    */
-  decoded?: { from: 'structuredContent.result'; basis: DecodeBasis };
+  decoded?: { from: 'structuredContent.result'; basis: DecodeBasis; text_mirrors?: 'structuredContent' };
   /** Where the result was decoded: structuredContent as received (the wrapper and its string), kept beside the decoded `data`. */
   raw_structured?: unknown;
   /** The shape fields of structuredContent and of each JSON text block that carry an `mws` field (spec 7.3, rule 11; src/checks/shape.ts), or null. */
@@ -80,15 +80,15 @@ export interface CallResult {
 export type DecodeBasis = 'outputSchema' | 'manifest';
 
 /**
- * Does a tool's outputSchema mark a wrapped result: Python FastMCP's `x-fastmcp-wrap-result: true`, or an object schema whose
- * only property is `result` (the MCP Python SDK wraps a non-object return the same way)? A `result` schema whose declared
- * type excludes string never carries a JSON document as a string, so it does not count.
+ * Does a tool's outputSchema mark a wrapped result: an object schema whose only property is `result`, of type string or with no
+ * type, with or without Python FastMCP's `x-fastmcp-wrap-result: true` (the MCP Python SDK wraps a non-object return the same
+ * way, without the extension)? A `result` whose declared type excludes string never carries a JSON document as a string, so
+ * it does not count, whatever the extension says.
  */
 export function marksWrappedResult(schema: unknown): boolean {
   if (!isObj(schema)) return false;
   const props = isObj(schema['properties']) ? schema['properties'] : null;
   if (!props || Object.keys(props).length !== 1 || !Object.hasOwn(props, 'result')) return false;
-  if (schema['x-fastmcp-wrap-result'] === true) return true;
   const r = props['result'];
   const t = isObj(r) ? r['type'] : undefined;
   return t === undefined || t === 'string' || (Array.isArray(t) && t.includes('string'));
@@ -816,12 +816,16 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   // a block whose whole text is the serialized structuredContent, and a JSON block that carries the shape; `text` itself is kept
   // whole for every other use (identifiers, fingerprints, quotes). Whether the tool adopts the shape is decided at reading.
   const sc = read;
+  // why: PR #7 round 3: a text block that repeats a wrapped result is the serialized wrapper (structuredContent as received),
+  // not the decoded document; for a decoded call it is the mirror too, and its free words are those of the decoded document.
+  const rawSc = unwrapped !== undefined ? res!['structuredContent'] : undefined;
+  const mirrors = (t: string): boolean => (sc !== undefined && sc !== null && isMirrorOf(t, sc)) || (rawSc !== undefined && isMirrorOf(t, rawSc));
   // The free words of each block left out (the mirror's shape, or the shape a JSON block carries) are kept, one per line, so a
   // reader of the text still reads them, as B-9 asks ("declared text patterns are applied to the other text blocks, and to
   // those free words"); member names and fixed values are not.
   const prose = shape
     ? texts.flatMap((t) => {
-        const mirror = sc !== undefined && sc !== null && isMirrorOf(t, sc);
+        const mirror = mirrors(t);
         if (!mirror && !carriesShape(t)) return [t];
         return freeWordsOfBlock(mirror ? (sc as Record<string, unknown>)['mws'] : (JSON.parse(t.trim()) as Record<string, unknown>)['mws']);
       })
@@ -829,7 +833,7 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   // why: an input_required result (2026-07-28), or any other non-complete result type, is neither a success nor an error (spec MWS-RES-2).
   const resultType = res && typeof res['resultType'] === 'string' ? res['resultType'] : null;
   const pending = resultType !== null && resultType !== 'complete';
-  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, ...(unwrapped !== undefined ? { decoded: { from: 'structuredContent.result' as const, basis: decode! }, raw_structured: res!['structuredContent'] } : {}), shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
+  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, ...(unwrapped !== undefined ? { decoded: { from: 'structuredContent.result' as const, basis: decode!, ...(texts.length === 1 && isMirrorOf(texts[0]!, rawSc) ? { text_mirrors: 'structuredContent' as const } : {}) }, raw_structured: rawSc } : {}), shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
 }
 
 /** Is a text block a JSON object that carries an `mws` member (the shape, B-9 v2)? */

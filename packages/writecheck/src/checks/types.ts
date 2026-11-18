@@ -353,15 +353,23 @@ export function mcpDefinedError(e: { code: number; message: string } | null | un
   return null;
 }
 
+/**
+ * Is the answer's whole text the serialized wrapper of a decoded result (one text block that repeats structuredContent as
+ * received, `{"result": "<JSON>"}`)? Then the decoded document is read in its place (session.toCallResult records it).
+ */
+export const textIsWrapper = (b: { decoded?: { text_mirrors?: string } | null }): boolean => b.decoded?.text_mirrors === 'structuredContent';
+
 /** The strings an answer says: its text (the string values of a text that is JSON), the string values of its data, and a JSON-RPC message; never field names. */
-export function saidStrings(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBrief, 'tool' | 'shape'>> & { rpc_error?: { message: string } | null }): string {
+export function saidStrings(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBrief, 'tool' | 'shape' | 'decoded'>> & { rpc_error?: { message: string } | null }): string {
   const out: string[] = [];
   const walk = (v: unknown): void => {
     if (typeof v === 'string') out.push(v);
     else if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === 'object') Object.values(v).forEach(walk);
   };
-  if (b.text) {
+  // why: PR #7 round 3: a text that is the serialized wrapper of a decoded result says what the decoded document says, which is
+  // walked below; walking the wrapper would hand its inner JSON (field names and all) to the patterns as one string.
+  if (b.text && !textIsWrapper(b)) {
     try {
       walk(JSON.parse(b.text));
     } catch {

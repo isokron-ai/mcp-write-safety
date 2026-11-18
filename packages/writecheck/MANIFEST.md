@@ -191,11 +191,11 @@ Some servers (Python FastMCP with a wrap-result output schema, for example) answ
 - the declared `outcome_field`;
 - the structured signals (a conflict, version-required or validation status or code at the top level or in `error`);
 - the conflict readings of MWS-CONC-2, CONC-4 and CONC-6 (the version and the other writer's value in the conflict, a conflict shown by a signal);
-- the text the patterns and `mentions` search (the answer's text plus its structured content), and an adopted result shape (`mws`), which is read from the decoded document, as the patterns are.
+- the text the patterns and `mentions` search (the answer's text plus its structured content), and an adopted result shape (`mws`), which is read from the decoded document, as the patterns are. A text block that repeats the wrapper (structuredContent as received, the usual text of such a result) is read as the decoded document by the patterns, so the inner JSON's field names are never read as words; other text is read as it is.
 
 The decode happens when both hold:
 
-- the tool is marked: its `outputSchema` in `tools/list` has `result` as its only property and either carries `x-fastmcp-wrap-result: true` or gives `result` the type string (or no type); or the manifest declares `decode: json` for it (for a server that publishes no `outputSchema`);
+- the tool is marked: its `outputSchema` in `tools/list` has `result` as its only property, of type string or with no type, with or without FastMCP's `x-fastmcp-wrap-result: true` (a `result` of another type is never marked); or the manifest declares `decode: json` for it (for a server that publishes no `outputSchema`);
 - the answer is exactly that shape: structuredContent is an object whose only member is `result`, a string that parses as a JSON object or array.
 
 Anything else is read as before: a string that is not JSON (or is a JSON number, string or null), structuredContent with any other member, or a tool that is neither marked nor declared.

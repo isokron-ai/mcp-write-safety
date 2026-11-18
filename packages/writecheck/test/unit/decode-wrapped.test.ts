@@ -12,7 +12,8 @@ import { outcomeByField, usePatterns } from '../../src/checks/says.js';
 import { patternData, readShape, useShapes } from '../../src/checks/shape.js';
 import { conflictSignal } from '../../src/checks/signals.js';
 import { conflictState, shownBy, staleExperiment, staleVerdicts, versionIn } from '../../src/checks/stale.js';
-import { brief } from '../../src/checks/types.js';
+import { textOf } from '../../src/checks/retry2.js';
+import { brief, saidStrings } from '../../src/checks/types.js';
 import { objectFrom } from '../../src/core/driver.js';
 import type { ExperimentOutcome } from '../../src/core/exec.js';
 import { declaredDecodes, parseManifestText } from '../../src/core/manifest.js';
@@ -37,6 +38,9 @@ test('marksWrappedResult: the FastMCP marker, or an object schema whose only pro
   assert.equal(marksWrappedResult({ type: 'object', properties: { result: { type: 'string' }, total: { type: 'integer' } } }), false, 'another property');
   assert.equal(marksWrappedResult({ type: 'object', properties: { rows: { type: 'array' } } }), false);
   assert.equal(marksWrappedResult({ type: 'object', properties: { result: { type: 'string' }, extra: {} }, 'x-fastmcp-wrap-result': true }), false, 'the marker with another property');
+  // PR #7 round 3: the extension does not override the type rule
+  assert.equal(marksWrappedResult({ type: 'object', properties: { result: { type: 'array' } }, 'x-fastmcp-wrap-result': true }), false, 'the marker with a result that is never a string');
+  assert.equal(marksWrappedResult({ type: 'object', properties: { result: {} }, 'x-fastmcp-wrap-result': true }), true, 'the marker with an untyped result');
 });
 
 test('unwrapResult: only {"result": "<JSON object or array>"} is decoded', () => {
@@ -250,5 +254,44 @@ resources:
     assert.equal('decoded' in twin || 'raw_structured' in twin, false);
   } finally {
     usePatterns(null);
+  }
+});
+
+test('PR #7 round 3: a text block that is the serialized wrapper is read as the decoded document, never as the inner JSON', () => {
+  const inner = JSON.stringify({ replayed: false, id: 3, message: 'Created T3' });
+  const wrapper = JSON.stringify({ result: inner });
+  const o = outcome({ content: [{ type: 'text', text: wrapper }], structuredContent: { result: inner } });
+  const dec = toCallResult(o, 's', 'L', 'set_row', 'manifest');
+  assert.equal(dec.decoded?.text_mirrors, 'structuredContent');
+  const b = brief(dec);
+  for (const said of [saidStrings(b), textOf(b)]) {
+    assert.doesNotMatch(said, /replayed/, 'no field name of the inner document reaches the patterns');
+    assert.match(said, /Created T3/);
+  }
+  // the twin, not decoded: read as before (the inner JSON is one string value of the text)
+  const raw = brief(toCallResult(o, 's', 'L', 'set_row', null));
+  assert.match(saidStrings(raw), /replayed/);
+  // a text that repeats the decoded document (not the wrapper) is not flagged; prose that is no mirror is not either
+  assert.equal(call(wrapped(inner), 'manifest').decoded?.text_mirrors, undefined);
+  const two = toCallResult(outcome({ content: [{ type: 'text', text: 'Created ticket 3.' }, { type: 'text', text: wrapper }], structuredContent: { result: inner } }), 's', 'L', 'set_row', 'manifest');
+  assert.equal(two.decoded?.text_mirrors, undefined);
+});
+
+test('PR #7 round 3: with an adopted shape, the wrapper text block is the mirror: the prose keeps only the free words', () => {
+  useShapes({ results: { shape: 'write-result/0.1', tools: {} } });
+  try {
+    const inner = JSON.stringify({ id: 3, mws: { shape: 'write-result/0.1', outcome: 'applied', message: 'Created T3.' } });
+    const wrapper = JSON.stringify({ result: inner });
+    const one = toCallResult(outcome({ content: [{ type: 'text', text: wrapper }], structuredContent: { result: inner } }), 's', 'L', 't_create', 'outputSchema');
+    assert.equal(one.prose_text, 'Created T3.', 'the wrapper is left out of the prose; the decoded shape\'s free words are kept');
+    assert.doesNotMatch(brief(one).text ?? '', /outcome|applied|write-result/);
+    // prose that is not a mirror stays as it is
+    const two = toCallResult(outcome({ content: [{ type: 'text', text: 'Ticket 3 was created.' }, { type: 'text', text: wrapper }], structuredContent: { result: inner } }), 's', 'L', 't_create', 'outputSchema');
+    assert.equal(two.prose_text, 'Ticket 3 was created.\nCreated T3.');
+    // not decoded: the wrapper is no mirror of anything the tester reads as the shape (as before)
+    const raw = toCallResult(outcome({ content: [{ type: 'text', text: wrapper }], structuredContent: { result: inner } }), 's', 'L', 't_create', null);
+    assert.equal(raw.shape, null);
+  } finally {
+    useShapes(null);
   }
 });
