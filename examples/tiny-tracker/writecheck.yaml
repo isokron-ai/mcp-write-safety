@@ -90,6 +90,17 @@ calls:
   remove_label: { resource: ticket, args: { id: "{{id}}", label_id: "{{object.labels[0].id}}" } }
   set_labels: { resource: ticket, args: { id: "{{id}}", labels: [z], expected_version: "{{object.version}}" } }
 
+# MWS-IN probes on every write tool (spec MWS-IN-4, R15-4): the arguments to which the tester may give, in a base call on its own
+# objects, the value a refused probe means (its counterpart), so that the counterpart control is that base call. Each acts on the
+# tester's own objects only: a label name, the force override on the tester's own ticket, an assignee on the tester's own tickets,
+# and the delete-all switch inside the tester's own container.
+inputs:
+  add_label: { counterpart_args: [name] }
+  set_labels: { counterpart_args: [force] }
+  delete_ticket: { counterpart_args: [force] }
+  bulk_update_tickets: { counterpart_args: [assignee] }
+  delete_tickets: { counterpart_args: [all] }
+
 resources:
   # Projects: the scopes tickets live in. The caller chooses the key (MWS-TGT-3).
   - name: project

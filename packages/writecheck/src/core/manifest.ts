@@ -315,6 +315,14 @@ export interface Manifest {
   backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
   /** Arguments for other tools (annotation effects), bound to a resource whose scratch object `{{id}}` names. */
   calls: Record<string, { args: unknown; resource: string | null }>;
+  /**
+   * Per write tool, for the MWS-IN probes on every write tool (spec MWS-IN-4, R15-4): `counterpart_args` are the arguments to
+   * which the operator lets the tester give, in a base call on its own objects, the value of the declared type that a refused
+   * probe means (its counterpart). The counterpart control is then that base call itself, so it changes nothing the base call
+   * does not. Absent: no such argument is declared, and a refused probe whose counterpart would send another value to a tool
+   * that writes an existing object is not judged.
+   */
+  inputs: Record<string, { counterpart_args: string[] }>;
   resources: ResourceSpec[];
   /** Start-up settings meant to restrict writes (MWS-CFG-1 to MWS-CFG-3), set through environment variables of a server the tester starts. */
   settings: {
@@ -1031,7 +1039,7 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
 
 export function validateManifest(raw: unknown, source: { path: string; sha256: string }): Manifest {
   const o = obj(raw, '(top)');
-  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results'], '(top)');
+  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'inputs', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results'], '(top)');
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
@@ -1134,6 +1142,14 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
       calls[name] = { args: cc['args'] ?? {}, resource: optStr(cc['resource'], `calls.${name}.resource`) };
     }
   }
+  const inputs: Manifest['inputs'] = {};
+  if (o['inputs'] !== undefined) {
+    for (const [name, c] of Object.entries(obj(o['inputs'], 'inputs'))) {
+      const cc = obj(c, `inputs.${name}`);
+      keys(cc, ['counterpart_args'], `inputs.${name}`);
+      inputs[name] = { counterpart_args: strList(cc['counterpart_args'], `inputs.${name}.counterpart_args`) };
+    }
+  }
   // why: a team may need its own recognisable prefix on the test objects (CLI-BUGS item 14); it must stay short and plain.
   const prefix = o['prefix'] === undefined ? 'mwsc' : str(o['prefix'], 'prefix');
   if (!/^[a-z][a-z0-9]{1,7}$/.test(prefix)) throw fail('prefix', 'two to eight lowercase letters or digits, starting with a letter (default mwsc)');
@@ -1169,6 +1185,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     },
     backend,
     calls,
+    inputs,
     resources,
     ...topLevel(o),
     source,

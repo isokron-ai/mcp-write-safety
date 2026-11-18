@@ -302,7 +302,8 @@ export function in5Verdicts(obs: In5Obs[], res: ResourceSpec, tools: Tool[]): Re
 
 export interface ProbeObs {
   tool: string;
-  role: 'read' | 'update';
+  /** write: a write tool other than an update tool (src/checks/inputwrites.ts), probed from a declared base call. */
+  role: 'read' | 'update' | 'write';
   prop: string;
   name: string;
   requirement: ProbeCase['requirement'];
@@ -382,7 +383,7 @@ export function saysNotUsed(text: string, prop: string): boolean {
 }
 
 /** Does a value carry any of the markers anywhere (deep; strings by substring)? */
-function carries(v: unknown, marks: unknown[]): boolean {
+export function carries(v: unknown, marks: unknown[]): boolean {
   if (marks.some((m) => deepEqual(m, v))) return true;
   if (typeof v === 'string') return marks.some((m) => (typeof m === 'string' || typeof m === 'number') && String(m).length > 0 && v.includes(String(m)));
   if (Array.isArray(v)) return v.some((x) => carries(x, marks));
@@ -390,7 +391,7 @@ function carries(v: unknown, marks: unknown[]): boolean {
   return false;
 }
 
-const ID_LIKE = /(^|_)(id|ids|uid|uuid|key|parent|project|owner|org|organization|workspace|tenant|namespace|scope|path|where|filter|selector|query|target)$|Id$/i;
+export const ID_LIKE = /(^|_)(id|ids|uid|uuid|key|parent|project|owner|org|organization|workspace|tenant|namespace|scope|path|where|filter|selector|query|target)$|Id$/i;
 
 /**
  * Properties a probe on a write tool must never change: every property of the base call except the
@@ -877,10 +878,11 @@ export function sameAnswer(a: Answer4, b: Answer4, vals: unknown[], again?: Answ
 
 export const internalsIn = (p: ProbeObs): boolean => RAW_ERROR.test(p.rpc_error?.message ?? p.text ?? '');
 
-export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Tool[], ctx: PlanContext | null = null, cut: Record<string, { sent: number; total: number }> = {}, protectedBy: Record<string, string[]> = {}): Result[] {
-  const sc = { id: ID, version: VERSION };
+export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Tool[], ctx: PlanContext | null = null, cut: Record<string, { sent: number; total: number }> = {}, protectedBy: Record<string, string[]> = {}, only: string[] | null = null, scenario: { id: string; version: string } = { id: ID, version: VERSION }): Result[] {
+  const sc = scenario;
   const out: Result[] = [];
-  for (const { tool } of toolsOf(res)) {
+  // why: B3 (lane F2): the write tools other than the update tool are judged here too, from the probes src/checks/inputwrites.ts made.
+  for (const tool of only ?? toolsOf(res).map((x) => x.tool)) {
     if (!toolByName(tools, tool)) continue;
     const w = wp(res.name, tool);
     const all = probes.filter((p) => p.tool === tool);
@@ -945,7 +947,7 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
         for (const r of ['MWS-IN-2', 'MWS-IN-7'] as const) out.push(result(r, w, sc, 'not tested', `every extra-argument probe of ${tool} had an unknown outcome`, { notes: sentLine }));
       } else {
         const had = cases.filter((p) => p.ok && p.effect && p.effect.length);
-        const unknownEffect = cases.filter((p) => p.ok && p.role === 'update' && p.effect === null);
+        const unknownEffect = cases.filter((p) => p.ok && p.role !== 'read' && p.effect === null);
         const rest = cases.filter((p) => !had.includes(p) && !unknownEffect.includes(p));
         // why: spec 7.3 rule 11: what a result says is decided by the declaration's pattern or a person's reading. Where only the
         // default pattern is in effect and the answer names the argument without matching it, the tester cannot decide: the
@@ -957,7 +959,7 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
         const silent = rest.filter((p) => p.ok && !saysNotUsed(p.text ?? '', p.prop) && !unclear.includes(p));
         const told = rest.filter((p) => p.ok && saysNotUsed(p.text ?? '', p.prop));
         const notes = [...sentLine, ...had.map((p) => `Observation: ${p.prop} (${p.name}) had an effect (${p.effect!.join(', ')}), so it was not dropped; not judged here (see MWS-IN-7).`), ...unknownEffect.map((p) => `${p.prop} (${p.name}): accepted, and the object did not read back; not judged.`), ...told.map((p) => `${p.prop} (${p.name}): accepted. ${saidBy('not_used', p.text ?? '')}`), ...rest.filter((p) => p.ok && !told.includes(p) && p.text).map((p) => `${p.prop} (${p.name}): accepted; the result was not read as saying the argument was not used. ${saidBy('not_used', p.text ?? '')}`)];
-        if (silent.length) out.push(result('MWS-IN-2', w, sc, 'violated', `${tool} accepted ${silent.map((p) => `${p.prop} (${p.name})`).join(' and ')}, an argument its schema does not define; the result does not say it was not used${silent[0]!.text ? ` (it says: ${JSON.stringify(short(silent[0]!.text, 160))})` : ''}${silent[0]!.role === 'update' ? ', and the read-back shows no effect' : ''}.`, { steps: silent.map((p) => p.step), notes }));
+        if (silent.length) out.push(result('MWS-IN-2', w, sc, 'violated', `${tool} accepted ${silent.map((p) => `${p.prop} (${p.name})`).join(' and ')}, an argument its schema does not define; the result does not say it was not used${silent[0]!.text ? ` (it says: ${JSON.stringify(short(silent[0]!.text, 160))})` : ''}${silent[0]!.role !== 'read' ? ', and the read-back shows no effect' : ''}.`, { steps: silent.map((p) => p.step), notes }));
         else if (unclear.length) out.push(result('MWS-IN-2', w, sc, 'not tested', `${tool} accepted ${unclear.map((p) => `${p.prop} (${p.name})`).join(' and ')} and its answer names the argument, but whether it says the argument was not used needs reading: it does not match the ${fromDeclaration('not_used') ? 'declared patterns.not_used' : 'default pattern for "not used", and the declaration gives none'} (spec 7.3, rule 11). The answer, where it names ${unclear[0]!.prop}: ${JSON.stringify(around(unclear[0]!.text ?? '', unclear[0]!.prop))}. Declare patterns.not_used, or read it.`, { notes }));
         // why: gate-2 re-run on 378f32f (note 19, R11; rule 11): a notice read as "not used" by the default pattern alone ("was not
         // ignored", "unused quota") decides nothing either way; only a declared patterns.not_used gives held.
