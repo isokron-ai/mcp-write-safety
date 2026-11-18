@@ -74,7 +74,7 @@ Pipelining is kept: a client that sends several units without waiting gets them 
 
 ## 4. Classification (write vs read)
 
-`GateRequest` keeps its HTTP shape so the checks need no new logic: `method` is the verb, `path` the target, `mutating` the classification. New optional field `wire: { protocol, statement, uncertain?, reply?, txn?, synthetic?, deferred? }`.
+`GateRequest` keeps its HTTP shape so the checks need no new logic: `method` is the verb, `path` the target, `mutating` the classification. New optional field `wire: { protocol, statement, uncertain?, statements?, reply?, txn?, synthetic?, note?, deferred? }`. Framing that is lost mid-connection is logged as a write (`method: '?'`, `wire.uncertain: framing lost …`) and the connection is closed.
 
 **Rule: a unit counts as a write unless the classifier is sure it does not write. When it is unsure it records why in `wire.uncertain`.** A false write makes the learning pass hold or fail a read (the check then reports "the held request changed nothing", never a false `held` of a write); a false read could hide the write that matters, which is the error that produces a false `held` (B-GAP §5 "Wire-gate misframing").
 
@@ -141,7 +141,7 @@ The gate keeps the client and the database in step after an injected error, wher
 - **Postgres, inside a transaction.** The backend never saw the failed unit and is still `T`, while the client was told `E`. The connection enters *emulated-failed* mode: any unit except ROLLBACK/ABORT/ROLLBACK TO/COMMIT/END is answered with `25P02 current transaction is aborted` and not forwarded; ROLLBACK, ABORT and ROLLBACK TO are forwarded as they are (leaving the mode); COMMIT/END is replaced by a `ROLLBACK` sent to the backend and answered to the client as Postgres answers a COMMIT of a failed transaction (`CommandComplete ROLLBACK`, `ReadyForQuery I`).
 - **Postgres, Flush unit.** The backend would skip everything up to the next Sync after an error; the gate answers those units itself (nothing, then `ReadyForQuery`) without forwarding them.
 - **Redis, inside MULTI.** Real Redis discards the transaction at EXEC after a queueing error. The gate replaces the EXEC with DISCARD and answers `-EXECABORT Transaction discarded because of previous errors.`
-- **Mongo, inside a transaction:** not emulated in this preview. The record says so (`wire.uncertain`) and the check should treat the trial as `not tested`. Transactions need a replica set (C1) anyway.
+- **Mongo, inside a transaction:** not emulated in this preview. The record says so (`wire.note`) and a check should treat the trial as `not tested`. Transactions need a replica set (C1) anyway.
 
 ### 5.3 The commit point (lost answer)
 
@@ -179,6 +179,8 @@ No Docker and no database here. Proven in-process:
 
 - **Codec unit tests** on synthetic frames built byte by byte from the protocol specifications: framing across arbitrary chunk splits (every byte boundary for a pipelined stream), classification tables, literal stripping, BSON round trips, reply-boundary detection (Postgres Sync/Flush/error-skip, RESP3 nesting and attributes, Mongo `responseTo`/`moreToCome`).
 - **Proxy tests** against a minimal in-process fake server per protocol (a TCP server that speaks just enough of the protocol: Postgres startup + trust auth + simple and extended query with a tiny key/value table and transactions; RESP with GET/SET/DEL/MULTI/EXEC; OP_MSG with hello/find/update/insert and `lsid` transactions), driven by a minimal client written in the test: pass-through, request log, hold-and-release with a second connection finishing first, nth matching, the four faults, deferred commit faults, emulated-failed mode, EXECABORT emulation.
+
+Files: `test/unit/wire-{postgres,redis,mongodb}.test.ts`, `test/integration/wire-gate-{postgres,redis,mongodb}.test.ts`, fakes and clients in `test/wire/{pg,redis,mongo}.ts`. The Mongo fake reuses the gate's BSON writer; the BSON reader is checked against the bsonspec.org vectors.
 
 **Must be verified on the Mac (Docker), not provable here:**
 

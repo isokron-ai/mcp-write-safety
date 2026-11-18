@@ -27,6 +27,7 @@ import type { Manifest } from '../core/manifest.js';
 import { WritecheckError } from '../core/util.js';
 import { Forwarder } from './forwarder.js';
 import { HookGate } from './hookgate.js';
+import { MongoSession, sharedMongo } from './wire/mongodb.js';
 import { PostgresSession } from './wire/postgres.js';
 import { WireGate } from './wire/proxy.js';
 import { RedisSession } from './wire/redis.js';
@@ -156,8 +157,9 @@ export function createGate(m: Manifest, env: NodeJS.ProcessEnv, o: { stateDir: s
     if (wire) {
       const why = wireRefusal(upstream);
       if (why) throw new WritecheckError(`backend.gate.rewrite_env: ${g.rewrite_env} holds a ${wire} URL the wire gate cannot stand in for: ${why}`, 2);
-      if (wire === 'mongodb') throw new WritecheckError(`backend.gate.rewrite_env: the ${wire} wire gate is not built yet`, 2);
-      const codec = wire === 'postgres' ? (k: string) => new PostgresSession(k) : (k: string) => new RedisSession(k);
+      // why: Mongo transactions belong to a session (lsid) that may use several pooled connections; their state is shared per gate.
+      const shared = sharedMongo();
+      const codec = wire === 'postgres' ? (k: string) => new PostgresSession(k) : wire === 'redis' ? (k: string) => new RedisSession(k) : (k: string) => new MongoSession(k, shared);
       return new WireGate(wire, g.rewrite_env, upstream, o.egress, g.hold_timeout_ms, codec);
     }
     return new Forwarder(g.rewrite_env, upstream, o.egress, g.hold_timeout_ms);
