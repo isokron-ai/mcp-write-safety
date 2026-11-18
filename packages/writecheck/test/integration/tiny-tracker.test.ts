@@ -44,10 +44,18 @@ const saidNo = (rs: Result[]) => rs.filter((r) => r.verdict === 'self-attested' 
  *                             not additive either (ANN-5)
  *   drop-unknown-args         an argument dropped silently (IN-2) was also not rejected (IN-7)
  *   shape-missing-failed      bulk_update_tickets writes one by one, so a failed call leaves the
- *                             earlier writes in place (ATOM-2); the shape's lie is ATOM-1
+ *                             earlier writes in place (ATOM-2); the shape's lie is ATOM-1. When the
+ *                             answer to its last write is lost, that ticket is applied and the
+ *                             result neither identifies it nor says its outcome is unknown (RES-2)
  *   shape-text-says-all-saved bulk_update_tickets writes one by one, so a failed call leaves the
  *                             earlier writes in place (ATOM-2); its sentence says all tickets were
- *                             saved beside a correct shape, read by patterns.applied_all (ATOM-1)
+ *                             saved beside a correct shape, read by patterns.applied_all (ATOM-1).
+ *                             When the answer to its last write is lost, its shape gives that
+ *                             applied ticket as not applied (RES-2)
+ *   conflict-as-generic-error set_labels words every refusal "Request failed ... Nothing was
+ *                             written."; after a lost backend answer (the write applied) that is a
+ *                             failure stated for a write in effect (RES-2, kind stated-failure). Its
+ *                             own finding (CONC-6) is review-only, below
  *   coerce-types              a conversion that changes the meaning (IN-1) is also a value of
  *                             another type that was accepted (IN-6; spec: "a record here and under
  *                             MWS-IN-1")
@@ -66,7 +74,7 @@ const EXPECT: Record<string, string[]> = {
   'read-merge-put': ['MWS-CONC-3'],
   'conflict-without-iserror': ['MWS-CONC-4'],
   'stale-unannounced': [],
-  'conflict-as-generic-error': [],
+  'conflict-as-generic-error': ['MWS-RES-2'],
   'ignore-project-scope': ['MWS-TGT-1'],
   'empty-filter-deletes-all': ['MWS-TGT-2'],
   'create-overwrites': ['MWS-ANN-2', 'MWS-ANN-5', 'MWS-TGT-3'],
@@ -76,8 +84,8 @@ const EXPECT: Record<string, string[]> = {
   'shape-text-says-failed': ['MWS-RES-2'],
   'shape-text-invites-retry': ['MWS-RES-2'],
   'shape-wrong-version': ['MWS-RES-4'],
-  'shape-missing-failed': ['MWS-ATOM-1', 'MWS-ATOM-2'],
-  'shape-text-says-all-saved': ['MWS-ATOM-1', 'MWS-ATOM-2'],
+  'shape-missing-failed': ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-2'],
+  'shape-text-says-all-saved': ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-2'],
   'error-as-text': ['MWS-RES-2'],
   'comment-id-dropped': ['MWS-RES-3'],
   'receipt-missing-version': ['MWS-RES-4'],
