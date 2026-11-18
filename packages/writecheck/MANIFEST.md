@@ -71,7 +71,7 @@ Exactly one route. `rewrite_env: VAR`: the tester starts a loopback forwarder an
 
 | Key | Meaning |
 |---|---|
-| `read_only` | `{ env, on, valid, empty_distinct }`: the read-only setting, the value that turns it on, the values the server accepts, and whether empty differs from unset (MWS-CFG-1, CFG-3). `valid` is a map `{ <value>: restrict \| permit }` saying whether each value restricts or permits writes (spec Annex E): a probe that is a valid value that permits writes is not sent; one that restricts writes is sent. The earlier list form says neither, so its values are not sent |
+| `read_only` | `{ env, on, valid, empty_distinct }`: the read-only setting, the value that turns it on, the values the server accepts, and whether empty differs from unset (MWS-CFG-1, CFG-3). In read-only mode every declared write tool is called, and also each tool marked read-only that has a `calls` entry (see `calls`). `valid` is a map `{ <value>: restrict \| permit }` saying whether each value restricts or permits writes (spec Annex E): a probe that is a valid value that permits writes is not sent; one that restricts writes is sent. The earlier list form says neither, so its values are not sent |
 | `tool_filters` | A list of `{ env, kind: deny \| allow, separator }`: a deny-list (MWS-CFG-2) or an allow-list (MWS-CFG-4) of tool names |
 | `per_request` | A list of `{ name, kind: read_only \| deny \| allow }`: settings applied with a request rather than at start; reported `not tested` in this preview |
 
@@ -89,7 +89,7 @@ A list of `{ name, tool, args, path, ignore }`: a read-only call made before and
 
 ## calls
 
-`{ tool_name: { resource, args } }`: arguments for a tool the annotation checks call on a scratch object of `resource` (MWS-ANN-1 to ANN-3, ANN-5). The read-only check (MWS-CFG-3) uses them too: it calls every declared write tool, listed or not, and a write tool with no call of its own (for example one named only under `failures`) leaves MWS-CFG-3 `not tested`; its record names the tool and this key.
+`{ tool_name: { resource, args } }`: arguments for a tool the annotation checks call on a scratch object of `resource` (MWS-ANN-1 to ANN-3, ANN-5). The read-only check (MWS-CFG-3) uses them too: it calls every declared write tool, listed or not, and a write tool with no call of its own (for example one named only under `failures`) leaves MWS-CFG-3 `not tested`; its record names the tool and this key. It also calls each tool that is marked read-only (`readOnlyHint: true` in `tools/list`, or a declared read tool) and has an entry here whose arguments name an object of the run (`{{id}}`, `{{prefix}}`, `{{marker}}` or `{{object}}`), with that entry's arguments and resource, as the annotation checks do, because read-only mode must refuse a write tool whatever its annotations declare. If the object changes through such a tool, MWS-CFG-3 is `violated` and the record names the tool and says it is marked read-only; if nothing changes, it counts toward `held` (it is a read unless it writes), whatever it answered. The deny-list trial of MWS-CFG-2 calls the same tools; MWS-CFG-1 compares the declared write tools only. A tool marked read-only with no entry here is not called (there are no safe arguments for it).
 
 ## review
 
