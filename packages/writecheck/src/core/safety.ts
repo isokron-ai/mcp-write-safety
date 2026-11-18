@@ -304,6 +304,16 @@ export interface GuardHooks {
   onCall?: (c: GuardCall) => void;
 }
 
+/** The tools the manifest reads through: every resource's read and list, and every canary. */
+export const manifestReadTools = (m: Manifest): string[] => [...new Set([...m.resources.flatMap((r) => [r.read.tool, ...(r.list ? [r.list.tool] : [])]), ...m.canaries.map((c) => c.tool)])];
+
+/** Does the manifest declare state a declared guard call can be compared against (a fixture, a canary, a list needing no object)? */
+const guardStateDeclared = (m: Manifest): boolean =>
+  m.canaries.length > 0 || m.resources.some((r) => !!r.fixture || (!!(r.list ?? (r.read.items ? r.read : null)) && !/\{\{\s*(json:)?\s*(id|marker|key|scope)\b/.test(JSON.stringify((r.list ?? r.read).args ?? null))));
+
+/** A guard declared read-only call by call (read_only_call) through a tool that declares destructiveHint: true (t12's dispatcher). */
+export const destructiveDispatcherGuard = (g: NonNullable<Manifest['target']['guard']>, def: { annotations?: Record<string, unknown> } | undefined): boolean => !!g.read_only_call && def?.annotations?.['destructiveHint'] === true;
+
 export const guardBasis = (g: NonNullable<Manifest['target']['guard']>): GuardCall['basis'] => (g.read_only_call ? 'operator' : g.read_only ? 'declared' : 'annotation');
 
 /** The calls sent so far, in words, for a stop message: never "no write was made" once a call that may write went out. */
@@ -319,8 +329,19 @@ function sentText(g: NonNullable<Manifest['target']['guard']>, calls: GuardCall[
  * no object, marker or scope, each read to the end. A key per list or canary; the value is canonical JSON with the declared
  * ignored fields left out, or null where the read failed (that one is not compared).
  */
-async function stateSnapshot(m: Manifest, s: Session, label: string, step: string): Promise<Map<string, string | null>> {
+async function stateSnapshot(m: Manifest, s: Session, label: string, step: string, o: { fixtures?: boolean } = {}): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
+  // why: t12: a guard through a tool that declares destructiveHint: true (a dispatcher that is the server's only read route) is
+  // also checked against every pre-made fixture, read whole (no ignored field left out), before the first call and after the third.
+  if (o.fixtures) {
+    for (const r of m.resources) {
+      if (!r.fixture) continue;
+      const k = `fixture ${r.name} ${JSON.stringify(r.fixture.id)}`;
+      if (out.has(k)) continue;
+      const got = await s.call(label, r.read.tool, render(r.read.args, baseVars(r, '', { id: r.fixture.id })), { write: false, step: s.stepId(`${step}.fixture.${r.name}`) });
+      out.set(k, got.ok ? canonical(got.data !== null && got.data !== undefined ? got.data : (got.text ?? null)) : null);
+    }
+  }
   for (const c of m.canaries) {
     const k = `canary ${c.name}`;
     const r = await s.call(label, c.tool, c.args, { write: false, step: s.stepId(`${step}.canary.${c.name}`) });
@@ -354,14 +375,15 @@ async function stateSnapshot(m: Manifest, s: Session, label: string, step: strin
   return out;
 }
 
-export async function tenantGuard(m: Manifest, s: Session, label: string, o: GuardHooks = {}): Promise<{ matched: string; step: string; basis?: 'operator'; calls: GuardCall[]; state?: string }> {
+export async function tenantGuard(m: Manifest, s: Session, label: string, o: GuardHooks = {}): Promise<{ matched: string; step: string; basis?: 'operator'; calls: GuardCall[]; state?: string; destructive?: true }> {
   const g = m.target.guard;
   if (!g) throw new WritecheckError('target.guard is required: a read-only tool call whose result must match a pattern (for example the tenant or workspace name) before any write', 2);
   const tools = await s.listTools(label);
   const def = tools.find((t) => t['name'] === g.tool) as { annotations?: Record<string, unknown> } | undefined;
   if (!def) throw new WritecheckError(`target.guard: ${g.tool} is not in tools/list`, 3);
-  const gp = guardProblem(g, def, { writeTools: new Set(declaredWriteTools(m, tools as never).keys()), anyAnnotated: tools.some((t) => t['annotations'] && typeof t['annotations'] === 'object' && Object.keys(t['annotations'] as object).length > 0), readOnlyTools: readOnlyToolsOf(tools) });
+  const gp = guardProblem(g, def, { writeTools: new Set(declaredWriteTools(m, tools as never).keys()), anyAnnotated: tools.some((t) => t['annotations'] && typeof t['annotations'] === 'object' && Object.keys(t['annotations'] as object).length > 0), readOnlyTools: readOnlyToolsOf(tools), manifest: m });
   if (gp) throw new WritecheckError(gp, 3);
+  const dispatcher = destructiveDispatcherGuard(g, def);
   const basis = guardBasis(g);
   const calls: GuardCall[] = [];
   const step = s.stepId('guard');
@@ -388,12 +410,12 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
   // third, and the same call made twice more must answer exactly as the first did. Any error, a different answer, or a changed
   // list or canary refuses the run. A write that changes nothing the manifest lets the tester read, and answers the same each
   // time, would still pass: the results say the guard rests on the declaration.
-  const before = await stateSnapshot(m, s, label, 'guard.state.before');
+  const before = await stateSnapshot(m, s, label, 'guard.state.before', { fixtures: dispatcher });
   const first = await once(step, 'check');
   const differs = () => `target.guard: ${g.tool} is declared read-only (read_only_call), but the same call answered differently when made again, so it may change state; ${sentText(g, calls)}`;
   if ((await once(s.stepId('guard.dry'), 'dry')).whole !== first.whole) throw new WritecheckError(differs(), 3);
   if ((await once(s.stepId('guard.after'), 'after')).whole !== first.whole) throw new WritecheckError(differs(), 3);
-  const after = await stateSnapshot(m, s, label, 'guard.state.after');
+  const after = await stateSnapshot(m, s, label, 'guard.state.after', { fixtures: dispatcher });
   const compared: string[] = [];
   for (const [k, v] of before) {
     if (v === null) continue;
@@ -403,10 +425,14 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
     compared.push(k);
   }
   const unread = [...before].filter(([, v]) => v === null).map(([k]) => k);
+  // why: t12: for a destructive-annotated dispatcher the comparison is the only evidence the call did not write: every fixture,
+  // canary and object-free list must have been read on both sides, and at least one must have been compared.
+  if (dispatcher && unread.length) throw new WritecheckError(`target.guard: ${g.tool} declares destructiveHint: true and is accepted as the guard only when the state around its calls is compared in full; ${unread.join(', ')} could not be read before the calls, so whether they changed state is not known; ${sentText(g, calls)}`, 3);
+  if (dispatcher && !compared.length) throw new WritecheckError(`target.guard: ${g.tool} declares destructiveHint: true and is accepted as the guard only when the state around its calls is compared; the manifest declares no fixture, canary or list that needs no object, so nothing was compared; ${sentText(g, calls)}`, 3);
   const state = compared.length
     ? `${compared.join(', ')} read the same before and after the three calls${unread.length ? ` (${unread.join(', ')} could not be read, so not compared)` : ''}`
     : `the manifest declares no canary and no list that needs no object${unread.length ? ` that could be read (${unread.join(', ')} failed)` : ''}, so no state was compared around the three calls`;
-  return { matched: short(first.text, 80), step, basis: 'operator', calls, state };
+  return { matched: short(first.text, 80), step, basis: 'operator', calls, state, ...(dispatcher ? { destructive: true as const } : {}) };
 }
 
 /**
@@ -459,19 +485,30 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
  * by the declaration (target.guard.read_only: true). A tool that declares readOnlyHint: false or destructiveHint:
  * true is refused either way. Shared by plan (which warns before the run) and the run.
  */
-export function guardProblem(g: NonNullable<Manifest['target']['guard']>, def: { annotations?: Record<string, unknown> } | undefined, o: { writeTools?: Set<string>; anyAnnotated?: boolean; readOnlyTools?: string[] } = {}): string | null {
+export function guardProblem(g: NonNullable<Manifest['target']['guard']>, def: { annotations?: Record<string, unknown> } | undefined, o: { writeTools?: Set<string>; anyAnnotated?: boolean; readOnlyTools?: string[]; manifest?: Manifest } = {}): string | null {
   if (!def) return `target.guard: ${g.tool} is not in tools/list`;
   // why: PostHog cli mode (research builds): a server whose only tool is a dispatcher can be guarded only by a call the operator
   // declares read-only; the run verifies it (tenantGuard) and the record says the guard rests on that declaration.
   const a = def.annotations ?? {};
   if (g.read_only_call) {
     // why: review: the declaration is for a server whose only route is a dispatcher; it never turns the other protections off.
-    if (a['destructiveHint'] === true) return `target.guard: ${g.tool} declares destructiveHint: true; even a declared read-only call through it cannot be the guard`;
     if (o.readOnlyTools?.length) return `target.guard: read_only_call is for a server whose only tool is a dispatcher; this server offers read-only tools (${o.readOnlyTools.slice(0, 3).join(', ')}): use one of them`;
+    if (a['destructiveHint'] === true) {
+      // why: t12: a SQL dispatcher (mysql_query) that writes when writes are on declares destructiveHint: true, and it is the
+      // server's only tool, so no other guard exists. Such a tool is accepted only as the manifest's only read route, and only
+      // when there is state to compare around its calls (tenantGuard then reads the fixtures whole and requires every read).
+      const refused = `target.guard: ${g.tool} declares destructiveHint: true; a declared read-only call through it can be the guard only where it is the server's only read route`;
+      if (!o.manifest) return `${refused} (not known here)`;
+      const others = manifestReadTools(o.manifest).filter((t) => t !== g.tool);
+      if (others.length) return `${refused}, and this manifest reads through ${others.slice(0, 3).join(', ')}: guard with a read-only tool`;
+      if (!manifestReadTools(o.manifest).includes(g.tool)) return `${refused}, and this manifest reads nothing through it`;
+      if (!guardStateDeclared(o.manifest)) return `${refused} and the manifest declares a fixture, a canary or a list that needs no object to compare around its calls; this manifest declares none`;
+      return null;
+    }
     return null;
   }
   if (a['readOnlyHint'] === true) return null;
-  if (a['readOnlyHint'] === false || a['destructiveHint'] === true) return `target.guard: ${g.tool} declares readOnlyHint: false or destructiveHint: true; the positive tenant check must be a tool that only reads`;
+  if (a['readOnlyHint'] === false || a['destructiveHint'] === true) return `target.guard: ${g.tool} declares readOnlyHint: false or destructiveHint: true; the positive tenant check must be a tool that only reads${g.read_only && a['destructiveHint'] === true ? ' (for a dispatcher that is the server\'s only read route, declare the exact call instead: target.guard.read_only_call: true)' : ''}`;
   // why: read_only is for a server that annotates no tool, and never for a tool the same manifest declares as a write (review).
   if (g.read_only && o.writeTools?.has(g.tool)) return `target.guard: ${g.tool} is declared as a write tool in this manifest; it cannot be the guard`;
   if (g.read_only && o.anyAnnotated) return `target.guard: read_only: true is for a server that annotates no tool, and this server annotates some; choose a tool that declares readOnlyHint: true`;

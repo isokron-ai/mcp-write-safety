@@ -75,7 +75,7 @@ export async function planCommand(o: { manifest: string; catalog?: string; env: 
   if (!manifest.target.guard) warning = `${warning ? `${warning}; ` : ''}run would refuse: target.guard is missing (a read-only call whose result must match before any write)`;
   // why: a guard the run would refuse is reported here, before anyone confirms the plan (CLI-BUGS item 1).
   if (manifest.target.guard && tools.length) {
-    const gp = guardProblem(manifest.target.guard, tools.find((t) => t.name === manifest.target.guard!.tool) as { annotations?: Record<string, unknown> } | undefined, { writeTools: new Set(declaredWriteTools(manifest, tools).keys()), anyAnnotated: tools.some((t) => !!t.annotations && Object.keys(t.annotations).length > 0), readOnlyTools: readOnlyToolsOf(tools as never) });
+    const gp = guardProblem(manifest.target.guard, tools.find((t) => t.name === manifest.target.guard!.tool) as { annotations?: Record<string, unknown> } | undefined, { writeTools: new Set(declaredWriteTools(manifest, tools).keys()), anyAnnotated: tools.some((t) => !!t.annotations && Object.keys(t.annotations).length > 0), readOnlyTools: readOnlyToolsOf(tools as never), manifest });
     if (gp) warning = `${warning ? `${warning}; ` : ''}run would refuse: ${gp}`;
   }
   if (manifest.target.guard && !/^\^/.test(manifest.target.guard.pattern)) o.log('\nnote: target.guard.pattern is not anchored (^…$); it matches anywhere in the value.');
