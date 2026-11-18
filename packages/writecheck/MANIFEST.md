@@ -52,6 +52,13 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
 | `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
 
+Target hosts are listed on the plan's "Hosts reached or given to the server" line, and one that looks like production is refused unless listed in `allow_hosts`. They are the server URL, the control bases, any URL in the server's environment or command line, and a host given without a URL. Where in doubt a host is read: a false refusal is cleared with `allow_hosts`, a missed host is never checked.
+
+- Variables the server is started with, by the last word of the name (split on `_`): `HOST`, `HOSTNAME`, `HOSTS` (and `PGHOST`) take any hostname or IP address; `SERVER(S)`, `ADDR(S)`, `ADDRESS(ES)`, `ENDPOINT(S)`, `NODES`, `BROKERS`, `SEEDS`, `SENTINELS` take a value with a dot, an IP address or a port, or a single word that looks like production (`sql-prod`). The port comes from the same name with `PORT` as the last word (`DB_HOST` → `DB_PORT`, `HOST` → `PORT`, `PGHOST` → `PGPORT`, any case). A comma-separated value is read item by item; `host,1433`, `host\INSTANCE,1433` and `tcp:host,1433` are one host and its port.
+- The same names as flags in `server.stdio` or `server.launch.command` (`--host`, `--db-host`, `--server`, `--addr`; `--x=y` or `--x y`), with the port from the matching port flag after it (`--db-port`; `--port` or `-p` for an unprefixed one). `-h` and `-H` take a dotted name, an IP address or `host:port`, and a single word only when `-p` or `--port` is given; a file name (`config.yaml`) after a flag is not a host. `-e NAME=value`, `--env NAME=value` and `--env=NAME=value` are read as variables.
+- Where the server listens is not a target, unless the value looks like production: a name whose last word follows `BIND` or `LISTEN` (`BIND_ADDR`, `LISTEN_HOST`; `BIND_SERVER` is a target), and, for a server the tester launches (`server.launch`), a one-word variable (`HOST`, `ADDR`) or an unprefixed host flag (`--host`, `-h`). A stdio server does not listen, so its `HOST` is a target. A container runtime's `-h` and `--hostname` name the container and are not read; its `-e` and `--env` are.
+- Not read: a value that is not a hostname or an IP address (empty, `true`, a number alone, a path, `0.0.0.0`); `*_URI` and `*_URL` values without a scheme; and a shell string (`sh -c "…"`), which is not parsed: give a host there as a variable or a flag of its own to have it checked.
+
 ## limits
 
 | Key | Default | Meaning |
