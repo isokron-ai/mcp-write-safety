@@ -75,6 +75,8 @@ Target hosts are listed on the plan's "Hosts reached or given to the server" lin
 
 Exactly one route. `rewrite_env: VAR`: the tester starts a loopback forwarder and gives the server its URL in `VAR` in place of the real backend URL. `node_import: true`: a Node server loads the in-process hook (every record obtained this way says so). `hold_timeout_ms` (default 5000): how long a request is held at most.
 
+When `VAR` holds a database URL (`postgres://`, `postgresql://`, `redis://`, `mongodb://`), the loopback gate is the wire gate: the server gets the same URL with only host and port replaced (Mongo: plus `directConnection=true`), and requests are named by verb and target (`UPDATE mwsc_items`, `SET mwsc-fx-1`, `update mwsc.mwsc_items`). A request the gate cannot classify counts as a write. TLS to the backend (`sslmode=require`, `rediss://`, `tls=true`), several hosts, `mongodb+srv://` and Unix sockets are refused. Run Mongo without wire compression. See `docs/WIRE-GATE.md`.
+
 ## settings
 
 | Key | Meaning |
