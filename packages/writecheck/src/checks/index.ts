@@ -1,6 +1,7 @@
 /** The checks, in the order a run takes them for each resource, and the server-wide checks that run once at the end. */
 
 import { annotationsCheck } from './annotations.js';
+import { effectsCheck } from './effects.js';
 import { createsCheck } from './creates.js';
 import { gatedCheck } from './gated.js';
 import { idempotencyCheck } from './idempotency.js';
@@ -16,7 +17,7 @@ import { staleCheck } from './stale.js';
 import { targetingCheck } from './targeting.js';
 import type { CheckModule, GlobalCheck } from './types.js';
 
-export const CHECKS: CheckModule[] = [readbackCheck, staleCheck, pairsCheck, gatedCheck, schemaCheck, annotationsCheck, idempotencyCheck, targetingCheck, multiCheck, listEditCheck, createsCheck, inputRequiredCheck];
+export const CHECKS: CheckModule[] = [readbackCheck, staleCheck, pairsCheck, gatedCheck, schemaCheck, annotationsCheck, idempotencyCheck, targetingCheck, multiCheck, listEditCheck, createsCheck, effectsCheck, inputRequiredCheck];
 
 /** Launch settings restart the server and the credential scan reads everything before it: both run last. */
 export const GLOBAL_CHECKS: GlobalCheck[] = [launchCheck, secretsCheck];

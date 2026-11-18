@@ -98,7 +98,7 @@ MWS-CONC-6   SHOULD held
 MWS-TGT-1    MUST   not tested, held
 MWS-TGT-2    MUST   held
 MWS-TGT-3    MUST   held
-MWS-RES-1    MUST   held, not tested
+MWS-RES-1    MUST   held
 MWS-RES-2    MUST   held, not tested
 MWS-RES-3    MUST   held
 MWS-RES-4    SHOULD held
@@ -151,7 +151,7 @@ Each requirement of MWS 0.9 (spec text: MWS 0.9 as published for comment; 37 req
 | MWS-TGT-1 | MUST | partial | update and delete tools that take a scope argument (an object of the same name in each scope), except the selector tool, which is tested only with `selector.narrow` and `selector.send_empty_forms` |
 | MWS-TGT-2 | MUST | partial | a client that declares the elicitation capability and declines a confirmation (spec 7.3, rule 10). The forms are destructive by design and run only with `selector.send_empty_forms: true`, on a backend where every object is disposable |
 | MWS-TGT-3 | MUST | partial | a client that declares the elicitation capability and declines a confirmation (spec 7.3, rule 10) |
-| MWS-RES-1 | MUST | partial | write tools other than the update and delete tools |
+| MWS-RES-1 | MUST | partial | a write tool with no declared effect (`effects`, an `input_required` effect, or a `multi` block) other than the update and delete tools; the control arm for those effects (`platform`) |
 | MWS-RES-2 | MUST | partial | write tools other than the update tool and the declared failures; judging an `input_required` result after the retry, or a task on what the terminal task carries; the settled-outcome runs of provoked failures through the interposer (the run without a fault and the lost-answer trial are built); the follow-through for an error that names the version (R10-11) |
 | MWS-RES-3 | MUST | yes |  |
 | MWS-RES-4 | SHOULD | yes |  |
@@ -232,6 +232,7 @@ Without a block, the requirements it unlocks are `not tested` (or `not applicabl
 | `versioned` | MWS-CONC-2 and CONC-4 for other tools that take the version the caller read |
 | `control` (`read`, `patch`, `write`, `delete`, `create`) | Attribution (`violated` versus `platform`), MWS-CONC-1, and setup through the platform's own API |
 | `update.cases` | MWS-RES-1 cases of your own: an update, and what must be in effect afterwards |
+| `effects` | MWS-RES-1 for every other write call: the call, and what must be in effect afterwards (created, deleted, a value set, an element added or removed) |
 | `scope` | MWS-TGT-1, and a container of the run's own |
 | `selector` (`narrow`, `send_empty_forms`) | MWS-TGT-2. **Destructive by design:** a server that ignores the scope or the selector deletes objects the tester did not create, and no order of black-box calls rules that out. The empty-selector forms, and the MWS-TGT-1 call on the selector tool that gates them, are sent only with `send_empty_forms: true`, which you set only where you, the operator, declare that every object the server's identity can change in the backend is disposable and that nothing else writes there during the test (spec 7.3, rule 1, R10-5); without it MWS-TGT-2 is `not tested` with that reason. With it: inside a container the tester created and confirmed holds only its objects, after MWS-TGT-1 is `held` for the selector tool itself (spec 7.3, rule 1). `narrow` (each value a string carrying `{{marker}}`, naming an argument the tool declares) lets the tester run that MWS-TGT-1. Before and after every targeting call the tester lists every object it can list outside its own, and around a selector call reads each back by id; a loss is in the record and at the top of the report, and that record is never `held`. The inventory is only as complete as the server's lists: the record and the report say what was listed, a selector record on a partial inventory is `not tested`, and a `held` record says the objects outside its own were "not seen to be lost" |
 | `update.apply` | Declares that the update tool sends an apply with field ownership (spec section 4: neither field patch nor full replace): its MWS-CONC-2 rows are `not tested` and it gets no version-left-out run. The tool cannot infer this; without it, such a tool can get a false MWS-CONC-2 `violated` |

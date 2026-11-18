@@ -146,6 +146,27 @@ export interface MultiSpec extends ToolTemplate {
   report: { applied: string; id: string | null } | null;
 }
 
+/**
+ * One condition of a declared effect, on the object read back after the call: `path` equals `value` (with `pick`: the list at
+ * `path`, each element reduced to its `pick` member, equals `value`); the list at `path` holds an element matching `contains`
+ * (an object matches on the members it names; any other value matches an equal element); or holds none matching `lacks`.
+ */
+export type EffectCond = { path: string; value: unknown; pick: string | null } | { path: string; contains: unknown } | { path: string; lacks: unknown };
+
+/**
+ * A write call and the state it asks for (MWS-RES-1), judged by reading the object back. `on: object`: the call writes a fresh
+ * scratch object of the resource ({{id}}, and {{object}} / {{version}} as read just before the call); `on: new`: the call
+ * creates the object, which is found by its {{marker}} through the resource's list. `deleted`: the object is gone afterwards.
+ * `answers`: the inputResponses to send where the tool answers input_required (revision 2026-07-28).
+ */
+export interface EffectSpec extends ToolTemplate {
+  on: 'object' | 'new';
+  deleted: boolean;
+  expect: EffectCond[];
+  answers: Record<string, unknown> | null;
+  client_capabilities: Record<string, unknown> | null;
+}
+
 /** A tool that edits one element of a list held inside the object (MWS-UPD-2). */
 export interface ListEditSpec extends ToolTemplate {
   /** Where the list is in the object the read returns, and the id and name inside each element. */
@@ -244,6 +265,8 @@ export interface ResourceSpec {
    * the fields the update tool can set; MWS-IN-1 and MWS-IN-4 counterpart controls): `path` is where the read shows the field.
    */
   restorable: { arg: string; path: string; call_only?: boolean }[];
+  /** MWS-RES-1: write calls with the state each asks for, judged by reading the object back (absent in older parsed forms). */
+  effects?: EffectSpec[];
   /** MWS-RETRY-3: how to make a tool answer input_required, and the answers to send on the retry. */
   input_required: { tool: string; args: unknown; answers: Record<string, unknown>; client_capabilities: Record<string, unknown>; effect: { path: string; value: unknown } | null }[];
   delete: ToolTemplate | null;
@@ -521,10 +544,35 @@ function effectOf(v: unknown, where: string, word: 'deleted' | 'removed'): { pat
   return { path: path(e['path'], `${where}.path`), value: e['value'] };
 }
 
+/** A declared MWS-RES-1 effect: "deleted", "created", one condition, or a list of conditions (with "created" in it for a create). */
+function effectSpecOf(v: unknown, where: string): { on: 'object' | 'new'; deleted: boolean; expect: EffectCond[] } {
+  if (v === 'deleted') return { on: 'object', deleted: true, expect: [] };
+  const items = Array.isArray(v) ? v : [v];
+  if (!items.length) throw fail(where, '"deleted", "created", a condition, or a list of conditions');
+  let created = false;
+  const expect: EffectCond[] = [];
+  items.forEach((x, k) => {
+    const iw = Array.isArray(v) ? `${where}[${k}]` : where;
+    if (x === 'created') return void (created = true);
+    if (x === 'deleted') throw fail(iw, '"deleted" stands alone');
+    const c = obj(x, iw);
+    keys(c, ['path', 'value', 'pick', 'contains', 'lacks'], iw);
+    const p = path(c['path'], `${iw}.path`);
+    const n = ['value', 'contains', 'lacks'].filter((m) => Object.hasOwn(c, m));
+    if (n.length !== 1) throw fail(iw, 'give exactly one of value, contains or lacks');
+    if (c['pick'] !== undefined && n[0] !== 'value') throw fail(`${iw}.pick`, 'only with value');
+    if (n[0] === 'value') expect.push({ path: p, value: c['value'], pick: c['pick'] === undefined ? null : path(c['pick'], `${iw}.pick`) });
+    else if (n[0] === 'contains') expect.push({ path: p, contains: c['contains'] });
+    else expect.push({ path: p, lacks: c['lacks'] });
+  });
+  if (!created && !expect.length) throw fail(where, 'a condition, "created" or "deleted"');
+  return { on: created ? 'new' : 'object', deleted: false, expect };
+}
+
 function resource(v: unknown, i: number): ResourceSpec {
   const w = `resources[${i}]`;
   const o = obj(v, w);
-  keys(o, ['name', 'vars', 'create', 'read', 'update', 'fields', 'version', 'delete', 'archive', 'list', 'cleanup', 'fixture', 'idempotency', 'control', 'missing_id', 'key', 'scope', 'selector', 'multi', 'list_edit', 'creates', 'failures', 'jobs', 'versioned', 'no_version_check', 'input_required', 'try_values', 'fixed_constraints', 'server_managed', 'restorable'], w);
+  keys(o, ['name', 'vars', 'create', 'read', 'update', 'fields', 'version', 'delete', 'archive', 'list', 'cleanup', 'fixture', 'idempotency', 'control', 'missing_id', 'key', 'scope', 'selector', 'multi', 'list_edit', 'creates', 'failures', 'jobs', 'versioned', 'no_version_check', 'input_required', 'try_values', 'fixed_constraints', 'server_managed', 'restorable', 'effects'], w);
   const name = str(o['name'], `${w}.name`, /^[a-z][a-z0-9_-]{0,39}$/);
   const vars = o['vars'] === undefined ? {} : obj(o['vars'], `${w}.vars`);
   for (const k of Object.keys(vars)) if (RESERVED_VARS.includes(k)) throw fail(`${w}.vars.${k}`, 'a reserved template name');
@@ -751,6 +799,19 @@ function resource(v: unknown, i: number): ResourceSpec {
       inputRequired.push({ tool: t.tool, args: t.args, answers, client_capabilities: caps, effect });
     });
   }
+  const effects: EffectSpec[] = [];
+  if (o['effects'] !== undefined) {
+    if (!Array.isArray(o['effects'])) throw fail(`${w}.effects`, 'a list of { tool, args, effect, answers?, client_capabilities? }');
+    (o['effects'] as unknown[]).forEach((x, j) => {
+      const ew = `${w}.effects[${j}]`;
+      const t = tool(x, ew, ['effect', 'answers', 'client_capabilities']);
+      const e = effectSpecOf(t['effect'], `${ew}.effect`);
+      if (e.on === 'new' && (!o['create'] || !o['list'])) throw fail(`${ew}.effect`, 'created needs the resource\'s create and list blocks (the object is found by its {{marker}} through the list)');
+      const answers = t['answers'] === undefined ? null : obj(t['answers'], `${ew}.answers`);
+      const caps = t['client_capabilities'] === undefined ? (answers ? { elicitation: { form: {} } } : null) : obj(t['client_capabilities'], `${ew}.client_capabilities`);
+      effects.push({ tool: t.tool, args: t.args, ...e, answers, client_capabilities: caps });
+    });
+  }
   const tryValues: ResourceSpec['try_values'] = [];
   if (o['try_values'] !== undefined) {
     if (!Array.isArray(o['try_values'])) throw fail(`${w}.try_values`, 'a list of { arg, value } or { arg, length }');
@@ -782,6 +843,7 @@ function resource(v: unknown, i: number): ResourceSpec {
     vars,
     versioned,
     input_required: inputRequired,
+    effects,
     try_values: tryValues,
     fixed_constraints: fixedConstraints,
     server_managed: strList(o['server_managed'], `${w}.server_managed`).map((x, j) => path(x, `${w}.server_managed[${j}]`)),

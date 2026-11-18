@@ -25,6 +25,7 @@ import { lastMutating, MUTATING } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { listScope, newScope, scratch } from './scratch.js';
 import { tgt1HeldFor } from './targeting.js';
+import { multiRes1 } from './effects.js';
 import { decidedByShape, itemStatus, quoteField, shapeFallbackNote, shapeOf } from './shape.js';
 import { appliedAllSaid, appliedAllUnread, brief, forPatterns, mentions, textStatement, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
@@ -55,6 +56,8 @@ export interface MultiObs {
   trials: MultiTrial[];
   /** The items sit in a container the tester created (applied_count is compared there, and where the call names only the trial's own items). */
   own_container?: boolean;
+  /** MWS-RES-1: a call on good items only (the learning pass where the gate runs one), and the items that hold the effect after it (null: a read-back with an unknown outcome). */
+  clean?: { call: CallBrief | null; items: unknown[]; applied: unknown[] | null; skipped?: string };
 }
 
 const cleanable = (res: ResourceSpec) => !!res.cleanup && res.cleanup !== 'leave';
@@ -62,7 +65,7 @@ const cleanable = (res: ResourceSpec) => !!res.cleanup && res.cleanup !== 'leave
 export const multiCheck: CheckModule = {
   id: ID,
   version: VERSION,
-  requirements: ['MWS-ATOM-1', 'MWS-ATOM-2'],
+  requirements: ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-1'],
   plan(ctx: PlanContext, res: ResourceSpec): PlannedCheck {
     const base: PlannedCheck = { check: ID, version: VERSION, resource: res.name, runs: false, calls: [], writes: 0, creates: 0, notRun: [] };
     const sc = { id: ID, version: VERSION };
@@ -73,19 +76,20 @@ export const multiCheck: CheckModule = {
     for (const m of res.multi) {
       const w = wp(res.name, m.tool);
       if (!cleanable(res)) {
-        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2'] as const).map((id) => result(id, w, sc, 'not tested', 'needs a cleanup policy (it creates the items)')));
+        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-1'] as const).map((id) => result(id, w, sc, 'not tested', 'needs a cleanup policy (it creates the items)')));
         continue;
       }
       const bb = m.invalid_id !== null;
       const px = !!ctx.manifest.backend?.gate;
       if (!bb && !px) {
-        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2'] as const).map((id) => result(id, w, sc, 'not tested', 'declare invalid_id (an item the backend refuses) for the black-box positions, or configure backend.gate to fail a backend write')));
+        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-1'] as const).map((id) => result(id, w, sc, 'not tested', 'declare invalid_id (an item the backend refuses) for the black-box positions, or configure backend.gate to fail a backend write')));
         continue;
       }
+      if (!px) calls.push(`${m.tool}: 2 good items only; read every item back (MWS-RES-1)`);
       if (bb) calls.push(`${m.tool}: 2 good items and the refused item ${JSON.stringify(m.invalid_id)} first, in the middle, last; read every item back`);
       if (px) calls.push(`${m.tool}: learning pass on 3 items; then fail the 2nd and the last mutating backend request, each on 3 fresh items; read every item back`);
-      writes += (bb ? 3 * 3 : 0) + (px ? 4 * 4 : 0);
-      creates += (bb ? 2 : 0) + (px ? 9 : 0) + (res.scope ? 1 : 0);
+      writes += (bb ? 3 * 3 : 0) + (px ? 4 * 4 : 0) + (px ? 0 : 3);
+      creates += (bb ? 2 : 0) + (px ? 9 : 2) + (res.scope ? 1 : 0);
     }
     return { ...base, runs: calls.length > 0, calls, writes, creates, notRun: nr };
   },
@@ -96,7 +100,10 @@ export const multiCheck: CheckModule = {
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
-    return (obs.data as { tools: MultiObs[] }).tools.flatMap((m) => multiVerdicts(m, res, res.multi.find((x) => x.tool === m.tool)!));
+    return (obs.data as { tools: MultiObs[] }).tools.flatMap((m) => {
+      const spec = res.multi.find((x) => x.tool === m.tool)!;
+      return [...multiVerdicts(m, res, spec), multiRes1(m, res, spec, ctx.manifest.async_operations ?? [])];
+    });
   },
 };
 
@@ -220,6 +227,17 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
     const args = render(m.args, baseVars(res, ctx.prefix, { scope, ids, batch }));
     return brief(await ctx.session.call(label, m.tool, args, { step: ctx.session.stepId(`multi.${tag}`) }));
   };
+  // MWS-RES-1: without the gate's learning pass, one call on good items only (with the gate, the learning pass is that call).
+  if (!ctx.gate) {
+    const batch = ctx.marker('mc');
+    const ds = await items(ctx, res, scope, batch, 2, label, mine);
+    const no = ds.length === 2 ? await unconfirmed() : 'the items could not be created';
+    if (no) o.clean = { call: null, items: ds.map((d) => d.id), applied: [], skipped: no };
+    else {
+      const b = await call(ds, ds.map((d) => d.id), batch, 'clean');
+      o.clean = { call: b, items: ds.map((d) => d.id), applied: await appliedOf(ctx, m, ds, label) };
+    }
+  }
   if (m.invalid_id !== null) {
     const batch = ctx.marker('mb');
     const ds = await items(ctx, res, scope, batch, 2, label, mine);
@@ -249,11 +267,13 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
     const batch = ctx.marker('ml');
     const ds = await items(ctx, res, scope, batch, 3, label, mine);
     const no = ds.length === 3 ? await unconfirmed() : null;
+    if (no || ds.length !== 3) o.clean = { call: null, items: ds.map((d) => d.id), applied: [], skipped: no ?? 'the items could not be created' };
     if (no) o.trials.push({ kind: 'failed backend write', position: 'learning pass', call: null, items: ds.map((d) => d.id), applied: [], reported: null, skipped: no });
     else if (ds.length === 3) {
       const mark = gate.mark();
-      await call(ds, ds.map((d) => d.id), batch, 'learn');
+      const lb = await call(ds, ds.map((d) => d.id), batch, 'learn');
       const reqs = await gate.since(mark);
+      o.clean = { call: lb, items: ds.map((d) => d.id), applied: await appliedOf(ctx, m, ds, label) };
       const muts = reqs.filter((r) => MUTATING.has(r.method));
       o.mutating_in_learning = muts.length;
       if (lastMutating(reqs))
