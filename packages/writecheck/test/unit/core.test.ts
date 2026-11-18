@@ -15,7 +15,8 @@ import { adjustResults } from '../../src/checks/coverage.js';
 import { result } from '../../src/report/verdicts.js';
 import { catalogCommand, planCommand } from '../../src/cli/commands.js';
 import { Redactor, REDACTED } from '../../src/core/redact.js';
-import { checkTarget, confirm, productionReason, targetHosts } from '../../src/core/safety.js';
+import { bareHost, checkTarget, confirm, productionReason, targetHosts } from '../../src/core/safety.js';
+import { buildPlan, renderPlan } from '../../src/core/plan.js';
 import { ruleOfThree, wilson } from '../../src/core/stats.js';
 import { render } from '../../src/core/template.js';
 import { canonical, diff, getPath, setPath, withoutIgnored, WritecheckError } from '../../src/core/util.js';
@@ -156,6 +157,74 @@ test('safety: a backend URL in the server command line is a target host (shown a
   assert.deepEqual(targetHosts(withArgv(['node', 'server.js', '--verbose']), {}).filter((h) => h.where.startsWith('server.stdio')), []);
   assert.deepEqual(targetHosts(withArgv(['node', 'server.js', 'file:///tmp/db.sqlite']), {}).filter((h) => h.where.startsWith('server.stdio')), []);
   assert.deepEqual(targetHosts(withArgv(['node', 'server.js', '--peers=http://a:1,http://b:2']), {}).filter((h) => h.where.startsWith('server.stdio')).map((h) => h.host), ['a:1', 'b:2']);
+});
+
+test('safety: a bare host or IP address is read the same way URL hosts are, and anything else is not a host', () => {
+  for (const [v, port, want] of [
+    ['b0', undefined, 'b0'],
+    ['b0', '3306', 'b0:3306'],
+    ['DB.Example.TEST.', ' 5432 ', 'db.example.test:5432'],
+    ['db_1', undefined, 'db_1'],
+    ['10.0.0.7:6380', '6379', '10.0.0.7:6380'],
+    ['::1', '5432', '[::1]:5432'],
+    ['[fd00::2]:5432', undefined, '[fd00::2]:5432'],
+    ['b0', 'abc', 'b0'],
+    ['b0', '70000', 'b0'],
+  ] as const) assert.equal(bareHost(v, port), want, `${v} ${port}`);
+  for (const v of ['', ' ', 'true', 'FALSE', 'on', '1', '3306', '1.2', '300.1.1.1', '/var/run/db.sock', './data', 'C:\\db', 'a b', 'u@h', '-x', 'b0:99999', 'b0:', '0.0.0.0', '::', '[::]', 'a:b:c', 'x..y'])
+    assert.equal(bareHost(v), null, JSON.stringify(v));
+});
+
+test('safety: a host in a host variable is a target host, with the port from its sibling *_PORT variable (shown and checked)', () => {
+  const base = parseManifestText(MIN, 'm.yaml');
+  const withEnv = (env: Record<string, string>, more: Partial<typeof base.server> = {}) => ({ ...base, server: { ...base.server, env, ...more } });
+  const env = (m: typeof base, e: NodeJS.ProcessEnv = {}) => targetHosts(m, e).filter((h) => !h.where.endsWith('TRACKER_URL'));
+  assert.deepEqual(env(withEnv({ MYSQL_HOST: 'b0', MYSQL_PORT: '3306', MYSQL_USER: 'app' })), [{ host: 'b0:3306', where: 'server.env MYSQL_HOST' }]);
+  assert.deepEqual(env(withEnv({ PGHOST: 'pg.internal', PGPORT: '5433' })).map((h) => h.host), ['pg.internal:5433']);
+  assert.deepEqual(env(withEnv({ CACHE_HOST: '127.0.0.1' })).map((h) => h.host), ['127.0.0.1'], 'no sibling port: the host alone');
+  assert.deepEqual(env(withEnv({ DB_HOSTNAME: 'b1', DB_PORT: '3307' })).map((h) => h.host), ['b1:3307']);
+  assert.deepEqual(env(withEnv({ QUEUE_SERVER: 'b2:4222', QUEUE_PORT: '9999' })).map((h) => h.host), ['b2:4222'], 'a port in the value wins');
+  assert.deepEqual(env(withEnv({ STORE_ADDR: 'b3', STORE_ADDRESS: 'b4', SEARCH_ENDPOINT: 'b5', HOST: 'b6', PORT: '8080' })).map((h) => h.host), ['b3', 'b4', 'b5', 'b6:8080']);
+  assert.deepEqual(env(withEnv({ SEARCH_ENDPOINT: 'http://b5:9200' })).map((h) => h.host), ['b5:9200'], 'a URL value is read once, as a URL');
+  // a passed-through variable is read from the tester's environment, with its sibling port when that is passed through too
+  const passed = withEnv({}, { env_public: ['TRACKER_URL', 'REDIS_HOST', 'REDIS_PORT'] });
+  assert.deepEqual(env(passed, { REDIS_HOST: 'b7', REDIS_PORT: '6379' }), [{ host: 'b7:6379', where: 'server environment REDIS_HOST' }]);
+  assert.deepEqual(env(passed, {}), []);
+  // the rule: the word ends the name and starts it or follows an underscore; values that are not a hostname or an IP are not hosts
+  assert.deepEqual(env(withEnv({ HOST_HEADER: 'b8', GHOST: '1', GHOST_HOST: 'true', LOCALHOST_ONLY: 'yes', DB_HOST_PORT: 'b9', MCP_SERVER_NAME: 'b10', APP_HOST: '', DATA_HOST: '/var/lib/db', LISTEN_HOST: '0.0.0.0', SOME_ADDR: '3306' })), []);
+  // checked like a URL host
+  const prod = withEnv({ DB_HOST: 'db.prod.example.com', DB_PORT: '5432' });
+  assert.throws(() => checkTarget(prod, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.env DB_HOST: db\.prod\.example\.com has a production label/);
+  checkTarget({ ...prod, target: { ...prod.target, allow_hosts: ['db.prod.example.com'] } }, { TRACKER_URL: 'http://127.0.0.1:4100' });
+  checkTarget(withEnv({ DB_HOST: 'b0', DB_PORT: '5432' }), { TRACKER_URL: 'http://127.0.0.1:4100' });
+  // and shown in the plan
+  const shown = renderPlan(buildPlan(withEnv({ MYSQL_HOST: 'b0', MYSQL_PORT: '3306' }), [], targetHosts(withEnv({ MYSQL_HOST: 'b0', MYSQL_PORT: '3306' }), {}).map((h) => h.host)), 'h');
+  assert.match(shown, /Hosts reached or given to the server: b0:3306\n/);
+});
+
+test('safety: a host after a known host flag in the server command line is a target host, with --port when given', () => {
+  const base = parseManifestText(MIN, 'm.yaml');
+  const argv = (stdio: string[]) => targetHosts({ ...base, server: { ...base.server, stdio } }, {}).filter((h) => h.where.startsWith('server.stdio'));
+  assert.deepEqual(argv(['node', 'server.js', '--host', 'b0', '--port', '3306']), [{ host: 'b0:3306', where: 'server.stdio[3]' }]);
+  assert.deepEqual(argv(['node', 'server.js', '--port=6379', '--host=b1']), [{ host: 'b1:6379', where: 'server.stdio[3]' }]);
+  assert.deepEqual(argv(['node', 'server.js', '-h', '10.0.0.7']), [{ host: '10.0.0.7', where: 'server.stdio[3]' }]);
+  assert.deepEqual(argv(['node', 'server.js', '--hostname', 'b2:5432', '--port', '1']).map((h) => h.host), ['b2:5432']);
+  assert.deepEqual(argv(['node', 'server.js', '--host', 'http://b3:80']).map((h) => h.host), ['b3'], 'a URL after the flag is read once, as a URL');
+  // only after a known host flag, and only a hostname or an IP
+  for (const a of [
+    ['node', 'server.js', 'b0', '--port', '3306'],
+    ['node', 'server.js', '--db', 'b0'],
+    ['node', 'server.js', '--host'],
+    ['node', 'server.js', '-h', '--verbose'],
+    ['node', 'server.js', '--host', '0.0.0.0', '--port', '3000'],
+    ['node', 'server.js', '--host', 'true'],
+    ['node', 'server.js', '-h=b0'],
+    ['node', 'server.js', '--host-header', 'b0'],
+  ])
+    assert.deepEqual(argv(a), [], a.join(' '));
+  const launched = targetHosts({ ...base, server: { ...base.server, stdio: null, launch: { command: ['srv', '--host', 'db.prod.example.com'], url_from: '$', ready_timeout_ms: 1000 } } }, {});
+  assert.deepEqual(launched.filter((h) => h.where.startsWith('server.launch')), [{ host: 'db.prod.example.com', where: 'server.launch.command[2]' }]);
+  assert.throws(() => checkTarget({ ...base, server: { ...base.server, stdio: ['srv', '--host', 'db.prod.example.com'] } }, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.stdio\[2\].*production label/);
 });
 
 test('confirmation needs the target and the plan hash; without a terminal both must be flags', async () => {
