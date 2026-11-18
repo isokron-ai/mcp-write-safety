@@ -27,7 +27,7 @@
 import { hasControl, needsBase, valueAt, type Driver } from '../core/driver.js';
 import type { FieldSpec, ResourceSpec } from '../core/manifest.js';
 import { deepEqual, diff, setPath, short, sleep, withoutIgnored } from '../core/util.js';
-import { lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
+import { isMutating, lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
 import { result, VIOLATED_CAVEAT, type Result } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { ruleNote } from './rules.js';
@@ -38,8 +38,9 @@ import { appliedAllSaid, appliedAllUnread, brief, failedKind, identifiesChangeTe
 const ID = 'held-request';
 const VERSION = '1';
 
-type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null };
-const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status });
+type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null; mutating?: boolean };
+// why: `mutating` is the gate's own classification; the wire gate's verbs (UPDATE, SET, update) are not HTTP methods.
+const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status, mutating: r.mutating });
 const showReq = (r: Req) => `#${r.seq} ${r.method} ${r.path}`;
 
 export interface HeldTrial {
@@ -281,7 +282,7 @@ export const gatedCheck: CheckModule = {
     }
     // A composite update: fail its second and its last mutating backend request.
     if (res.update!.mode === 'composite') {
-      const muts = la.requests.filter((q) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(q.method));
+      const muts = la.requests.filter((q) => isMutating(q));
       obs.atom = { trials: [] };
       if (muts.length < 2) obs.atom.skipped = `${res.update!.tool} made ${muts.length} mutating backend request(s) in the learning pass: there is no later step to fail`;
       else
@@ -462,7 +463,7 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
       // why: review (5): NF-19, an operation the declaration lists as completed asynchronously, is not such a statement.
       if (asyncOps.includes(res.update!.tool)) continue;
       if (!l.call || l.call.indeterminate || !l.requests.length || !l.requests.every(delivered) || !unknownIn(l.call)) continue;
-      const mut = l.requests.filter((q) => !/^(GET|HEAD|OPTIONS)$/i.test(q.method));
+      const mut = l.requests.filter((q) => (typeof q.mutating === 'boolean' ? q.mutating : !/^(GET|HEAD|OPTIONS)$/i.test(q.method)));
       const allDone = mut.length > 0 && mut.every((q) => q.status! < 300);
       const allRefused = mut.length > 0 && mut.every((q) => q.status! >= 400);
       const agrees = (allDone && l.applied === true) || (allRefused && l.applied === false);
