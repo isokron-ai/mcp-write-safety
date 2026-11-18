@@ -159,6 +159,8 @@ export interface ShapeCarrier {
   shape?: ShapeCapture | null;
   data?: unknown;
   text?: string | null;
+  /** Set where `data` is the decoded document of a wrapped result (structuredContent {"result": "<JSON>"}); the capture was made from it too. */
+  decoded?: { from: string; basis: string } | null;
 }
 
 const pointer = (x: unknown): x is string => isStr(x) && (x === '' || x.startsWith('/'));
@@ -249,7 +251,8 @@ export function readShape(b: ShapeCarrier | null | undefined): ShapeRead {
   const notes = [...p.bad];
   if (fromSc && !cap.texts.length) notes.push('no text block carries the serialized structuredContent (B-9, "Text"); a client that forwards only content does not show the shape to the model');
   if (fromSc && cap.texts.length && JSON.stringify(sortKeys(cap.texts[0])) !== JSON.stringify(sortKeys(cap.sc))) notes.push('the JSON text block and structuredContent carry different shapes; structuredContent was read, and each text block is read by the patterns through its free words only');
-  return { status: 'ok', shape: name, v: p.v, where: fromSc ? 'structuredContent.mws' : 'the JSON text block (structuredContent carries none)', bad: notes };
+  // why: a decoded wrapped result is read in one place for the shape and the patterns: its decoded document (session.toCallResult).
+  return { status: 'ok', shape: name, v: p.v, where: fromSc ? (b.decoded ? 'structuredContent.result decoded (its mws member)' : 'structuredContent.mws') : 'the JSON text block (structuredContent carries none)', bad: notes };
 }
 
 /** The shape where it is adopted and decides, else null. */
