@@ -42,34 +42,38 @@ const URL_IN_ARG = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,]+/gi;
 
 /**
  * A backend host given without a URL: in a host variable (`DB_HOST=b0` with `DB_PORT=3306`) or after a host flag
- * (`--db-host b0 --db-port 3306`). The rule, on the words of the name (split on `_`, and on `-` for a flag):
- *   - the last word is HOST, HOSTNAME or HOSTS: any hostname or IP address is a host (`PGHOST` counts as one of these);
- *   - the last word is SERVER(S), ADDR(S), ADDRESS(ES), ENDPOINT(S), NODES, BROKERS, SEEDS or SENTINELS: only a value with a
- *     dot, an IP address or a port of its own is a host (a single word such as `production` is a name, not a host);
- *   - a name with a LISTEN or BIND word is where the server listens, not a target; so is a variable of one word (`HOST`,
- *     `PORT`, `ADDR`) and an unprefixed host flag (`--host`, `-h`) on server.launch.command;
+ * (`--db-host b0 --db-port 3306`). This feeds the production-host refusal, so where in doubt a host is read: a false refusal
+ * is cleared with target.allow_hosts, a missed host is not seen at all. The rule, on the words of the name (split on `_`,
+ * and on `-` for a flag):
+ *   - the last word is HOST, HOSTNAME or HOSTS (or the name is `PGHOST`): any hostname or IP address is a host;
+ *   - the last word is SERVER(S), ADDR(S), ADDRESS(ES), ENDPOINT(S), NODES, BROKERS, SEEDS or SENTINELS: a value with a dot,
+ *     an IP address or a port of its own is a host; a single word (`sql-1`) is read only when it looks like production
+ *     (`sql-prod`, `live`);
+ *   - where the server listens, not a target, unless the value looks like production: a name whose last word follows BIND
+ *     or LISTEN (`BIND_ADDR`, `LISTEN_HOST`), and, for a server the tester launches (server.launch), a one-word variable
+ *     (`HOST`, `ADDR`) or an unprefixed host flag (`--host`, `-h`) on its command line;
  *   - `HOST_HEADER` (HOST is not the last word) and `GHOST` (not a word of its own) are not host names.
- * The port is the sibling with PORT for the last word (`DB_HOST` → `DB_PORT`, `PGHOST` → `PGPORT`, in any case), or the
- * matching port flag after the host flag (`--db-host` → `--db-port`; `--host`, `-h`, `-H` → `--port`, `-p`).
+ * The port is the sibling with PORT for the last word (`DB_HOST` → `DB_PORT`, `HOST` → `PORT`, `PGHOST` → `PGPORT`, in any
+ * case), or the matching port flag after the host flag (`--db-host` → `--db-port`; `--host`, `-h`, `-H` → `--port`, `-p`).
  */
 const LENIENT_WORDS = new Set(['HOST', 'HOSTNAME', 'HOSTS']);
 const STRICT_WORDS = new Set(['SERVER', 'SERVERS', 'ADDR', 'ADDRS', 'ADDRESS', 'ADDRESSES', 'ENDPOINT', 'ENDPOINTS', 'NODES', 'BROKERS', 'SEEDS', 'SENTINELS']);
 const LISTEN_WORDS = new Set(['LISTEN', 'BIND']);
-/** For a host name: whether its values need a dot, an IP or a port (strict), and the words before the last one. Null when it is not a host name. */
-function hostName(name: string, split: RegExp): { strict: boolean; prefix: string[] } | null {
+const LISTEN_TARGETS = new Set(['HOST', 'HOSTNAME', 'ADDR', 'ADDRESS', 'IP']);
+/** For a host name: whether its values need a dot, an IP or a port (strict), whether it names a listen address, and the words before the last one. */
+function hostName(name: string, split: RegExp): { strict: boolean; listen: boolean; prefix: string[] } | null {
   const w = name.toUpperCase().split(split).filter(Boolean);
-  if (w.length === 1 && w[0] === 'PGHOST') return { strict: false, prefix: ['PG'] };
+  if (w.length === 1 && w[0] === 'PGHOST') return { strict: false, listen: false, prefix: ['PG'] };
   const last = w.at(-1) ?? '';
-  if (w.some((x) => LISTEN_WORDS.has(x))) return null;
-  if (LENIENT_WORDS.has(last)) return { strict: false, prefix: w.slice(0, -1) };
-  if (STRICT_WORDS.has(last)) return { strict: true, prefix: w.slice(0, -1) };
-  return null;
+  const strict = STRICT_WORDS.has(last);
+  if (!strict && !LENIENT_WORDS.has(last)) return null;
+  return { strict, listen: LISTEN_TARGETS.has(last) && LISTEN_WORDS.has(w.at(-2) ?? ''), prefix: w.slice(0, -1) };
 }
 
 const LABEL = /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/i;
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 const NOT_A_HOST = new Set(['true', 'false', 'yes', 'no', 'on', 'off', 'none', 'null', 'undefined']);
-/** The last label of a file name, not of a host (`config.yaml`, `prod.env`). */
+/** The last label of a file name, not of a host (`-h config.yaml`); checked for flag values only. */
 const FILE_EXT = new Set(['yaml', 'yml', 'json', 'jsonc', 'json5', 'toml', 'ini', 'cfg', 'conf', 'config', 'env', 'properties', 'txt', 'js', 'mjs', 'cjs', 'ts', 'sql', 'db', 'sqlite', 'sqlite3', 'log', 'xml', 'csv', 'pem', 'key', 'crt', 'cert', 'lock']);
 /** Addresses a server listens on, not hosts it reaches. */
 const UNSPECIFIED = new Set(['0.0.0.0', '[::]']);
@@ -83,14 +87,20 @@ const ipv6 = (v: string): string | null => {
 };
 const unquote = (v: string): string => (/^(["']).*\1$/s.test(v) && v.length >= 2 ? v.slice(1, -1).trim() : v);
 
+/** How a value is read: `strict` (a single word only when it looks like production), `listen` (only when it looks like production), `flag` (a file name is not a host). */
+export interface HostRead {
+  strict?: boolean;
+  listen?: boolean;
+  flag?: boolean;
+}
+
 /**
  * A bare host (no scheme) given as `host` or `host:port`, normalized as URL.host is (lower case, an internationalized name in
  * its ASCII form, an IPv6 address in brackets), with `port` added when the value has none; or null when the value is not a
- * hostname or an IP address: empty, a flag word (`true`, `off`), a number on its own, a path or a file name, or a
- * listen-on-everything address (`0.0.0.0`, `::`). With `strict`, a single word without a port is not a host either.
- * One pair of surrounding quotes is dropped, and so is a named instance (`host\INSTANCE`).
+ * hostname or an IP address: empty, a flag word (`true`, `off`), a number on its own, a path, or a listen-on-everything
+ * address (`0.0.0.0`, `::`). One pair of surrounding quotes is dropped, and so is a named instance (`host\INSTANCE`).
  */
-export function bareHost(value: string | undefined, port?: string, strict = false): string | null {
+export function bareHost(value: string | undefined, port?: string, o: HostRead = {}): string | null {
   const v = unquote((value ?? '').trim()).toLowerCase().replace(/\\[a-z0-9_$-]+$/, '');
   if (!v || NOT_A_HOST.has(v) || /[/\\\s@?#,]/.test(v)) return null;
   let host: string | null;
@@ -109,7 +119,7 @@ export function bareHost(value: string | undefined, port?: string, strict = fals
       if (!IPV4.test(host)) return null;
     } else {
       ip = false;
-      if (labels.length > 1 && FILE_EXT.has(labels.at(-1)!)) return null;
+      if (o.flag && labels.length > 1 && FILE_EXT.has(labels.at(-1)!)) return null;
       try {
         host = new URL(`http://${host}/`).hostname; // an internationalized name in its ASCII form, as for a URL host
       } catch {
@@ -120,44 +130,55 @@ export function bareHost(value: string | undefined, port?: string, strict = fals
   }
   if (!host || UNSPECIFIED.has(host)) return null;
   if (p !== undefined && !portOk(p)) return null;
-  if (strict && !ip && !host.includes('.') && p === undefined) return null;
+  // why: review round 3: a value skipped by the name rule is still read when it looks like production, so it is refused.
+  const production = productionReason(host) !== null;
+  if (o.listen && !production) return null;
+  if (o.strict && !ip && !host.includes('.') && p === undefined && !production) return null;
   const withPort = p ?? (portOk(port?.trim()) ? port!.trim() : undefined);
   return withPort ? `${host}:${+withPort}` : host;
 }
 
 /**
  * The hosts in one value: a comma-separated list is read item by item (`a:27017,b:27017`), and `host,1433` (the second item
- * only a port) is one host with its port. A URL is not read here (it is read as a URL).
+ * only a port; also `tcp:host\INSTANCE,1433`) is one host with its port. A URL is not read here (it is read as a URL).
  */
-export function hostsIn(value: string, port?: string, strict = false): string[] {
-  const v = unquote(value.trim());
+export function hostsIn(value: string, port?: string, o: HostRead = {}): string[] {
+  const v = unquote(value.trim())
+    .replace(/^tcp:/i, '')
+    .replace(/\\[a-z0-9_$-]+(?=\s*(,|$))/gi, '');
   if (v.includes('://')) return [];
   const parts = v.split(',').map((s) => s.trim());
   if (parts.length === 2 && /^\d+$/.test(parts[1]!) && !parts[0]!.includes(':')) {
-    const h = bareHost(`${parts[0]}:${parts[1]}`, undefined, strict);
+    const h = bareHost(`${parts[0]}:${parts[1]}`, undefined, o);
     return h ? [h] : [];
   }
-  return parts.map((s) => bareHost(s, port, strict)).filter((h): h is string => !!h);
+  return parts.map((s) => bareHost(s, port, o)).filter((h): h is string => !!h);
 }
 
 type Found = { host: string; where: string };
 
-/** Hosts in host variables (prefixed names only), each with its sibling port. */
-function varHosts(vars: Map<string, { value: string; where: string }>, out: Found[]): void {
+/** Hosts in host variables, each with its sibling port. `launch`: the variables of a server the tester launches, whose one-word names are where it listens. */
+function varHosts(vars: Map<string, { value: string; where: string }>, launch: boolean, out: Found[]): void {
   const upper = new Map([...vars].map(([k, v]) => [k.toUpperCase(), v.value]));
   for (const [k, { value, where }] of vars) {
     const n = hostName(k, /_/);
-    if (!n || (!n.prefix.length && k.toUpperCase() !== 'PGHOST')) continue;
-    const portVar = k.toUpperCase() === 'PGHOST' ? 'PGPORT' : `${n.prefix.join('_')}_PORT`;
-    for (const host of hostsIn(value, upper.get(portVar), n.strict)) out.push({ host, where });
+    if (!n) continue;
+    const pg = k.toUpperCase() === 'PGHOST';
+    const portVar = pg ? 'PGPORT' : [...n.prefix, 'PORT'].join('_');
+    const listen = n.listen || (launch && !pg && !n.prefix.length);
+    for (const host of hostsIn(value, upper.get(portVar), { strict: n.strict, listen })) out.push({ host, where });
   }
 }
+
+/** Commands whose `-h` and `--hostname` name the container's own hostname, not a host it reaches (their `-e`/`--env` are read). */
+const CONTAINER_RUNTIMES = new Set(['docker', 'podman']);
 
 /** Hosts after host flags in one command line, and in `-e NAME=value` / `--env NAME=value` / `--env=NAME=value` variables. */
 function argvHosts(cmd: string[], where: string, launch: boolean, out: Found[]): void {
   const vars = new Map<string, { value: string; where: string }>();
-  const hosts: { i: number; key: string; strict: boolean; value: string; at: number; short?: 'h' | 'H' }[] = [];
+  const hosts: { i: number; key: string; read: HostRead; value: string; at: number; short?: 'h' | 'H' }[] = [];
   const ports: { i: number; key: string; value: string }[] = [];
+  const container = CONTAINER_RUNTIMES.has((cmd[0] ?? '').split(/[\\/]/).at(-1)!.replace(/\.exe$/i, '').toLowerCase());
   for (const [i, x] of cmd.entries()) {
     const setVar = (s: string | undefined, at: number) => {
       const eq = s?.indexOf('=') ?? -1;
@@ -166,7 +187,7 @@ function argvHosts(cmd: string[], where: string, launch: boolean, out: Found[]):
     if (x === '-e' || x === '--env') setVar(cmd[i + 1], i + 1);
     else if (x.startsWith('--env=')) setVar(x.slice(6), i);
     else if (x === '-h' || x === '-H') {
-      if (cmd[i + 1] !== undefined) hosts.push({ i, key: '', strict: x === '-H', value: cmd[i + 1]!, at: i + 1, short: x === '-h' ? 'h' : 'H' });
+      if (cmd[i + 1] !== undefined && !(x === '-h' && container)) hosts.push({ i, key: '', read: { listen: launch, flag: true }, value: cmd[i + 1]!, at: i + 1, short: x === '-h' ? 'h' : 'H' });
     } else if (x === '-p') {
       if (cmd[i + 1] !== undefined) ports.push({ i, key: '', value: cmd[i + 1]! });
     } else if (/^--[a-z0-9]/i.test(x)) {
@@ -177,19 +198,20 @@ function argvHosts(cmd: string[], where: string, launch: boolean, out: Found[]):
       const words = name.toUpperCase().split(/[-_]/).filter(Boolean);
       if (words.at(-1) === 'PORT') ports.push({ i, key: words.slice(0, -1).join('-'), value });
       const n = hostName(name, /[-_]/);
-      if (n && !(launch && !n.prefix.length)) hosts.push({ i, key: n.prefix.join('-'), strict: n.strict, value, at });
+      if (n && !(container && name.toLowerCase() === 'hostname')) hosts.push({ i, key: n.prefix.join('-'), read: { strict: n.strict, listen: n.listen || (launch && !n.prefix.length), flag: true }, value, at });
     }
   }
   const unprefixedPort = ports.some((p) => p.key === '');
   for (const [k, h] of hosts.entries()) {
-    if (h.short && (launch || (h.short === 'h' && !unprefixedPort))) continue; // -h is help unless a port is given; -H needs a port or a host-like value
+    // -h and -H: a single word is read only with -p or --port given (else -h may be help); a dotted name, an IP or host:port always
+    if (h.short) h.read.strict = !unprefixedPort;
     const prev = hosts[k - 1]?.i ?? -1;
     const next = hosts[k + 1]?.i ?? Infinity;
     const same = ports.filter((p) => p.key === h.key);
     const port = (same.find((p) => p.i > h.i && p.i < next) ?? same.filter((p) => p.i < h.i && p.i > prev).at(-1))?.value;
-    for (const host of hostsIn(h.value, port, h.strict && !(h.short === 'H' && unprefixedPort))) out.push({ host, where: `${where}[${h.at}]` });
+    for (const host of hostsIn(h.value, port, h.read)) out.push({ host, where: `${where}[${h.at}]` });
   }
-  varHosts(vars, out);
+  varHosts(vars, launch, out);
 }
 
 /** Every host the run would reach directly, or that the server is pointed at through a passed-through variable. */
@@ -221,7 +243,7 @@ export function targetHosts(m: Manifest, env: NodeJS.ProcessEnv): { host: string
   const vars = new Map<string, { value: string; where: string }>();
   for (const n of [...m.server.env_passthrough, ...m.server.env_public]) if (env[n] !== undefined) vars.set(n, { value: env[n]!, where: `server environment ${n}` });
   for (const [k, v] of Object.entries(m.server.env)) vars.set(k, { value: v, where: `server.env ${k}` });
-  varHosts(vars, out);
+  varHosts(vars, !!m.server.launch, out);
   argvHosts(m.server.stdio ?? [], 'server.stdio', false, out);
   argvHosts(m.server.launch?.command ?? [], 'server.launch.command', true, out);
   for (const r of m.resources) if (r.control) add(r.control.base ?? env[r.control.base_env!], `resources.${r.name}.control`);

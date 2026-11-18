@@ -176,14 +176,24 @@ test('safety: a bare host or IP address is read the same way URL hosts are, and 
     ['bücher.example.test', undefined, 'xn--bcher-kva.example.test'],
     ['sql.example.test\\INSTANCE1', undefined, 'sql.example.test'],
   ] as const) assert.equal(bareHost(v, port), want, `${v} ${port}`);
-  for (const v of ['', ' ', 'true', 'FALSE', 'on', '1', '3306', '1.2', '300.1.1.1', '/var/run/db.sock', './data', 'C:\\db', 'a b', 'u@h', '-x', 'b0:99999', 'b0:', '0.0.0.0', '::', '[::]', 'a:b:c', 'x..y', '""', 'config.yaml', 'prod.env', 'a,b'])
+  for (const v of ['', ' ', 'true', 'FALSE', 'on', '1', '3306', '1.2', '300.1.1.1', '/var/run/db.sock', './data', 'C:\\db', 'a b', 'u@h', '-x', 'b0:99999', 'b0:', '0.0.0.0', '::', '[::]', 'a:b:c', 'x..y', '""', 'a,b'])
     assert.equal(bareHost(v), null, JSON.stringify(v));
-  // review item 3: with strict (SERVER, ADDR, ADDRESS, ENDPOINT and the list names), a single word without a port is a name
-  for (const v of ['production', 'live', 'b0']) assert.equal(bareHost(v, '5432', true), null, v);
-  assert.deepEqual(['b0:4222', 'db.example.test', '10.0.0.7'].map((v) => bareHost(v, undefined, true)), ['b0:4222', 'db.example.test', '10.0.0.7']);
+  // round 3 item 5: a file name is not a host only in a flag's value; a variable's value is read
+  for (const v of ['config.yaml', 'prod.env', 'warehouse.prod.sql']) assert.equal(bareHost(v, undefined, { flag: true }), null, v);
+  assert.equal(bareHost('warehouse.prod.sql'), 'warehouse.prod.sql');
+  // review item 3: with strict (SERVER, ADDR, ADDRESS, ENDPOINT and the list names), a single word without a port is a name...
+  for (const v of ['b0', 'sql-1', 'hub']) assert.equal(bareHost(v, '5432', { strict: true }), null, v);
+  assert.deepEqual(['b0:4222', 'db.example.test', '10.0.0.7'].map((v) => bareHost(v, undefined, { strict: true })), ['b0:4222', 'db.example.test', '10.0.0.7']);
+  // ...unless it looks like production (round 3 item 3), and a listen address is read only then
+  assert.deepEqual(['sql-prod', 'live', 'production'].map((v) => bareHost(v, '5432', { strict: true })), ['sql-prod:5432', 'live:5432', 'production:5432']);
+  assert.deepEqual(['127.0.0.1', 'b0.internal', 'app.example.test', 'db.prod.example.com'].map((v) => bareHost(v, undefined, { listen: true })), [null, null, null, 'db.prod.example.com']);
   // review item 2: lists are read item by item; host,1433 is one host with its port
   assert.deepEqual(hostsIn('a.example.test:27017, b:27017,,c', '1'), ['a.example.test:27017', 'b:27017', 'c:1']);
   assert.deepEqual(hostsIn('sql.example.test,1433'), ['sql.example.test:1433']);
+  // round 3 item 4: a named instance is dropped before the comma is read
+  assert.deepEqual(hostsIn('sql.example.test\\INSTANCE1,1433'), ['sql.example.test:1433']);
+  assert.deepEqual(hostsIn('tcp:sql.example.test,1433'), ['sql.example.test:1433']);
+  assert.deepEqual(hostsIn('a\\I1,b\\I2'), ['a', 'b']);
   assert.deepEqual(hostsIn('http://a:1,b'), [], 'a URL is read as a URL, elsewhere');
 });
 
@@ -212,13 +222,26 @@ test('safety: a host in a host variable is a target host, with the port from its
   assert.deepEqual(env(passed, { CACHE_HOST: 'b7', CACHE_PORT: '6379' }), [{ host: 'b7:6379', where: 'server environment CACHE_HOST' }]);
   assert.deepEqual(env(passed, {}), []);
   // the rule: the word ends the name and starts it or follows an underscore; values that are not a hostname or an IP are not hosts
-  assert.deepEqual(hosts({ HOST_HEADER: 'b8', GHOST: '1', GHOST_HOST: 'true', LOCALHOST_ONLY: 'yes', DB_HOST_PORT: 'b9', MCP_SERVER_NAME: 'b10', APP_HOST: '', DATA_HOST: '/var/lib/db', CONF_HOST: 'config.yaml', SOME_ADDR: '3306' }), []);
+  assert.deepEqual(hosts({ HOST_HEADER: 'b8', GHOST: '1', GHOST_HOST: 'true', LOCALHOST_ONLY: 'yes', DB_HOST_PORT: 'b9', MCP_SERVER_NAME: 'b10', APP_HOST: '', DATA_HOST: '/var/lib/db', SOME_ADDR: '3306' }), []);
   // review item 3: a single word is not a host for SERVER/ADDR/ADDRESS/ENDPOINT names; a one-word name and a LISTEN or BIND name
   // are the server's own listen address
-  assert.deepEqual(hosts({ SERVER: 'production', TOOLS_SERVER: 'production', HUB_SERVER: 'live', EMBED_ENDPOINT: 'vendor', DEPLOY_ADDR: 'eu' }), []);
-  assert.deepEqual(hosts({ HOST: '127.0.0.1', PORT: '3000', HOSTNAME: 'b0', ADDR: 'db.prod.example.com:1' }), []);
-  assert.deepEqual(hosts({ LISTEN_ADDR: 'b0.internal:8080', BIND_ADDRESS: '10.0.0.1', SERVER_LISTEN_HOST: 'b0' }), []);
-  checkTarget(withEnv({ TOOLS_SERVER: 'production' }), { TRACKER_URL: 'http://127.0.0.1:4100' });
+  assert.deepEqual(hosts({ TOOLS_SERVER: 'hub', EMBED_ENDPOINT: 'vendor', DEPLOY_ADDR: 'eu' }), []);
+  checkTarget(withEnv({ TOOLS_SERVER: 'hub' }), { TRACKER_URL: 'http://127.0.0.1:4100' });
+  assert.deepEqual(hosts({ DB_HOST: 'warehouse.prod.sql' }), ['warehouse.prod.sql'], 'round 3 item 5: no file-name filter for variables');
+  // round 3 item 3: a single word that looks like production is read under every host name, and refused
+  assert.deepEqual(hosts({ DB_SERVER: 'sql-prod', QUEUE_BROKERS: 'q-prod-0,q-prod-1', SEARCH_NODES: 'es-live', DB_HOST: 'pg-prod' }), ['sql-prod', 'q-prod-0', 'q-prod-1', 'es-live', 'pg-prod']);
+  assert.throws(() => checkTarget(withEnv({ SEARCH_NODES: 'es-live' }), { TRACKER_URL: 'http://127.0.0.1:4100' }), /SEARCH_NODES: es-live has a production label/);
+  // round 3 item 1: a stdio server does not listen, so a one-word HOST or SERVER is a target (with PORT)
+  assert.deepEqual(hosts({ HOST: 'db.prod.example.com', PORT: '5432' }), ['db.prod.example.com:5432']);
+  assert.deepEqual(hosts({ SERVER: 'db.prod.example.com', HOSTNAME: 'b0', ADDR: 'b1:1' }), ['db.prod.example.com', 'b0', 'b1:1']);
+  assert.throws(() => checkTarget(withEnv({ SERVER: 'db.prod.example.com' }), { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.env SERVER: .*production label/);
+  // for a launched server they are where it listens: read only when the value looks like production
+  const launchedEnv = (e: Record<string, string>) => env(withEnv(e, { stdio: null, launch: { command: ['srv'], url_from: '$', ready_timeout_ms: 1000 } })).map((h) => h.host);
+  assert.deepEqual(launchedEnv({ HOST: '127.0.0.1', PORT: '3000', ADDR: 'b0.internal:1', DB_HOST: 'b2' }), ['b2']);
+  assert.deepEqual(launchedEnv({ HOST: 'db.prod.example.com' }), ['db.prod.example.com']);
+  // round 3 item 6: BIND or LISTEN right before HOST/HOSTNAME/ADDR/ADDRESS/IP names a listen address; other BIND names count
+  assert.deepEqual(hosts({ LISTEN_ADDR: 'b0.internal:8080', BIND_ADDRESS: '10.0.0.1', SERVER_LISTEN_HOST: 'b0', DIR_BIND_HOST: 'b1.internal' }), []);
+  assert.deepEqual(hosts({ LISTEN_HOST: 'db.prod.example.com', BIND_SERVER: 'ns1.internal', REBIND_HOST: 'b3' }), ['db.prod.example.com', 'ns1.internal', 'b3']);
   // checked like a URL host
   const prod = withEnv({ DB_HOST: 'db.prod.example.com', DB_PORT: '5432' });
   assert.throws(() => checkTarget(prod, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.env DB_HOST: db\.prod\.example\.com has a production label/);
@@ -242,7 +265,8 @@ test('safety: a host after a host flag in the server command line is a target ho
   assert.deepEqual(hosts(['srv', '--db-host', 'b0', '--db-port', '3306', '--port', '9']), ['b0:3306']);
   assert.deepEqual(hosts(['srv', '--cache_host=b1']), ['b1']);
   assert.deepEqual(hosts(['srv', '--server', 'b2.internal', '--addr', 'b3:6379', '--store-hosts', 'a:1,b:2']), ['b2.internal', 'b3:6379', 'a:1', 'b:2']);
-  assert.deepEqual(hosts(['srv', '--server', 'production', '--addr', 'eu']), [], 'SERVER and ADDR flags need a dot, an IP or a port');
+  assert.deepEqual(hosts(['srv', '--server', 'hub', '--addr', 'eu']), [], 'SERVER and ADDR flags need a dot, an IP or a port');
+  assert.deepEqual(hosts(['srv', '--server', 'sql-prod']), ['sql-prod'], '...or a production label');
   assert.deepEqual(hosts(['srv', '-H', 'b4.internal']), ['b4.internal']);
   assert.deepEqual(hosts(['srv', '-H', 'b4', '-p', '6379']), ['b4:6379']);
   assert.deepEqual(hosts(['srv', '-H', 'b4']), [], '-H with a single word and no port flag is not read');
@@ -253,12 +277,23 @@ test('safety: a host after a host flag in the server command line is a target ho
     { host: 'b7.internal', where: 'server.stdio[8]' },
   ]);
   assert.deepEqual(hosts(['runner', '-e', 'HOST=0.0.0.0', '-e', 'PORT=3000', '-e', 'TOOLS_SERVER=hub']), []);
+  // round 3 item 7: for a container runtime, -h and --hostname name the container itself; its -e and --env are still read
+  assert.deepEqual(argv(['docker', 'run', '-h', 'app.prod.example.com', '--hostname', 'app.prod.example.com', '-p', '8080:80', '-e', 'db_host=db.prod.example.com', 'image']), [{ host: 'db.prod.example.com', where: 'server.stdio[9]' }]);
+  assert.deepEqual(hosts(['/usr/bin/podman', 'run', '-h', 'b0.internal', 'image']), []);
+  assert.deepEqual(hosts(['runner', '-e', 'DB_HOST', 'image']), [], 'a name without a value is not read');
   assert.deepEqual(hosts(['sh', '-c', 'node server.js --host db.prod.example.com']), [], 'a shell string is not parsed');
   // review item 4: -h is a host only with -p or --port, and never a file name
   assert.deepEqual(hosts(['srv', '-h', 'db.internal', '-p', '5432']), ['db.internal:5432']);
   assert.deepEqual(hosts(['srv', '-h', '10.0.0.7', '--port', '5432']), ['10.0.0.7:5432']);
   assert.deepEqual(hosts(['srv', '-h', 'config.yaml', '-p', '1']), []);
-  assert.deepEqual(hosts(['srv', '-h', 'db.prod.example.com']), [], '-h without a port flag is help');
+  // round 3 item 2: without a port flag, -h takes a dotted name, an IP or host:port (a single word may be help), never a file name
+  assert.deepEqual(hosts(['srv', '-h', 'db.prod.example.com']), ['db.prod.example.com']);
+  assert.deepEqual(hosts(['srv', '-h', '10.1.2.3']), ['10.1.2.3']);
+  assert.deepEqual(hosts(['srv', '-h', 'b0:5432']), ['b0:5432']);
+  assert.deepEqual(hosts(['srv', '-h', 'json']), []);
+  assert.deepEqual(hosts(['srv', '-h', 'config.yaml']), []);
+  assert.throws(() => checkTarget({ ...base, server: { ...base.server, stdio: ['srv', '-h', 'db.prod.example.com'] } }, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.stdio\[2\].*production label/);
+  assert.deepEqual(hosts(['srv', '--port', '1', '--host', 'b0', '--port', '2']), ['b0:2'], 'the port flag after the host wins');
   // review item 6: each host flag takes the port flag that follows it
   assert.deepEqual(hosts(['srv', '--host', 'a.internal', '--port', '1', '--host', 'b.internal', '--port', '2']), ['a.internal:1', 'b.internal:2']);
   // only after a known host flag, and only a hostname or an IP
@@ -267,6 +302,7 @@ test('safety: a host after a host flag in the server command line is a target ho
     ['node', 'server.js', '--db', 'b0'],
     ['node', 'server.js', '--host'],
     ['node', 'server.js', '-h', '--verbose', '-p', '1'],
+    ['node', 'server.js', '-H', 'Authorization: Bearer x'],
     ['node', 'server.js', '--host', '0.0.0.0', '--port', '3000'],
     ['node', 'server.js', '--host', 'true'],
     ['node', 'server.js', '-h=b0'],
@@ -277,6 +313,7 @@ test('safety: a host after a host flag in the server command line is a target ho
   // review item 3: on server.launch.command an unprefixed --host/--port (or -h) is where the launched server listens
   const launched = (command: string[]) => targetHosts({ ...base, server: { ...base.server, stdio: null, launch: { command, url_from: '$', ready_timeout_ms: 1000 } } }, {}).filter((h) => h.where.startsWith('server.launch'));
   assert.deepEqual(launched(['srv', '--host', '127.0.0.1', '--port', '8000', '-h', 'b0', '-p', '1']), []);
+  assert.deepEqual(launched(['srv', '--hostname', 'db.prod.example.com']).map((h) => h.host), ['db.prod.example.com'], 'unless it looks like production');
   assert.deepEqual(launched(['srv', '--host', '0.0.0.0', '--db-host', 'db.prod.example.com']), [{ host: 'db.prod.example.com', where: 'server.launch.command[4]' }]);
   assert.throws(() => checkTarget({ ...base, server: { ...base.server, stdio: ['srv', '--host', 'db.prod.example.com'] } }, { TRACKER_URL: 'http://127.0.0.1:4100' }), /server\.stdio\[2\].*production label/);
 });
