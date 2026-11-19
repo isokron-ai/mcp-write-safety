@@ -280,16 +280,46 @@ export function baseVars(res: ResourceSpec, prefix: string, extra: Env = {}): En
  * the resource apart from any other and fails closed.
  */
 export function callKind(res: ResourceSpec, call: { tool: string; args: unknown }): string | null {
+  const r = renderFixed(res, call.args);
+  return r === undefined ? null : `${call.tool}|${JSON.stringify(r)}`;
+}
+
+const HOLE = '\u0000{{';
+/** A call's arguments with the resource's vars filled in and every per-call variable a placeholder; undefined when they cannot be rendered so. */
+function renderFixed(res: ResourceSpec, args: unknown): unknown {
   // why: review B1: the kind was built from the unrendered arguments with every string holding {{id}} dropped, so two
   // collections that differ only in a vars value, or in the text around the id, were one.
-  const hole = (name: string) => `\u0000{{${name}}}\u0000`;
+  const hole = (name: string) => `${HOLE}${name}}}\u0000`;
   const env = baseVars(res, hole('prefix'));
   for (const [k, v] of Object.entries(env)) if (v === null && !Object.hasOwn(res.vars, k)) env[k] = hole(k);
   try {
-    return `${call.tool}|${JSON.stringify(render(call.args, env))}`;
+    return render(args, env) ?? null;
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+/**
+ * Do two calls of one tool carry the same fixed arguments? Each is rendered as callKind renders it; a top-level argument
+ * both calls carry must be equal, unless one of the two holds a per-call variable (the argument that names the object).
+ * `read_records {table: a, conditions: {id: "{{id}}"}}` and `read_records {table: a}` agree; the same calls on tables a
+ * and b do not. False where the tools differ or either call cannot be rendered. It does not show that the two calls reach
+ * the same objects (a caller that needs that compares what they answer); it shows where they cannot.
+ */
+export function sameFixedArgs(a: ResourceSpec, callA: { tool: string; args: unknown }, b: ResourceSpec, callB: { tool: string; args: unknown }): boolean {
+  if (callA.tool !== callB.tool) return false;
+  const ra = renderFixed(a, callA.args);
+  const rb = renderFixed(b, callB.args);
+  if (ra === undefined || rb === undefined) return false;
+  const map = (v: unknown): Record<string, unknown> => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+  const [ma, mb] = [map(ra), map(rb)];
+  for (const k of Object.keys(ma)) {
+    if (!Object.hasOwn(mb, k)) continue;
+    const [ja, jb] = [JSON.stringify(ma[k]), JSON.stringify(mb[k])];
+    if (ja.includes(JSON.stringify(HOLE).slice(1, -1)) || jb.includes(JSON.stringify(HOLE).slice(1, -1))) continue;
+    if (ja !== jb) return false;
+  }
+  return true;
 }
 
 /**
