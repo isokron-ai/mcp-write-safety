@@ -8,7 +8,7 @@ The MCP Write-Safety Requirements (MWS) are a specification for Model Context Pr
 
 **Status: MWS 0.9, a draft for public comment, published 16 November 2026, open for comment until 16 December 2026.** Every requirement has the status `draft`. Comments are made as issues in this repository, and every comment gets a recorded disposition. Version 1.0 follows the comment window ([section 1](spec/mws.md#1-status-of-this-document) of the specification gives the exit criteria).
 
-Read the specification in [`spec/mws.md`](spec/mws.md) or at [isokron.ai/mws](https://isokron.ai/mws).
+Read the specification in [`spec/mws.md`](spec/mws.md) or at [isokron.ai/mws](https://isokron.ai/mws?utm_source=mws-readme&utm_medium=readme).
 
 MWS is an independent draft. It is not a product of the Model Context Protocol project or of the foundation that hosts it, and no MCP maintainer and no maintainer of a cited server has endorsed it. It is written and stewarded by IsoKron, which sells audits and builds of MCP servers and so has a commercial interest in the subject (section 15.1 of the specification). Every finding it cites comes from IsoKron's own audits of November 2026. The text was drafted with the assistance of AI tools.
 
@@ -38,4 +38,4 @@ Comments on any part of the text are welcome as issues. A proposal to change a r
 
 The code (`packages/`, `examples/`, `integrations/`) is Apache-2.0 (`LICENSE`; `integrations/` carries its own `LICENSE` and `NOTICE`); the specification text and the result shape are CC BY 4.0 (`LICENSE-spec`). The name "MCP Write-Safety Requirements" and the MWS mark are covered by neither licence; see [TRADEMARKS.md](TRADEMARKS.md). Each package has a `CHANGELOG.md`.
 
-Written and stewarded by [IsoKron](https://isokron.ai/?utm_source=github&utm_medium=readme&utm_campaign=mcp-write-safety).
+Written and stewarded by [IsoKron](https://isokron.ai/?utm_source=mws-readme&utm_medium=readme).

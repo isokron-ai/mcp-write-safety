@@ -6,11 +6,20 @@ Tests your own MCP server, in a test environment, against the MCP Write-Safety R
 
 No model, no account, no telemetry. The tool connects to your server, to the hosts your manifest names, and to nothing else (enforced in code; cloud metadata addresses are refused by the address a name resolves to).
 
-Packages: `@mcp-write-safety/writecheck` (this tool; the command is `mcp-writecheck`) and `@mcp-write-safety/tiny-tracker` (the sample server). The requirements: [MCP Write-Safety Requirements 0.9](https://isokron.ai/mws). Source: [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety/tree/main/packages/writecheck). Node 22 or later.
+Packages: `@mcp-write-safety/writecheck` (this tool; the command is `mcp-writecheck`) and `@mcp-write-safety/tiny-tracker` (the sample server). The requirements: [MCP Write-Safety Requirements 0.9](https://isokron.ai/mws?utm_source=writecheck-readme&utm_medium=readme). Source: [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety/tree/main/packages/writecheck). Node 22 or later.
+
+## Before you run: a full run makes thousands of real writes
+
+`run` creates, changes and deletes real objects in whatever system the manifest points at, and sends the destructive MWS-TGT-2 forms only where you opt in. Read this first.
+
+- **Use a disposable backend.** A backend that you start for the test (a container, an in-memory build) or a tenant that exists only for testing, with a credential that is valid only there. Never a shared or production system.
+- **Read the plan before you run.** `plan` calls no tool and writes nothing; it prints the largest number of writes and creates and the plan hash. For the sample server, tiny-tracker, it is at most 1,789 writes and 307 creates; `--pair-budget 2x1500` adds about 12,000 writes per resource. The default `limits.write_budget` is 20,000. `run` takes the plan hash back from a person (`--plan-hash`), and the target (`--confirm-target`); there is no `--yes`.
+- **Destructive forms need an explicit flag.** The empty and match-all selector forms of MWS-TGT-2 are sent only with `selector.send_empty_forms: true` in the manifest, which you set only for a backend where every object is disposable. Without it MWS-TGT-2 is `not tested`.
+- **The checks refuse obvious mistakes; they do not prove a target is a test system.** The manifest must say `environment: test`, hosts that look like production are refused unless listed, and a read-only guard call must match before any write (see Seat belts below). The decision to point the manifest at a system is yours.
 
 Status: a preview for the MWS 0.9 comment window. It covers a stated subset of the 37 requirements (the coverage table below); a requirement or a tool it does not exercise is reported `not tested`, with the reason, never guessed.
 
-## Try it in two minutes
+## Try it in a few minutes
 
 `demo` runs the suite against tiny-tracker, the MWS sample server: a small issue tracker whose default build is written to meet the requirements and whose broken builds switch on deliberate defects, one per requirement. (A run reports per requirement and write path; no run says a server meets MWS as a whole.) Everything runs on 127.0.0.1 and stops when the demo ends; nothing leaves the machine.
 
@@ -47,7 +56,7 @@ MWS-CONC-4   MUST   violated in ticket:set_labels
 MWS-CONC-5   SHOULD self-attested, not applicable, not tested; review answer "no" in project:delete_project
 MWS-CONC-6   SHOULD self-attested; review answer "no" in ticket:set_labels
 MWS-TGT-1    MUST   violated in ticket:create_ticket, ticket-replace:create_ticket
-MWS-TGT-2    MUST   not tested
+MWS-TGT-2    MUST   not tested, not applicable
 MWS-TGT-3    MUST   violated in project:create_project
 MWS-RES-1    MUST   violated in ticket:update_ticket
 MWS-RES-2    MUST   violated in ticket:add_comment, ticket-replace:replace_ticket
@@ -76,7 +85,7 @@ MWS-ANN-4    SHOULD violated in (catalog):remove_label
 MWS-ANN-5    SHOULD violated in project:create_project, ticket:add_label, ticket:set_labels
 MWS-SEC-1    MUST   violated in (server):get_ticket
 
-268 records in about 15 s. One line per requirement; the report has one row per write path. There is no total.
+442 records in about <seconds> s. One line per requirement; the report has one row per write path. There is no total.
 mcp-writecheck is a preview: of the 37 requirements of MWS 0.9 it executes the test of 14 in full and of 23 in part; what is not built is reported "not tested" with the reason (README: Coverage in this preview).
 report: <tmp>/mwsc-demo-results/<run id>/report.md
 ```
@@ -87,31 +96,31 @@ Expected output for the correct build:
 tiny-tracker (correct build) — backend http://127.0.0.1:<port>, MCP server started by the tester behind the loopback gate
 plan <hash>; the demo confirms the target itself because it started it (on 127.0.0.1, in memory). `run` always asks.
 
-MWS-UPD-1    MUST   held, not applicable
-MWS-UPD-2    MUST   held
-MWS-CONC-1   MUST   held
-MWS-CONC-2   MUST   not tested, held
-MWS-CONC-3   MUST   not observed, held
-MWS-CONC-4   MUST   held, self-attested
+MWS-UPD-1    MUST   held, not applicable, not tested
+MWS-UPD-2    MUST   held, not applicable
+MWS-CONC-1   MUST   held, not applicable, not tested
+MWS-CONC-2   MUST   not tested, held, not applicable
+MWS-CONC-3   MUST   not observed, held, not applicable, not tested
+MWS-CONC-4   MUST   held, self-attested, not applicable, not tested
 MWS-CONC-5   SHOULD self-attested, not applicable, not tested
 MWS-CONC-6   SHOULD held
-MWS-TGT-1    MUST   not tested, held
-MWS-TGT-2    MUST   held
-MWS-TGT-3    MUST   held
+MWS-TGT-1    MUST   not tested, held, not applicable
+MWS-TGT-2    MUST   held, not applicable
+MWS-TGT-3    MUST   held, not applicable
 MWS-RES-1    MUST   held, not tested
 MWS-RES-2    MUST   held, not tested
-MWS-RES-3    MUST   held
+MWS-RES-3    MUST   held, not tested, not applicable
 MWS-RES-4    SHOULD held
-MWS-ATOM-1   MUST   held
+MWS-ATOM-1   MUST   held, not applicable
 MWS-ATOM-2   SHOULD held
 MWS-RETRY-1  SHOULD held
-MWS-RETRY-2  MUST   held, not observed
-MWS-RETRY-3  MUST   not observed, held
+MWS-RETRY-2  MUST   held, not observed, not applicable, not tested
+MWS-RETRY-3  MUST   not observed, held, not applicable
 MWS-IN-1     MUST   not applicable, held, not tested
 MWS-IN-2     MUST   held, not tested
 MWS-IN-3     MUST   not applicable, held, not tested
 MWS-IN-4     MUST   held, self-attested, not tested
-MWS-IN-5     SHOULD not observed, not tested
+MWS-IN-5     SHOULD not tested, not observed
 MWS-IN-6     SHOULD not applicable, held, not tested
 MWS-IN-7     SHOULD held, not tested
 MWS-CFG-1    MUST   held
@@ -120,12 +129,12 @@ MWS-CFG-3    MUST   held
 MWS-CFG-4    SHOULD held
 MWS-ANN-1    MUST   not observed, not applicable
 MWS-ANN-2    MUST   not observed, not applicable
-MWS-ANN-3    MUST   not applicable, not observed
+MWS-ANN-3    MUST   not applicable, not observed, not tested
 MWS-ANN-4    SHOULD held
 MWS-ANN-5    SHOULD not observed, not applicable
 MWS-SEC-1    MUST   not observed
 
-287 records in about 15 s. One line per requirement; the report has one row per write path. There is no total.
+454 records in <seconds> s. One line per requirement; the report has one row per write path. There is no total.
 mcp-writecheck is a preview: of the 37 requirements of MWS 0.9 it executes the test of 14 in full and of 23 in part; what is not built is reported "not tested" with the reason (README: Coverage in this preview).
 report: <tmp>/mwsc-demo-results/<run id>/report.md
 ```
@@ -190,9 +199,13 @@ mcp-writecheck review  mwsc-results/<run>                                       
 mcp-writecheck recheck mwsc-results/<run> [--review answers.yaml]                  # re-apply the rules offline
 mcp-writecheck rerun   mwsc-results/<run> -m manifest.yaml                         # run the same plan again
 mcp-writecheck cleanup -m manifest.yaml                                             # what an interrupted run left
+mcp-writecheck run  -m manifest.yaml --baseline baseline.yaml --sign ~/.ssh/key             # known violations that do not fail the run; ssh signature of SHA256SUMS
+mcp-writecheck plan -m manifest.yaml --pair-budget 2x1500                           # opt in to the MWS-CONC-3 barrier-pair budget (about 12,000 writes per resource); give run the same flag
+mcp-writecheck run  -m manifest.yaml --in5-reading=tester                           # MWS-IN-5: record a constraint only the tester's reading confirms as violated (spec draft 0.10)
+mcp-writecheck cleanup -m manifest.yaml --abandon                                   # record leftover objects as left behind and touch nothing
 mcp-writecheck run  -m manifest.yaml --server-commit <sha> --server-image <ref@sha256:…> --sign-key key.pem   # a pinned, signed run
 mcp-writecheck verify-results mwsc-results/<run> --pubkey signer.pub                # signed by that key, and unchanged
-mcp-writecheck compare before/<run> after/<run> --out cmp                           # before/after per cell, joined on test hashes
+mcp-writecheck compare before/<run> after/<run> --out cmp                           # before/after per cell, joined on test hashes; --fail-on-slot-regression false only warns on a slot regression
 ```
 
 `mcp-writecheck <command> --help` describes each command and its options. An unknown option or command is refused with a pointer to that help.
@@ -298,4 +311,4 @@ TINY_TRACKER_DIR="$PWD/../../examples/tiny-tracker" npm test   # also the tiny-t
 
 The tiny-tracker self-test (`test/integration/tiny-tracker.test.ts`) is the matrix of the spec's change process: the correct build gives no `violated` (over both protocol revisions), each defect gives its own requirement (plus the secondary effects the test lists, each a requirement the defect really breaks under the spec's method), all defects together leave only the two requirements noted above unviolated, and the backend's own lost update is `platform`.
 
-Made by [IsoKron](https://isokron.ai/?utm_source=npm&utm_medium=readme&utm_campaign=mcp-writecheck).
+Made by [IsoKron](https://isokron.ai/?utm_source=writecheck-readme&utm_medium=readme).

@@ -10,8 +10,8 @@
 //
 // Mirrors: Payload PAY-03 (`where: {}` deleted all 20 documents, 5 of 5) and
 // GitHub GH-03 (`delete_file` on a folder path deletes the folder).
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
