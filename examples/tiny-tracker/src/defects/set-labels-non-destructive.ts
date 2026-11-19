@@ -12,8 +12,8 @@
 //
 // Mirrors: GitHub GH-07 (label replace annotated non-destructive) and
 // Kubernetes K8S-02 (a force-apply over an existing Service).
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

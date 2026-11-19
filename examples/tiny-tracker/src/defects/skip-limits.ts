@@ -11,7 +11,7 @@
 //
 // Mirrors: GitHub GH-12 (advertised bounds not enforced), Grafana GF-18,
 // Kubernetes K8S-11, Payload PAY-12.
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 

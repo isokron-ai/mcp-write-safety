@@ -11,7 +11,7 @@
 //
 // Mirrors: GitHub GH-07 (a label tool annotated destructiveHint: false that
 // replaces the labels) and Kubernetes K8S-02.
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

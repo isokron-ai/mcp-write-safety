@@ -8,7 +8,7 @@
 //
 // Mirrors: PostHog C1 (the platform API itself lost 6 of 11 concurrent
 // updates); the specification's NF-1 cites a second platform case.
-//   https://isokron.ai/research/posthog-mcp-server-audit#findings-register
+//   https://isokron.ai/research/posthog-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 //
 // What goes wrong: the handler takes a copy of the ticket, waits (standing
 // in for a slow storage round trip), writes the copy back and then applies

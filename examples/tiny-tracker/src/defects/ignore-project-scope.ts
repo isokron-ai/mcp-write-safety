@@ -10,7 +10,7 @@
 // still says "Created".
 //
 // Mirrors: Kubernetes K8S-20 (`helm_install` ignores its `namespace`).
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

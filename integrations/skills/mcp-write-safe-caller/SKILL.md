@@ -7,7 +7,7 @@ description: Rules for an agent that calls MCP tools which create, update or del
 
 These rules are for the calling side: an agent that uses a server's write tools to create, change or delete something.
 
-They are tied to the MCP Write-Safety Requirements, version 0.9 (draft for public comment, https://isokron.ai/mws). MWS puts requirements on servers, not on callers; the behavior of agents is outside its scope. The rules here are what a careful caller does given what MWS says a server must do, should do, and is allowed to do. Each rule names the requirement it rests on. A server you call may not meet MWS at all, so several rules tell you to check and not to trust.
+They are tied to the MCP Write-Safety Requirements, version 0.9 (draft for public comment, https://isokron.ai/mws?utm_source=mws-skill&utm_medium=skill). MWS puts requirements on servers, not on callers; the behavior of agents is outside its scope. The rules here are what a careful caller does given what MWS says a server must do, should do, and is allowed to do. Each rule names the requirement it rests on. A server you call may not meet MWS at all, so several rules tell you to check and not to trust.
 
 ## Read the result shape first
 
@@ -110,4 +110,4 @@ After a conflict (rule 1):
 
 ## Source
 
-Derived from "MCP Write-Safety Requirements, version 0.9, Joshua Bryan, IsoKron, CC BY 4.0" (draft for public comment, https://isokron.ai/mws). The requirement IDs and the spec are the reference; this skill is a restatement and adds no requirement.
+Derived from "MCP Write-Safety Requirements, version 0.9, Joshua Bryan, IsoKron, CC BY 4.0" (draft for public comment, https://isokron.ai/mws?utm_source=mws-skill&utm_medium=skill). The requirement IDs and the spec are the reference; this skill is a restatement and adds no requirement.

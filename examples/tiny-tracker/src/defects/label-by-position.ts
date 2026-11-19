@@ -12,7 +12,7 @@
 //
 // Mirrors: Grafana GF-02 (the wrong panel edited because panels were addressed
 // by position, 5 of 5) and Payload PAY-06 (row ids refused).
-//   https://isokron.ai/research/grafana-mcp-server-audit#findings-register
+//   https://isokron.ai/research/grafana-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
