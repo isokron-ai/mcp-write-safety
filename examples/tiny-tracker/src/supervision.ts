@@ -20,7 +20,7 @@
 // This module holds no fixture logic and imports nothing from src/fixture.
 // Every write is a temporary file, fsync, rename, then an fsync of the folder.
 
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 /** The environment variable that tells a `tiny-tracker all` process it is one half of a supervised pair. */
@@ -205,13 +205,37 @@ export function memoryArming(wallNow: () => Date = () => new Date()): ArmingStor
   };
 }
 
+/**
+ * The sequence in a firing record's name. It is per process, not per store: two stores in one process (the unit
+ * tests, a library caller) once each counted from 1, so two firings in the same millisecond got the same name and the
+ * later write replaced the earlier firing.
+ */
+let firingSeq = 0;
+
+/**
+ * Claims a new name in `fired/` with an exclusive create, so no other store or process (a restarted child that got a
+ * dead child's pid, say) can write a firing to the same name. The claimed file is empty until the firing is written,
+ * and an empty file reads as no firing. Names stay `<ms>-<pid>-<seq>.json`, so firings sort by time, then by order
+ * within a process.
+ */
+function claimFiringName(firedDir: string): string {
+  for (;;) {
+    const name = `${Date.now()}-${process.pid}-${++firingSeq}.json`;
+    try {
+      closeSync(openSync(join(firedDir, name), "wx", 0o600));
+      return name;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+  }
+}
+
 /** The arming store in the supervisor's state folder. */
 export function folderArming(stateDir: string, wallNow: () => Date = () => new Date()): ArmingStore {
   const armedDir = join(stateDir, "armed");
   const firedDir = join(stateDir, "fired");
   mkdirSync(armedDir, { recursive: true, mode: 0o700 });
   mkdirSync(firedDir, { recursive: true, mode: 0o700 });
-  let firingSeq = 0;
   const read = (file: string) => readJson<ArmedFault>(join(armedDir, file));
   return {
     shared: true,
@@ -239,13 +263,15 @@ export function folderArming(stateDir: string, wallNow: () => Date = () => new D
       const f = read(fileFor(point));
       if (!f) return undefined;
       const record: FaultFiring = { point, ...firing };
-      const name = `${Date.now()}-${process.pid}-${++firingSeq}.json`;
+      const name = claimFiringName(firedDir);
       if (f.once) {
         // The rename is the consumption: of two processes reaching the point at once, one wins and the other sees
-        // no file. The firing record replaces the arming file's content once the rename is done.
+        // no file. It replaces only the name this store just claimed. The firing record replaces the arming file's
+        // content once the rename is done.
         try {
           renameSync(path, join(firedDir, name));
         } catch {
+          try { unlinkSync(join(firedDir, name)); } catch { /* already gone */ }
           return undefined;
         }
         fsyncDir(armedDir);
