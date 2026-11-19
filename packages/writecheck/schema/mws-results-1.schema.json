@@ -340,12 +340,86 @@
           "test_hash": {
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$",
-            "description": "What defines this record's test (mws-test-hash/1, MANIFEST.md \"Run identity\"): the tester build, the spec version, the requirement and level, the procedure and its version, the write path, the narrowed input schemas of the tools its resource block names (the arguments the test uses, and the names of other required arguments), the part of the tool entry the requirement judges, that resource block, the rest of the declaration except server, target, resources and limits, target.guard, the limits other than write_budget (and writes_per_second except for MWS-CONC-*), and the tester's MWS-IN-5 reading where the build has one. Adding an optional argument the test does not use keeps the hash. Absent in files written before it."
+            "description": "What defines this record's test (MANIFEST.md \"test_hash\"). Under mws-test-hash/2: sha256 of the canonical JSON of { format, tester, rest, tools, probed, subject, extras } from test_inputs; under mws-test-hash/1 (files written before it) as that release documented. Absent in files written before mws-test-hash/1."
           },
           "test_hash_core": {
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$",
-            "description": "Only on a record whose requirement judges part of the tool entry (the input schema for MWS-IN-2/3/5/6/7, the annotations for MWS-ANN-*, the description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3): the test hash without that part, so compare can tell a changed subject from a changed test."
+            "description": "Only on a record whose requirement judges part of the tool entry (the probed arguments' schema for MWS-IN-2/3/5/6/7, and the description for MWS-IN-5; the annotations for MWS-ANN-*; the description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3): the test hash without that part."
+          },
+          "test_inputs": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scheme",
+              "tester",
+              "rest",
+              "tools"
+            ],
+            "description": "mws-test-hash/2: what compare reads to decide whether two records are the same test (rule A; MANIFEST.md \"test_hash\"). Argument names and hashes only, never a value the run sent.",
+            "properties": {
+              "scheme": {
+                "type": "string"
+              },
+              "tester": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "version",
+                  "commit"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "commit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "dirty": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "rest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "tools": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/test_tool_shape"
+                }
+              },
+              "probed": {
+                "$ref": "#/$defs/test_tool_shape"
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "extras": {
+                "type": "object"
+              }
+            }
+          },
+          "case": {
+            "type": "string",
+            "description": "The case of a procedure that makes several records on one write path (a declared failure; the create and the update of MWS-RES-4), so that compare joins records one to one. Absent where the procedure makes one record per write path."
           },
           "attribution": {
             "enum": [
@@ -792,8 +866,11 @@
           "description": "sha256 over the canonical, name-sorted tools/list entries (tools only)."
         },
         "test_hash": {
-          "const": "mws-test-hash/1",
-          "description": "The algorithm of every record's test_hash."
+          "enum": [
+            "mws-test-hash/1",
+            "mws-test-hash/2"
+          ],
+          "description": "The scheme of the records' test_hash written by the run (a recheck by a later release may add records under a later scheme; each such record names its scheme in test_inputs)."
         },
         "server": {
           "type": "object",
@@ -981,6 +1058,37 @@
           },
           "description": "Each identity member not stated or not pinned, with why."
         },
+        "hash_inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Inputs of the test hashes that are not in the manifest copy the run keeps: the --pair-budget given and the sha256 of each MWS-IN-5 document.",
+          "properties": {
+            "pair_budget": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "repeats": {
+                  "type": "integer"
+                },
+                "pairs": {
+                  "type": "integer"
+                }
+              }
+            },
+            "in5_docs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
         "rechecked_by": {
           "type": "object",
           "additionalProperties": false,
@@ -1002,6 +1110,12 @@
             "commit": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "dirty": {
+              "type": [
+                "boolean",
                 "null"
               ]
             },
@@ -1059,6 +1173,66 @@
             "null"
           ],
           "description": "The ssh signature file of SHA256SUMS, where one was also made (--sign)."
+        }
+      }
+    },
+    "test_shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "h"
+      ],
+      "properties": {
+        "h": {
+          "type": "string"
+        },
+        "p": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/test_shape"
+          }
+        },
+        "r": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "test_tool_shape": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "h",
+        "p",
+        "r",
+        "ro"
+      ],
+      "properties": {
+        "h": {
+          "type": "string"
+        },
+        "p": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/test_shape"
+          }
+        },
+        "r": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ro": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

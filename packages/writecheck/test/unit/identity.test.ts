@@ -378,7 +378,8 @@ test('compare: rule 13 roll-up, and only violated → held on an equal test hash
   assert.equal(classify(side('violated?'), side('held')).transition, 'unstable');
   // The join is per slot (requirement, resource, tool, procedure): a slot the other build did not reach joins when it says
   // not tested, and is a coverage change when it carries evidence; the same slot with another hash is a changed test.
-  const R = (verdict: string, scenario: { id: string; version: string }, hash: string, resource = 'a') => ({ requirement: 'MWS-RES-1', write_path: { resource, tool: 't' }, scenario, verdict, test_hash: hash });
+  // The file states one clean tester build (compare reads it from identity.tester; review S3).
+  const R = (verdict: string, scenario: { id: string; version: string }, hash: string, resource = 'a') => ({ requirement: 'MWS-RES-1', write_path: { resource, tool: 't' }, scenario, verdict, test_hash: hash, _doc_tester: `0.1.0@${'a'.repeat(40)}` });
   const s1 = { id: 'rw', version: '1' };
   assert.equal(joinCell([R('held', s1, 'h1')], [R('held', s1, 'h1'), R('not tested', { id: 'creates', version: '1' }, 'h2')]).problem, null);
   assert.equal(joinCell([R('held', s1, 'h1'), R('not observed', s1, 'h3', 'b')], [R('held', s1, 'h1')]).problem?.transition, 'coverage-change');

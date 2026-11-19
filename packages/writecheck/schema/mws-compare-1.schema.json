@@ -52,7 +52,10 @@
       }
     },
     "test_hash": {
-      "const": "mws-test-hash/1"
+      "enum": [
+        "mws-test-hash/1",
+        "mws-test-hash/2"
+      ]
     },
     "before": {
       "type": "object",
@@ -203,7 +206,52 @@
             },
             "detail": {
               "type": "string"
+            },
+            "accepted": {
+              "enum": [
+                "pinned",
+                "allow-unsigned"
+              ]
             }
+          }
+        },
+        "started": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tester_dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "rechecked_by": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "judged_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }
@@ -357,7 +405,52 @@
             },
             "detail": {
               "type": "string"
+            },
+            "accepted": {
+              "enum": [
+                "pinned",
+                "allow-unsigned"
+              ]
             }
+          }
+        },
+        "started": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tester_dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "rechecked_by": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "judged_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }
@@ -576,7 +669,9 @@
               "removed-cell",
               "partly-held",
               "subject-changed",
-              "schema-fixed"
+              "schema-fixed",
+              "scheme-changed",
+              "tester-unpinned"
             ]
           },
           "label": {
@@ -629,6 +724,9 @@
                     "not tested",
                     "not applicable"
                   ]
+                },
+                "ambiguous": {
+                  "type": "string"
                 }
               }
             }
@@ -638,6 +736,17 @@
             "items": {
               "type": "string"
             }
+          },
+          "same_test_because": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why records whose hashes differ were judged the same test (rule A): each tolerated difference, by slot."
+          },
+          "newly_found": {
+            "type": "boolean",
+            "description": "Violated on the after build in a cell the before build did not test."
           }
         }
       }

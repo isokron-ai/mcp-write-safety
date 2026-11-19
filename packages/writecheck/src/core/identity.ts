@@ -20,7 +20,9 @@ import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import { isObj, parseConfigText, WritecheckError } from './util.js';
 
 export const IDENTITY_FORMAT = 'mws-identity/1';
-export const TEST_HASH_FORMAT = 'mws-test-hash/1';
+export const TEST_HASH_FORMAT = 'mws-test-hash/2';
+/** Every test-hash scheme compare reads: records hashed under different schemes are never joined (compare says so). */
+export const TEST_HASH_FORMATS_READ = ['mws-test-hash/1', 'mws-test-hash/2'] as const;
 
 /** A git commit: 40 (SHA-1) or 64 (SHA-256) lowercase hex characters. Abbreviated commits are refused: they do not pin. */
 export const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
@@ -245,7 +247,7 @@ export interface RunIdentity {
   /** sha256 over the canonical, name-sorted tools/list entries (tools only; target.catalog_fingerprint also covers prompts and templates). */
   tools_fingerprint: string;
   /** The per-record test_hash algorithm (report/testhash.ts; MANIFEST.md, Run identity). */
-  test_hash: typeof TEST_HASH_FORMAT;
+  test_hash: string;
   server: { repo: string | null; commit: string | null; tag: string | null; image: string | null; recipe: string | null; launch: string; transport: string | null };
   backend: BackendImage[];
   runner: Runner;
@@ -255,8 +257,10 @@ export interface RunIdentity {
   provenance: { sources: string[]; overridden: string[] };
   /** Each identity member that is not stated or not pinned, with why. Empty only for a fully pinned run. */
   gaps: string[];
+  /** Inputs of the test hashes that are not in the manifest copy the run keeps (so a recheck can hash with them): the `--pair-budget` given, and the sha256 of each document MWS-IN-5 read. */
+  hash_inputs?: { pair_budget?: { repeats: number; pairs: number } | null; in5_docs?: Record<string, string | null> };
   /** Set by `recheck` on its copy: the tester build that re-applied the rules, when, and how many records it hashed anew. */
-  rechecked_by?: { name: string; version: string; commit: string | null; at: string; records_rehashed: number };
+  rechecked_by?: { name: string; version: string; commit: string | null; dirty?: boolean | null; at: string; records_rehashed: number };
 }
 
 export function identityGaps(i: Omit<RunIdentity, 'gaps'>): string[] {

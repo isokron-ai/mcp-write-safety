@@ -36,6 +36,8 @@ export { safeCommand } from '../core/command-line.js';
 import { Session } from '../core/session.js';
 import { WritecheckError } from '../core/util.js';
 import { verifyChecksums } from '../report/evidence.js';
+import { verifyResults } from '../report/sign.js';
+import { firstWriteOf, postEvaluate } from '../checks/coverage.js';
 import { renderMarkdown } from '../report/markdown.js';
 import type { ResultsDoc } from '../report/results.js';
 import { result, writePathKey, type Result } from '../report/verdicts.js';
@@ -152,9 +154,14 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
     if (!v.ok) throw new WritecheckError(`${o.dir}: SHA256SUMS does not match ${v.bad.join(', ')}; not rechecking changed evidence`, 3);
   } else o.log('note: no SHA256SUMS in this folder; the evidence could not be checked');
   const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
+  // why: review S4: a signed results.json that was changed after signing is not rechecked (and never signed again).
+  const sig = verifyResults(doc, null);
+  if (sig.status === 'invalid') throw new WritecheckError(`${o.dir}: the results signature does not verify (${sig.detail}); not rechecking a changed file`, 3);
   if (!/^manifest\.(yaml|json)$/.test(doc.manifest.path)) throw new WritecheckError(`${o.dir}: unexpected manifest path ${JSON.stringify(doc.manifest.path)}`, 2);
   const manifestFile = join(o.dir, doc.manifest.path);
-  const manifest = parseManifestText(readFileSync(manifestFile, 'utf8'), manifestFile);
+  // why: review S7: the pair budget the run was given (it is not in the manifest copy).
+  const pb = doc.identity?.hash_inputs?.pair_budget ?? null;
+  const manifest = parseManifestText(readFileSync(manifestFile, 'utf8'), manifestFile, pb ? { pairBudget: pb } : {});
   const tools = readCatalogFile(join(o.dir, 'catalog.json')).tools as Tool[];
   usePatterns(manifest);
   useShapes(manifest, tools);
@@ -182,7 +189,13 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   // Results decided without calls (not applicable, not tested, the catalog) are kept as recorded.
   const same = (x: Result, y: Result) => x.requirement === y.requirement && writePathKey(x.write_path) === writePathKey(y.write_path) && x.scenario.id === y.scenario.id;
   const kept = doc.results.filter((r) => !fresh.some((f) => same(f, r)));
-  const results = [...kept, ...fresh];
+  // why: review M3: the whole-run adjustments of `run` (the first write after a create, a declared override, an apply) are applied
+  // here by the same step, so a recheck by the build that made the run gives the run's verdicts.
+  const results = postEvaluate(manifest, [...kept, ...fresh], firstWriteOf(doc.observations as never, doc.results));
+  for (const [i, r] of results.entries()) {
+    const at = i - kept.length;
+    if (at >= 0 && freshObs.has(fresh[at]!)) freshObs.set(r, freshObs.get(fresh[at]!)!);
+  }
   const k = (r: Result) => `${r.requirement} ${writePathKey(r.write_path)} ${r.scenario.id}`;
   const before = new Map(doc.results.map((r) => [k(r), r.verdict]));
   const changed = results.filter((r) => before.get(k(r)) !== r.verdict).map((r) => ({ key: k(r), before: before.get(k(r)) ?? '(none)', after: r.verdict }));
@@ -356,7 +369,7 @@ export async function catalogCommand(o: { manifest?: string; catalog?: string; o
   const outDir = join(o.out, runId);
   mkdirSync(outDir, { recursive: true });
   const safeDoc = red.value(doc) as ResultsDoc;
-  writeFileSync(join(outDir, 'catalog.json'), JSON.stringify(red.value({ tools, prompts: catalog.prompts ?? [], resourceTemplates: catalog.resourceTemplates ?? [] }), null, 2) + '\n');
+  writeFileSync(join(outDir, 'catalog.json'), JSON.stringify(red.catalogValue({ tools, prompts: catalog.prompts ?? [], resourceTemplates: catalog.resourceTemplates ?? [] }), null, 2) + '\n');
   writeFileSync(join(outDir, 'results.json'), JSON.stringify(safeDoc, null, 2) + '\n');
   writeFileSync(join(outDir, 'report.md'), renderMarkdown(safeDoc));
   writeFileSync(join(outDir, 'junit.xml'), renderJunit(safeDoc, null));

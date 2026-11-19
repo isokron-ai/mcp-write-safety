@@ -41,6 +41,13 @@ export interface Result {
   test_hash?: string;
   /** For a requirement that judges part of the tool entry (testhash.ts subjectFacets): the hash without that part. */
   test_hash_core?: string;
+  /** What compare reads to decide whether two records are the same test (testhash.ts TestInputs, `mws-test-hash/2`); absent before it. */
+  test_inputs?: import('./testhash.js').TestInputs;
+  /**
+   * The case of a procedure that makes several records on one write path (a declared failure, the create and the update of
+   * MWS-RES-4), so that compare joins records one to one. Absent where the procedure makes one record per write path.
+   */
+  case?: string;
   /**
    * Spec 8.2 rule 3: for a requirement that lists platform, a violated or platform record carries one of
    * server (a control arm ran and the platform API did not show the behavior), platform (it did), or

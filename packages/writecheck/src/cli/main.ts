@@ -117,12 +117,15 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     flags: [],
   },
   compare: {
-    usage: `mcp-writecheck compare <before results.json|folder> <after results.json|folder> [--out DIR] [--pubkey KEY]
+    usage: `mcp-writecheck compare <before results.json|folder> <after results.json|folder> [--out DIR] (--pubkey KEY | --allow-unsigned)
     Before/after per cell (requirement @ tool), joined only where the test hashes are equal; verdicts rolled up by MWS 8.2
     rule 13. Labels each cell fixed, regressed, unchanged, changed (no claim) or not comparable, with the reason. Writes
-    compare.json and compare.md to --out (default .). Refuses different MWS versions. --pubkey: both files must be signed
-    by that key. Exit 1 when a cell regressed, or a slot regressed inside a cell (--fail-on-slot-regression false: warn only).`,
-    flags: ['--out', '-o', '--pubkey', '--fail-on-slot-regression'],
+    compare.json and compare.md to --out (default .). Refuses different MWS versions, and a file whose results signature does
+    not verify (exit 3). --pubkey: both files must be signed by that key; --allow-unsigned: compare files that are unsigned or
+    not pinned (the output says so). Exit 1 when a cell regressed, or a slot regressed inside a cell (--fail-on-slot-regression
+    false: warn only), or with --fail-on-new-violation true a cell the before build did not test is violated after.`,
+    flags: ['--out', '-o', '--pubkey', '--fail-on-slot-regression', '--fail-on-new-violation'],
+    bools: ['--allow-unsigned'],
   },
   'verify-results': {
     usage: `mcp-writecheck verify-results <results.json|folder> [--pubkey KEY]
@@ -287,7 +290,9 @@ export async function main(argv: string[]): Promise<number> {
       const pubkey = one(a, '--pubkey');
       const fosr = one(a, '--fail-on-slot-regression') ?? 'true';
       if (fosr !== 'true' && fosr !== 'false') throw new WritecheckError('--fail-on-slot-regression takes true or false', 2);
-      return compareCommand({ before, after, out: one(a, '--out', '-o') ?? '.', ...(pubkey ? { pubkey } : {}), failOnSlotRegression: fosr === 'true', log }).exit;
+      const fonv = one(a, '--fail-on-new-violation') ?? 'false';
+      if (fonv !== 'true' && fonv !== 'false') throw new WritecheckError('--fail-on-new-violation takes true or false', 2);
+      return compareCommand({ before, after, out: one(a, '--out', '-o') ?? '.', ...(pubkey ? { pubkey } : {}), allowUnsigned: a.flags.has('--allow-unsigned'), failOnSlotRegression: fosr === 'true', failOnNewViolation: fonv === 'true', log }).exit;
     }
     case 'verify-results': {
       const pubkey = one(a, '--pubkey');
@@ -306,7 +311,7 @@ export async function main(argv: string[]): Promise<number> {
       const sk = one(a, '--sign-key');
       const key = loadSigningKey(sk, sk ? {} : process.env);
       recheckCommand({ dir: folder(), ...(review ? { review } : {}), log });
-      await finishRecheck(folder(), { key, log });
+      await finishRecheck(folder(), { key, ...(review ? { review } : {}), log });
       return 0;
     }
     case 'review':
