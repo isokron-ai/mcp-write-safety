@@ -21,7 +21,12 @@ async function main(): Promise<void> {
   const { startMcpServer } = (await import(dist('mcp/server.js'))) as any;
   const { applyVariants } = (await import(dist('variants/index.js'))) as any;
   const { ok } = (await import(dist('mcp/results.js'))) as any;
-  const build = createBuild([]);
+  const { effectiveFeatures, parseFeatures, parseProfile } = (await import(dist('profile.js'))) as any;
+  // why: the shipped manifest declares calls for the lookup tools (get_operation), which the default profile lists; built with no
+  // features they are missing from tools/list and every cell of theirs is `not tested`. Same features as `tiny-tracker server`.
+  const variants = (process.env['TRACKER_VARIANTS'] ?? '').split(',').map((x: string) => x.trim()).filter(Boolean);
+  const { features } = effectiveFeatures(parseProfile(process.env['TRACKER_PROFILE']), parseFeatures(process.env['TRACKER_FEATURES']), variants);
+  const build = createBuild([], features);
   const patch = (name: string, wrap: (inner: Handler) => Handler) => {
     const t = build.tools.get(name);
     build.tools.set(name, { ...t, handler: wrap(t.handler) });
