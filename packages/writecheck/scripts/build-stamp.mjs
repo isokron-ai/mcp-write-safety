@@ -15,8 +15,8 @@ const git = (...args) => execFileSync('git', args, { cwd: pkg, encoding: 'utf8',
 let info;
 try {
   const commit = git('rev-parse', 'HEAD');
-  // why: only the package's own sources decide whether this build is the commit; dist/ and node_modules are ignored files.
-  const dirty = git('status', '--porcelain', '--untracked-files=no', '--', '.').length > 0;
+  // why: only the package's own files decide whether this build is the commit (an untracked source is compiled in, so it counts); dist/ and node_modules are ignored.
+  const dirty = git('status', '--porcelain', '--', '.').length > 0;
   info = { commit, dirty };
 } catch {
   info = { commit: null, dirty: null, note: 'built outside a git checkout' };
