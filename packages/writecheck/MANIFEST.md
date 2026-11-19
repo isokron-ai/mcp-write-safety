@@ -23,6 +23,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `patterns` | no | How the tester decides what a result says (spec 7.3, rule 11); below |
 | `outcome_field` | no | A structured outcome field in the result: `{ path, applied, not_applied, unknown }` (below) |
 | `results` | no | `{ shape, tools: { <tool>: { shape } } }`: a result shape adopted by name and version (spec 7.3, rule 11; draft Annex B-9). Known: `write-result/0.1`. A tool's own entry overrides the top level; `shape: null` adopts none for it. An unknown name or version is refused at load. See [results](#results) |
+| `in5` | no | `{ docs: [paths] }`: documents (relative to this file) the MWS-IN-5 search reads for bounds stated in words; see [in5](#in5) |
 | `async_operations` | no | Tools whose operation the backend completes asynchronously (spec NF-19, Annex E): a result that says "accepted" or "pending" is then not read as a report of success. For any other tool it is |
 
 ## server
@@ -70,6 +71,8 @@ Target hosts are listed on the plan's "Hosts reached or given to the server" lin
 | `gate_reps` | 2 | Repetitions of each held-request schedule |
 | `timeout_ms` | 30000 | Per call |
 | `max_fuzz_cases` | 200 | Schema probes per tool; a list cut at this limit gives `not tested`, never `held` |
+| `in5_probes` | 80 | MWS-IN-5 search: calls per tool at most (the probes, the bisection and the repeats). The record says when the search was cut |
+| `in5_payload_bytes` | 65536 | MWS-IN-5 search: the largest value sent, in bytes (a string's UTF-8 bytes, otherwise its JSON form) |
 
 ## backend.gate
 
@@ -98,6 +101,16 @@ A list of `{ name, tool, args, path, ignore }`: a read-only call made before and
 ## calls
 
 `{ tool_name: { resource, args } }`: arguments for a tool the annotation checks call on a scratch object of `resource` (MWS-ANN-1 to ANN-3, ANN-5). The read-only check (MWS-CFG-3) uses them too: it calls every declared write tool, listed or not, and a write tool with no call of its own (for example one named only under `failures`) leaves MWS-CFG-3 `not tested`; its record names the tool and this key. It also calls each tool that is marked read-only (`readOnlyHint: true` in `tools/list`, or a declared read tool) and has an entry here whose arguments name an object of the run (`{{id}}`, `{{prefix}}`, `{{marker}}` or `{{object}}`), with that entry's arguments and resource, as the annotation checks do, because read-only mode must refuse a write tool whatever its annotations declare. If the object changes through such a tool, MWS-CFG-3 is `violated` and the record names the tool and says it is marked read-only; an object deleted is a change too. A refusal, or a final answer with no change to the watched object, counts toward `held`; a call that could not be made (no resource to bind it to, no scratch object) or failed without a refusal (a timeout, a lost connection, an error MCP defines for the case), an `input_required` or task answer, or an object that could not be read back leaves MWS-CFG-3 `not tested`, and the record names the tool and why. The deny-list trial of MWS-CFG-2 calls the same tools; MWS-CFG-1 compares the declared write tools only. A tool marked read-only with no entry here is not called (there are no safe arguments for it).
+
+## in5
+
+The MWS-IN-5 search runs with no declaration. For each argument of each tool it starts from (a resource's read call, its declared list calls, its create tool and its update tool), it sends values valid by the input schema that commonly meet a limit the schema does not declare: string lengths 0, 1, 255, 256, 1024, 4096 and 65536 within the declared bounds, eight character classes beside a plain value of the same length, format extremes, numbers 0, ±1, ±2^31 and 2^53-1 (and fractions for `number`), and arrays of 0, 1, 100 and 1000 items. A bound stated in words in a description, or in a document listed here, that names the tool and the argument ("up to 100 characters", "between 1 and 50") adds probes at N and N+1. The update tool is searched only on scratch objects the tester creates; each accepted create is cleaned up by the resource's policy (a resource whose policy is `leave` gets no write probe). An identifier, the scope, the version, its override, the caller's key and an idempotency key are never probed; enums, booleans and objects are not searched.
+
+A refusal counts as a fixed constraint where the declaration states it (`fixed_constraints`), or by the tester's differential reading: a neighbouring value of the same argument was accepted in the same context, the refusal repeats in a fresh context (a second scratch object with another field varied, or a fresh create), and on an order every accepted value lies on one side, with the boundary found by bisection (the record gives it, for example `maxLength 100`). A refusal that names a rate limit, the state of the backend or the caller's permissions, and an unknown outcome, are left out. The record is `violated` or `not observed` (spec 8.2, rule 8), with the scope searched in `numbers` (`args_total`, `args_probed`, `probes`, `refusals`, `confirmed`).
+
+| Key | Meaning |
+|---|---|
+| `docs` | Paths of documents (a README, an API reference) to read for bounds stated in words. Read when the plan is built; nothing is fetched |
 
 ## review
 
@@ -244,6 +257,6 @@ Each resource is one kind of object. Only `name` and `read` are required; every 
 | `versioned` | A list of `{ tool, args }` whose `args` carry `{{version}}`: other tools that get the stale-write test (MWS-CONC-2, CONC-4, CONC-6) |
 | `no_version_check` | Tools for which the backend has no version check (MWS-CONC-2 is `not applicable`; MWS-CONC-5 asks about the description) |
 | `input_required` | A list of `{ tool, args, answers, client_capabilities, effect }`: a tool that answers `input_required` (revision 2026-07-28) and the `inputResponses` to send on the retry (MWS-RETRY-3). `client_capabilities` defaults to `{ elicitation: { form: {} } }`. `effect` (`{ path, value }`) is what the write puts into effect; a change before the retry that is not the effect may be staged state, and is not judged |
-| `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5) |
+| `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5). Optional: the IN-5 search sends its own values; these are sent beside them, on the search's scratch objects |
 | `fixed_constraints` | A list of `{ arg, pattern, reason }` (R10-8): refusals of the update tool that rest on a fixed constraint; MWS-IN-5 is `violated` only for a refusal whose text matches one, otherwise each refusal is listed, "seen, not judged", and the verdict is `not observed` |
 | `server_managed` | A list of fields the server sets itself (a timestamp, a revision). A field that `read.ignore` or a list's `ignore` names and that the tool under test can set (from its input schema) is warned in the plan and the report, and refused for a selector tool in opt-in mode, unless it is listed here: an ignored field must not hide a bystander change |

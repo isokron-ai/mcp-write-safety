@@ -300,6 +300,17 @@ export function in5Verdicts(obs: In5Obs[], res: ResourceSpec, tools: Tool[]): Re
   return [result('MWS-IN-5', w, sc, 'not observed', seen.length ? `${tool} refused ${seen.length} of the ${sent.length} declared value(s) valid by its schema; each refusal is listed, seen, not judged (no declared fixed constraint). This is a search (spec 8.2, rule 8).` : `${tool} accepted the ${sent.length} declared value(s) valid by its schema. This is a search (spec 8.2, rule 8).`, { notes })];
 }
 
+/**
+ * MWS-IN-5 for an update tool this check halted (spec R15-4): the IN-5 search (src/checks/in5search.ts) runs after this check
+ * and sends nothing to a halted tool, and where the object under test is unusable it does not run for the resource at all, so
+ * the record that says why comes from here. Evidence from before the search recorded `in5` and is judged by in5Verdicts.
+ */
+function in5Halted(halted: Record<string, string>, res: ResourceSpec, tools: Tool[]): Result[] {
+  const tool = res.update?.tool;
+  if (!tool || !toolByName(tools, tool) || !halted[tool]) return [];
+  return [result('MWS-IN-5', wp(res.name, tool), { id: `${ID}.in5`, version: VERSION }, 'not tested', `${tool} was not probed further after a failed put-back (spec R15-4): ${short(halted[tool]!, 300)}. The MWS-IN-5 search sends nothing to it.`)];
+}
+
 export interface ProbeObs {
   tool: string;
   role: 'read' | 'update';
@@ -382,7 +393,7 @@ export function saysNotUsed(text: string, prop: string): boolean {
 }
 
 /** Does a value carry any of the markers anywhere (deep; strings by substring)? */
-function carries(v: unknown, marks: unknown[]): boolean {
+export function carries(v: unknown, marks: unknown[]): boolean {
   if (marks.some((m) => deepEqual(m, v))) return true;
   if (typeof v === 'string') return marks.some((m) => (typeof m === 'string' || typeof m === 'number') && String(m).length > 0 && v.includes(String(m)));
   if (Array.isArray(v)) return v.some((x) => carries(x, marks));
@@ -390,7 +401,7 @@ function carries(v: unknown, marks: unknown[]): boolean {
   return false;
 }
 
-const ID_LIKE = /(^|_)(id|ids|uid|uuid|key|parent|project|owner|org|organization|workspace|tenant|namespace|scope|path|where|filter|selector|query|target)$|Id$/i;
+export const ID_LIKE = /(^|_)(id|ids|uid|uuid|key|parent|project|owner|org|organization|workspace|tenant|namespace|scope|path|where|filter|selector|query|target)$|Id$/i;
 
 /**
  * Properties a probe on a write tool must never change: every property of the base call except the
@@ -443,7 +454,6 @@ export const schemaCheck: CheckModule = {
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const d = ctx.driver;
     const out: ProbeObs[] = [];
-    const in5: In5Obs[] = [];
     const cut: Record<string, { sent: number; total: number }> = {};
     const noObject: string[] = [];
     // why: writesafe self-test T1: a tool whose probes could not start (the reset or the read before them failed) is not tested
@@ -736,33 +746,10 @@ export const schemaCheck: CheckModule = {
           stale = true;
         }
       }
-      // MWS-IN-5: the declared values to try, each valid by the schema, through the update tool.
-      // spec R15-4: after a put-back that failed, nothing more is sent to the tool.
-      if (role === 'update' && !halted) {
-        const props = isObj(t.inputSchema) && isObj(t.inputSchema['properties']) ? (t.inputSchema['properties'] as Obj) : {};
-        for (const tv of res.try_values) {
-          const value = tv.value !== undefined ? render(tv.value, d.vars()) : named.has(tv.arg) ? `${ctx.prefix}${'x'.repeat(Math.max(0, tv.length! - ctx.prefix.length))}` : 'x'.repeat(tv.length!);
-          const step = ctx.session.stepId(`in5.${tool}.${tv.arg}`);
-          if (!validFor(props[tv.arg], value)) {
-            in5.push({ tool, arg: tv.arg, value: short(value, 60), valid: false, ok: false, isError: false, names_arg: false, step: null, text: null });
-            continue;
-          }
-          if (!(await fresh())) break;
-          const r = await ctx.session.call(label, tool, { ...base, [tv.arg]: value }, { step, write: true });
-          // why: R10-8: a success after which the listed value is not stored counts as refused.
-          let stored: boolean | null = null;
-          if (r.ok && !r.timed_out && r.transport_error === null) {
-            const path = res.fields?.find((f) => f.arg === tv.arg)?.path ?? tv.arg;
-            const back = await d.readSettled(label, `in5.${tool}.${tv.arg}.read`, (o) => deepEqual(getPath(o, path), value));
-            stored = back.ok ? back.settled : null;
-            await d.reset();
-          }
-          in5.push({ tool, arg: tv.arg, value: short(value, 60), valid: true, ok: r.ok, isError: r.isError, names_arg: !r.ok && `${r.text ?? ''} ${r.rpc_error?.message ?? ''} ${JSON.stringify(r.data ?? null)}`.includes(tv.arg), step, text: ((t) => (t !== null && t.length > 2000 ? short(t, 2000) : t))(r.text ?? r.rpc_error?.message ?? null), stored, ...(r.timed_out || r.transport_error !== null ? { indeterminate: true } : {}) });
-          await d.reset();
-        }
-      }
+      // MWS-IN-5: the declared values to try (try_values) are sent by the IN-5 search (src/checks/in5search.ts), on a scratch
+      // object of the tester's, with the search's own values; this check sends none (lane F7).
     }
-    return { check: ID, version: VERSION, resource: res.name, data: { probes: out, in5, cut, no_object: noObject, protected: protectedBy, not_probed: notProbed, halted: Object.fromEntries([...haltedIn(ctx.session)].filter(([k]) => toolsOf(res).some((x) => x.tool === k))) } };
+    return { check: ID, version: VERSION, resource: res.name, data: { probes: out, cut, no_object: noObject, protected: protectedBy, not_probed: notProbed, halted: Object.fromEntries([...haltedIn(ctx.session)].filter(([k]) => toolsOf(res).some((x) => x.tool === k))) } };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
@@ -770,7 +757,7 @@ export const schemaCheck: CheckModule = {
     const np = data.not_probed ?? {};
     const none = [...(data.no_object ?? []), ...Object.keys(np)];
     const skipped = none.flatMap((tool) => (['MWS-IN-1', 'MWS-IN-2', 'MWS-IN-3', 'MWS-IN-4', 'MWS-IN-6', 'MWS-IN-7'] as const).map((id) => result(id, wp(res.name, tool), { id: ID, version: VERSION }, 'not tested', `${tool} was not probed: ${np[tool] ?? 'the resource has no object of the run to read (no update tool declared)'}`)));
-    const all = [...schemaVerdicts(data.probes, res, ctx.tools, ctx, data.cut ?? {}, data.protected ?? {}).filter((r) => !none.includes(r.write_path.tool)), ...skipped, ...in5Verdicts(data.in5 ?? [], res, ctx.tools)];
+    const all = [...schemaVerdicts(data.probes, res, ctx.tools, ctx, data.cut ?? {}, data.protected ?? {}).filter((r) => !none.includes(r.write_path.tool)), ...skipped, ...(data.in5 !== undefined ? in5Verdicts(data.in5, res, ctx.tools) : in5Halted(data.halted ?? {}, res, ctx.tools))];
     // why: spec R15-4, review of 3283a69 (2): after a failed put-back no further probe, control or value goes to the tool, and each
     // probe not sent for that reason is treated as one not judged: no record of the tool's MWS-IN-1 to IN-7 is held or not observed.
     const halted = { ...(data.halted ?? {}), ...Object.fromEntries((data.probes ?? []).filter((p) => p.halted).map((p) => [p.tool, p.not_sent ?? 'a put-back failed'])) };
@@ -831,7 +818,7 @@ export function restorableTool(res: ResourceSpec, all: ResourceSpec[] = [res]): 
 
 /** Spec R15-4: the update tools a failed put-back halted, run-wide (by session), with the reason: no further probe or control goes to them. */
 const haltedTools = new WeakMap<object, Map<string, string>>();
-const haltedIn = (session: object): Map<string, string> => {
+export const haltedIn = (session: object): Map<string, string> => {
   let m = haltedTools.get(session);
   if (!m) haltedTools.set(session, (m = new Map()));
   return m;
