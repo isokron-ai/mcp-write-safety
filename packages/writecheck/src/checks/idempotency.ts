@@ -22,7 +22,7 @@
 import { baseVars, type Driver, sameCollection } from '../core/driver.js';
 import type { ResourceSpec } from '../core/manifest.js';
 import { createVerified, idFromResult } from '../core/objects.js';
-import { BudgetExhausted, Interrupted, RateLimited, type CallResult } from '../core/session.js';
+import { BudgetExhausted, Interrupted, LaunchInitFailed, RateLimited, type CallResult, type LaunchResult } from '../core/session.js';
 import { validates } from '../core/jsonschema.js';
 import { listAll } from '../core/lists.js';
 import { render } from '../core/template.js';
@@ -439,6 +439,16 @@ async function collectAll(ctx: RunContext, res: ResourceSpec, obs: IdemObs): Pro
     }
   }
 
+  // why: follow-up to PR #14 (A): a dedicated server whose session.init fails makes only its own step not tested.
+  const launchFor = async (label: string): Promise<LaunchResult> => {
+    try {
+      return await ctx.session.launch({ label, env: {} });
+    } catch (e) {
+      if (e instanceof LaunchInitFailed) return { started: false, exit_code: null, reason: e.message, stderr_tail: '', init_failed: e.message };
+      throw e;
+    }
+  };
+
   // Step (e): a dedicated server, the first call answered, the tester's own stop and start, then the repeat.
   const restartDecl = ctx.manifest.server.restart;
   const launchable = !!(ctx.manifest.server.stdio || ctx.manifest.server.launch);
@@ -446,8 +456,8 @@ async function collectAll(ctx: RunContext, res: ResourceSpec, obs: IdemObs): Pro
     const r: RestartObs = { key: key('e'), t0: null, a1: null, t1: null, restart: null, tr: null, a2: null, t2: null, t3: null, gap_ms: null, settle_ms: settle };
     obs.restart = r;
     const LR = ctx.label('IDEMR');
-    const started = await ctx.session.launch({ label: LR, env: {} });
-    const t = started.started ? await target('idemr') : { skipped: `the dedicated server did not start: ${started.reason}` };
+    const started = await launchFor(LR);
+    const t = started.started ? await target('idemr') : { skipped: !started.started && started.init_failed ? `the dedicated server started, but ${started.init_failed}` : `the dedicated server did not start: ${(started as { reason: string }).reason}` };
     if ('skipped' in t) r.skipped = t.skipped;
     else {
       r.t0 = await trace('e0', t, false);
@@ -471,8 +481,8 @@ async function collectAll(ctx: RunContext, res: ResourceSpec, obs: IdemObs): Pro
     const c: CrashObs = { routing: gate.describe(), learned: null, hit: false, answered_before_stop: false, key: key('f'), t0: null, a1: null, t1: null, restart: null, tr: null, a2: null, t2: null, t3: null, gap_ms: null, settle_ms: settle };
     obs.crash = c;
     const LC = ctx.label('IDEMC');
-    const started = await ctx.session.launch({ label: LC, env: {} });
-    const t = started.started ? await target('idemc') : { skipped: `the dedicated server did not start: ${started.reason}` };
+    const started = await launchFor(LC);
+    const t = started.started ? await target('idemc') : { skipped: !started.started && started.init_failed ? `the dedicated server started, but ${started.init_failed}` : `the dedicated server did not start: ${(started as { reason: string }).reason}` };
     const l = 'skipped' in t ? t : await learn(LC, t);
     if ('skipped' in l) c.skipped = l.skipped;
     else {

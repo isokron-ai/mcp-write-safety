@@ -2,6 +2,8 @@
 // through here, so a loopback gate placed in front of the backend sees all of
 // them (that is how a tester forces an interleaving).
 
+import { attributionHeaders } from "../attribution.js";
+
 export interface ApiResponse<T = any> {
   status: number;
   ok: boolean;
@@ -22,7 +24,8 @@ export interface RequestOptions {
 }
 
 export class TrackerApi {
-  constructor(private readonly baseUrl: string, private readonly token: string) {}
+  /** stampAttribution: put the current call's run and operation tags on every request (design rule 3). */
+  constructor(private readonly baseUrl: string, private readonly token: string, private readonly stampAttribution = false) {}
 
   async request<T = any>(method: string, path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const url = new URL(path, this.baseUrl);
@@ -31,6 +34,7 @@ export class TrackerApi {
     if (options.body !== undefined) headers["content-type"] = "application/json";
     if (options.ifMatch !== undefined) headers["if-match"] = options.ifMatch === "*" ? "*" : `"${options.ifMatch}"`;
     if (options.idempotencyKey !== undefined) headers["idempotency-key"] = options.idempotencyKey;
+    if (this.stampAttribution) Object.assign(headers, attributionHeaders());
     const request = { method, url: url.toString(), headers };
     let response: Response;
     let text: string;

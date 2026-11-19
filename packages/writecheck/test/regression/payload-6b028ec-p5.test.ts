@@ -27,8 +27,9 @@ test('P5: a list read that needs an id is not used as the inventory; MWS-TGT-3 k
     const r = await runFixture(f);
     const all = r.doc.results.filter((x) => /^MWS-TGT-/.test(x.requirement));
     assert.deepEqual(all.filter((x) => /template|check failed/.test(x.reason)).map((x) => x.reason), [], show(all));
-    assert.deepEqual(rows(r.doc.results, 'MWS-TGT-1', 'task:createTasks'), [], 'no MWS-TGT-1 row for a resource without a scope');
-    assert.deepEqual(rows(r.doc.results, 'MWS-TGT-2', 'task:createTasks'), [], 'no MWS-TGT-2 row');
+    // why: F1 (docs/CELLS.md): no check makes an MWS-TGT-1 row for a resource without a scope; the cell pass records the cell as not applicable under its rule.
+    assert.deepEqual(rows(r.doc.results, 'MWS-TGT-1', 'task:createTasks').map((x) => [x.scenario.id, x.verdict, /TGT-1\.no-scope/.test(x.reason)]), [['cells', 'not applicable', true]], 'no MWS-TGT-1 row from a check for a resource without a scope; only the cell pass\'s not-applicable row');
+    assert.deepEqual(rows(r.doc.results, 'MWS-TGT-2', 'task:createTasks').filter((x) => x.scenario.id !== 'cells'), [], 'no MWS-TGT-2 row from a check (the cell pass may add one, with its rule)');
     const t3 = rows(r.doc.results, 'MWS-TGT-3', 'task:createTasks');
     assert.equal(t3.length, 1, show(t3));
     assert.equal(t3[0]!.verdict, 'held', show(t3));

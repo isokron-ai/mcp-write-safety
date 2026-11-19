@@ -106,7 +106,8 @@ export const pairsCheck: CheckModule = {
   plan(ctx: PlanContext, res: ResourceSpec): PlannedCheck {
     const w = wp(res.name, res.update!.tool);
     const base: PlannedCheck = { check: ID, version: VERSION, resource: res.name, runs: false, calls: [], writes: 0, creates: 0, notRun: [] };
-    const n = ctx.manifest.limits.pairs;
+    const reps = ctx.manifest.limits.pair_repeats ?? 1;
+    const n = ctx.manifest.limits.pairs * reps;
     const ctl = needsBase(res) ? hasControl(res, 'read', 'write') : hasControl(res, 'read', 'patch');
     const mode = ctx.manifest.server.processes;
     return {
@@ -114,7 +115,7 @@ export const pairsCheck: CheckModule = {
       runs: true,
       calls: [
         `validity x1: ${res.update!.tool} ${res.fields![0].path}, then ${res.fields![1].path}; ${res.read.tool}; and back in the other order; ${res.read.tool}`,
-        `test x${n}: ${needsBase(res) ? `${res.read.tool}; ` : ''}${res.update!.tool} ${res.fields![0].path} || ${res.update!.tool} ${res.fields![1].path} (released together, ${mode}); ${res.read.tool}`,
+        `test x${n}${reps > 1 ? ` (${reps} repeats of ${ctx.manifest.limits.pairs})` : ''}${ctx.manifest.limits.pair_budget ? ` against a pair budget of ${ctx.manifest.limits.pair_budget.repeats} × ${ctx.manifest.limits.pair_budget.pairs}` : ''}: ${needsBase(res) ? `${res.read.tool}; ` : ''}${res.update!.tool} ${res.fields![0].path} || ${res.update!.tool} ${res.fields![1].path} (released together, ${mode}); ${res.read.tool}`,
         ...(ctl ? [`control x${n}: ${needsBase(res) ? 'control read; control write' : 'control patch'} ${res.fields![0].path} || ${needsBase(res) ? 'control write' : 'control patch'} ${res.fields![1].path}; control read`] : []),
       ],
       writes: (1 + n) * 4 + (ctl ? n * 4 : 0),
@@ -122,15 +123,75 @@ export const pairsCheck: CheckModule = {
   },
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const exp = pairsExperiment(res, ctx.manifest.limits.pairs, ctx.manifest.server.processes);
-    const out = await runExperiment({ session: ctx.session, driver: ctx.driver }, exp);
-    return { check: ID, version: VERSION, resource: res.name, data: out };
+    const runs: ExperimentOutcome[] = [];
+    // why: F5: the pair budget is repeats × pairs; each repeat is its own experiment (fresh servers per arm), and a stopped repeat ends the series.
+    for (let i = 0; i < (ctx.manifest.limits.pair_repeats ?? 1); i++) {
+      const out = await runExperiment({ session: ctx.session, driver: ctx.driver }, exp);
+      runs.push(out);
+      if (out.stopped) break;
+    }
+    // why: the budget is kept with the observation, so recheck judges against the budget the run was made under.
+    const budget = ctx.manifest.limits.pair_budget ?? null;
+    return { check: ID, version: VERSION, resource: res.name, data: pairsData(runs, budget) };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
-    const rec = obs.data as ExperimentOutcome;
-    return pairsVerdicts(recount(rec.experiment, rec.arms, rec.simulated, rec.stopped), res, ctx.manifest.backend?.gate != null);
+    const data = obs.data as ExperimentOutcome | { repeats: ExperimentOutcome[]; budget?: { repeats: number; pairs: number } | null; stopped?: string | null };
+    const runs = 'repeats' in data ? data.repeats : [data];
+    const budget = 'repeats' in data ? data.budget ?? null : null;
+    const outs = runs.map((rec) => recount(rec.experiment, rec.arms, rec.simulated, rec.stopped));
+    return pairsBudgetVerdicts(outs, res, ctx.manifest.backend?.gate != null, budget);
   },
 };
+
+/**
+ * The observation data of the barrier pairs: one experiment as before, or the repeats with the budget. Review N1: the wrapper
+ * carries `stopped` (the first stopped repeat's reason), which run.ts reads to stop the run and mark the cut.
+ */
+export function pairsData(runs: ExperimentOutcome[], budget: { repeats: number; pairs: number } | null): ExperimentOutcome | { repeats: ExperimentOutcome[]; budget: { repeats: number; pairs: number } | null; stopped: string | null } {
+  if (runs.length === 1 && !budget) return runs[0]!;
+  return { repeats: runs, budget, stopped: runs.find((r) => r.stopped)?.stopped ?? null };
+}
+
+/**
+ * F5: the verdict over every repeat, judged against the pair budget. A violated or platform repeat decides (one valid violation
+ * counts); otherwise the repeats' pairs are added up, and `not observed` says whether the run reached the budget: "not observed
+ * (below budget)" is never a statement about the budget's bound. Pairs never give `held`.
+ */
+export function pairsBudgetVerdicts(outs: ExperimentOutcome[], res: ResourceSpec, gateConfigured: boolean, budget: { repeats: number; pairs: number } | null): Result[] {
+  const per = outs.map((o) => pairsVerdicts(o, res, gateConfigured)[0]!);
+  // why: review S2: with no declared budget and one repeat the record is exactly as before.
+  if (!budget && outs.length === 1) return per;
+  const c = (o: ExperimentOutcome, k: string) => o.arms['test']?.counts[k] ?? 0;
+  const run = outs.map((o) => c(o, 'valid'));
+  const met = !!budget && outs.length >= budget.repeats && run.slice(0, budget.repeats).every((n) => n >= budget.pairs);
+  const budgetNumbers = { pair_budget: budget ? { repeats: budget.repeats, pairs: budget.pairs } : null, repeats_run: outs.length, pairs_run: run, budget_met: met };
+  const label = budget ? `${budget.repeats} × ${budget.pairs}` : '';
+  const decided = per.findIndex((r) => r.verdict === 'violated' || r.verdict === 'platform');
+  if (decided >= 0) {
+    const r = per[decided]!;
+    return [{ ...r, numbers: { ...r.numbers, ...budgetNumbers, repeat: decided + 1 } }];
+  }
+  if (outs.length === 1 && per[0]!.verdict !== 'not observed') return [{ ...per[0]!, numbers: { ...per[0]!.numbers, ...budgetNumbers } }];
+  const stopped = per.find((r) => r.verdict === 'not tested' && outs[per.indexOf(r)]!.stopped);
+  if (stopped) return [{ ...stopped, numbers: { ...stopped.numbers, ...budgetNumbers } }];
+  const w = wp(res.name, res.update!.tool);
+  const sc = { id: ID, version: VERSION };
+  const valid = run.reduce((a, b) => a + b, 0);
+  const overlapped = outs.reduce((a, o) => a + c(o, 'overlapped'), 0);
+  const gateNote = gateConfigured ? ['The forced interleaving through backend.gate is a separate record (scenario held-request).'] : [];
+  const numbers: Record<string, unknown> = { pairs: valid, pairs_overlapped: overlapped, both_ok: outs.reduce((a, o) => a + c(o, 'both_ok'), 0), one_error: outs.reduce((a, o) => a + c(o, 'one_error'), 0), lost: 0, ...budgetNumbers };
+  if (per.some((r) => r.verdict === 'not tested' && /not independent|no valid pair/.test(r.reason))) {
+    const bad = per.find((r) => r.verdict === 'not tested')!;
+    return [{ ...bad, numbers: { ...bad.numbers, ...budgetNumbers } }];
+  }
+  if (overlapped < MIN_OVERLAPPED) return [result('MWS-CONC-3', w, sc, 'not tested', `too few overlapped pairs: ${overlapped} of ${valid} pairs in ${outs.length} repeat(s) were in flight together, and ${MIN_OVERLAPPED} are needed before "not observed" (raise limits.pairs)`, { numbers, notes: gateNote })];
+  const wi = wilson(0, overlapped);
+  const r3 = ruleOfThree(overlapped);
+  Object.assign(numbers, { loss_rate_upper_95_wilson: wi ? Math.round(wi.hi * 10_000) / 10_000 : null, loss_rate_upper_95_rule_of_three: r3 ? Math.round(r3.approx * 10_000) / 10_000 : null });
+  const head = !budget ? '' : met ? `Not observed at the full pair budget (${label} pairs): ` : `Not observed, below the pair budget (${run.join(' + ')} of ${label} pairs run): `;
+  return [result('MWS-CONC-3', w, sc, 'not observed', `${head}${head ? 'no' : 'No'} lost update in ${valid} simultaneous pairs (${overlapped} overlapped); the per-pair loss rate under these conditions could still be up to about ${r3 ? Math.round(r3.approx * 1000) / 10 : '?'}% (95% bound). ${NOT_OBSERVED_SENTENCE}`, { numbers, notes: gateNote })];
+}
 
 export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateConfigured: boolean): Result[] {
   const w = wp(res.name, res.update!.tool);

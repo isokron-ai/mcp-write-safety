@@ -6,6 +6,16 @@
 // rather than repeated, and batches are all-or-nothing. The MCP layer in
 // src/mcp talks to it over HTTP only.
 
+import { wallClock, type Clock } from "../clock.js";
+import { randomBytes } from "node:crypto";
+import {
+  CommitSinkError, JournalError, objectsOf,
+  type AppliedWrite, type CommitSink, type CommittedTransaction, type IdCounters, type ObjectOwner, type ObjectRef,
+  type RefusedTransaction, type ReplayedTransaction, type SeedState, type TxMeta,
+} from "./commit.js";
+import type { KeyRecordSeam, KeyScope } from "./seams.js";
+import type { EvidenceReader } from "./lookup.js";
+
 export type Status = "open" | "in_progress" | "closed" | "archived";
 export const STATUSES: readonly Status[] = ["open", "in_progress", "closed", "archived"];
 
@@ -79,16 +89,42 @@ export interface WriteResult {
   ticket: Ticket;
   changed: string[];
   replayed: boolean;
+  /** When replayed: the commit that applied the write this repeat matches (its applied-write entry's seq). */
+  originalSeq?: number;
 }
 
-/** One entry per applied write, used to recognize a replayed conditional write. */
-interface AppliedWrite {
-  fromVersion: number;
-  toVersion: number;
-  fingerprint: string;
+/** A Map that tells its owner which keys were set or deleted (the post-state of a commit is collected this way). */
+class TrackedMap<K, V> extends Map<K, V> {
+  onChange: ((key: K) => void) | undefined = undefined;
+  override set(key: K, value: V): this {
+    this.onChange?.(key);
+    return super.set(key, value);
+  }
+  override delete(key: K): boolean {
+    this.onChange?.(key);
+    return super.delete(key);
+  }
 }
 
-const now = () => new Date().toISOString();
+/** What the commit section in progress has touched: its one clock read and the objects and log entries it changed. */
+interface Section {
+  meta: TxMeta;
+  seq: number;
+  committedAt: string;
+  projects: Set<string>;
+  tickets: Set<string>;
+  owners: ObjectOwner[];
+  applied: AppliedWrite[];
+}
+
+/** A reply from a commit section. `replayOf` set: a re-sent conditional write already applied by commit `replayOf`. */
+export interface SectionReply {
+  status: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+  replayOf?: number;
+}
+
 const clone = <T>(value: T): T => structuredClone(value);
 
 export function canonicalJson(value: unknown): string {
@@ -165,13 +201,307 @@ export function validateFields(fields: TicketFields, { partial }: { partial: boo
 // ---- the store ----
 
 export class Store {
-  readonly projects = new Map<string, Project>();
-  readonly tickets = new Map<string, Ticket>();
-  private readonly applied = new Map<string, AppliedWrite[]>();
-  private seq = { ticket: 0, label: 0, comment: 0 };
+  /**
+   * The fields whose values are the store's state: a journal failure puts every one of them back (snapshot/restore),
+   * and test/interfaces.test.ts fails when the class has a field in neither list. A stream that adds state adds the
+   * field here; one that adds wiring adds it to WIRING_FIELDS.
+   */
+  static readonly STATE_FIELDS = ["projects", "tickets", "applied", "seq", "owners", "commitSeq"] as const;
+  /** The applied-write log keeps this many entries per ticket (INTERFACES 1.1). */
+  static readonly APPLIED_CAP = 20;
+  /** Fields that are configuration or bookkeeping, not state: never snapshotted. */
+  static readonly WIRING_FIELDS = ["clock", "bootId", "seed", "journal", "sinks", "stopped", "section", "keyRecords", "runOwner", "evidence", "resets"] as const;
 
-  constructor(seedProjects: string[] = ["inbox"]) {
+  readonly projects = new TrackedMap<string, Project>();
+  readonly tickets = new TrackedMap<string, Ticket>();
+  private applied = new Map<string, AppliedWrite[]>();
+  private seq: IdCounters = { ticket: 0, label: 0, comment: 0 };
+  /** Who created each project and ticket ("project:<key>", "ticket:<id>"): the run reset and ownership checks read it. */
+  private owners = new Map<string, ObjectOwner>();
+  /** The commit sequence: one per commit, from 1. Replays, refusals and aborted writes take none. */
+  private commitSeq = 0;
+  /** The seed, as created (the journal header carries it, so a restart keeps the seed's created_at). */
+  readonly seed: SeedState;
+  private journal: CommitSink | undefined = undefined;
+  private readonly sinks: CommitSink[] = [];
+  /** Set when a sink after the journal failed: the store answers nothing more (fail-stop). */
+  private stopped: CommitSinkError | undefined = undefined;
+  /** The commit section in progress, if any. */
+  private section: Section | undefined = undefined;
+  /** The key-record seam, set by startBackend: a run reset drops one run's key records through it. */
+  keyRecords: KeyRecordSeam | undefined = undefined;
+  /** Which principal a run belongs to, when the fixture layer allocated it (undefined: unknown run). Set by startBackend. */
+  runOwner: ((run: string) => string | undefined) | undefined = undefined;
+  /**
+   * The read side of the evidence (execution records and lookup by key; stream A), when the execution-records feature
+   * is on. Set by startBackend. The evidence namespace (stream B) answers GET /executions/:id and GET /operations/:key
+   * with `evidence.serve(url.pathname, url.searchParams)`.
+   */
+  evidence: EvidenceReader | undefined = undefined;
+  /**
+   * How many run resets this process committed, per principal and run (key `principal NUL run`). Not state: it lets a
+   * write that awaited before its commit section see that its run was reset meanwhile (409 run_reset, http.ts). It
+   * counts only resets that committed (bumped after the journal has the reset), so nothing undoes it.
+   */
+  private readonly resets = new Map<string, number>();
+
+  /** The number of committed resets of one principal's run (see `resets`). */
+  resetCount(principal: string, run: string): number {
+    return this.resets.get(`${principal}\u0000${run}`) ?? 0;
+  }
+
+  constructor(seedProjects: string[] = ["inbox"], readonly clock: Clock = wallClock, readonly bootId: string = randomBytes(8).toString("hex")) {
     for (const key of seedProjects) this.createProject(key, key);
+    this.seed = { projects: [...this.projects.values()].map(clone), counters: { ...this.seq } };
+    this.projects.onChange = (k) => this.section?.projects.add(k);
+    this.tickets.onChange = (k) => this.section?.tickets.add(k);
+  }
+
+  /** The record time: inside a commit section the section's one clock read, else (only the seed) the clock. */
+  private now(): string {
+    return this.section?.committedAt ?? this.clock.now().toISOString();
+  }
+
+  /** The commit sequence of the last commit (0 before any). */
+  get lastSeq(): number {
+    return this.commitSeq;
+  }
+
+  /** The id counters now. */
+  counters(): IdCounters {
+    return { ...this.seq };
+  }
+
+  /** The owner of a project or ticket, if this store created it in a commit (the seed has none). */
+  ownerOf(ref: { type: "ticket" | "project"; id: string }): ObjectOwner | undefined {
+    const o = this.owners.get(`${ref.type}:${ref.id}`);
+    return o && { ...o };
+  }
+
+  // ---- the commit point (src/backend/commit.ts) ----
+
+  /** Adds a sink. At most one has role "journal"; it is told first, the others after the write is visible. */
+  addSink(sink: CommitSink): void {
+    if (sink.role === "journal") {
+      if (this.journal) throw new Error(`a journal sink is already set (${this.journal.name})`);
+      this.journal = sink;
+    } else {
+      this.sinks.push(sink);
+    }
+  }
+
+  /** Every STATE_FIELDS value, deep-copied. Taken only when a journal is set (to undo a write its journal refused). */
+  captureState(): Record<string, unknown> {
+    const self = this as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const f of Store.STATE_FIELDS) {
+      const v = self[f];
+      out[f] = v instanceof Map ? structuredClone([...v]) : structuredClone(v);
+    }
+    return out;
+  }
+
+  private restoreState(s: Record<string, unknown>): void {
+    const self = this as unknown as Record<string, unknown>;
+    for (const f of Store.STATE_FIELDS) {
+      const v = self[f];
+      if (v instanceof Map) {
+        v.clear();
+        for (const [k, x] of s[f] as Array<[unknown, unknown]>) Map.prototype.set.call(v, k, x);
+      } else {
+        self[f] = s[f];
+      }
+    }
+  }
+
+  /** Throws the stored sink failure once a sink has failed. */
+  checkRunning(): void {
+    if (this.stopped) throw this.stopped;
+  }
+
+  private event(meta: TxMeta, status: number) {
+    return { ...meta, bootId: this.bootId, at: this.clock.wallNow().toISOString(), clockOffsetMs: this.clock.offsetMs(), status };
+  }
+
+  /** Tells the ledger sinks, then the observers, each group in the order added (frozen). */
+  private notify(fn: (sink: CommitSink) => void): void {
+    const ordered = [...this.sinks.filter((s) => s.role === "ledger"), ...this.sinks.filter((s) => s.role !== "ledger")];
+    for (const sink of ordered) {
+      try {
+        fn(sink);
+      } catch (e) {
+        this.stopped = new CommitSinkError(sink.name, e);
+        throw this.stopped;
+      }
+    }
+  }
+
+  /**
+   * Runs one write, in one synchronous section, in this order (frozen; docs/INTERFACES.md 1.1):
+   *   1. validate and compute: `mutate` runs on the store; a refusal (an ApiError) changes nothing and is reported;
+   *      a reply with `replayOf` (a re-sent conditional write already applied) changes nothing and goes to replay();
+   *   2. journal: the journal sink appends the committed post-state; if it throws, the store is put back as it was,
+   *      nothing is applied, the ledger is told of a 503 journal_unavailable refusal, and the caller gets a
+   *      JournalError (503);
+   *   3. apply: the write is now in effect, and `afterJournal` records what goes with it (the key record); if it
+   *      throws, the ledger and observers are still told, then the store stops (fail-stop);
+   *   4. ledger, then observers: if one throws, the store stops (fail-stop: the journal and memory agree, the
+   *      evidence does not);
+   *   5. reply (the caller sends it, after the after-commit fault hook).
+   * `mutate` receives the commit sequence number the write will get, and must not await. Every record time it stores
+   * is the section's one clock read (tx.committedAt).
+   */
+  commit<R extends SectionReply>(meta: TxMeta, mutate: (seq: number) => R, afterJournal?: (tx: CommittedTransaction, reply: R) => void, kind: CommittedTransaction["kind"] = "write"): { reply: R; tx?: CommittedTransaction } {
+    this.checkRunning();
+    if (this.section) throw new Error("commit sections do not nest");
+    const before = this.journal ? this.captureState() : undefined;
+    const seq = this.commitSeq + 1;
+    const section: Section = { meta, seq, committedAt: this.clock.now().toISOString(), projects: new Set(), tickets: new Set(), owners: [], applied: [] };
+    this.section = section;
+    let reply: R;
+    try {
+      reply = mutate(seq);
+      if ((reply as unknown as { then?: unknown }).then !== undefined) throw new Error("a commit section must be synchronous (await in a before step instead)");
+    } catch (e) {
+      this.section = undefined;
+      if (e instanceof ApiError) this.refuse(meta, e.status, e.code);
+      throw e;
+    }
+    this.section = undefined;
+    if (reply.replayOf !== undefined) {
+      if (section.projects.size || section.tickets.size) throw new Error("a replayed write changed the store");
+      this.replay(meta, reply.status, reply.body, reply.replayOf);
+      return { reply };
+    }
+    if (reply.status >= 300) {
+      this.refuse(meta, reply.status, "refused");
+      return { reply };
+    }
+    const tx: CommittedTransaction = {
+      ...this.event(meta, reply.status), kind, seq, committedAt: section.committedAt, body: reply.body, headers: { ...(reply.headers ?? {}) },
+      objects: kind === "run-reset" ? [...((reply.body as { objects?: ObjectRef[] })?.objects ?? [])] : objectsOf(meta.request?.path ?? "", reply.body),
+      post: this.postState(section),
+    };
+    if (kind === "run-reset") tx.reset = { principal: meta.principal, run: meta.attribution.run!, objects: [...tx.objects], keys: null };
+    if (this.journal) {
+      try {
+        this.journal.onCommit(tx);
+      } catch (e) {
+        this.restoreState(before!);
+        this.refuse(meta, 503, "journal_unavailable");
+        throw new JournalError(this.journal.name, e);
+      }
+    }
+    this.commitSeq = seq;
+    // The write is journalled and applied from here on. An exception in afterJournal (completing the key record) must
+    // not skip the ledger: the ledger and observers are still told of the commit, then the store stops (fail-stop),
+    // exactly as when a sink throws (seams v2.1).
+    let afterFailed = false;
+    let afterError: unknown;
+    try {
+      afterJournal?.(tx, reply);
+    } catch (e) {
+      afterFailed = true;
+      afterError = e;
+    }
+    this.notify((s) => s.onCommit(tx));
+    if (afterFailed) {
+      this.stopped = new CommitSinkError("afterJournal", afterError);
+      throw this.stopped;
+    }
+    return { reply, tx };
+  }
+
+  private postState(section: Section): CommittedTransaction["post"] {
+    const post: CommittedTransaction["post"] = {
+      upserts: { projects: [], tickets: [] }, deletes: { projects: [], tickets: [] }, counters: { ...this.seq },
+      owners: section.owners.filter((o) => (o.type === "ticket" ? this.tickets : this.projects).has(o.id)), applied: section.applied,
+    };
+    for (const k of section.projects) {
+      const p = this.projects.get(k);
+      if (p) post.upserts.projects.push(clone(p)); else post.deletes.projects.push(k);
+    }
+    for (const k of section.tickets) {
+      const t = this.tickets.get(k);
+      if (t) post.upserts.tickets.push(clone(t)); else post.deletes.tickets.push(k);
+    }
+    return post;
+  }
+
+  /** Records the creator of an object made in the current section. */
+  private own(type: "ticket" | "project", id: string): void {
+    const s = this.section;
+    if (!s) return;
+    const o: ObjectOwner = { type, id, principal: s.meta.principal, run: s.meta.attribution.run };
+    this.owners.set(`${type}:${id}`, o);
+    s.owners.push(o);
+  }
+
+  /** Marks a ticket changed in place (the TrackedMap sees only set and delete). */
+  private touch(ticket: Ticket): void {
+    this.section?.tickets.add(ticket.id);
+  }
+
+  /** A keyed repeat answered from its record, or a re-sent conditional write: nothing applied. `originalSeq` is the commit that made it. */
+  replay(meta: TxMeta, status: number, body: unknown, originalSeq: number): ReplayedTransaction {
+    this.checkRunning();
+    const tx: ReplayedTransaction = { ...this.event(meta, status), body, originalSeq };
+    this.notify((s) => s.onReplay?.(tx));
+    return tx;
+  }
+
+  /** A write refused before any effect. */
+  refuse(meta: TxMeta, status: number, code: string): RefusedTransaction {
+    const tx: RefusedTransaction = { ...this.event(meta, status), code };
+    this.notify((s) => s.onRefusal?.(tx));
+    return tx;
+  }
+
+  /**
+   * Run reset (contract 1.8): removes the projects and tickets one principal's run created, and that run's key
+   * records, as one commit (kind "run-reset"): journalled, so a restart does not bring them back, and told to the
+   * ledger with tx.reset. A project that still holds a ticket of another run is kept. Refused with 403 run_not_owned
+   * when the run is known to belong to another principal, and with 404 run_not_allocated when a run registry is
+   * wired (runOwner) and never allocated it. Its meta has `request: null` (no client request; the ledger entry's
+   * request is null). The key-record seam's dropRun also fences the run's pending key records (src/backend/seams.ts).
+   */
+  dropRun(scope: KeyScope, run: string): { objects: number; keys: number; tx: CommittedTransaction } {
+    const owner = this.runOwner?.(run);
+    const meta: TxMeta = { principal: scope.principal, attribution: { run, operation: null }, request: null };
+    if (owner !== undefined && owner !== scope.principal) {
+      this.refuse(meta, 403, "run_not_owned");
+      throw new ApiError(403, "run_not_owned", `run ${run} belongs to another principal`);
+    }
+    if (this.runOwner && owner === undefined) {
+      this.refuse(meta, 404, "run_not_allocated");
+      throw new ApiError(404, "run_not_allocated", `run ${run} was never allocated by this fixture`);
+    }
+    let removed: ObjectRef[] = [];
+    const { tx } = this.commit(meta, () => {
+      removed = [];
+      const mine = (o: ObjectOwner | undefined) => o !== undefined && o.principal === scope.principal && o.run === run;
+      for (const t of [...this.tickets.values()]) {
+        if (mine(this.owners.get(`ticket:${t.id}`))) {
+          this.tickets.delete(t.id);
+          this.applied.delete(t.id);
+          this.owners.delete(`ticket:${t.id}`);
+          removed.push({ type: "ticket", id: t.id });
+        }
+      }
+      for (const p of [...this.projects.values()]) {
+        if (mine(this.owners.get(`project:${p.key}`)) && ![...this.tickets.values()].some((t) => t.project === p.key)) {
+          this.projects.delete(p.key);
+          this.owners.delete(`project:${p.key}`);
+          removed.push({ type: "project", id: p.key });
+        }
+      }
+      return { status: 200, body: { run, principal: scope.principal, objects: removed } };
+    }, (t) => {
+      const k = `${scope.principal}\u0000${run}`;
+      this.resets.set(k, (this.resets.get(k) ?? 0) + 1);
+      t.reset!.keys = this.keyRecords?.dropRun(scope, run) ?? 0;
+    }, "run-reset");
+    return { objects: removed.length, keys: tx!.reset!.keys!, tx: tx! };
   }
 
   // projects
@@ -186,9 +516,10 @@ export class Store {
     if (this.projects.has(key)) {
       throw new ApiError(409, "exists", `project ${key} already exists`, { current: clone(this.projects.get(key)) });
     }
-    const t = now();
+    const t = this.now();
     const project: Project = { key, name, version: 1, created_at: t, updated_at: t };
     this.projects.set(key, project);
+    this.own("project", key);
     return clone(project);
   }
 
@@ -201,7 +532,8 @@ export class Store {
     }
     existing.name = name;
     existing.version += 1;
-    existing.updated_at = now();
+    existing.updated_at = this.now();
+    this.section?.projects.add(key);
     return { project: clone(existing), created: false };
   }
 
@@ -218,6 +550,7 @@ export class Store {
       throw new ApiError(409, "not_empty", `project ${key} still has ${count} tickets`, { ticket_count: count });
     }
     this.projects.delete(key);
+    this.owners.delete(`project:${key}`);
   }
 
   // tickets
@@ -245,7 +578,7 @@ export class Store {
     if (comment !== undefined && (typeof comment !== "string" || comment.length < 1 || comment.length > 5000)) {
       throw fieldError("comment", "must be a string of 1 to 5000 characters");
     }
-    const t = now();
+    const t = this.now();
     const ticket: Ticket = {
       id: `T-${++this.seq.ticket}`,
       project,
@@ -262,28 +595,38 @@ export class Store {
       updated_at: t,
     };
     this.tickets.set(ticket.id, ticket);
+    this.own("ticket", ticket.id);
     return clone(ticket);
+  }
+
+  /** The principal of the write in progress (the commit section's); "" outside a section. */
+  private principal(): string {
+    return this.section?.meta.principal ?? "";
   }
 
   /**
    * Checks an If-Match precondition. Returns a replay result when the
    * precondition is stale only because this very write was already applied
-   * from that version and nothing has changed since.
+   * from that version, by the same principal, and nothing has changed since.
+   * Another principal sending the same write gets the normal 412 (seams v2.1).
    */
   private precondition(ticket: Ticket, ifMatch: number | "*" | undefined, fingerprint: string): WriteResult | undefined {
     if (ifMatch === undefined || ifMatch === "*" || ifMatch === ticket.version) return undefined;
     const last = this.applied.get(ticket.id)?.at(-1);
-    if (last && last.fromVersion === ifMatch && last.toVersion === ticket.version && last.fingerprint === fingerprint) {
-      return { ticket: clone(ticket), changed: [], replayed: true };
+    if (last && last.fromVersion === ifMatch && last.toVersion === ticket.version && last.fingerprint === fingerprint
+      && last.principal === this.principal()) {
+      return { ticket: clone(ticket), changed: [], replayed: true, originalSeq: last.seq };
     }
     throw new ApiError(412, "precondition_failed",
       `ticket ${ticket.id} is at version ${ticket.version}, not ${ifMatch}`, { current: clone(ticket) });
   }
 
   private record(ticket: Ticket, fromVersion: number, fingerprint: string): void {
+    const entry: AppliedWrite = { ticket: ticket.id, principal: this.principal(), fromVersion, toVersion: ticket.version, fingerprint, seq: this.section?.seq ?? 0 };
     const list = this.applied.get(ticket.id) ?? [];
-    list.push({ fromVersion, toVersion: ticket.version, fingerprint });
-    this.applied.set(ticket.id, list.slice(-20));
+    list.push(entry);
+    this.applied.set(ticket.id, list.slice(-Store.APPLIED_CAP));
+    this.section?.applied.push({ ...entry });
   }
 
   /** Applies fields to a ticket in place and returns the names of the fields that changed. */
@@ -318,7 +661,8 @@ export class Store {
 
   private bump(ticket: Ticket): void {
     ticket.version += 1;
-    ticket.updated_at = now();
+    ticket.updated_at = this.now();
+    this.touch(ticket);
   }
 
   /** Per-field update. Only the fields present are touched. */
@@ -365,6 +709,7 @@ export class Store {
     this.precondition(ticket, ifMatch, "DELETE");
     this.tickets.delete(id);
     this.applied.delete(id);
+    this.owners.delete(`ticket:${id}`);
   }
 
   addComment(id: string, body: string): { ticket: Ticket; comment: Comment } {
@@ -373,7 +718,7 @@ export class Store {
     if (typeof body !== "string" || body.length < 1 || body.length > 5000) {
       throw fieldError("body", "must be a string of 1 to 5000 characters");
     }
-    const comment: Comment = { id: `C-${++this.seq.comment}`, body, created_at: now() };
+    const comment: Comment = { id: `C-${++this.seq.comment}`, body, created_at: this.now() };
     ticket.comments.push(comment);
     this.bump(ticket);
     return { ticket: clone(ticket), comment: clone(comment) };
@@ -442,6 +787,7 @@ export class Store {
       if (op.op === "delete") {
         this.tickets.delete(op.id);
         this.applied.delete(op.id);
+        this.owners.delete(`ticket:${op.id}`);
         return { id: op.id, op: op.op };
       }
       const r = this.patchTicket(op.id, op.set ?? {});
@@ -453,6 +799,46 @@ export class Store {
   export(): { projects: Project[]; tickets: Ticket[] } {
     return { projects: [...this.projects.values()].map(clone), tickets: [...this.tickets.values()].map(clone) };
   }
+
+  // ---- stream D: journal replay ----
+  // Stream D fills this block (and only this block of store.ts). Contract (docs/INTERFACES.md 1.8): no clock call, no
+  // operation re-run; times, ids, counters, owners and applied-write entries come from the journal as committed.
+
+  /** Replaces the constructor's seed with a journal header's (so the seed keeps its first created_at). Stream D. */
+  applySeed(seed: SeedState): void {
+    if (this.commitSeq !== 0 || this.tickets.size !== 0) throw new Error("a seed is applied only to a store with no commits");
+    this.projects.clear();
+    for (const p of seed.projects) this.projects.set(p.key, clone(p));
+    this.seq = { ...seed.counters };
+    (this as { seed: SeedState }).seed = clone(seed);
+  }
+
+  /**
+   * Restores one committed transaction's post-state: upserts and deletes, counters, owners, applied-write entries,
+   * and the commit sequence (lastSeq becomes tx.seq). Key records are rebuilt by the journal from the same line
+   * (storedReplyOf(tx); a run-reset line drops tx.reset's key records). Stream D.
+   */
+  applyPostState(tx: CommittedTransaction): void {
+    if (this.section) throw new Error("applyPostState runs outside a commit section (journal replay only)");
+    if (tx.seq <= this.commitSeq) throw new Error(`commit ${tx.seq} is not after ${this.commitSeq}`);
+    const post = tx.post;
+    for (const p of post.upserts.projects) this.projects.set(p.key, clone(p));
+    for (const t of post.upserts.tickets) this.tickets.set(t.id, clone(t));
+    for (const k of post.deletes.projects) {
+      this.projects.delete(k);
+      this.owners.delete(`project:${k}`);
+    }
+    for (const k of post.deletes.tickets) {
+      this.tickets.delete(k);
+      this.applied.delete(k);
+      this.owners.delete(`ticket:${k}`);
+    }
+    for (const o of post.owners) this.owners.set(`${o.type}:${o.id}`, { ...o });
+    for (const a of post.applied) this.applied.set(a.ticket, [...(this.applied.get(a.ticket) ?? []), { ...a }].slice(-20));
+    this.seq = { ...post.counters };
+    this.commitSeq = tx.seq;
+  }
+  // ---- end stream D ----
 }
 
 export interface BatchOp {

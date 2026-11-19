@@ -6,6 +6,7 @@
  * writes, so point it only at a test environment you are allowed to change.
  */
 
+import { parsePairBudget } from '../core/manifest.js';
 import { createInterface } from 'node:readline';
 import { stdin } from 'node:process';
 
@@ -23,6 +24,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { catalogCommand, cleanupCommand, planCommand, recheckCommand, rerunCommand, reviewCommand } from './commands.js';
+import { loadSigningKey } from '../report/sign.js';
+import { compareCommand, finishRecheck, IDENTITY_FLAGS, IDENTITY_USAGE, identityOptions, verifyResultsCommand } from './compare.js';
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
 import { runCommand, type RunOutcome } from './run.js';
@@ -49,7 +52,7 @@ const COMMANDS: Record<string, CommandSpec> = {
     and stops everything it started. Finds tiny-tracker with --tiny-tracker, TINY_TRACKER_DIR, a
     tiny-tracker command on PATH (the @mcp-write-safety/tiny-tracker package), or examples/tiny-tracker in a checkout. The demo confirms the
     target itself because it started it; run never does.`,
-    flags: ['--defect', '--tiny-tracker', '--out', '-o', '--manifest', '-m'],
+    flags: ['--defect', '--tiny-tracker', '--out', '-o', '--manifest', '-m', '--pair-budget'],
     bools: ['--verbose', '-v'],
   },
   init: {
@@ -60,11 +63,13 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     flags: ['--out', '-o', '--env', '--url'],
   },
   plan: {
-    usage: `mcp-writecheck plan -m manifest.yaml [--catalog tools.json]
+    usage: `mcp-writecheck plan -m manifest.yaml [--catalog tools.json] [--pair-budget 2x1500]
     Print every call a run would make, the most writes and creates, what will not be tested and why,
     and the plan hash run must be given. Makes no tool call (tools/list only, or --catalog: a
-    tools/list answer, a list of tools, or a catalog snapshot).`,
-    flags: ['-m', '--manifest', '--catalog'],
+    tools/list answer, a list of tools, or a catalog snapshot). --pair-budget RxP: run the MWS-CONC-3
+    barrier pairs as R repeats of P pairs (as limits.pair_budget; it enters the plan hash, so give run
+    the same flag). Opt-in: 2x1500 is about 12,000 writes per resource; the plan prints the estimate.`,
+    flags: ['-m', '--manifest', '--catalog', '--pair-budget'],
   },
   catalog: {
     usage: `mcp-writecheck catalog (-m manifest.yaml | --catalog tools.json) [--out mwsc-results]
@@ -79,14 +84,14 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
                    [--state .mwsc] [--baseline baseline.yaml] [--review answers.yaml] [--sign ~/.ssh/key]
     Run the checks. Asks for the target and the plan hash (or takes them as flags in CI; there is no
     --yes). Writes report.md, results.json, junit.xml, the capture and SHA256SUMS to --out/<run id>.`,
-    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review'],
+    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--pair-budget'],
   },
   rerun: {
     usage: `mcp-writecheck rerun <results folder> -m manifest.yaml [--confirm-target T --plan-hash H] [same options as run]
     Run again what a recorded run ran. The manifest must be the one that run used (its sha256 is
     recorded); if today's plan differs (catalog, suite, hosts), that is printed and the new hash is
     the one to confirm. The new results say which run they repeat.`,
-    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review'],
+    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--pair-budget'],
   },
   cleanup: {
     usage: `mcp-writecheck cleanup -m manifest.yaml [--confirm-target T] [--state .mwsc] [--run ID] [--abandon]
@@ -108,9 +113,31 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     under in the manifest's review block. Answers are recorded as self-attested.`,
     flags: [],
   },
+  compare: {
+    usage: `mcp-writecheck compare <before results.json|folder> <after results.json|folder> [--out DIR] [--pubkey KEY]
+    Before/after per cell (requirement @ tool), joined only where the test hashes are equal; verdicts rolled up by MWS 8.2
+    rule 13. Labels each cell fixed, regressed, unchanged, changed (no claim) or not comparable, with the reason. Writes
+    compare.json and compare.md to --out (default .). Refuses different MWS versions. --pubkey: both files must be signed
+    by that key. Exit 1 when a cell regressed, or a slot regressed inside a cell (--fail-on-slot-regression false: warn only).`,
+    flags: ['--out', '-o', '--pubkey', '--fail-on-slot-regression'],
+  },
+  'verify-results': {
+    usage: `mcp-writecheck verify-results <results.json|folder> [--pubkey KEY]
+    Check the results signature (--sign-key) against a pinned Ed25519 key (PEM, or an ssh-ed25519 line or .pub file).
+    Exit 0 signed by that key and unchanged; 1 unsigned, or not pinned (no --pubkey); 3 changed or signed by another key.`,
+    flags: ['--pubkey'],
+  },
   requirements: { usage: `mcp-writecheck requirements\n    List the requirement IDs this release knows, with their level.`, flags: [] },
   version: { usage: `mcp-writecheck version\n    Print the suite and requirements versions.`, flags: [] },
 };
+
+// why: F8: the run identity flags are added here, apart from the run and rerun entries, so other changes to those lines merge cleanly.
+for (const c of ['run', 'rerun'] as const) {
+  COMMANDS[c]!.flags.push(...IDENTITY_FLAGS);
+  COMMANDS[c]!.usage += `\n${IDENTITY_USAGE}`;
+}
+COMMANDS['recheck']!.flags.push('--sign-key');
+COMMANDS['recheck']!.usage += '\n    The rechecked copy is unsigned (the original signature does not cover new verdicts), or signed with --sign-key FILE.';
 
 const USAGE = `${HEAD}
 
@@ -186,7 +213,8 @@ export async function main(argv: string[]): Promise<number> {
     const baseline = one(a, '--baseline');
     const sign = one(a, '--sign');
     const review = one(a, '--review');
-    return { manifest: manifest(), outRoot: one(a, '--out', '-o') ?? 'mwsc-results', stateDir: one(a, '--state') ?? '.mwsc', ...(confirmTarget !== undefined ? { confirmTarget } : {}), ...(planHash !== undefined ? { planHash } : {}), ...(baseline ? { baseline } : {}), ...(sign ? { sign } : {}), ...(review ? { review } : {}), interactive: !!stdin.isTTY, ask: askLine, env: process.env, log };
+    const pb = one(a, '--pair-budget');
+    return { manifest: manifest(), ...(pb ? { pairBudget: parsePairBudget(pb) } : {}), outRoot: one(a, '--out', '-o') ?? 'mwsc-results', stateDir: one(a, '--state') ?? '.mwsc', ...(confirmTarget !== undefined ? { confirmTarget } : {}), ...(planHash !== undefined ? { planHash } : {}), ...(baseline ? { baseline } : {}), ...(sign ? { sign } : {}), ...(review ? { review } : {}), interactive: !!stdin.isTTY, ask: askLine, env: process.env, log };
   };
   const report = (r: RunOutcome) => {
     // why: problem 14 in the GitHub Action's NOTES.md: an incomplete run says so first.
@@ -220,7 +248,8 @@ export async function main(argv: string[]): Promise<number> {
     case 'demo': {
       const tt = one(a, '--tiny-tracker');
       const m = one(a, '--manifest', '-m');
-      return demoCommand({ ...(tt ? { tinyTracker: tt } : {}), ...(m ? { manifest: m } : {}), defects: (a.flags.get('--defect') ?? []).flatMap((d) => d.split(',')).filter(Boolean), out: one(a, '--out', '-o') ?? join(tmpdir(), 'mwsc-demo-results'), env: process.env, log, verbose: a.flags.has('--verbose') || a.flags.has('-v') });
+      const pb = one(a, '--pair-budget');
+      return demoCommand({ ...(tt ? { tinyTracker: tt } : {}), ...(m ? { manifest: m } : {}), ...(pb ? { pairBudget: parsePairBudget(pb) } : {}), defects: (a.flags.get('--defect') ?? []).flatMap((d) => d.split(',')).filter(Boolean), out: one(a, '--out', '-o') ?? join(tmpdir(), 'mwsc-demo-results'), env: process.env, log, verbose: a.flags.has('--verbose') || a.flags.has('-v') });
     }
     case 'init': {
       const url = one(a, '--url');
@@ -230,7 +259,8 @@ export async function main(argv: string[]): Promise<number> {
     }
     case 'plan': {
       const catalog = one(a, '--catalog');
-      await planCommand({ manifest: manifest(), ...(catalog ? { catalog } : {}), env: process.env, log });
+      const pb = one(a, '--pair-budget');
+      await planCommand({ manifest: manifest(), ...(catalog ? { catalog } : {}), ...(pb ? { pairBudget: parsePairBudget(pb) } : {}), env: process.env, log });
       return 0;
     }
     case 'catalog': {
@@ -239,9 +269,21 @@ export async function main(argv: string[]): Promise<number> {
       return (await catalogCommand({ ...(m ? { manifest: m } : {}), ...(cat ? { catalog: cat } : {}), out: one(a, '--out', '-o') ?? 'mwsc-results', env: process.env, log })).exit;
     }
     case 'run':
-      return report(await runCommand(runOpts()));
+      return report(await runCommand({ ...runOpts(), identity: identityOptions((n) => one(a, n), (n) => a.flags.get(n) ?? []) }));
     case 'rerun':
-      return report(await rerunCommand({ ...runOpts(), dir: folder() }));
+      return report(await rerunCommand({ ...runOpts(), identity: identityOptions((n) => one(a, n), (n) => a.flags.get(n) ?? []), dir: folder() }));
+    case 'compare': {
+      const [before, after] = a.rest;
+      if (!before || !after) throw new WritecheckError('compare <before> <after> (see mcp-writecheck compare --help)', 2);
+      const pubkey = one(a, '--pubkey');
+      const fosr = one(a, '--fail-on-slot-regression') ?? 'true';
+      if (fosr !== 'true' && fosr !== 'false') throw new WritecheckError('--fail-on-slot-regression takes true or false', 2);
+      return compareCommand({ before, after, out: one(a, '--out', '-o') ?? '.', ...(pubkey ? { pubkey } : {}), failOnSlotRegression: fosr === 'true', log }).exit;
+    }
+    case 'verify-results': {
+      const pubkey = one(a, '--pubkey');
+      return verifyResultsCommand({ file: folder(), ...(pubkey ? { pubkey } : {}), log }).exit;
+    }
     case 'cleanup': {
       const run = one(a, '--run');
       const confirmTarget = one(a, '--confirm-target');
@@ -250,7 +292,12 @@ export async function main(argv: string[]): Promise<number> {
     }
     case 'recheck': {
       const review = one(a, '--review');
+      // why: F8 review: the rechecked copy is not covered by the original signature; it is unsigned or signed again. The key is
+      // read before recheck writes anything, so a bad key leaves no half-finished copy.
+      const sk = one(a, '--sign-key');
+      const key = loadSigningKey(sk, sk ? {} : process.env);
       recheckCommand({ dir: folder(), ...(review ? { review } : {}), log });
+      await finishRecheck(folder(), { key, log });
       return 0;
     }
     case 'review':

@@ -11,6 +11,7 @@
  *            <folder>/recheck/.
  */
 
+import { cellPass, CELLS_SCENARIO, inputRequiredTools } from '../checks/cells.js';
 import type { Loss } from '../checks/bystanders.js';
 import { withLaterLoss, withLoss, type LaterLoss } from '../checks/targeting.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -45,8 +46,8 @@ import { previewSentence, REQUIREMENTS, SPEC_VERSION, type RequirementId } from 
 import { egressOf, redactorFor, reviewOf, runCommand, type RunOptions, type RunOutcome } from './run.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 
-export async function planCommand(o: { manifest: string; catalog?: string; env: NodeJS.ProcessEnv; log: (s: string) => void }): Promise<{ plan: Plan; hash: string; warning: string | null }> {
-  const manifest = loadManifest(o.manifest);
+export async function planCommand(o: { manifest: string; catalog?: string; pairBudget?: { repeats: number; pairs: number } | null; env: NodeJS.ProcessEnv; log: (s: string) => void }): Promise<{ plan: Plan; hash: string; warning: string | null }> {
+  const manifest = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   let warning: string | null = null;
   try {
     checkTarget(manifest, o.env);
@@ -163,7 +164,11 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   useShapes(manifest, tools);
   const ctx = { manifest, tools, review: reviewOf(manifest, o.review), gated: !!manifest.backend?.gate };
   const fresh: Result[] = [];
-  for (const obs of doc.observations as Observation[]) {
+  // why: review (F1 round 3): the cut of a run cut short is persisted (run.cut_at); a record re-evaluated from an observation made
+  // after it stays late, and one from before it is never voided, whatever key it shares.
+  const cut = doc.run.cut_at ?? null;
+  const freshObs = new Map<Result, number>();
+  for (const [oi, obs] of (doc.observations as Observation[]).entries()) {
     const mod = checkById(obs.check);
     if (!mod) throw new WritecheckError(`recheck: no check ${obs.check} in this version`, 2);
     if (mod.version !== obs.version) o.log(`note: ${obs.check} was recorded at scenario version ${obs.version}; this release has ${mod.version}`);
@@ -173,7 +178,9 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
     const later = (obs as { later_losses?: LaterLoss[] }).later_losses ?? [];
     for (const r of mod.evaluate(obs, ctx)) {
       const x = runLosses.length ? withLoss(r, [], false, runLosses) : r;
-      fresh.push(later.length ? withLaterLoss(x, later) : x);
+      const y = later.length ? withLaterLoss(x, later) : x;
+      fresh.push(y);
+      freshObs.set(y, oi);
     }
   }
   // Results decided without calls (not applicable, not tested, the catalog) are kept as recorded.
@@ -183,13 +190,38 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   const k = (r: Result) => `${r.requirement} ${writePathKey(r.write_path)} ${r.scenario.id}`;
   const before = new Map(doc.results.map((r) => [k(r), r.verdict]));
   const changed = results.filter((r) => before.get(k(r)) !== r.verdict).map((r) => ({ key: k(r), before: before.get(k(r)) ?? '(none)', after: r.verdict }));
-  const out: ResultsDoc = { ...doc, results, scope: `${doc.scope} Rechecked offline with this release's rules.` };
+  // why: F1/F6: the cells and validity are re-derived from the rechecked records (docs/CELLS.md).
+  // why: review M2: the cell pass's own rows are re-derived, never kept (a rule or a record that changed would leave a stale one).
+  // why: review R1: a record made after the run was cut short is known from the recorded validity (V-RUN), not from the stop text.
+  const late = recheckLate(doc, freshObs);
+  // why: the late records go last, so the rechecked file's run.cut_at.record again marks where they start.
+  const input = results.filter((r) => r.scenario.id !== CELLS_SCENARIO.id);
+  const ordered = cut ? [...input.filter((r) => !late(r)), ...input.filter(late)] : input;
+  const celled = cellPass(manifest, tools, ordered, { stopped: doc.run.stopped_reason, late, input_required_tools: inputRequiredTools(doc.target.mcp) });
+  const run = cut && celled.late_from !== null ? { ...doc.run, cut_at: { record: celled.late_from, observation: cut.observation } } : doc.run;
+  const out: ResultsDoc = { ...doc, run, results: celled.results, cells: celled.cells, scope: `${doc.scope} Rechecked offline with this release's rules.` };
   const dir = join(o.dir, 'recheck');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'results.json'), JSON.stringify(out, null, 2) + '\n');
   writeFileSync(join(dir, 'report.md'), renderMarkdown(out));
   o.log(changed.length ? changed.map((c) => `${c.key}: ${c.before} → ${c.after}`).join('\n') : 'No verdict changed.');
   return { doc: out, changed };
+}
+
+/**
+ * Which records of a recheck were made after the run was cut short (V-RUN). With run.cut_at: a record re-evaluated from an
+ * observation at or after cut_at.observation, or a kept record at or after cut_at.record. Without it (a file from before the
+ * field), the records that failed V-RUN before, by requirement, write path and scenario.
+ */
+export function recheckLate(doc: Pick<ResultsDoc, 'run' | 'results'>, freshObs: Map<Result, number>): (r: Result) => boolean {
+  const cut = doc.run.cut_at ?? null;
+  const k = (r: Result) => `${r.requirement} ${writePathKey(r.write_path)} ${r.scenario.id}`;
+  if (!cut) {
+    const lateKeys = new Set(doc.results.filter((r) => r.validity?.failed.includes('V-RUN')).map(k));
+    return (r) => lateKeys.has(k(r));
+  }
+  const keptAt = new Map(doc.results.map((r, i) => [r, i] as const));
+  return (r) => (freshObs.has(r) ? freshObs.get(r)! >= cut.observation : keptAt.has(r) && keptAt.get(r)! >= cut.record);
 }
 
 /**
@@ -233,7 +265,7 @@ export async function rerunCommand(o: Omit<RunOptions, 'rerunOf'> & { dir: strin
   const file = join(o.dir, 'results.json');
   if (!existsSync(file)) throw new WritecheckError(`${o.dir}: no results.json (give the folder a run wrote, e.g. mwsc-results/<run id>)`, 2);
   const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
-  const m = loadManifest(o.manifest);
+  const m = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   if (m.source.sha256 !== doc.manifest.sha256) throw new WritecheckError(`${o.manifest} is not the manifest run ${doc.run.id} used (sha256 ${m.source.sha256.slice(0, 16)}… now, ${doc.manifest.sha256.slice(0, 16)}… then); a rerun repeats a recorded run exactly, so it refuses. Use \`run\` for a new plan.`, 3);
   if (doc.suite.version !== SUITE_VERSION) o.log(`note: run ${doc.run.id} was made with ${doc.suite.name} ${doc.suite.version}; this is ${SUITE_VERSION}, so scenario versions may differ.`);
   const { hash } = await planCommand({ manifest: o.manifest, env: o.env, log: () => {} });
@@ -315,6 +347,8 @@ export async function catalogCommand(o: { manifest?: string; catalog?: string; o
     manifest: manifestInfo,
     plan: { hash: '' },
     results,
+    // why: catalog only: no tool was called and no declaration names the write tools, so there are no cells (docs/CELLS.md).
+    cells: [],
     not_built: [],
     measurements: measure(tools, {}),
     leftovers: [],
