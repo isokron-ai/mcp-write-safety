@@ -39,6 +39,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import type { Manifest, ResourceSpec } from '../core/manifest.js';
 import { furtherProbes } from '../checks/readback.js';
 import { versionLeftOutRuns } from '../checks/stale.js';
+import { ID_LIKE, misspelledArgument } from '../checks/schema.js';
 import { canonical, isObj, parsePath, sha256 } from '../core/util.js';
 import { TEST_HASH_FORMAT } from '../core/identity.js';
 import { SPEC_VERSION } from '../requirements.js';
@@ -492,6 +493,23 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     address[le.tool] = { by_id: !!le.address.by_id && Object.hasOwn(props, topName(le.address.by_id)), by_position: !!le.address.by_position && Object.hasOwn(props, topName(le.address.by_position)) };
   }
   if (Object.keys(address).length) chosen['address'] = address;
+  // MWS-IN-2 misspells one argument of the probed tool: which one follows from the names, the skipped ones and the closed schema.
+  if (res && r.requirement === 'MWS-IN-2' && r.scenario.id === 'schema-probes') {
+    const sc = ctx.tools.find((x) => x.name === r.write_path.tool)?.['inputSchema'];
+    const closed = !(isObj(sc) && (sc['additionalProperties'] === true || isObj(sc['additionalProperties'])));
+    if (closed) {
+      const props = Object.keys(declaredProps(sc));
+      const skip = new Set<string>();
+      // (as checks/schema.ts protectedProps: on the update tool, every argument of the base call but the field's, and id-like ones)
+      if (res.update?.tool === r.write_path.tool) {
+        const fieldArg = res.fields?.[0]?.arg;
+        const base = isObj(res.update.args) ? Object.keys(res.update.args).filter((k) => !k.includes('{{')) : [];
+        for (const k of base) if (k !== fieldArg) skip.add(k);
+        for (const k of props) if (!base.includes(k) && k !== fieldArg && ID_LIKE.test(k)) skip.add(k);
+      }
+      chosen['misspelled'] = misspelledArgument(props.filter((k) => !skip.has(k)));
+    }
+  }
   // why: review F4: MWS-CONC-2 adds a run that leaves the version argument out only where the tool's schema does not require it.
   if (res && r.requirement === 'MWS-CONC-2' && res.version?.arg) {
     const runs = versionLeftOutRuns(res).filter((x) => !res.no_version_check.includes(x.tool));
