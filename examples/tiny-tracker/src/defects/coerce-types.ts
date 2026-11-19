@@ -10,7 +10,7 @@
 // `all: "false"` deletes every ticket in the project.
 //
 // Mirrors: PostHog X1 (`"false"` read as true, `null` as 0).
-//   https://isokron.ai/research/posthog-mcp-server-audit#findings-register
+//   https://isokron.ai/research/posthog-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { correctValidation } from "../mcp/validate.js";

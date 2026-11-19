@@ -46,6 +46,206 @@ export function canonical(v: unknown): string {
 
 export const hashJson = (v: unknown): string => sha256(canonical(v));
 
+/** The deepest nesting (objects and arrays) a signed or compared document may have. */
+export const MAX_JSON_DEPTH = 512;
+
+/** A JSON path short enough for one error line. */
+const clipPath = (path: string): string => (path.length > 120 ? `${path.slice(0, 60)}…${path.slice(-50)}` : path);
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** True when the string holds a UTF-16 surrogate without its pair: not Unicode text, so not I-JSON (RFC 7493) and refused by RFC 8785. */
+export const hasLoneSurrogate = (s: string): boolean => LONE_SURROGATE.test(s);
+
+/**
+ * RFC 8785 (JCS) canonical JSON for signatures. The output is byte-identical to `canonical` for every value it accepts, but
+ * it refuses (WritecheckError, exit 3) what RFC 8785 or I-JSON excludes or what cannot be canonicalised safely, never a crash:
+ * a string or member name with a lone surrogate, nesting deeper than `maxDepth`, a non-finite number, a value that is not JSON.
+ * Iterative, so the depth check, not the call stack, is the limit.
+ */
+export function canonicalStrict(value: unknown, maxDepth = MAX_JSON_DEPTH): string {
+  const out: string[] = [];
+  const stack: [unknown, number, string][] = [[value, 0, '$']];
+  const refuse = (path: string, what: string) => new WritecheckError(`canonical JSON: ${clipPath(path)}: ${what}`, 3);
+  while (stack.length > 0) {
+    const [v, depth, path] = stack.pop()!;
+    if (v instanceof Lit) {
+      out.push(v.s);
+      continue;
+    }
+    if (v === null || typeof v === 'boolean') out.push(JSON.stringify(v));
+    else if (typeof v === 'string') {
+      if (hasLoneSurrogate(v)) throw refuse(path, 'a string with a lone surrogate (not Unicode text; RFC 8785 refuses it)');
+      out.push(JSON.stringify(v));
+    } else if (typeof v === 'number') {
+      if (!Number.isFinite(v)) throw refuse(path, 'a non-finite number');
+      out.push(JSON.stringify(v));
+    } else if (Array.isArray(v) || isObj(v)) {
+      if (depth >= maxDepth) throw refuse(path, `nesting deeper than ${maxDepth} levels`);
+      if (Array.isArray(v)) {
+        out.push('[');
+        stack.push([new Lit(']'), 0, path]);
+        for (let i = v.length - 1; i >= 0; i--) {
+          const x = v[i] as unknown;
+          stack.push([x === undefined ? null : x, depth + 1, `${path}[${i}]`]);
+          if (i > 0) stack.push([new Lit(','), 0, path]);
+        }
+      } else {
+        const keys = Object.keys(v)
+          .filter((k) => v[k] !== undefined)
+          .sort();
+        out.push('{');
+        stack.push([new Lit('}'), 0, path]);
+        for (let i = keys.length - 1; i >= 0; i--) {
+          const k = keys[i]!;
+          if (hasLoneSurrogate(k)) throw refuse(path, 'a member name with a lone surrogate (not Unicode text; RFC 8785 refuses it)');
+          stack.push([v[k], depth + 1, `${path}.${k}`]);
+          stack.push([new Lit(`${i > 0 ? ',' : ''}${JSON.stringify(k)}:`), 0, path]);
+        }
+      }
+    } else throw refuse(path, `a ${typeof v} is not JSON`);
+  }
+  return out.join('');
+}
+
+/** What makes a JSON text unfit to be signed or compared, found by `jsonTextProblem`. */
+export interface JsonTextProblem {
+  kind: 'syntax' | 'duplicate' | 'number' | 'string' | 'depth';
+  /** Where (`$.a.b[0]`). */
+  path: string;
+  message: string;
+}
+
+const NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+const clip = (s: string) => (s.length > 40 ? `${s.slice(0, 40)}…` : s);
+
+/**
+ * One iterative pass over a JSON text (no recursion, so any nesting is safe) that finds the first thing that would make two
+ * different texts verify under one signature, or a text that RFC 8785 refuses:
+ * - a syntax error or text after the document (`syntax`);
+ * - an object that repeats a member name (`duplicate`: JSON readers disagree on which copy counts);
+ * - a number not written as RFC 8785 writes it (`number`: `1.0`, `1e0`, `-0`, or digits beyond double precision such as
+ *   `9007199254740993`, which a JavaScript reader rounds and a reader with exact integers does not; and numbers beyond the
+ *   double range). With every number in that form, the number text is a function of the value, so the canonical form, and with
+ *   it the signature, covers the text itself;
+ * - a string or member name holding a lone surrogate, escaped (`"\ud800"`) or raw (`string`);
+ * - nesting deeper than `maxDepth` (`depth`).
+ * Null when the text has none of these.
+ */
+export function jsonTextProblem(text: string, maxDepth = MAX_JSON_DEPTH): JsonTextProblem | null {
+  const n = text.length;
+  let i = 0;
+  const p = (kind: JsonTextProblem['kind'], path: string, message: string): JsonTextProblem => ({ kind, path, message: `${clipPath(path)}: ${message}` });
+  const syntax = (path: string) => p('syntax', path, i >= n ? 'the text ends early' : `unexpected ${JSON.stringify(text[i])} at offset ${i}`);
+  const ws = () => {
+    while (i < n) {
+      const c = text.charCodeAt(i);
+      if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) i++;
+      else break;
+    }
+  };
+  /** The string token at i (text[i] is '"'), decoded; null if it is not a JSON string. */
+  const str = (): string | null => {
+    const start = i;
+    i++;
+    while (i < n && text.charCodeAt(i) !== 0x22) i += text.charCodeAt(i) === 0x5c ? 2 : 1;
+    if (i >= n) return null;
+    i++;
+    try {
+      return JSON.parse(text.slice(start, i)) as string;
+    } catch {
+      return null;
+    }
+  };
+  interface Frame {
+    obj: boolean;
+    path: string;
+    seen: Set<string>;
+    count: number;
+  }
+  const stack: Frame[] = [];
+  let path = '$';
+  /** Read `"name":` of the next member of f, setting path to it. */
+  const member = (f: Frame): JsonTextProblem | null => {
+    ws();
+    if (text[i] !== '"') return syntax(f.path);
+    const k = str();
+    if (k === null) return syntax(f.path);
+    if (hasLoneSurrogate(k)) return p('string', f.path, 'a member name with a lone surrogate (not Unicode text; RFC 8785 refuses it)');
+    path = `${f.path}.${k}`;
+    if (f.seen.has(k)) return p('duplicate', path, 'the member appears twice');
+    f.seen.add(k);
+    ws();
+    if (text[i] !== ':') return syntax(path);
+    i++;
+    return null;
+  };
+  for (;;) {
+    // A value at i, at `path`.
+    ws();
+    const c = text[i];
+    let opened = false;
+    if (c === '{' || c === '[') {
+      if (stack.length >= maxDepth) return p('depth', path, `nesting deeper than ${maxDepth} levels`);
+      i++;
+      const f: Frame = { obj: c === '{', path, seen: new Set(), count: 0 };
+      stack.push(f);
+      ws();
+      if (text[i] === (f.obj ? '}' : ']')) {
+        i++;
+        stack.pop();
+      } else {
+        if (f.obj) {
+          const e = member(f);
+          if (e) return e;
+        } else path = `${f.path}[0]`;
+        opened = true;
+      }
+    } else if (c === '"') {
+      const s = str();
+      if (s === null) return syntax(path);
+      if (hasLoneSurrogate(s)) return p('string', path, 'a string with a lone surrogate (not Unicode text; RFC 8785 refuses it)');
+    } else if (c === 't' || c === 'f' || c === 'n') {
+      const lit = c === 't' ? 'true' : c === 'f' ? 'false' : 'null';
+      if (text.startsWith(lit, i)) i += lit.length;
+      else return syntax(path);
+    } else if (c === '-' || (c !== undefined && c >= '0' && c <= '9')) {
+      NUMBER.lastIndex = i;
+      const m = NUMBER.exec(text);
+      if (!m) return syntax(path);
+      const lex = m[0];
+      i += lex.length;
+      const v = Number(lex);
+      if (!Number.isFinite(v)) return p('number', path, `the number ${clip(lex)} is beyond the range of a double (RFC 8785 numbers are IEEE 754 doubles)`);
+      const canon = JSON.stringify(v);
+      if (canon !== lex) return p('number', path, `the number ${clip(lex)} is not written as RFC 8785 writes its value (${canon}); readers can disagree on what it is`);
+    } else return syntax(path);
+    if (opened) continue;
+    // After a value: the next member or item, or close containers.
+    for (;;) {
+      ws();
+      const f = stack[stack.length - 1];
+      if (!f) return i === n ? null : p('syntax', '$', `text after the document at offset ${i}`);
+      const d = text[i];
+      if (d === ',') {
+        i++;
+        f.count++;
+        if (f.obj) {
+          const e = member(f);
+          if (e) return e;
+        } else path = `${f.path}[${f.count}]`;
+        break;
+      }
+      if (d === (f.obj ? '}' : ']')) {
+        i++;
+        stack.pop();
+        continue;
+      }
+      return syntax(f.path);
+    }
+  }
+}
+
 /** A literal output fragment on canonicalJson's work stack. */
 class Lit {
   readonly s: string;

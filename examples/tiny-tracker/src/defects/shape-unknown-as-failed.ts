@@ -14,7 +14,7 @@
 // Mirrors: the unknown-outcome study (an error that passes on the transport
 // error, or says the write failed, invites a duplicate) and GitHub GH-05 (an
 // edit stayed applied although the call reported an error).
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool, rewriteShape } from "./types.js";

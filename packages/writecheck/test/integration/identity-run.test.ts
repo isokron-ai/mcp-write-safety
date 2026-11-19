@@ -16,6 +16,7 @@ import { compareCommand, finishRecheck, verifyResultsCommand } from '../../src/c
 import { runCommand } from '../../src/cli/run.js';
 import { validates } from '../../src/core/jsonschema.js';
 import { startFake, type Fake } from '../fake/harness.js';
+import { assertMatchesSchema, assertNoBannedText, assertPublishable } from '../publish-lint.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schema = JSON.parse(readFileSync(join(here, '..', '..', '..', 'schema', 'mws-results-1.schema.json'), 'utf8')) as Record<string, unknown>;
@@ -38,6 +39,10 @@ test('a run states its identity, hashes every record\'s test, signs results.json
     const after = await run(bad, { signKey: join(tmp, 'key.pem'), provenance: { serverCommit: 'd'.repeat(40) } }, join(tmp, 'after'));
     const doc = JSON.parse(readFileSync(join(before.outDir, 'results.json'), 'utf8')) as Record<string, unknown> & { results: { test_hash?: string }[]; identity: Record<string, unknown> & { gaps: string[]; server: Record<string, unknown> } };
     assert.equal(validates(schema, doc), true, 'results.json validates against mws-results-1');
+    // Signed, with a stated identity, a test_hash (and test_hash_core) per record and the MWS-IN-5 numbers: no member the schema does not name.
+    assertPublishable(before.outDir);
+    assertPublishable(after.outDir);
+    assert.ok(doc.results.some((r) => 'test_hash_core' in r) && doc.results.some((r) => (r as { requirement?: string }).requirement === 'MWS-IN-5'));
     assert.ok(doc.results.length > 0 && doc.results.every((r) => /^sha256:[0-9a-f]{64}$/.test(r.test_hash ?? '')), 'every record has a test_hash');
     assert.equal(doc.identity['format'], 'mws-identity/1');
     assert.equal(doc.identity.server['commit'], 'a'.repeat(40));
@@ -61,11 +66,18 @@ test('a run states its identity, hashes every record\'s test, signs results.json
     assert.equal(rc.evidence.signature, null);
     assert.ok(rc.identity?.rechecked_by && rc.results.every((r) => typeof r.test_hash === 'string'));
     assert.equal(validates(schema, JSON.parse(readFileSync(join(before.outDir, 'recheck', 'results.json'), 'utf8'))), true);
-    const rs = await finishRecheck(before.outDir, { key: privateKey, log });
+    assertPublishable(join(before.outDir, 'recheck'));
+    assert.equal(rc.identity?.rechecked_by?.original_signature?.status, 'valid-unpinned');
+    // signing the copy needs the original pinned (--pubkey), or --allow-unsigned
+    await assert.rejects(finishRecheck(before.outDir, { key: privateKey, log }), /signs only a copy of a file signed by a pinned key/);
+    const rs = await finishRecheck(before.outDir, { key: privateKey, pubkey: publicKey, log });
     assert.equal(typeof rs.evidence.signature, 'object');
+    const os = rs.identity?.rechecked_by?.original_signature;
+    assert.ok(os && os.status === 'valid' && os.pinned === true && /^ed25519-/.test(os.key_id ?? '') && os.allow_unsigned === undefined, JSON.stringify(os));
     assert.equal(verifyResultsCommand({ file: join(before.outDir, 'recheck'), pubkey: join(tmp, 'pub.pem'), log }).exit, 0);
-    const cschema = JSON.parse(readFileSync(join(here, '..', '..', '..', 'schema', 'mws-compare-1.schema.json'), 'utf8')) as Record<string, unknown>;
-    assert.equal(validates(cschema, JSON.parse(readFileSync(join(tmp, 'cmp', 'compare.json'), 'utf8'))), true, 'compare.json validates against mws-compare-1');
+    const cmp = JSON.parse(readFileSync(join(tmp, 'cmp', 'compare.json'), 'utf8')) as unknown;
+    assertMatchesSchema('mws-compare-1', cmp, 'compare.json');
+    assertNoBannedText(cmp, { 'compare.md': readFileSync(join(tmp, 'cmp', 'compare.md'), 'utf8') });
   } finally {
     await good.close();
     await bad.close();

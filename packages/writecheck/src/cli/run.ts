@@ -59,7 +59,7 @@ import { hashExtras, stampTestHashes } from '../report/testhash.js';
 import type { IdentityOptions } from './compare.js';
 import { renderJunit } from '../report/junit.js';
 import { renderMarkdown } from '../report/markdown.js';
-import { adjustResults, coverageRows } from '../checks/coverage.js';
+import { coverageRows, postEvaluate } from '../checks/coverage.js';
 import { RESULTS_FORMAT, scopeSentence, type ResultsDoc } from '../report/results.js';
 import { result, type Result } from '../report/verdicts.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
@@ -201,6 +201,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   let protocol: string | null = null;
   /** Bystander losses outside any check's records (review S3): a failed set-up, or after the last check. */
   const runLosses: (Loss & { where: string })[] = [];
+  /** Corpus target t14: a declared fixture the bystander inventory of another resource lists under that resource's key, said in safety.warnings. */
+  const inventoryWarnings: string[] = [];
   let finalInventory: (() => Promise<void>) | null = null;
 
   let cleanupRun: Promise<CleanupReport | null> | null = null;
@@ -294,8 +296,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     session.armInit();
     ledger = new Ledger(join(o.stateDir, runId), runId, (s) => red.text(s));
     ledger.append({ kind: 'run_start', run_id: runId, prefix, manifest_sha256: manifest.source.sha256, hosts: plan.target.hosts });
-    const g = await tenantGuard(manifest, session, 'MAIN', { onCall: onGuardCall });
-    guard = { tool: manifest.target.guard!.tool, matched: g.matched, ...(g.basis === 'operator' ? { basis: 'operator' as const, note: `The tenant guard rests on the operator's declaration that this call only reads (target.guard.read_only_call), not on an annotation. It was sent three times before any other write, each counted as a write and recorded in the ledger, and answered identically each time; ${g.state}. A write that answers the same each time and changes nothing the manifest lets the tester read would not be detected. Between checks the run asked tools/list, not the declared call.` } : {}) };
+    const g = await tenantGuard(manifest, session, 'MAIN', { onCall: onGuardCall, onStateRead: (r) => ledger?.append({ kind: 'guard_state_read', step: r.step, tool: r.tool, phase: r.phase, what: r.what, context: 'run' }) });
+    guard = { tool: manifest.target.guard!.tool, matched: g.matched, ...(g.basis === 'operator' ? { basis: 'operator' as const, note: `The tenant guard rests on the operator's declaration that this call only reads (target.guard.read_only_call), not on an annotation. It was sent three times before any other write, each counted as a write and recorded in the ledger, and answered identically each time; ${g.state}. A write that answers the same each time and changes nothing the manifest lets the tester read would not be detected. Between checks the run asked tools/list, not the declared call.${g.destructive ? ` The guard runs through ${manifest.target.guard!.tool}, a dispatcher that declares destructiveHint: true. It was accepted because every other tool declares readOnlyHint: false or destructiveHint: true, the manifest reads only through it, and the declared arguments contain no word that can write, lock or have a side effect and call no function outside a short read-only list (functions with side effects). Every pre-made fixture, canary and list was read as its declared read returns it, with no ignored field left out, before the first call and after the third (these reads went out before the tenant check matched, and the ledger records each); every read had to succeed in full and match. Tables, columns, schemas and counters the manifest does not read, and a write undone within one call, are not compared.` : ''}` } : {}) };
     o.log(`tenant guard matched: ${g.matched}`);
     // Untouched state: the canaries are read before anything is written, and again after cleanup.
     for (const c of manifest.canaries) canaryBefore.set(c.name, await readCanary(session, c));
@@ -326,6 +328,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       // why: a scope resource whose scopes another bracketed resource's inventory lists (as scope entries) is not listed twice.
       for (const r of listable) if (r.selector?.send_empty_forms || !listable.some((x) => x !== r && x.scope?.resource === r.name)) bracketed.push(r);
       for (const r of bracketed) lastInv.set(r.name, start.get(r.name)!);
+      for (const r of bracketed) for (const f of start.get(r.name)!.covered.fixtures ?? []) inventoryWarnings.push(`${r.name}: in the list of objects outside the tester's own, ${f}; any other change to it, and its loss, is reported`);
       startInv = start;
     }
     finalInventory = async () => {
@@ -467,6 +470,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           const obs = await mod.collect(ctx, res).finally(() => session.release(checkLabels.splice(0)));
           observations.push(obs);
           obsAt.push(start);
+          // why: review M3: the first-write finding of this resource's set-up goes with its observations, so recheck applies it too.
+          if (firstWrite.has(res.name)) (obs as { first_write?: string[] }).first_write = firstWrite.get(res.name);
           let got = mod.evaluate(obs, { manifest, tools, review, gated: !!gate });
           if (setupLosses.length) {
             got = got.map((r) => withLoss(r, [], false, setupLosses));
@@ -620,7 +625,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       if (!stopped) await d.reset('MAIN').catch(() => false);
     }
     // why: research builds N3 (review): a reset that went through the declared control.patch is said in the resource's records.
-    for (const [name, d] of drivers) if (d.resetViaControl) for (const [i, r] of results.entries()) if (r.write_path.resource === name) results[i] = { ...r, notes: [...r.notes, `The tool under test refused to put this resource's object back ${d.resetViaControl} time(s); the tester reset it through the declared control.patch (research builds N3).`] };
+    for (const [name, d] of drivers) if (d.resetViaControl) for (const [i, r] of results.entries()) if (r.write_path.resource === name) results[i] = { ...r, notes: [...r.notes, `The tool under test refused to put this resource's object back ${d.resetViaControl} time(s); the tester reset it through the declared control.patch.`] };
     const noSetup = setupFailed.length && !setupDone ? `the set-up of every resource with an object under test failed (${setupFailed.join('; ')})` : null;
     // Server-wide checks: launch settings (they restart the server) and the credential scan (it reads everything before it).
     for (const g of GLOBAL_CHECKS) {
@@ -679,12 +684,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     // too; a loss there is named in every record that made calls, and none of them is held.
     if (bracketed.length && !stopped) blockEarlier((await gapLoss(baseCtx('(run)'), 'after the last check')).losses, 'after the last check (the last reset, the fixtures put back)', results.length, true);
     results.push(...plan.catalog_results);
-    // why: a tool no check exercised gets a not-tested row per requirement, never silence (deep review: misleading held rows).
-    for (const [name, moved] of firstWrite) {
-      const tool = manifest.resources.find((x) => x.name === name)?.update?.tool;
-      for (const [i, r] of results.entries()) if (r.requirement === 'MWS-UPD-1' && r.verdict === 'held' && r.write_path.resource === name && r.write_path.tool === tool) results[i] = { ...r, verdict: 'not tested', reason: `the first write after the create (a setup write naming only ${manifest.resources.find((x) => x.name === name)!.fields![0].path}) changed fields it did not name: ${moved.slice(0, 5).join(', ')}; the compared reads come after the setup writes, and judging that first write against the platform is not built in this preview`, notes: [...r.notes, `Later writes changed only the fields they named: ${r.reason}`] };
-    }
-    results.splice(0, results.length, ...adjustResults(manifest, results));
+    // why: review M3: the whole-run adjustments are one step, shared with recheck (checks/coverage.ts postEvaluate).
+    results.splice(0, results.length, ...postEvaluate(manifest, results, firstWrite));
     results.push(...coverageRows(manifest, tools, results));
     let second: Tool[] | null = null;
     try {
@@ -776,21 +777,43 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     cleanup: cl ? { deleted: cl.deleted, failed: cl.failed, unknown: cl.unknown, stopped: cl.stopped, prefix: cl.prefix } : null,
     observations,
     evidence: { capture: cap, checksums: 'SHA256SUMS', signature: null },
-    safety: { canaries, fixtures_restored: fixturesRestored, gate: gate ? { route: gate.route, description: gate.describe() } : null, protocol, rerun_of: o.rerunOf ?? null, ...(plan?.warnings?.length ? { warnings: plan.warnings } : {}), ...(runLosses.length ? { run_losses: runLosses } : {}) },
+    safety: { canaries, fixtures_restored: fixturesRestored, gate: gate ? { route: gate.route, description: gate.describe() } : null, protocol, rerun_of: o.rerunOf ?? null, ...(plan?.warnings?.length || inventoryWarnings.length ? { warnings: [...(plan?.warnings ?? []), ...inventoryWarnings] } : {}), ...(runLosses.length ? { run_losses: runLosses } : {}) },
   };
   // why: F8 (before/after pages): each record says which test it is; the run says which tester, test and build it was.
   const stamp = buildStamp();
-  stampTestHashes(doc.results, { manifest, tools, tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit }, extras: await hashExtras() });
+  stampTestHashes(doc.results, { manifest, tools, tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit, dirty: stamp.dirty }, extras: await hashExtras(manifest), review: review ?? null });
   doc.identity = buildIdentity({ manifestSha256: manifest.source.sha256, planHash: hash, toolsFingerprint: tools.length ? toolsFingerprintOf(tools) : 'sha256:unknown', launch: serverLabel(manifest), transport: mcp.transport, provenance: prov.provenance, sources: prov.sources, overridden: prov.overridden, started: doc.run.started, finished: iso(Date.now()), env: o.env, stamp });
+  const hx = await hashExtras(manifest);
+  doc.identity.hash_inputs = { pair_budget: o.pairBudget ?? null, ...(hx.in5_docs ? { in5_docs: hx.in5_docs } : {}) };
   const baseline = applyBaseline(results, o.baseline ? loadBaseline(o.baseline) : []);
   if (o.sign) doc.evidence.signature = 'SHA256SUMS.sig';
   const safe = red.value(doc);
+  // why: review S1: the test inputs are argument names and hashes (never a value the run sent); masking an argument named
+  // `password` would leave a record whose test_hash no longer follows from its inputs.
+  safe.results.forEach((r, i) => {
+    const inputs = doc.results[i]?.test_inputs;
+    if (inputs) r.test_inputs = JSON.parse(JSON.stringify(inputs)) as typeof inputs;
+  });
   // why: F8: the signature covers the file as written (after redaction), with evidence.signature null.
-  if (signKey) safe.evidence.signature = signResults(safe, signKey, o.sign ? 'SHA256SUMS.sig' : null);
+  let signRefused = false;
+  if (signKey) {
+    try {
+      safe.evidence.signature = signResults(safe, signKey, o.sign ? 'SHA256SUMS.sig' : null);
+    } catch (e) {
+      // why: p08: a document RFC 8785 refuses (a lone surrogate in a captured answer, nesting deeper than the limit) is not
+      // signed; the evidence is still written, unsigned, and the run exits 4 so the missing signature is not missed.
+      if (!(e instanceof WritecheckError)) throw e;
+      safe.evidence.signature = o.sign ? 'SHA256SUMS.sig' : null;
+      signRefused = true;
+      o.log(`error: results.json is not signed: ${e.message}`);
+    }
+  }
   // why: literal server.env values may hold secrets; the copies are redacted like everything else.
-  writeFileSync(join(outDir, doc.manifest.path), red.text(manifestText));
+  // why: review S1: the copy stays YAML (a flow mapping such as `{ env: X, prefix: "Bearer " }` is not cut by the header rule).
+  writeFileSync(join(outDir, doc.manifest.path), red.manifestText(manifestText));
   // why: dogfood C9: the whole catalog the fingerprint covers, so a plan from this file gives the same hash.
-  writeFileSync(join(outDir, 'catalog.json'), JSON.stringify(red.value({ tools, prompts: fullCatalog.prompts ?? [], resourceTemplates: fullCatalog.resourceTemplates ?? [] }), null, 2) + '\n');
+  // why: review S1: a tool argument named like a credential (`password`) keeps its schema; only string values are masked by name.
+  writeFileSync(join(outDir, 'catalog.json'), JSON.stringify(red.catalogValue({ tools, prompts: fullCatalog.prompts ?? [], resourceTemplates: fullCatalog.resourceTemplates ?? [] }), null, 2) + '\n');
   if (plan) writeFileSync(join(outDir, 'plan.json'), JSON.stringify(red.value({ hash, plan }), null, 2) + '\n');
   writeFileSync(join(outDir, 'results.json'), JSON.stringify(safe, null, 2) + '\n');
   writeFileSync(join(outDir, 'report.md'), renderMarkdown(safe));
@@ -807,7 +830,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   }
   finished = true;
   // why: problem 14 in the GitHub Action's NOTES.md: an incomplete run (stopped, or clean-up not finished) exits 4 whatever its verdicts say.
-  return { exit: interrupted ? 130 : stopped ? 4 : exitCodeFor(baseline) === 1 ? 1 : 0, outDir, doc: safe, baseline };
+  return { exit: interrupted ? 130 : stopped || signRefused ? 4 : exitCodeFor(baseline) === 1 ? 1 : 0, outDir, doc: safe, baseline };
 }
 
 /** One canary read: the result (at `path`, without the ignored fields), or undefined when the call failed. */
