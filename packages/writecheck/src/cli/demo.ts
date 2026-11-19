@@ -68,7 +68,7 @@ function demoManifest(ttDir: string, dir: string, shipped: string | null): strin
   return out;
 }
 
-export async function demoCommand(o: { tinyTracker?: string; defects: string[]; manifest?: string; out: string; env: NodeJS.ProcessEnv; log: (s: string) => void; verbose?: boolean }): Promise<number> {
+export async function demoCommand(o: { tinyTracker?: string; defects: string[]; manifest?: string; pairBudget?: { repeats: number; pairs: number } | null; out: string; env: NodeJS.ProcessEnv; log: (s: string) => void; verbose?: boolean }): Promise<number> {
   const tt = findTinyTracker(o.tinyTracker, o.env);
   const token = `demo-${randomBytes(16).toString('hex')}`;
   const work = mkdtempSync(join(tmpdir(), 'mwsc-demo-'));
@@ -83,10 +83,10 @@ export async function demoCommand(o: { tinyTracker?: string; defects: string[]; 
     const manifest = demoManifest(tt, work, o.manifest ?? null);
     const env: NodeJS.ProcessEnv = { PATH: o.env['PATH'], HOME: o.env['HOME'], TRACKER_BACKEND_URL: url, TRACKER_BACKEND_TOKEN: token, ...(o.defects.length ? { TRACKER_DEFECTS: o.defects.join(',') } : {}) };
     o.log(`tiny-tracker ${o.defects.length ? `with defects: ${o.defects.join(', ')}` : '(correct build)'} — backend ${url}, MCP server started by the tester behind the loopback gate`);
-    const { hash } = await planCommand({ manifest, env, log: () => {} });
+    const { hash } = await planCommand({ manifest, pairBudget: o.pairBudget ?? null, env, log: () => {} });
     o.log(`plan ${hash}; the demo confirms the target itself because it started it (on 127.0.0.1, in memory). \`run\` always asks.`);
     const t0 = Date.now();
-    const r = await runCommand({ manifest, outRoot: o.out, stateDir: join(work, 'state'), confirmTarget: 'tiny-tracker', planHash: hash, interactive: false, env, log: o.verbose ? o.log : () => {}, noSignals: false });
+    const r = await runCommand({ manifest, pairBudget: o.pairBudget ?? null, outRoot: o.out, stateDir: join(work, 'state'), confirmTarget: 'tiny-tracker', planHash: hash, interactive: false, env, log: o.verbose ? o.log : () => {}, noSignals: false });
     o.log('');
     for (const req of REQUIREMENTS) {
       const recs = r.doc.results.filter((x) => x.requirement === req.id);

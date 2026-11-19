@@ -99,6 +99,25 @@
         },
         "processes_started": {
           "type": "integer"
+        },
+        "cut_at": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "record",
+            "observation"
+          ],
+          "description": "Where a run cut short (write budget, rate limit, interrupt) was cut: the index in results of the first record made after the cut, and the index in observations of the first observation made after it. Absent when the run was not cut short.",
+          "properties": {
+            "record": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "observation": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -326,6 +345,152 @@
               null
             ],
             "description": "Spec 8.2 rule 3: for a requirement that lists platform, every violated or platform record carries server, platform or unresolved; null otherwise. A violated record is never quoted without it."
+          },
+          "cell": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+@.+$",
+            "description": "The cell this record belongs to (docs/CELLS.md): <requirement>@<tool>, or <requirement>@(server) for a server-level requirement. Absent on records that belong to no cell."
+          },
+          "validity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "class",
+              "counts",
+              "failed",
+              "synthetic_fault",
+              "evidence"
+            ],
+            "description": "Evidence validity (docs/CELLS.md): present on every violated record.",
+            "properties": {
+              "class": {
+                "enum": [
+                  "valid",
+                  "platform",
+                  "harness-suspect"
+                ]
+              },
+              "counts": {
+                "type": "boolean"
+              },
+              "failed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "synthetic_fault": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "acknowledged": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "read_back": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "synthetic_fault": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "cells": {
+      "type": "array",
+      "description": "One entry per cell: a MUST requirement on a declared write tool, or a server-level MUST requirement (docs/CELLS.md). Not an aggregate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "requirement",
+          "tool",
+          "scope",
+          "verdict",
+          "applicable",
+          "rule",
+          "reason",
+          "resources",
+          "records"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+$"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "tool",
+              "server"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "violated",
+              "platform",
+              "held",
+              "not observed",
+              "not tested",
+              "not applicable",
+              "self-attested"
+            ]
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "rule": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "validity": {
+            "enum": [
+              "valid",
+              "platform",
+              "harness-suspect"
+            ]
           }
         }
       }
