@@ -2,7 +2,7 @@
  * Review M3 (before/after): `recheck` by the build that made a run must not change a verdict or a hash. The run applies whole-run
  * adjustments after the checks' evaluate() (a declared explicit override takes MWS-CONC-1 away, NF-7; the first write after a
  * create keeps MWS-UPD-1 from held); recheck used to skip them, so the rechecked copy said held where the run said not tested,
- * under an equal test hash. Converted from review probe p11 (a) and the Grafana rows of p11 (b).
+ * under an equal test hash. Converted from review probe p11 (a) and the real-pair rows of p11 (b).
  */
 
 import assert from 'node:assert/strict';
