@@ -15,6 +15,7 @@ import type { NotRun, Result } from '../report/verdicts.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import { restorableExclusion, type Manifest, type ResourceSpec } from './manifest.js';
 import { canonical, sha256 } from './util.js';
+import { Redactor } from './redact.js';
 
 export interface ResourcePlan {
   resource: string;
@@ -44,6 +45,12 @@ export interface Plan {
   creates_at_most: number;
   /** Warnings about the declaration (an ignored field the tool under test can set). */
   warnings: string[];
+  /**
+   * `session.init`, where declared (absent otherwise, so a manifest without it keeps its plan hash): the calls made on every
+   * session before its first other tools/call, with arguments as written (templates, secret-named values masked), and whether
+   * each counts as a write.
+   */
+  session_init?: { tool: string; args: unknown; counted: boolean }[];
 }
 
 /**
@@ -113,6 +120,19 @@ export interface PlanOptions {
   catalog?: { tools: unknown[]; prompts?: unknown[]; resourceTemplates?: unknown[] };
 }
 
+/**
+ * session.init as the plan states it: a call counts as a write unless the operator declares it read_only (a server's
+ * readOnlyHint does not exempt it). Arguments are shown as written: a `{{env.NAME}}` template as is (it is no secret), any
+ * other string through the redactor's shape rules (a credential in a URL, a known key shape).
+ */
+export function sessionInitPlan(manifest: Manifest, _tools: Tool[] = []): Plan['session_init'] {
+  const inits = manifest.session?.init;
+  if (!inits?.length) return undefined;
+  const mask = new Redactor([]);
+  const show = (v: unknown): unknown => (typeof v === 'string' ? (/\{\{/.test(v) ? v : mask.text(v)) : Array.isArray(v) ? v.map(show) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, show(x)])) : v);
+  return inits.map((c) => ({ tool: c.tool, args: show(c.args), counted: !c.read_only }));
+}
+
 export function buildPlan(manifest: Manifest, tools: Tool[], hosts: string[] = [], o: PlanOptions = {}): Plan {
   const ctx = { manifest, tools, gated: !!manifest.backend?.gate };
   const iw = ignoreWarnings(manifest, tools);
@@ -133,6 +153,8 @@ export function buildPlan(manifest: Manifest, tools: Tool[], hosts: string[] = [
   const global = GLOBAL_CHECKS.map((c) => c.plan(ctx));
   const not_built: NotRun[] = REQUIREMENTS.filter((r) => NOT_BUILT[r.id]).map((r) => ({ requirement: r.id, verdict: 'not tested' as const, reason: NOT_BUILT[r.id]! }));
   const writes = resources.reduce((n, r) => n + r.setup_writes + r.checks.reduce((m, c) => m + c.writes, 0), 0) + global.reduce((n, c) => n + c.writes, 0);
+  const init = sessionInitPlan(manifest, tools);
+  const initWarn = init?.some((c) => c.counted) ? [`session.init: ${init.filter((c) => c.counted).map((c) => c.tool).join(', ')} ${init.filter((c) => c.counted).length === 1 ? 'is' : 'are'} not declared read-only (session.init[].read_only), so each call counts against the write budget, once per MCP session the run opens; that number depends on the run (concurrency pairs, restarts, launch checks, clean-up), so these calls are not in "at most" above, and the run stops if they would exceed the budget (the clean-up's own init is counted but never refused)`] : [];
   const creates = resources.reduce((n, r) => n + r.setup_creates + r.checks.reduce((m, c) => m + c.creates, 0), 0) + global.reduce((n, c) => n + c.creates, 0);
   return {
     format: 'mws-plan/1',
@@ -150,7 +172,8 @@ export function buildPlan(manifest: Manifest, tools: Tool[], hosts: string[] = [
     writes_at_most: writes + (manifest.target.guard?.read_only_call ? 3 : 0),
     creates_at_most: creates,
     // why: review: the operator confirms the plan knowing the tenant guard rests on their own declaration.
-    warnings: [...iw.warnings, ...restorableWarnings(manifest), ...(manifest.target.guard?.read_only_call ? [`the tenant guard ${manifest.target.guard.tool} ${JSON.stringify(manifest.target.guard.args)} rests on your declaration that this call only reads (target.guard.read_only_call), not on an annotation; it is sent three times before any write, each call counted against the write budget and recorded in the ledger, with the canaries and the declared lists read before and after; between checks the run asks tools/list instead`] : [])],
+    ...(init ? { session_init: init } : {}),
+    warnings: [...iw.warnings, ...initWarn, ...restorableWarnings(manifest), ...(manifest.target.guard?.read_only_call ? [`the tenant guard ${manifest.target.guard.tool} ${JSON.stringify(manifest.target.guard.args)} rests on your declaration that this call only reads (target.guard.read_only_call), not on an annotation; it is sent three times before any write, each call counted against the write budget and recorded in the ledger, with the canaries and the declared lists read before and after; between checks the run asks tools/list instead`] : [])],
   };
 }
 
@@ -164,6 +187,11 @@ export function renderPlan(p: Plan, hash: string): string {
   L.push(`At most ${p.writes_at_most} writes and ${p.creates_at_most} created objects (write budget ${p.limits.write_budget}, ${p.limits.writes_per_second} writes per second).`);
   L.push('No tool call was made to build this plan.');
   for (const w of p.warnings ?? []) L.push(`warning: ${w}`);
+  if (p.session_init?.length) {
+    L.push('');
+    L.push('Session init: on every MCP session the run opens, after the handshake and before its first other tools/call (tools/list alone does not trigger it); a failure stops the run:');
+    for (const c of p.session_init) L.push(`  - ${c.tool} ${JSON.stringify(c.args)} (${c.counted ? 'counted as a write' : 'declared read-only, not counted'})`);
+  }
   for (const r of p.resources) {
     L.push('');
     L.push(`Resource ${r.resource}: ${r.object}`);

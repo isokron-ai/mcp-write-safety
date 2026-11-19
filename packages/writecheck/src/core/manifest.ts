@@ -47,15 +47,196 @@ export interface ToolTemplate {
  * outputSchema marks them. Absent unless declared (the outputSchema decides).
  */
 export type DecodeMode = 'json' | 'none';
-export type Decode = { decode?: DecodeMode };
+/**
+ * Read extraction (`decode: { extract: … }`): a tool whose answer carries its JSON inside markup or prose (the whole answer
+ * wrapped in `<insecure-content>…</insecure-content>`, say) has that JSON taken out of the answer's text before it is parsed.
+ * `between`: the text after the first `start` and before the first `end` that follows it; `regex`: the one capture group of
+ * the first match (dotAll). `refusals`: also extract from an error answer, and let the structured refusal signals read the
+ * extracted document; without it a refusal is classified on the answer as received.
+ */
+export type Extract = ({ between: [string, string] } | { regex: string }) & { refusals: boolean };
+export type Decode = { decode?: DecodeMode; extract?: Extract };
 
-const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it)';
+const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it); or an object { mode, extract }';
 
-/** Parse an optional `decode` member. */
+/** The longest extraction pattern accepted. */
+const EXTRACT_MAX = 512;
+
+/**
+ * Why a declared extraction regex is refused (null: accepted). It must compile, have exactly one capture group, and be bounded:
+ * the group is delimited by something on each side that is more than anchors or a match-anything run (a group that can reach
+ * either end of the answer could take the whole of it), and no quantified group holds a quantifier of its own (catastrophic
+ * backtracking on a long answer).
+ */
+export function extractRegexProblem(src: string): string | null {
+  if (src.length > EXTRACT_MAX) return `longer than ${EXTRACT_MAX} characters`;
+  try {
+    void new RegExp(src, 's');
+  } catch (e) {
+    return `not a valid regular expression: ${(e as Error).message}`;
+  }
+  const groups = (new RegExp(`${src}|`, 's').exec('') ?? []).length - 1;
+  if (groups !== 1) return `${groups} capture groups; exactly one is needed (use (?:…) for any other group)`;
+  // Locate the capture group: the first "(" that is not escaped, not in a class, and not followed by "?" (or is "(?<name>").
+  let open = -1;
+  let close = -1;
+  let depth = 0;
+  let inClass = false;
+  let capDepth = -1;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') inClass = true;
+    else if (c === '(') {
+      depth++;
+      const capturing = src[i + 1] !== '?' || (src[i + 2] === '<' && src[i + 3] !== '=' && src[i + 3] !== '!');
+      if (capturing && open < 0) {
+        open = i;
+        capDepth = depth;
+      }
+    } else if (c === ')') {
+      if (depth === capDepth && close < 0 && open >= 0) close = i;
+      depth--;
+    }
+  }
+  if (open < 0 || close < 0) return 'the capture group could not be located';
+  const before = required(src.slice(0, open));
+  const after = required(src.slice(close + 1).replace(/^(?:[*+?]|\{\d*,?\d*\})\??/, ''));
+  if (!before || !after) return 'unbounded: the capture group must be delimited on both sides by text the answer must contain (e.g. "<tag>(.*?)</tag>"), or it could take the whole answer; prefer between: [start, end]';
+  if (/\((?:[^()\\]|\\.)*[*+](?:[^()\\]|\\.)*\)[*+{]/.test(src)) return 'unbounded: a quantified group holds a quantifier (catastrophic backtracking)';
+  return null;
+}
+
+/**
+ * What a regex fragment requires the text to contain: anchors, optional atoms and groups (`x?`, `x*`, `x{0,n}`, `(?:…)?`), a group
+ * with an empty alternative (`(?:<t>|)`) and match-anything runs (`.+`, `[\s\S]+`, `\S+`) taken out. Empty: no delimiter.
+ */
+function required(s: string): string {
+  const G = String.raw`(?:[^()\\]|\\.)*`;
+  let x = s.replace(/\\[bBAzZ]|[\^$]/g, '');
+  const optGroup = new RegExp(String.raw`\((?:\?:)?${G}\)(?:[?*]|\{0(?:,\d*)?\})\??`, 'g');
+  const emptyAlt = new RegExp(String.raw`\((?:\?:)?(?:\|${G}|${G}\||${G}\|\|${G})\)`, 'g');
+  for (let prev = ''; prev !== x; ) {
+    prev = x;
+    x = x.replace(optGroup, '').replace(emptyAlt, '');
+  }
+  x = x.replace(/(?:\\.|\[(?:[^\]\\]|\\.)*\]|[^\\()|])(?:[?*]|\{0(?:,\d*)?\})\??/g, '');
+  x = x.replace(/(?:\.|\[\\s\\S\]|\[\\S\\s\]|\[\^\]\]|\\[sSwWdD])\+\??/g, '');
+  return x.replace(/\(\?:|[()|]/g, '').trim();
+}
+
+function extractOf(v: unknown, where: string): Extract {
+  const o = obj(v, where);
+  keys(o, ['between', 'regex', 'refusals'], where);
+  if ((o['between'] === undefined) === (o['regex'] === undefined)) throw fail(where, 'give exactly one of between: [start, end] or regex: "<pattern with one capture group>"');
+  if (o['refusals'] !== undefined && typeof o['refusals'] !== 'boolean') throw fail(`${where}.refusals`, 'true or false');
+  const refusals = o['refusals'] === true;
+  if (o['between'] !== undefined) {
+    const b = o['between'];
+    if (!Array.isArray(b) || b.length !== 2 || b.some((x) => typeof x !== 'string' || !x || x.length > EXTRACT_MAX)) throw fail(`${where}.between`, `[start, end]: two non-empty strings of at most ${EXTRACT_MAX} characters (unbounded otherwise)`);
+    return { between: [b[0] as string, b[1] as string], refusals };
+  }
+  const src = str(o['regex'], `${where}.regex`);
+  const why = extractRegexProblem(src);
+  if (why) throw fail(`${where}.regex`, why);
+  return { regex: src, refusals };
+}
+
+/** Parse an optional `decode` member: `json`, `none`, or `{ mode, extract }`. */
 function decodeOf(v: unknown, where: string): Decode {
   if (v === undefined) return {};
-  if (v !== 'json' && v !== 'none') throw fail(`${where}.decode`, DECODE_WHY);
-  return { decode: v };
+  if (v === 'json' || v === 'none') return { decode: v };
+  if (!isObj(v)) throw fail(`${where}.decode`, DECODE_WHY);
+  keys(v, ['mode', 'extract'], `${where}.decode`);
+  if (v['mode'] === undefined && v['extract'] === undefined) throw fail(`${where}.decode`, 'mode, extract or both');
+  if (v['mode'] !== undefined && v['mode'] !== 'json' && v['mode'] !== 'none') throw fail(`${where}.decode.mode`, 'json or none');
+  return { ...(v['mode'] !== undefined ? { decode: v['mode'] as DecodeMode } : {}), ...(v['extract'] !== undefined ? { extract: extractOf(v['extract'], `${where}.decode.extract`) } : {}) };
+}
+
+/**
+ * Every tool the declaration names an extraction for (server.decode, target.guard, each resource's read and list), one per tool;
+ * two different extractions for one tool are refused.
+ */
+export function declaredExtracts(m: Pick<Manifest, 'server' | 'target' | 'resources'>): Map<string, Extract> {
+  const out = new Map<string, Extract>();
+  const where = new Map<string, string>();
+  const add = (tool: string, x: Extract | undefined, at: string) => {
+    if (!x) return;
+    const had = out.get(tool);
+    if (had && JSON.stringify(had) !== JSON.stringify(x)) throw fail(at, `decode.extract for ${tool} differs from the one ${where.get(tool)} declares (one extraction per tool: it applies to every call of the tool)`);
+    out.set(tool, x);
+    where.set(tool, at);
+  };
+  for (const [tool, x] of Object.entries(m.server?.extract ?? {})) add(tool, x, `server.decode.${tool}.extract`);
+  if (m.target?.guard) add(m.target.guard.tool, m.target.guard.extract, 'target.guard.decode.extract');
+  (m.resources ?? []).forEach((r, i) => {
+    add(r.read.tool, r.read.extract, `resources[${i}].read.decode.extract`);
+    if (r.list) add(r.list.tool, r.list.extract, `resources[${i}].list.decode.extract`);
+  });
+  return out;
+}
+
+/**
+ * Feature: per-session init (`session.init`). Calls made on every MCP session the tester opens, after the handshake and before
+ * the session's first other tools/call, for a server that connects to its backend only when a call carries the connection
+ * settings. `args` may use `{{env.NAME}}` (the tester's environment; every such value is treated as a secret). `read_only: true`
+ * declares the call only reads; otherwise (and where tools/list does not mark it readOnlyHint: true) each call counts as a write.
+ */
+export interface SessionInit {
+  tool: string;
+  args: unknown;
+  read_only: boolean;
+  /** Every environment variable the arguments name (`{{env.NAME}}`). */
+  env: string[];
+}
+
+/** Argument names that carry a credential or a connection string (session.init: their values must come from the environment). */
+const SECRET_ARG = /^(?:pass(?:word|wd|phrase)?|pwd|secret|.*[_-]secret|client[_-]?secret|token|.*[_-]token|auth|authorization|api[_-]?key|apikey|key|.*[_-]key|private[_-]?key|access[_-]?key|dsn|connection[_-]?string|conn[_-]?str(?:ing)?|connection[_-]?url|database[_-]?url|db[_-]?url|uri|url|credentials?|cookie)$/i;
+
+function sessionOf(v: unknown): { init: SessionInit[] } | null {
+  if (v === undefined) return null;
+  const o = obj(v, 'session');
+  keys(o, ['init'], 'session');
+  if (!Array.isArray(o['init']) || o['init'].length === 0 || o['init'].length > 8) throw fail('session.init', 'a list of one to eight { tool, args, read_only } calls');
+  const init = (o['init'] as unknown[]).map((x, i) => {
+    const w = `session.init[${i}]`;
+    const t = tool(x, w, ['read_only']);
+    if (t['read_only'] !== undefined && typeof t['read_only'] !== 'boolean') throw fail(`${w}.read_only`, 'true or false');
+    if (!isObj(t.args)) throw fail(`${w}.args`, 'an object');
+    const roots = templateRoots(t.args);
+    for (const r of roots) if (r !== 'env') throw fail(`${w}.args`, `{{${r}}}: session.init arguments may use only {{env.NAME}} (they are sent before any object of the run exists)`);
+    const env = new Set<string>();
+    const walk = (s: unknown): void => {
+      if (typeof s === 'string') {
+        for (const m of s.matchAll(/\{\{\s*(?:json:|\?)?env(?:\.([^}\s]*))?\s*\}\}/g)) {
+          if (!m[1] || !ENV.test(m[1])) throw fail(`${w}.args`, `${m[0]}: write {{env.NAME}} with one environment variable name`);
+          env.add(m[1]);
+        }
+      } else if (Array.isArray(s)) s.forEach(walk);
+      else if (isObj(s)) for (const [k, x] of Object.entries(s)) (walk(k), walk(x));
+    };
+    walk(t.args);
+    // why: review of PR #14 (8): a credential is never written in the manifest; under a secret-like name it must come from {{env.NAME}}.
+    const lit = (v: unknown, at: string): void => {
+      if (Array.isArray(v)) return v.forEach((x, j) => lit(x, `${at}[${j}]`));
+      if (isObj(v)) {
+        for (const [k, x] of Object.entries(v)) {
+          if (SECRET_ARG.test(k) && (typeof x === 'number' || (typeof x === 'string' && x !== '' && !/^\{\{\s*\??env\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$/.test(x)))) throw fail(`${w}.args${at}.${k}`, `a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest`);
+          lit(x, `${at}.${k}`);
+        }
+      }
+    };
+    lit(t.args, '');
+    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env] };
+  });
+  return { init };
 }
 
 /**
@@ -296,6 +477,8 @@ export interface Manifest {
     restart: { stop: 'graceful' | 'kill' } | null;
     /** Per tool: how its wrapped results are read (`json` or `none`); absent unless declared. */
     decode?: Record<string, DecodeMode>;
+    /** Per tool: the read extraction declared under `server.decode.<tool>.extract`; absent unless declared. */
+    extract?: Record<string, Extract>;
   };
   target: {
     environment: string;
@@ -345,6 +528,8 @@ export interface Manifest {
    * own entry overrides the top level; `shape: null` there adopts none for that tool. See src/checks/shape.ts.
    */
   results: { shape: ShapeName | null; tools: Record<string, ShapeName | null> };
+  /** `session.init`: calls made on every MCP session before its first other tools/call; absent unless declared. */
+  session?: { init: SessionInit[] };
   source: { path: string; sha256: string };
 }
 
@@ -1031,16 +1216,20 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
 
 export function validateManifest(raw: unknown, source: { path: string; sha256: string }): Manifest {
   const o = obj(raw, '(top)');
-  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results'], '(top)');
+  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'session'], '(top)');
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
   keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart', 'decode'], 'server');
   let serverDecode: Record<string, DecodeMode> | null = null;
+  let serverExtract: Record<string, Extract> | null = null;
   if (s['decode'] !== undefined) {
     const d = obj(s['decode'], 'server.decode');
-    serverDecode = {};
-    for (const [tool, v] of Object.entries(d)) serverDecode[tool] = decodeOf(v, `server.decode.${tool}`).decode!;
+    for (const [tool, v] of Object.entries(d)) {
+      const dd = decodeOf(v, `server.decode.${tool}`);
+      if (dd.decode) (serverDecode ??= {})[tool] = dd.decode;
+      if (dd.extract) (serverExtract ??= {})[tool] = dd.extract;
+    }
   }
   const stdio = s['stdio'] === undefined ? null : strList(s['stdio'], 'server.stdio');
   const url = optStr(s['url'], 'server.url');
@@ -1156,7 +1345,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const m: Manifest = {
     mws,
     prefix,
-    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}) },
+    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}), ...(serverExtract ? { extract: serverExtract } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
       write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
@@ -1171,10 +1360,12 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     calls,
     resources,
     ...topLevel(o),
+    ...((sess) => (sess ? { session: sess } : {}))(sessionOf(o['session'])),
     source,
   };
-  // why: one decode mode per tool (refused here, before anything runs).
+  // why: one decode mode per tool, and one extraction per tool (refused here, before anything runs).
   declaredDecodes(m);
+  declaredExtracts(m);
   return m;
 }
 

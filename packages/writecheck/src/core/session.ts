@@ -9,12 +9,14 @@
  */
 
 import { appendFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 import type { CaptureSink } from './capture.js';
 import { BASE_ENV, HttpMcpClient, LaunchedServer, PROTOCOL_VERSION_META_KEY, rawHttp, StdioClient, type LaunchOutcome, type McpClient, type RpcOutcome } from './client.js';
 import { egressFor, type EgressPolicy } from './egress.js';
 import type { Gate } from '../gate/gate.js';
-import { declaredDecodes, type Manifest } from './manifest.js';
+import { declaredDecodes, declaredExtracts, type Extract, type Manifest, type SessionInit } from './manifest.js';
+import { render } from './template.js';
 import type { Redactor } from './redact.js';
 import { Throttle } from './throttle.js';
 import { getPath, isObj, nowMs, parseStructured, sha256, sleep, WritecheckError, type Obj } from './util.js';
@@ -63,6 +65,14 @@ export interface CallResult {
   decoded?: { from: 'structuredContent.result'; basis: DecodeBasis; text_mirrors?: 'structuredContent' };
   /** Where the result was decoded: structuredContent as received (the wrapper and its string), kept beside the decoded `data`. */
   raw_structured?: unknown;
+  /**
+   * Set where `data` is the JSON document taken out of the answer's text by the manifest's `decode.extract` (between two markers,
+   * or a regex's capture group) and parsed. `refusals`: whether the structured refusal signals read it (declared); `text` is kept
+   * as received, so the patterns read the answer as it came.
+   */
+  extracted?: { from: 'text'; by: 'between' | 'regex'; basis: 'manifest'; refusals: boolean };
+  /** Set where the manifest declares decode.extract for the tool, the answer was one to extract from, and nothing was found: why. `data` is then null. */
+  extract_failed?: { by: 'between' | 'regex'; reason: string };
   /** The shape fields of structuredContent and of each JSON text block that carry an `mws` field (spec 7.3, rule 11; src/checks/shape.ts), or null. */
   shape?: ShapeCapture | null;
   /** Whether the call carried an idempotency key and a version (B-9: same_key / same_version on a call that carried none is read as yes); set by the driver for the writes it builds, absent where not recorded. */
@@ -154,6 +164,16 @@ export class Interrupted extends WritecheckError {
   }
 }
 
+/** A `session.init` call failed: the run stops (a harness reason, not a verdict on the server's write path). */
+export class SessionInitFailed extends Interrupted {}
+
+/** A `session.init` call failed on a server a launch check started: that check is not tested, the run goes on. */
+export class LaunchInitFailed extends WritecheckError {
+  constructor(msg: string) {
+    super(msg, 4);
+  }
+}
+
 export class BudgetExhausted extends WritecheckError {
   constructor(what: string, budget: number) {
     super(`stopped: ${what} would exceed the write budget of ${budget}`, 4);
@@ -192,6 +212,10 @@ interface Conn {
   own: LaunchedServer | null;
   /** The environment overrides a label started with Session.launch was given (a restart starts it again with the same). */
   launchEnv?: Record<string, string>;
+  /** session.init on this connection: run once, before its first other tools/call. */
+  init?: Promise<void>;
+  /** How many times session.init was started on this connection (CLEANUP retries a failed one once). */
+  initTries?: number;
 }
 
 /** How a restart went (MWS-RETRY-2 step (e)): the stop asked for, the stop used (a graceful stop that needed SIGKILL is a kill), and when. */
@@ -242,6 +266,16 @@ export class Session {
   private readonly schemaMarked = new Set<string>();
   /** Tools a decode (or a decode switched off) was already noted for (one note per tool). */
   private readonly decodeNoted = new Set<string>();
+  /** Tools the manifest declares a read extraction for (`decode.extract`). */
+  private readonly extracts: Map<string, Extract>;
+  /** Tools an extraction (used, or declared and not matched) was noted for. */
+  private readonly extractNoted = new Set<string>();
+  /** Once armed (the run confirmed its plan), session.init runs at the end of every new connection, not only before its first call. */
+  private initArmed = false;
+  /** session.init calls made, all sessions together (for the results). */
+  initCalls = 0;
+  /** Set where a session.init call failed: the reason the run stopped. */
+  initFailure: string | null = null;
 
   constructor(readonly o: SessionOptions) {
     if (o.min_interval_ms > 0 && o.throttle_file) this.throttle = new Throttle(o.throttle_file, o.min_interval_ms);
@@ -249,6 +283,7 @@ export class Session {
       if (mode === 'json') this.decodeTools.set(tool, 'manifest');
       else this.decodeOff.add(tool);
     }
+    this.extracts = o.manifest ? declaredExtracts(o.manifest) : new Map();
   }
 
   /** A new step id, unique in the run: `<prefix>.<seq>`. */
@@ -512,6 +547,9 @@ export class Session {
     this.conns.set(label, conn);
     this.started.push(label);
     await this.handshake(conn, label, this.stepId(`init.${label}`));
+    // why: review of PR #14 (6): once armed, a new connection is initialised in connect(), so a barrier that connects its labels
+    // first (pairs, MWS-RETRY-2 step d) does not carry an init call inside the barrier.
+    if (this.initArmed) await this.ensureInit(conn, label);
     return conn;
   }
 
@@ -554,6 +592,7 @@ export class Session {
         await this.release([o.label]);
         return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: (conn.own ?? own).stderrTail() };
       }
+      await this.launchInit(conn, o.label);
       return { started: true, protocol: conn.protocol };
     }
     const client = this.stdioClient(o.label, env);
@@ -576,6 +615,7 @@ export class Session {
       await this.release([o.label]);
       return { started: false, exit_code: code, reason: failed ?? `exited (${code ?? 'signal'}) right after starting`, stderr_tail: tail };
     }
+    await this.launchInit(conn, o.label);
     return { started: true, protocol: conn.protocol };
   }
 
@@ -641,11 +681,12 @@ export class Session {
       // why: t17: a tool whose outputSchema marks a wrapped result has its structuredContent.result decoded where it is JSON.
       // `decode: none` in the manifest keeps them as they are.
       if (method === 'tools/list')
-        for (const t of page)
+        for (const t of page) {
           if (isObj(t) && typeof t['name'] === 'string' && marksWrappedResult(t['outputSchema'])) {
             this.schemaMarked.add(t['name']);
             if (!this.decodeTools.has(t['name']) && !this.decodeOff.has(t['name'])) this.decodeTools.set(t['name'], 'outputSchema');
           }
+        }
       cursor = res['nextCursor'];
       if (!cursor) return out;
       const k = JSON.stringify(cursor);
@@ -691,11 +732,12 @@ export class Session {
   }
 
   /** One tools/call. `write: false` for calls that read; every other call counts against the budget and the rate limit. */
-  async call(label: string, tool: string, args: unknown, o: { step?: string; write?: boolean; paced?: boolean; counted?: boolean; meta?: Record<string, unknown>; params?: Record<string, unknown> } = {}): Promise<CallResult> {
+  async call(label: string, tool: string, args: unknown, o: { step?: string; write?: boolean; paced?: boolean; counted?: boolean; meta?: Record<string, unknown>; params?: Record<string, unknown>; init?: true } = {}): Promise<CallResult> {
     this.guard(label);
     const step = o.step ?? this.stepId(`call.${tool}`);
     const write = o.write !== false;
     const conn = await this.connect(label);
+    if (!o.init) await this.ensureInit(conn, label);
     if (write) {
       if (!o.counted) this.reserveWrites(1, `tools/call ${tool}`);
       if (!o.paced) await this.pace();
@@ -716,7 +758,18 @@ export class Session {
         /* a scanner failure never changes the call's outcome */
       }
     }
-    const out = toCallResult(r, step, label, tool, this.decodeTools.get(tool) ?? null);
+    const out = toCallResult(r, step, label, tool, this.decodeTools.get(tool) ?? null, this.extracts.get(tool) ?? null);
+    const ex = this.extracts.get(tool);
+    if (ex && !this.extractNoted.has(`${tool}:${out.extracted ? 'ok' : out.extract_failed ? 'failed' : 'none'}`)) {
+      const how = 'between' in ex ? `between ${JSON.stringify(ex.between[0])} and ${JSON.stringify(ex.between[1])}` : `by the regex ${JSON.stringify(ex.regex)}`;
+      if (out.extracted) {
+        this.extractNoted.add(`${tool}:ok`);
+        this.note(label, step, `${tool} answers JSON inside its text; the manifest declares decode.extract, so its data (paths, a declared outcome field) is the JSON document taken out of the text ${how} and parsed; the call records mark it extracted, the text the patterns read is kept as received, and ${ex.refusals ? 'the structured refusal signals read the extracted document too (refusals: true)' : 'a refusal is classified on the answer as received (an error answer is not extracted, and the structured refusal signals do not read the extracted document)'}.`);
+      } else if (out.extract_failed) {
+        this.extractNoted.add(`${tool}:failed`);
+        this.note(label, step, `${tool}: the manifest declares decode.extract (${how}), but an answer gave no document: ${out.extract_failed.reason}; such an answer has no data (paths find nothing), and each such call record carries extract_failed.`);
+      }
+    }
     if (out.decoded && !this.decodeNoted.has(tool)) {
       this.decodeNoted.add(tool);
       this.note(label, step, `${tool} answers a wrapped result (structuredContent {"result": "<JSON as a string>"}); every reading of its structured answer (paths, outcome fields, signals, the text searched) uses the decoded JSON document (basis: ${out.decoded.basis === 'manifest' ? 'the manifest declares decode: json' : "the tool's outputSchema marks a wrapped result"}); the call records keep structuredContent as received in raw_structured, and the capture keeps the whole answer.`);
@@ -728,6 +781,78 @@ export class Session {
     this.hist({ op, phase: out.ok ? 'ok' : out.timed_out || out.transport_error ? 'info' : 'fail', kind: 'call', label, step, name: tool, write, ...(out.timed_out ? { detail: 'client timeout: the outcome is unknown' } : out.transport_error ? { detail: out.transport_error } : {}) });
     if (out.http_status === 429 || (!out.ok && RATE_TEXT.test(out.text ?? out.rpc_error?.message ?? ''))) throw new RateLimited(`tools/call ${tool} (${step})`);
     return out;
+  }
+
+  /** Whether a session.init call counts as a write: unless the operator declares it read_only (a server's readOnlyHint does not exempt it). */
+  initCounted(c: SessionInit): boolean {
+    return !c.read_only;
+  }
+
+  /** From now on (the run confirmed its plan) every new connection runs session.init at once (see connect). */
+  armInit(): void {
+    this.initArmed = true;
+  }
+
+  /** session.init on `conn`, once; CLEANUP retries a failed one once (its failure is a clean-up failure, never cached for good). */
+  private async ensureInit(conn: Conn, label: string): Promise<void> {
+    if (!this.o.manifest.session?.init.length) return;
+    if (!conn.init) {
+      conn.initTries = (conn.initTries ?? 0) + 1;
+      const p = this.runInit(label, conn);
+      conn.init = p;
+      if (label === 'CLEANUP')
+        p.catch(() => {
+          if ((conn.initTries ?? 0) < 2 && conn.init === p) conn.init = undefined;
+        });
+    }
+    await conn.init;
+  }
+
+  /** A server a launch check started gets its session.init at once; a failure releases it and makes that check not tested. */
+  private async launchInit(conn: Conn, label: string): Promise<void> {
+    if (!this.o.manifest.session?.init.length) return;
+    try {
+      await this.ensureInit(conn, label);
+    } catch (e) {
+      await this.release([label]);
+      throw e;
+    }
+  }
+
+  /**
+   * session.init: each declared call, in order, on a new session, before its first other tools/call. The arguments' `{{env.NAME}}`
+   * come from the tester's environment (their values are redacted in every record: see secretsOf). A failure on a run's session
+   * (an error, an isError answer, no answer, an unset variable) stops the run; on a launch check's server it makes that check
+   * not tested; on CLEANUP it is a clean-up failure (retried once). Clean-up never reserves write budget for it.
+   */
+  private async runInit(label: string, conn: Conn): Promise<void> {
+    const inits = this.o.manifest.session?.init ?? [];
+    for (const [i, c] of inits.entries()) {
+      const env: Record<string, string> = {};
+      for (const n of c.env) {
+        const v = this.o.env[n];
+        if (v === undefined) return this.initFailed(label, conn, i, c, `environment variable ${n} is not set`);
+        env[n] = v;
+      }
+      const args = render(c.args, { env });
+      const counted = this.initCounted(c);
+      // why: review of PR #14 (1): the clean-up must run after the budget is spent; its init is counted, never reserved.
+      const cleanup = label === 'CLEANUP';
+      if (cleanup && counted) this.writes++;
+      const r = await this.call(label, c.tool, args, { init: true, write: counted, ...(cleanup ? { counted: true } : {}), step: this.stepId(`session-init.${label}.${c.tool}`) });
+      this.initCalls++;
+      if (!r.ok) return this.initFailed(label, conn, i, c, r.timed_out ? 'no answer before the timeout' : r.transport_error ? r.transport_error : r.rpc_error ? `JSON-RPC error ${r.rpc_error.code}: ${r.rpc_error.message}` : r.isError ? `an error answer: ${(r.text ?? '').slice(0, 300)}` : `result type ${r.result_type}`);
+      if (this.initCalls === i + 1) this.note(label, r.step, `session.init: ${c.tool} was called on session ${label} before its first other call (${counted ? 'counted as a write' : 'declared read-only, not counted as a write'}); it is called on every session the run opens. What it does on the server (a connection, a login) is not in the ledger and is not cleaned up.`);
+    }
+  }
+
+  private initFailed(label: string, conn: Conn, i: number, c: SessionInit, why: string): never {
+    const base = `session.init[${i}] (${c.tool}) failed on session ${label}, before any probe on it: ${this.o.redactor.text(why)}`;
+    if (label === 'CLEANUP') throw new WritecheckError(`clean-up: ${base}`, 4);
+    if (conn.launchEnv) throw new LaunchInitFailed(`${base} (a server started by a check; that check is not tested)`);
+    this.initFailure ??= base;
+    this.abort(base);
+    throw new SessionInitFailed(base);
   }
 
   /** One control request (the platform's own API), through the egress list. */
@@ -793,7 +918,82 @@ export class Session {
   }
 }
 
-export function toCallResult(r: RpcOutcome, step: string, label: string, tool: string, decode: DecodeBasis | null = null): CallResult {
+/** The most of an answer's text a declared extraction searches (review of PR #14 (2): far below the capture limit). */
+export const EXTRACT_INPUT_MAX = 256 * 1024;
+/** The time a regex extraction may take on one answer; past it the extraction fails (review of PR #14 (2): ReDoS on server text). */
+export const EXTRACT_REGEX_MS = 100;
+/** The most end markers tried after the start marker before `between` gives up. */
+const EXTRACT_TRIES = 64;
+
+let regexCtx: vm.Context | null = null;
+
+/** The regex's first match, run in a separate context under a hard time limit; null where it does not match, 'timeout' past the limit. */
+function boundedExec(src: string, text: string): RegExpExecArray | null | 'timeout' {
+  regexCtx ??= vm.createContext(Object.create(null));
+  regexCtx['src'] = src;
+  regexCtx['text'] = text;
+  try {
+    const m = vm.runInContext('new RegExp(src, "s").exec(text)', regexCtx, { timeout: EXTRACT_REGEX_MS }) as RegExpExecArray | null;
+    return m ? (Array.from(m) as unknown as RegExpExecArray) : null;
+  } catch (e) {
+    if ((e as { code?: string }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') return 'timeout';
+    throw e;
+  } finally {
+    regexCtx['text'] = '';
+  }
+}
+
+const parseDoc = (inner: string): unknown => {
+  const s = inner.trim();
+  if (!s.startsWith('{') && !s.startsWith('[')) return undefined;
+  try {
+    const v: unknown = JSON.parse(s);
+    return v !== null && typeof v === 'object' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The JSON document a declared extraction takes out of an answer's text (`decode.extract`), or why it found none. `between`:
+ * after the first start marker, each following end marker is tried in turn (up to 64) until the text between parses as a
+ * JSON object or array (the document may itself contain the end marker). `regex`: the capture group of the first match, found
+ * under a 100 ms limit. At most the first 256 KiB of text is searched. No Python-repr or YAML parsing.
+ */
+export function extractDoc(text: string, x: Extract): { doc: unknown } | { failed: string } {
+  const cut = text.length > EXTRACT_INPUT_MAX;
+  const t = cut ? text.slice(0, EXTRACT_INPUT_MAX) : text;
+  const more = cut ? ` (only the first ${EXTRACT_INPUT_MAX} characters of ${text.length} were searched)` : '';
+  if ('between' in x) {
+    const a = t.indexOf(x.between[0]);
+    if (a < 0) return { failed: `the start marker ${JSON.stringify(x.between[0])} is not in the text${more}` };
+    const from = a + x.between[0].length;
+    let at = from;
+    let tries = 0;
+    for (; tries < EXTRACT_TRIES; tries++) {
+      const b = t.indexOf(x.between[1], at);
+      if (b < 0) break;
+      const doc = parseDoc(t.slice(from, b));
+      if (doc !== undefined) return { doc };
+      at = b + 1;
+    }
+    return { failed: tries === 0 ? `no end marker ${JSON.stringify(x.between[1])} after the start marker${more}` : `the text between the markers is not a JSON object or array (${tries} end marker${tries === 1 ? '' : 's'} tried)${more}` };
+  }
+  const m = boundedExec(x.regex, t);
+  if (m === 'timeout') return { failed: `the regex did not finish within ${EXTRACT_REGEX_MS} ms on this answer${more}` };
+  if (!m) return { failed: `the regex does not match${more}` };
+  const inner = m.slice(1).find((g) => g !== undefined);
+  const doc = inner === undefined ? undefined : parseDoc(inner);
+  return doc === undefined ? { failed: `the captured text is not a JSON object or array${more}` } : { doc };
+}
+
+/** The extracted document, or undefined (see extractDoc). */
+export function extractJson(text: string, x: Extract): unknown {
+  const r = extractDoc(text, x);
+  return 'doc' in r ? r.doc : undefined;
+}
+
+export function toCallResult(r: RpcOutcome, step: string, label: string, tool: string, decode: DecodeBasis | null = null, extract: Extract | null = null): CallResult {
   const body = r.message ?? {};
   const res = isObj(body['result']) ? body['result'] : null;
   const err = isObj(body['error']) ? { code: Number(body['error']['code']), message: String(body['error']['message']) } : null;
@@ -807,6 +1007,16 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   // outputSchema, or the manifest's decode: json) and the value is exactly {"result": "<JSON object or array>"}.
   const unwrapped = decode && res ? unwrapResult(res['structuredContent']) : undefined;
   if (unwrapped !== undefined) data = unwrapped;
+  // why: CLI feature A: a declared extraction takes the JSON out of an answer that wraps it in markup or prose; only where the
+  // answer has no structuredContent, and (unless `refusals: true`) only for an answer that is not an error, so a refusal is
+  // classified on the answer as received.
+  const eligible = !!extract && !!res && res['structuredContent'] === undefined && text !== null && !err && (extract.refusals || !isError);
+  const ex = eligible ? extractDoc(text!, extract!) : null;
+  const extracted = ex && 'doc' in ex ? ex.doc : undefined;
+  // why: review of PR #14 (4): for a declared tool a failed extraction is recorded, and the text is not parsed some other way.
+  const extractFailed = ex && 'failed' in ex ? ex.failed : null;
+  if (extracted !== undefined) data = extracted;
+  else if (extractFailed !== null) data = null;
   // why: an adopted result shape is read at evaluation, from what is captured here for every call (cheap; null for most servers).
   // For a decoded wrapped result the shape is captured from the decoded document, as every other reading of it is (patternData
   // reads `data`): the tool's structured answer is that document, so the shape and the patterns read the same thing.
@@ -833,7 +1043,7 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   // why: an input_required result (2026-07-28), or any other non-complete result type, is neither a success nor an error (spec MWS-RES-2).
   const resultType = res && typeof res['resultType'] === 'string' ? res['resultType'] : null;
   const pending = resultType !== null && resultType !== 'complete';
-  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, ...(unwrapped !== undefined ? { decoded: { from: 'structuredContent.result' as const, basis: decode!, ...(texts.length === 1 && isMirrorOf(texts[0]!, rawSc) ? { text_mirrors: 'structuredContent' as const } : {}) }, raw_structured: rawSc } : {}), shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
+  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, ...(unwrapped !== undefined ? { decoded: { from: 'structuredContent.result' as const, basis: decode!, ...(texts.length === 1 && isMirrorOf(texts[0]!, rawSc) ? { text_mirrors: 'structuredContent' as const } : {}) }, raw_structured: rawSc } : {}), ...(extracted !== undefined ? { extracted: { from: 'text' as const, by: 'between' in extract! ? ('between' as const) : ('regex' as const), basis: 'manifest' as const, refusals: extract!.refusals } } : {}), ...(extractFailed !== null ? { extract_failed: { by: 'between' in extract! ? ('between' as const) : ('regex' as const), reason: extractFailed } } : {}), shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
 }
 
 /** Is a text block a JSON object that carries an `mws` member (the shape, B-9 v2)? */
