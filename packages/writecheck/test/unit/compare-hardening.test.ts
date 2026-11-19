@@ -512,14 +512,20 @@ test('review F4 (R3): MWS-IN-1 acts on required (it compares a probe with the ca
   assert.match(x.why, /acts on required/);
 });
 
-test('review F4 (R4): MWS-CONC-2 adds a version-left-out run only for an optional version: relaxing it is another test, never regressed; elsewhere the relaxation stays rule A', () => {
+test('review F4 (R4): MWS-CONC-2 adds a version-left-out run only where the tool does not require the version: relaxing it there is another test, never regressed; elsewhere the relaxation stays rule A', () => {
   const m = load();
   const sc = { id: 'stale-write', version: '1' };
-  const before = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, required: ['id', 'expected_version'] })));
+  // ticket: the version-left-out run is on delete_ticket (checks/stale.ts versionLeftOutRuns)
+  const before = toolsFor(m, onTool('delete_ticket', (s) => ({ ...s, required: ['id', 'expected_version'] })));
   const after = toolsFor(m);
   const x = cellOf(cmp(doc(stamped([rec('MWS-CONC-2', 'held', { scenario: sc })], m, before)), doc(stamped([viol(rec('MWS-CONC-2', 'held', { scenario: sc }))], m, after))), 'MWS-CONC-2@update_ticket');
   assert.equal(x.label, 'not comparable');
   assert.equal(x.transition, 'test-changed');
+  assert.match(x.why, /version_left_out/);
+  // relaxing the version of update_ticket (a field patch: no version-left-out run) leaves CONC-2's calls as they were
+  const relaxedUpdate = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, required: ['id', 'expected_version'] })));
+  assert.equal(cellOf(cmp(doc(stamped([rec('MWS-CONC-2', 'held', { scenario: sc })], m, relaxedUpdate)), doc(stamped([viol(rec('MWS-CONC-2', 'held', { scenario: sc }))], m, after))), 'MWS-CONC-2@update_ticket').label, 'regressed');
+  // and for another requirement the same relaxation is rule A
   const y = cellOf(cmp(doc(stamped([viol(rec('MWS-CONC-1', 'held', { scenario: sc }))], m, before)), doc(stamped([rec('MWS-CONC-1', 'held', { scenario: sc })], m, after))), 'MWS-CONC-1@update_ticket');
   assert.equal(y.label, 'fixed', 'MWS-CONC-1 sends the same call: RELAXED_REQUIRED_IS_SAME_TEST');
   assert.ok(y.same_test_because?.some((t) => /relaxed from required to optional/.test(t)));
@@ -531,6 +537,9 @@ test('review F4: a required argument the test does not send, no longer required,
   const before = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { tenant: { type: 'string' } }, ['id', 'tenant'])));
   const after = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { tenant: { type: 'string' } })));
   assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, before)), doc(stamped([r0], m, after))), 'MWS-CONC-1@update_ticket').transition, 'test-changed');
+  // a record that sends the tool no arguments (a catalog read) is not changed by it
+  const ann = rec('MWS-ANN-4', 'held', { resource: '(catalog)', scenario: { id: 'catalog', version: '1' } });
+  assert.equal(cellOf(cmp(doc(stamped([ann], m, before)), doc(stamped([ann], m, after))), 'MWS-ANN-4@update_ticket').label, 'unchanged');
   // the test sends expected_version (the version arg); closed schemas that declare it only after
   const closedB = toolsFor(m, onTool('update_ticket', (s) => ({ ...without(s, 'expected_version'), additionalProperties: false })));
   const closedA = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, additionalProperties: false })));

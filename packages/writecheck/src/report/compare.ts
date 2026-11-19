@@ -321,15 +321,17 @@ function cmpTool(b: ToolShape, a: ToolShape, tool: string, tol: string[], bad: s
   for (const n of b.r) if (!a.r.includes(n) && hasKey(a.p, n)) (relax ? tol.push(`${tool}.${n}: relaxed from required to optional (the test sends it both times)`) : bad.push(`${tool}.${n}: relaxed from required to optional (this check acts on required, so its calls change)`));
   for (const n of a.ro) if (!b.ro.includes(n)) bad.push(`${tool}.${n}: a new required argument the test does not send`);
   // why: review F4: a required argument the test does not send made the before call incomplete; after, the same call is accepted.
-  for (const n of b.ro) if (!a.ro.includes(n) && !hasKey(a.p, n)) bad.push(`${tool}.${n}: a required argument the test does not send is no longer required (the before build refused the call)`);
+  // (only for a tool the test calls with arguments: a record that reads the catalog or scans answers sends none)
+  for (const n of b.ro) if (!a.ro.includes(n) && !hasKey(a.p, n)) (keysOf(b.p).length ? bad.push(`${tool}.${n}: a required argument the test does not send is no longer required (the before build refused the call)`) : tol.push(`${tool}.${n}: a required argument is no longer required (the test sends this tool no arguments)`));
 }
 
 /**
- * Requirements whose procedure acts on `required` itself, so that relaxing an argument to optional changes the calls the test
- * sends (review F4): MWS-IN-1 compares a probe with the call without the argument only for an optional one (checks/schema.ts),
- * and MWS-CONC-2 adds a run that leaves an optional version argument out (checks/stale.ts).
+ * Requirements whose procedure acts on the `required` of the arguments it probes, so that relaxing a probed argument to optional
+ * changes the calls the test sends (review F4): MWS-IN-1 compares a probe with the call without the argument only for an
+ * optional one (checks/schema.ts). MWS-CONC-2's run that leaves an optional version argument out is in `chosen`
+ * (version_left_out), since only the version argument's `required` decides it.
  */
-export const REQUIRED_DRIVES_CALLS = ['MWS-IN-1', 'MWS-CONC-2'] as const;
+export const REQUIRED_DRIVES_CALLS = ['MWS-IN-1'] as const;
 
 interface SameTest {
   kind: 'equal' | 'rule-a' | 'subject' | 'changed' | 'scheme';
@@ -360,7 +362,8 @@ export function sameTest(rb: Rec, ra: Rec): SameTest {
   if (canonical(ib.extras ?? null) !== canonical(ia.extras ?? null)) return { kind: 'changed', why: ` (a setting of the tester or a document it read differs: ${canonical(ib.extras ?? null)} before, ${canonical(ia.extras ?? null)} after)`, tolerated: [] };
   const tol: string[] = [];
   const bad: string[] = [];
-  const relax = RELAXED_REQUIRED_IS_SAME_TEST && !(REQUIRED_DRIVES_CALLS as readonly string[]).includes(rb.requirement);
+  const relax = RELAXED_REQUIRED_IS_SAME_TEST;
+  const relaxProbed = RELAXED_REQUIRED_IS_SAME_TEST && !(REQUIRED_DRIVES_CALLS as readonly string[]).includes(rb.requirement);
   for (const t of [...new Set([...Object.keys(ib.tools), ...Object.keys(ia.tools)])].sort()) {
     const x = ib.tools[t];
     const y = ia.tools[t];
@@ -380,7 +383,7 @@ export function sameTest(rb: Rec, ra: Rec): SameTest {
     } else {
       // why: review M4: a probed argument that is gone means the probe that failed was not sent again: never a fix.
       const changedArgs: string[] = [];
-      cmpTool(x, y, rb.write_path.tool, tol, judged ? changedArgs : bad, true, bad, relax);
+      cmpTool(x, y, rb.write_path.tool, tol, judged ? changedArgs : bad, true, bad, relaxProbed);
       if (changedArgs.length) {
         facets.add('schema');
         tol.push(...changedArgs.map((c) => `judged schema changed: ${c}`));

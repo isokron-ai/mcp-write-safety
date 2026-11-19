@@ -38,6 +38,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 
 import type { Manifest, ResourceSpec } from '../core/manifest.js';
 import { furtherProbes } from '../checks/readback.js';
+import { versionLeftOutRuns } from '../checks/stale.js';
 import { canonical, isObj, parsePath, sha256 } from '../core/util.js';
 import { TEST_HASH_FORMAT } from '../core/identity.js';
 import { SPEC_VERSION } from '../requirements.js';
@@ -491,6 +492,16 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     address[le.tool] = { by_id: !!le.address.by_id && Object.hasOwn(props, topName(le.address.by_id)), by_position: !!le.address.by_position && Object.hasOwn(props, topName(le.address.by_position)) };
   }
   if (Object.keys(address).length) chosen['address'] = address;
+  // why: review F4: MWS-CONC-2 adds a run that leaves the version argument out only where the tool's schema does not require it.
+  if (res && r.requirement === 'MWS-CONC-2' && res.version?.arg) {
+    const runs = versionLeftOutRuns(res).filter((x) => !res.no_version_check.includes(x.tool));
+    // (read as checks/stale.ts reads it: the input schema's own `required`)
+    const requires = (tool: string): boolean => {
+      const sc = ctx.tools.find((x) => x.name === tool)?.['inputSchema'];
+      return isObj(sc) && Array.isArray(sc['required']) && sc['required'].includes(res.version!.arg!);
+    };
+    if (runs.length) chosen['version_left_out'] = runs.map((x) => ({ tool: x.tool, runs: !requires(x.tool) }));
+  }
   const limits = paced(r.requirement) ? { ...(shared.limits as Record<string, unknown>), writes_per_second: shared.rate } : shared.limits;
   const extras: Record<string, unknown> = {};
   if (r.requirement === 'MWS-IN-5') {
