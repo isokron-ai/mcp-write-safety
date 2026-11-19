@@ -118,6 +118,10 @@ resources:
     # project key that exists is refused by the duplicate check the backend makes whatever the key (own_checks: name).
     # Step (c) changes the project key: under a fresh key the tool would create that project.
     idempotency: { args: { key: "{{key}}", name: "{{marker}}" }, key: { arg: idempotency_key }, id: key, replay_marker: replayed, vary: key, own_checks: [name], backend_key: true }
+    # MWS-RES-1: the state each write call asks for, judged by reading the project back (the create finds it by its marker).
+    effects:
+      - { tool: create_project, args: { key: "{{key}}", name: "{{marker}}" }, effect: [created, { path: name, value: "{{marker}}" }] }
+      - { tool: delete_project, args: { key: "{{id}}" }, effect: deleted }
     # MWS-RES-2 (black-box): calls that are refused. Projects have no object under test, so each is read back by the key it
     # carries: the project must not exist afterwards. A name over 100 characters is refused by the tool's schema check (and by
     # the backend); a delete of a project that does not exist is refused by the backend.
@@ -187,6 +191,16 @@ resources:
       element: { id: id, name: name }
       address: { by_id: label_id, by_position: position }
       insert: { tool: set_labels, args: { id: "{{id}}", labels: "{{names_inserted}}", force: true } }
+    # MWS-RES-1: the state each write call asks for, judged by reading the ticket back after the call (each on a fresh ticket;
+    # {{object}} is the ticket as read just before the call). update_ticket and replace_ticket are judged by their update cases,
+    # delete_ticket by the delete case, bulk_update_tickets and delete_tickets per item by the multi-item check, and close_ticket
+    # by its input_required effect (below).
+    effects:
+      - { tool: create_ticket, args: { project: "{{?scope}}", title: "{{marker}}", status: in_progress, priority: 2, labels: [a, b] }, effect: [created, { path: title, value: "{{marker}}" }, { path: status, value: in_progress }, { path: priority, value: 2 }, { path: labels, pick: name, value: [a, b] }] }
+      - { tool: add_comment, args: { id: "{{id}}", body: "{{marker}}" }, effect: { path: comments, contains: { body: "{{marker}}" } } }
+      - { tool: add_label, args: { id: "{{id}}", name: added }, effect: { path: labels, contains: { name: added } } }
+      - { tool: remove_label, args: { id: "{{id}}", label_id: "{{object.labels[0].id}}" }, effect: { path: labels, lacks: { id: "{{object.labels[0].id}}" } } }
+      - { tool: set_labels, args: { id: "{{id}}", labels: [z], expected_version: "{{version}}" }, effect: { path: labels, pick: name, value: [z] } }
     # MWS-RETRY-3: close_ticket asks for a confirmation (input_required) before it writes.
     input_required:
       - { tool: close_ticket, args: { id: "{{id}}" }, answers: { confirm: { action: accept, content: { confirm: true } } }, effect: { path: status, value: closed } }

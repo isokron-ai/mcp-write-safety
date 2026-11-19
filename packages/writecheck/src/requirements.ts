@@ -110,7 +110,7 @@ export const COVERAGE: Record<string, { check: 'yes' | 'partial' | 'no'; not_bui
   'MWS-TGT-1': { check: 'partial', not_built: 'update and delete tools that take a scope argument (an object of the same name in each scope), except the selector tool, which is tested only with `selector.narrow` and `selector.send_empty_forms`' },
   'MWS-TGT-2': { check: 'partial', not_built: 'a client that declares the elicitation capability and declines a confirmation (spec 7.3, rule 10). The forms are destructive by design and run only with `selector.send_empty_forms: true`, on a backend where every object is disposable' },
   'MWS-TGT-3': { check: 'partial', not_built: 'a client that declares the elicitation capability and declines a confirmation (spec 7.3, rule 10)' },
-  'MWS-RES-1': { check: 'partial', not_built: 'write tools other than the update and delete tools' },
+  'MWS-RES-1': { check: 'partial', not_built: 'a write tool with no declared effect (`effects`, an `input_required` effect, or a `multi` block) other than the update and delete tools; the control arm for those effects (`platform`)' },
   'MWS-RES-2': { check: 'partial', not_built: 'a write tool the manifest declares no call for (the failed request and the lost answer run for each declared write call with backend.gate: create, delete, `calls`, `versioned`, `input_required`, `creates`, the update tool and the multi-item tools); judging an `input_required` result after the retry, or a task on what the terminal task carries; the settled-outcome runs of provoked failures through the interposer (the run without a fault and the lost-answer trial are built)' },
   'MWS-RES-3': { check: 'yes', not_built: '' },
   'MWS-RES-4': { check: 'yes', not_built: '' },

@@ -25,15 +25,18 @@ import { lastMutating, MUTATING } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { listScope, newScope, scratch } from './scratch.js';
 import { tgt1HeldFor } from './targeting.js';
+import { multiRes1 } from './effects.js';
 import { decidedByShape, itemStatus, quoteField, shapeFallbackNote, shapeOf } from './shape.js';
 import { lostAnswerVerdict, type LostAnswerObs } from './gated.js';
 import { SYNTHETIC_FAULT } from './writefaults.js';
 import { appliedAllSaid, appliedAllUnread, brief, forPatterns, mentions, res2Judge, textStatement, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'multi-item';
-// why: spec 13.6: version 2: with the gate, the learning pass is read back (the settled outcome, R9-1) and a lost-answer trial
-// follows the failed-request trials; the procedure version enters every record's test_hash.
-const VERSION = '2';
+// why: 3: both lanes changed what the scenario sends, and the version enters every record's test_hash. From 2 (spec 13.6): with the gate,
+// the learning pass is read back (the settled outcome, R9-1) and a lost-answer trial follows the failed-request trials (MWS-RES-2).
+// From this lane: the check also sends a call on good items only where there is no gate (MWS-RES-1, effects.ts multiRes1), and the
+// learning pass is that call where the gate runs one.
+const VERSION = '3';
 
 export interface MultiTrial {
   kind: 'invalid item' | 'failed backend write';
@@ -59,6 +62,8 @@ export interface MultiObs {
   trials: MultiTrial[];
   /** The items sit in a container the tester created (applied_count is compared there, and where the call names only the trial's own items). */
   own_container?: boolean;
+  /** MWS-RES-1: a call on good items only (the learning pass where the gate runs one), and the items that hold the effect after it (null: a read-back with an unknown outcome). */
+  clean?: { call: CallBrief | null; items: unknown[]; applied: unknown[] | null; skipped?: string };
   /** MWS-RES-2, the lost answer (with the gate): the last mutating request of the learning pass applied and its answer cut; absent in older evidence. */
   lost?: MultiTrial & { requests: { seq: number; method: string; path: string; status: number | null }[]; faulted: { seq: number; method: string; path: string; status: number | null } | null };
   /** The learning pass, for the clause on a settled outcome (R9-1); absent in older evidence. */
@@ -70,7 +75,7 @@ const cleanable = (res: ResourceSpec) => !!res.cleanup && res.cleanup !== 'leave
 export const multiCheck: CheckModule = {
   id: ID,
   version: VERSION,
-  requirements: ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-2'],
+  requirements: ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-1', 'MWS-RES-2'],
   plan(ctx: PlanContext, res: ResourceSpec): PlannedCheck {
     const base: PlannedCheck = { check: ID, version: VERSION, resource: res.name, runs: false, calls: [], writes: 0, creates: 0, notRun: [] };
     const sc = { id: ID, version: VERSION };
@@ -81,32 +86,33 @@ export const multiCheck: CheckModule = {
     for (const m of res.multi) {
       const w = wp(res.name, m.tool);
       if (!cleanable(res)) {
-        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-2'] as const).map((id) => result(id, w, id === 'MWS-RES-2' ? { id: `${ID}.res2`, version: VERSION } : sc, 'not tested', 'needs a cleanup policy (it creates the items)')));
+        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-1', 'MWS-RES-2'] as const).map((id) => result(id, w, id === 'MWS-RES-2' ? { id: `${ID}.res2`, version: VERSION } : sc, 'not tested', 'needs a cleanup policy (it creates the items)')));
         continue;
       }
       const bb = m.invalid_id !== null;
       const px = !!ctx.manifest.backend?.gate;
       // why: B-GAP F4: a multi-item tool's failed request and lost answer are brought about through the gate; without it, say so.
       if (!px) nr.push(result('MWS-RES-2', w, { id: `${ID}.res2`, version: VERSION }, 'not tested', `a failed or lost backend answer for ${m.tool} is brought about through backend.gate, which the declaration does not configure`));
-      if (!bb && !px) {
-        nr.push(...(['MWS-ATOM-1', 'MWS-ATOM-2'] as const).map((id) => result(id, w, sc, 'not tested', 'declare invalid_id (an item the backend refuses) for the black-box positions, or configure backend.gate to fail a backend write')));
-        continue;
-      }
+      // why: the call on good items only (MWS-RES-1) needs neither invalid_id nor the gate; only the ATOM trials do (multiVerdicts says so).
+      if (!px) calls.push(`${m.tool}: 2 good items only; read every item back (MWS-RES-1)`);
       if (bb) calls.push(`${m.tool}: 2 good items and the refused item ${JSON.stringify(m.invalid_id)} first, in the middle, last; read every item back`);
-      if (px) calls.push(`${m.tool}: learning pass on 3 items; then fail the 2nd and the last mutating backend request, each on 3 fresh items (MWS-ATOM-1/2 and MWS-RES-2); let the last one through and cut its answer, on 3 fresh items (MWS-RES-2, lost answer); read every item back`);
-      writes += (bb ? 3 * 3 : 0) + (px ? 5 * 4 : 0);
-      creates += (bb ? 2 : 0) + (px ? 12 : 0) + (res.scope ? 1 : 0);
+      if (px) calls.push(`${m.tool}: learning pass on 3 items, read back (MWS-RES-1); then fail the 2nd and the last mutating backend request, each on 3 fresh items (MWS-ATOM-1/2 and MWS-RES-2); let the last one through and cut its answer, on 3 fresh items (MWS-RES-2, lost answer); read every item back`);
+      writes += (bb ? 3 * 3 : 0) + (px ? 5 * 4 : 0) + (px ? 0 : 3);
+      creates += (bb ? 2 : 0) + (px ? 12 : 2) + (res.scope ? 1 : 0);
     }
     return { ...base, runs: calls.length > 0, calls, writes, creates, notRun: nr };
   },
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const out: MultiObs[] = [];
-    if (cleanable(res)) for (const m of res.multi) if (m.invalid_id !== null || ctx.gate) out.push(await runMulti(ctx, res, m));
+    if (cleanable(res)) for (const m of res.multi) out.push(await runMulti(ctx, res, m));
     return { check: ID, version: VERSION, resource: res.name, data: { tools: out } };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
-    return (obs.data as { tools: MultiObs[] }).tools.flatMap((m) => [...multiVerdicts(m, res, res.multi.find((x) => x.tool === m.tool)!), ...multiRes2Verdicts(m, res, ctx.manifest.async_operations ?? [])]);
+    return (obs.data as { tools: MultiObs[] }).tools.flatMap((m) => {
+      const spec = res.multi.find((x) => x.tool === m.tool)!;
+      return [...multiVerdicts(m, res, spec), multiRes1(m, res, spec, ctx.manifest.async_operations ?? [], { id: ID, version: VERSION }), ...multiRes2Verdicts(m, res, ctx.manifest.async_operations ?? [])];
+    });
   },
 };
 
@@ -230,6 +236,17 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
     const args = render(m.args, baseVars(res, ctx.prefix, { scope, ids, batch }));
     return brief(await ctx.session.call(label, m.tool, args, { step: ctx.session.stepId(`multi.${tag}`) }));
   };
+  // MWS-RES-1: without the gate's learning pass, one call on good items only (with the gate, the learning pass is that call).
+  if (!ctx.gate) {
+    const batch = ctx.marker('mc');
+    const ds = await items(ctx, res, scope, batch, 2, label, mine);
+    const no = ds.length === 2 ? await unconfirmed() : 'the items could not be created';
+    if (no) o.clean = { call: null, items: ds.map((d) => d.id), applied: [], skipped: no };
+    else {
+      const b = await call(ds, ds.map((d) => d.id), batch, 'clean');
+      o.clean = { call: b, items: ds.map((d) => d.id), applied: await appliedOf(ctx, m, ds, label) };
+    }
+  }
   if (m.invalid_id !== null) {
     const batch = ctx.marker('mb');
     const ds = await items(ctx, res, scope, batch, 2, label, mine);
@@ -259,6 +276,7 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
     const batch = ctx.marker('ml');
     const ds = await items(ctx, res, scope, batch, 3, label, mine);
     const no = ds.length === 3 ? await unconfirmed() : null;
+    if (no || ds.length !== 3) o.clean = { call: null, items: ds.map((d) => d.id), applied: [], skipped: no ?? 'the items could not be created' };
     if (no) o.trials.push({ kind: 'failed backend write', position: 'learning pass', call: null, items: ds.map((d) => d.id), applied: [], reported: null, skipped: no });
     else if (ds.length === 3) {
       const mark = gate.mark();
@@ -267,6 +285,7 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
       const muts = reqs.filter((r) => MUTATING.has(r.method));
       o.mutating_in_learning = muts.length;
       const la = await appliedOf(ctx, m, ds, label);
+      o.clean = { call: lc, items: ds.map((d) => d.id), applied: la };
       o.learn = { call: lc, requests: reqs.map((q) => ({ seq: q.seq, method: q.method, path: q.path, status: q.status })), applied: la === null ? null : la.length === ds.length };
       if (lastMutating(reqs))
         for (const k of [...new Set([2, muts.length])].filter((k) => k <= muts.length)) {
@@ -312,6 +331,7 @@ export function multiVerdicts(o: MultiObs, res: ResourceSpec, m: MultiSpec): Res
   const w = wp(res.name, o.tool);
   const sc = { id: ID, version: VERSION };
   if (o.skipped) return (['MWS-ATOM-1', 'MWS-ATOM-2'] as const).map((id) => result(id, w, sc, 'not tested', `${o.tool} was not called: ${o.skipped}`));
+  if (!o.trials.length && m.invalid_id === null && o.routing === null) return (['MWS-ATOM-1', 'MWS-ATOM-2'] as const).map((id) => result(id, w, sc, 'not tested', 'declare invalid_id (an item the backend refuses) for the black-box positions, or configure backend.gate to fail a backend write'));
   const t = o.trials.filter((x) => !x.skipped && x.call && !x.call.indeterminate);
   const notes = [...(o.routing && o.trials.some((x) => x.kind === 'failed backend write') ? [`Route: ${o.routing}`] : []), ...(o.mutating_in_learning !== null ? [`learning pass: ${o.mutating_in_learning} mutating backend request(s)`] : []), ...o.trials.map((x) => `${x.kind} (${x.position}): ${x.skipped ? `skipped: ${x.skipped}` : `${x.call!.ok ? 'success reported' : 'error'}; applied ${x.applied.length} of ${x.items.length}${x.reported ? `; reported applied ${x.reported.length}` : ''}`}`)];
   // A trial in which the call did not apply every item it was asked to (the refused item, or the failed write).

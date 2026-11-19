@@ -68,15 +68,16 @@ export class Driver {
 
   /**
    * Read until `until(obj)` holds or the settle window has passed; the last read is returned with
-   * `settled` saying whether the expectation held. With no window, one read.
+   * `settled` saying whether the expectation held. With no window, one read. `done` ends the wait on a read that did not return
+   * the object (a read that shows it gone), which `until` is not given.
    */
-  async readSettled(label: string, stepPrefix: string, until?: (obj: unknown) => boolean): Promise<ReadResult> {
+  async readSettled(label: string, stepPrefix: string, until?: (obj: unknown) => boolean, done?: (r: ReadResult) => boolean): Promise<ReadResult> {
     const deadline = Date.now() + this.res.read.settle_ms;
     let n = 0;
     for (;;) {
       const r = await this.readOnce(label, this.session.stepId(`${stepPrefix}.read`));
       n++;
-      const holds = !until || (r.ok && until(r.obj));
+      const holds = !until || (r.ok && until(r.obj)) || (!!done && done(r));
       if (holds || Date.now() >= deadline) return { ...r, reads: n, settled: holds };
       await sleep(Math.max(20, Math.min(200, this.res.read.settle_ms / 10)));
     }
