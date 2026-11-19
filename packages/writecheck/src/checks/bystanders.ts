@@ -5,6 +5,15 @@
  * the record. An object is the tester's own only when this run's ledger holds its id; a name that carries the run prefix is
  * not enough (note 14 item 6, c4 and c5: a server can make objects whose names carry it). Everything else is a bystander.
  *
+ * A declared fixture under another key (corpus target t14, run 44406854696): two resources over one table, the fixture
+ * resource keyed by a text id and the create resource by the row number. The second resource's list shows the first one's
+ * fixture under the row number, which no ledger entry and no fixture id names, so every write the tester made to its own
+ * fixture read as "an object the tester did not create was changed". Such an entry is recognised (`fixtureForms`): the list
+ * and the fixture's read go through the same tool with the same fixed arguments, the fixture read by its own id carries the
+ * entry's key, and the two forms are equal. It stays in the inventory; only the fields the declaration lets the tester
+ * write on the fixture (`fields`, `restorable`) are left out of the comparison. Gone, missing, made again, or changed in
+ * any other field, it is reported like every other bystander.
+ *
  * The inventory cannot be complete from the server's own lists, so it is made honest instead (note 14, "what I take from
  * it"): every inventory says what it listed (which scopes, how many objects, through which lists, and whether an answer
  * showed a further page), and what it could not list (`partial`). A record whose call can remove objects (a selector call)
@@ -24,7 +33,7 @@
  * attributed to the call (other activity can change an object), so it blocks `held` and does not make `violated`.
  */
 
-import { baseVars, callKind, objectFrom } from '../core/driver.js';
+import { baseVars, callKind, objectFrom, sameFixedArgs } from '../core/driver.js';
 import type { ListSpec, ResourceSpec } from '../core/manifest.js';
 import { definitelyGone, goneByAnswer, notFoundAnswer, notFoundWithoutError, readsById } from '../core/objects.js';
 import { listAll } from '../core/lists.js';
@@ -43,6 +52,11 @@ interface Entry {
   res: string;
   /** Paths of the listed form that change by themselves. */
   ignore: string[];
+  /**
+   * Set where the entry is another resource's declared fixture, listed here under this resource's key: the fields the
+   * declaration lets the tester write on it. They are left out of the listed and the read form alike.
+   */
+  own_fields?: string[];
 }
 
 export interface Inventory {
@@ -65,6 +79,8 @@ export interface Coverage {
   lists: string[];
   /** Whether every bystander was read back by id around the call. */
   read_back_by_id: boolean;
+  /** Entries that are a declared fixture of another resource, listed under this resource's key, with the fields left out. */
+  fixtures?: string[];
 }
 
 export interface Loss {
@@ -95,7 +111,7 @@ export const BYSTANDER_NOTE = 'Objects the tester did not create were changed or
 export function coverageText(c: Coverage | undefined, partial: string[] = []): string {
   if (!c) return 'the inventory listed nothing';
   const scopes = c.scopes.length ? `${c.scopes.length} scope(s) outside the tester's own (${c.scopes.map((s) => short(s, 30)).join(', ')})` : 'no scope outside the tester\'s own';
-  return `the inventory listed ${scopes} and ${c.objects} object(s) outside the tester's own, through ${c.lists.length ? [...new Set(c.lists)].join(', ') : 'no list'}${c.read_back_by_id ? ', and read each object back by id' : ''}; ${partial.length ? `it did not cover: ${partial.join('; ')}` : 'no answer showed a further page'}. Objects these lists do not show are not covered`;
+  return `the inventory listed ${scopes} and ${c.objects} object(s) outside the tester's own, through ${c.lists.length ? [...new Set(c.lists)].join(', ') : 'no list'}${c.read_back_by_id ? ', and read each object back by id' : ''}${c.fixtures?.length ? `; of these, ${c.fixtures.join('; ')}` : ''}; ${partial.length ? `it did not cover: ${partial.join('; ')}` : 'no answer showed a further page'}. Objects these lists do not show are not covered`;
 }
 
 /** A value that is a time or an age (an ISO time, `5s`, `2m30s`, `3d`): one that changes by itself. */
@@ -203,9 +219,48 @@ async function take(ctx: RunContext, res: ResourceSpec, label: string, o: { read
     if (shown && !inv.partial.includes(shown)) inv.partial.push(shown);
     return { xs: c.items };
   };
-  const keep = (k: string, it: unknown, r: ResourceSpec, scope: unknown, id: unknown, ignore: string[]) => {
+  /**
+   * Corpus target t14: the declared fixtures of other resources that the list `l` of `r` may show under r's own key. For each
+   * resource with a fixture, of another kind than r, whose read goes through the list's tool with the same fixed arguments,
+   * the fixture is read by its own id. Read once per inventory; a read that fails or shows no object names no fixture, and
+   * the entry is then an ordinary bystander.
+   */
+  const fixtureReads = new Map<ResourceSpec, unknown>();
+  const fixtureForms = async (r: ResourceSpec, l: ListSpec): Promise<{ x: ResourceSpec; obj: unknown }[]> => {
+    const out: { x: ResourceSpec; obj: unknown }[] = [];
+    for (const x of ctx.manifest.resources) {
+      if (!x.fixture || x === r || sameKind(r).includes(x) || !sameFixedArgs(x, x.read, r, l)) continue;
+      if (!fixtureReads.has(x)) {
+        let obj: unknown = null;
+        try {
+          const c = await call(x.read.tool, render(x.read.args, baseVars(x, ctx.prefix, { id: x.fixture.id })));
+          obj = c.ok ? (objectFrom(x, c.data, x.fixture.id) ?? null) : null;
+        } catch {
+          obj = null;
+        }
+        fixtureReads.set(x, obj);
+      }
+      const obj = fixtureReads.get(x);
+      if (obj !== null && typeof obj === 'object') out.push({ x, obj });
+    }
+    return out;
+  };
+  /** The fields the declaration lets the tester write on a fixture: its two fields and its restorable arguments. */
+  const written = (x: ResourceSpec): string[] => [...new Set([...(x.fields ?? []).map((f) => f.path), ...x.restorable.filter((a) => !a.call_only).map((a) => a.path)])];
+  const keep = (k: string, it: unknown, r: ResourceSpec, scope: unknown, id: unknown, ignore: string[], fixtures: { x: ResourceSpec; obj: unknown }[] = [], idPath = '') => {
     if (id !== undefined && id !== null && mine(r, id)) return;
-    inv.items.set(k, { item: it, scope, id, res: r.name, ignore: [...r.read.ignore, ...ignore] });
+    const e: Entry = { item: it, scope, id, res: r.name, ignore: [...r.read.ignore, ...ignore] };
+    // The entry is a fixture where the fixture, read by its own id, carries this entry's key and is the same form.
+    const fx = id === undefined || id === null ? undefined : fixtures.find((f) => {
+      const key = getPath(f.obj, idPath);
+      return key !== undefined && key !== null && idKey(key) === idKey(id) && withoutIgnored(diff(f.obj, it), [...f.x.read.ignore, ...e.ignore]).length === 0;
+    });
+    if (fx) {
+      e.own_fields = written(fx.x);
+      e.ignore = [...e.ignore, ...e.own_fields];
+      (inv.covered.fixtures ??= []).push(`${k} is the declared fixture of ${fx.x.name} (${short(fx.x.fixture!.id, 40)}): the fields the tester writes on it (${e.own_fields.join(', ') || 'none'}) are not compared`);
+    }
+    inv.items.set(k, e);
   };
   if (!res.scope) {
     const l = listOf(res);
@@ -213,7 +268,8 @@ async function take(ctx: RunContext, res: ResourceSpec, label: string, o: { read
     const got = await listOnce(l, res, {});
     if ('skip' in got) return { ...inv, unavailable: `${got.skip}; declare a list block for ${res.name} so that objects outside the tester's own can be listed` };
     if ('fail' in got) return { ...inv, unavailable: got.fail };
-    for (const it of got.xs) keep(`/${JSON.stringify(getPath(it, l.id))}`, it, res, null, getPath(it, l.id), l.ignore);
+    const fixtures = await fixtureForms(res, l);
+    for (const it of got.xs) keep(`/${JSON.stringify(getPath(it, l.id))}`, it, res, null, getPath(it, l.id), l.ignore, fixtures, l.id);
   } else {
     const scopeRes = ctx.manifest.resources.find((r) => r.name === res.scope!.resource);
     const sl = scopeRes ? listOf(scopeRes) : null;
@@ -232,6 +288,7 @@ async function take(ctx: RunContext, res: ResourceSpec, label: string, o: { read
     if (res.scope.default !== null && !scopes.some((s) => s === res.scope!.default)) scopes.push(res.scope.default);
     if (!scopes.length) return { ...inv, unavailable: 'no scope could be listed' };
     const l = res.scope.list;
+    const fixtures = await fixtureForms(res, l);
     for (const scope of scopes) {
       // why: a scope this run created holds only the tester's own objects; it is not listed (and a failed list of it, a scope
       // deleted mid-run, say, does not make the inventory unavailable). A fixture scope is listed: it may hold others' objects.
@@ -239,7 +296,7 @@ async function take(ctx: RunContext, res: ResourceSpec, label: string, o: { read
       const got = await listOnce(l, res, { scope });
       if ('skip' in got) return { ...inv, unavailable: got.skip };
       if ('fail' in got) return { ...inv, unavailable: got.fail };
-      for (const it of got.xs) keep(`${JSON.stringify(scope)}/${JSON.stringify(getPath(it, l.id))}`, it, res, scope, getPath(it, l.id), l.ignore);
+      for (const it of got.xs) keep(`${JSON.stringify(scope)}/${JSON.stringify(getPath(it, l.id))}`, it, res, scope, getPath(it, l.id), l.ignore, fixtures, l.id);
     }
     inv.covered.scopes = scopes.filter((s) => !(scopeRes && mine(scopeRes, s)));
   }
@@ -364,7 +421,7 @@ export async function compare(ctx: RunContext, res: ResourceSpec, label: string,
       const back = await readBack(ctx, r, label, v);
       if (back.kind === 'gone') gone.push(k);
       else if (back.kind === 'present') {
-        const ch = fieldsChanged(v.read, back.obj, [...r.read.ignore, ...(r.version ? [r.version.read] : [])]);
+        const ch = fieldsChanged(v.read, back.obj, [...r.read.ignore, ...(r.version ? [r.version.read] : []), ...(v.own_fields ?? [])]);
         if (ch.length) changed.push(`${k} (read back changed: ${ch.slice(0, 4).join(', ')})`);
       }
     }
@@ -389,7 +446,7 @@ export async function compare(ctx: RunContext, res: ResourceSpec, label: string,
         }
         if (back.kind === 'present') {
           // why: i5: a bystander the list hides that still reads back may have been changed (trashed); the read forms decide.
-          const readChange = v.read !== undefined && v.read !== null ? fieldsChanged(v.read, back.obj, [...r.read.ignore, ...(r.version ? [r.version.read] : [])]) : [];
+          const readChange = v.read !== undefined && v.read !== null ? fieldsChanged(v.read, back.obj, [...r.read.ignore, ...(r.version ? [r.version.read] : []), ...(v.own_fields ?? [])]) : [];
           const listChange = now ? fieldsChanged(v.item, now.item, v.ignore, k) : [];
           if (readChange.length) changed.push(`${k} (read back changed: ${readChange.slice(0, 4).join(', ')})`);
           else if (listChange.length) changedCand.set(k, listChange);

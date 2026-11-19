@@ -105,6 +105,8 @@ export interface CellCompare {
   slot_moves?: { slot: string; before: CellState; after: CellState }[];
   /** Slots that went from held or not observed to violated, in a cell whose own label is not `regressed`. */
   slot_regressions?: string[];
+  /** Only on `subject-changed`: the parts of the tool entry the requirement judges that changed (report/testhash.ts, subjectFacets). */
+  facets?: Facet[];
 }
 
 export interface RunSummary {
@@ -286,7 +288,7 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
   return { problem: null, slots, subjectSlots };
 }
 
-type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[] };
+type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[]; facets?: Facet[] };
 
 export function classify(b: Side, a: Side): Classified {
   const mb = mismatch(b);
@@ -307,7 +309,8 @@ export function classify(b: Side, a: Side): Classified {
       const open = openSlots([...slots, ...j.subjectSlots]);
       if (j.problem.facets?.includes('schema') && b.verdict === 'violated' && a.verdict === 'held' && !open.length)
         return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` });
-      return withSlots({ ...j.problem, label: 'not comparable', ...(open.length && b.verdict === 'violated' ? { why: `${j.problem.why}; not schema-fixed: ${open.map((m) => `${m.slot} ${m.before} → ${m.after}`).join(', ')}` } : {}) });
+      // why: the cell says which judged part changed (facets), so a reader need not parse `why`; the schema allows it on this transition only.
+      return withSlots({ transition: 'subject-changed', why: j.problem.why, facets: j.problem.facets ?? [], label: 'not comparable', ...(open.length && b.verdict === 'violated' ? { why: `${j.problem.why}; not schema-fixed: ${open.map((m) => `${m.slot} ${m.before} → ${m.after}`).join(', ')}` } : {}) });
     }
     if (j.problem) return withSlots({ transition: j.problem.transition, why: j.problem.why, label: 'not comparable' });
   } else {
@@ -378,7 +381,7 @@ export function summarize(doc: Record<string, unknown>, file: string, bytes: Buf
 export function compareDocs(b: Record<string, unknown>, a: Record<string, unknown>, before: RunSummary, after: RunSummary): CompareDoc {
   for (const [d, n] of [[b, 'before'], [a, 'after']] as const) {
     if (d['format'] !== 'mws-results/1') throw new CompareRefused(`${n}: not an mws-results/1 document (format ${JSON.stringify(d['format'])})`);
-    if (!recsOf(d).some((r) => typeof r.test_hash === 'string')) throw new CompareRefused(`${n}: its records carry no test_hash (written before ${TEST_HASH_FORMAT}); run it again with this release, or compare by the interim rule of the before/after design by hand`);
+    if (!recsOf(d).some((r) => typeof r.test_hash === 'string')) throw new CompareRefused(`${n}: its records carry no test_hash (written before ${TEST_HASH_FORMAT}); run it again with this release`);
     const id = isObj(d['identity']) ? d['identity'] : null;
     if (id && id['test_hash'] !== TEST_HASH_FORMAT) throw new CompareRefused(`${n}: test hashes made by ${String(id['test_hash'])}; this release compares ${TEST_HASH_FORMAT} only`);
   }
