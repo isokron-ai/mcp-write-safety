@@ -646,6 +646,12 @@ export interface Manifest {
     gate_reps: number;
     timeout_ms: number;
     max_fuzz_cases: number;
+    /** MWS-IN-5 search: calls per tool at most (search, bisection and repeats); default 80. */
+    in5_probes?: number;
+    /** MWS-IN-5 search: the largest value sent, in bytes (a string's UTF-8 bytes, otherwise its JSON form); default 65536. */
+    in5_payload_bytes?: number;
+    /** MWS-IN-5 search: calls to a create tool at most (each accepted one makes an object); default 10. */
+    in5_creates?: number;
   };
   /** backend.gate: exactly one route (rewrite_env: base-URL rewrite; node_import: the in-process hook). */
   backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
@@ -681,6 +687,11 @@ export interface Manifest {
    * own entry overrides the top level; `shape: null` there adopts none for that tool. See src/checks/shape.ts.
    */
   results: { shape: ShapeName | null; tools: Record<string, ShapeName | null> };
+  /**
+   * MWS-IN-5 search (optional): documents the tester reads for bounds stated in words (`docs`, paths relative to this file),
+   * resolved to absolute paths. Read at plan time; nothing is fetched.
+   */
+  in5?: { docs: string[]; allow_args?: string[] };
   /** `session.init`: calls made on every MCP session before its first other tools/call; absent unless declared. */
   session?: { init: SessionInit[] };
   source: { path: string; sha256: string };
@@ -1369,7 +1380,7 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
 
 export function validateManifest(raw: unknown, source: { path: string; sha256: string }, opts: ManifestOptions = {}): Manifest {
   const o = obj(raw, '(top)');
-  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'session'], '(top)');
+  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'in5', 'session'], '(top)');
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
@@ -1455,7 +1466,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
-  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'pair_repeats', 'pair_budget', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases'], 'limits');
+  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'pair_repeats', 'pair_budget', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases', 'in5_probes', 'in5_payload_bytes', 'in5_creates'], 'limits');
   // why: review S2: the pair budget is opt-in (limits.pair_budget, or --pair-budget through opts); without it the defaults are as before.
   let pairBudget: { repeats: number; pairs: number } | null = null;
   if (opts.pairBudget) pairBudget = { ...opts.pairBudget };
@@ -1524,11 +1535,17 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
       gate_reps: num(lim['gate_reps'], 2, 1, 100, 'limits.gate_reps'),
       timeout_ms: num(lim['timeout_ms'], 30_000, 100, 600_000, 'limits.timeout_ms'),
       max_fuzz_cases: num(lim['max_fuzz_cases'], 200, 0, 1000, 'limits.max_fuzz_cases'),
+      // why: review S6: the MWS-IN-5 limits are kept only where declared, so the plan-hashed limits of a manifest that does not
+      // declare them are unchanged; the defaults are applied where they are used (src/checks/in5search.ts).
+      ...(lim['in5_probes'] !== undefined ? { in5_probes: num(lim['in5_probes'], 80, 0, 2000, 'limits.in5_probes') } : {}),
+      ...(lim['in5_payload_bytes'] !== undefined ? { in5_payload_bytes: num(lim['in5_payload_bytes'], 65536, 64, 1_048_576, 'limits.in5_payload_bytes') } : {}),
+      ...(lim['in5_creates'] !== undefined ? { in5_creates: num(lim['in5_creates'], 10, 0, 2000, 'limits.in5_creates') } : {}),
     },
     backend,
     calls,
     resources,
     ...topLevel(o),
+    ...in5Of(o['in5'], source.path),
     ...((sess) => (sess ? { session: sess } : {}))(sessionOf(o['session'])),
     source,
   };
@@ -1536,6 +1553,15 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   declaredDecodes(m);
   declaredExtracts(m);
   return m;
+}
+
+/** MWS-IN-5 search options: the documents read for bounds stated in words (paths relative to the manifest). */
+function in5Of(v: unknown, manifestPath: string): Pick<Manifest, 'in5'> {
+  if (v === undefined) return {};
+  const o = obj(v, 'in5');
+  keys(o, ['docs', 'allow_args'], 'in5');
+  const base = dirname(resolve(manifestPath));
+  return { in5: { docs: strList(o['docs'], 'in5.docs').map((d) => (isAbsolute(d) ? d : resolve(base, d))), allow_args: strList(o['allow_args'], 'in5.allow_args') } };
 }
 
 /** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */
