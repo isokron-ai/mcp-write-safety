@@ -36,7 +36,7 @@ export { safeCommand } from '../core/command-line.js';
 import { Session } from '../core/session.js';
 import { WritecheckError } from '../core/util.js';
 import { verifyChecksums } from '../report/evidence.js';
-import { verifyResults } from '../report/sign.js';
+import { parseResultsBytes, verifyResults } from '../report/sign.js';
 import { firstWriteOf, postEvaluate } from '../checks/coverage.js';
 import { renderMarkdown } from '../report/markdown.js';
 import type { ResultsDoc } from '../report/results.js';
@@ -153,7 +153,8 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
     const v = verifyChecksums(o.dir);
     if (!v.ok) throw new WritecheckError(`${o.dir}: SHA256SUMS does not match ${v.bad.join(', ')}; not rechecking changed evidence`, 3);
   } else o.log('note: no SHA256SUMS in this folder; the evidence could not be checked');
-  const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
+  // why: p08: read as verify-results reads it (UTF-8, no repeated member, RFC 8785 numbers, no lone surrogate, bounded nesting).
+  const doc = parseResultsBytes(readFileSync(file), file) as ResultsDoc;
   // why: review S4: a signed results.json that was changed after signing is not rechecked (and never signed again).
   const sig = verifyResults(doc, null);
   if (sig.status === 'invalid') throw new WritecheckError(`${o.dir}: the results signature does not verify (${sig.detail}); not rechecking a changed file`, 3);
