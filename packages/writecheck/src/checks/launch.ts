@@ -4,7 +4,8 @@
  * object it created before the restart.
  *
  *   MWS-CFG-1  the read-only setting set to yes, on, enabled, 1, TRUE and a misspelling of a valid
- *              value (and empty, if the declaration says the server tells empty from unset), less the
+ *              value; on an inverted switch (the restricting value reads as false, an allow-write flag)
+ *              FALSE, False, no, off, 0, disabled and a misspelling of the false word instead (and empty, if the declaration says the server tells empty from unset), less the
  *              declared values that permit writes: for each, the server either does not start, or starts
  *              with writes refused; where a write is applied, every declared write tool is called under
  *              the value, and only a value every tool accepts is judged here (some refusing: MWS-CFG-3)
@@ -40,7 +41,8 @@ import { listScope, newScope, scratch } from './scratch.js';
 import { mcpDefinedError, schemaProps, sw, toolByName, type GlobalCheck, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'launch-settings';
-const VERSION = '1';
+// '2': the MWS-CFG-1 probes are derived from the declared restricting value (cfg1Probe); '1' always sent the truthy variants.
+const VERSION = '2';
 
 /**
  * MWS-CFG-4's echo rule (owner's decision on review item S1, 15 Nov 2026): an error from tools/list counts as refusing the list
@@ -115,7 +117,8 @@ interface Cfg3Call {
 interface LaunchObs {
   baseline: { started: boolean; reason: string | null };
   /** baseline_tools: every declared write tool called on a server started with no setting, where a value's follow-up ran (a positive control). */
-  cfg1: { env: string; starts: Start[]; baseline_tools?: Cfg3Call[] } | null;
+  /** polarity, basis: how the probes were derived from the declared restricting value (normal or inverted switch); absent in older evidence. */
+  cfg1: { env: string; starts: Start[]; baseline_tools?: Cfg3Call[]; polarity?: Cfg1Polarity; basis?: string; opposite?: string[] } | null;
   /** invented: the misspelled tool name the tester put in the list (MWS-CFG-4's echo rule). */
   cfg2: { env: string; kind: string; value: string; started: boolean; reason: string | null; calls?: Cfg3Call[]; list_error?: string | null; invented?: string; init_failed?: string }[];
   cfg3: { env: string; started: boolean; reason: string | null; calls: Cfg3Call[]; init_failed?: string } | null;
@@ -150,7 +153,9 @@ export const launchCheck: GlobalCheck = {
     const marked = [...readOnlyMarkedCalls(ctx.manifest, ctx.tools).keys()];
     const alsoMarked = marked.length ? `, and each tool marked read-only that has a calls entry (${marked.join(', ')}) with that entry's arguments on a scratch object` : '';
     if (st.read_only) {
-      calls.push(`MWS-CFG-1: start with ${st.read_only.env} = ${cfg1Values(st.read_only).map((v) => JSON.stringify(v)).join(', ')}; on each that starts, one write on the run's object, and where it is applied, every declared write tool under the same value`);
+      const pb = cfg1Probe(st.read_only);
+      // why: the plan's text for a normal switch is as before (its hash with it); an inverted or mixed one says which polarity it probes.
+      calls.push(`MWS-CFG-1: start with ${st.read_only.env} = ${pb.values.map((v) => JSON.stringify(v)).join(', ')}${pb.polarity === 'normal' ? '' : ` (${pb.polarity} switch: the restricting value reads as ${pb.polarity === 'inverted' ? 'false' : 'both true and false'})`}; on each that starts, one write on the run's object, and where it is applied, every declared write tool under the same value`);
       calls.push(`MWS-CFG-3: start with ${st.read_only.env}=${st.read_only.on}; call every declared write tool on objects created before the restart${alsoMarked}; read back`);
     }
     for (const f of st.tool_filters) calls.push(f.kind === 'deny' ? `MWS-CFG-2: start with ${f.env} (deny-list) naming one misspelled tool; if it starts, a write probe${marked.length ? ` (every declared write tool${alsoMarked})` : ''}` : `MWS-CFG-4: start with ${f.env} (allow-list) naming one misspelled tool`);
@@ -183,8 +188,9 @@ export const launchCheck: GlobalCheck = {
     if (!b.r.started) return { check: ID, version: VERSION, resource: '(server)', data: { ...obs, skipped: `the server does not start with no setting: ${why(b.r)}` } };
     if (base && !(base.ok && base.changed === true)) return { check: ID, version: VERSION, resource: '(server)', data: { ...obs, skipped: 'the positive control failed: a server started with no setting did not apply the probe write, so a refused write under a setting would show nothing' } };
     if (st.read_only) {
-      obs.cfg1 = { env: st.read_only.env, starts: [] };
-      for (const v of cfg1Values(st.read_only)) {
+      const pb = cfg1Probe(st.read_only);
+      obs.cfg1 = { env: st.read_only.env, starts: [], polarity: pb.polarity, basis: pb.basis, ...(pb.opposite.length ? { opposite: pb.opposite } : {}) };
+      for (const v of pb.values) {
         const s = await start({ [st.read_only.env]: v }, 'cfg1');
         const rec: Start = { value: v, started: s.r.started, reason: why(s.r), write: null, ...(!s.r.started && s.r.init_failed ? { init_failed: s.r.init_failed } : {}) };
         if (s.r.started && pr && pd) rec.write = await writeProbe(ctx, pr, pd, s.label);
@@ -235,18 +241,107 @@ export const launchCheck: GlobalCheck = {
     }
     return { check: ID, version: VERSION, resource: '(server)', data: obs };
   },
-  evaluate(obs: Observation): Result[] {
-    return launchVerdicts(obs.data as LaunchObs);
+  evaluate(obs: Observation, ctx?: PlanContext): Result[] {
+    return launchVerdicts(obs.data as LaunchObs, ctx?.manifest.settings.read_only ?? null);
   },
 };
 
-export function cfg1Values(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean }): string[] {
+/**
+ * What a value of a switch means, read from its spelling: 'true' (yes, on, 1, enabled, and the words that grant: all, always,
+ * allow, full), 'false' (no, off, 0, disabled, and the words that withhold: none, never, deny, blocked) or neither (a mode
+ * name such as readonly).
+ */
+export function switchSense(v: string): 'true' | 'false' | null {
+  const t = v.trim();
+  if (/^(1|true|t|yes|y|on|enabled?|all|always|allow(ed)?|permit(ted)?|full)$/i.test(t)) return 'true';
+  if (/^(0|false|f|no|n|off|disabled?|none|never|deny|denied|disallow(ed)?|block(ed)?|forbid(den)?)$/i.test(t)) return 'false';
+  return null;
+}
+
+/**
+ * The polarity of the read-only switch (MWS-CFG-1), from the value that turns it on and the values declared to restrict writes:
+ *   normal    the restricting values read as true (READ_ONLY=true), or as neither: probes are truthy variants
+ *   inverted  they read as false (an allow-write flag, ALLOW_WRITES=false; WRITES=none): probes are falsy variants
+ *   mixed     both: no spelling variant is sent, only a misspelling
+ * Where no restricting value reads either way (a mode name, MODE=readonly), the values declared to permit decide: a switch
+ * whose permitting value reads as true is inverted.
+ */
+export type Cfg1Polarity = 'normal' | 'inverted' | 'mixed';
+
+/** A misspelling inside the word: its third and fourth letters swapped (false → fasle), or misspell() for a short word. */
+const transposeInner = (s: string): string => (s.length >= 4 ? `${s.slice(0, 2)}${s[3]}${s[2]}${s.slice(4)}` : misspell(s));
+
+export interface Cfg1Probe {
+  polarity: Cfg1Polarity;
+  /** The values sent, in order. */
+  values: string[];
+  /** The candidates not sent because they mean the opposite of restrict (they would permit writes on this switch). */
+  opposite: string[];
+  /** One line for the evidence: the polarity and what it was read from. */
+  basis: string;
+  /** Does a value mean the opposite of restrict on this switch (and is not declared to restrict)? Such a value is never judged. */
+  isOpposite: (v: string) => boolean;
+  /** Is a value a misspelling of a word that permits writes on this switch, and not one this procedure sends? Never judged. */
+  permitTypo: (v: string) => boolean;
+}
+
+/** `permit`: present where `valid` was the map form, which classes each value as restrict or permit. */
+export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean; permit?: string[] }): Cfg1Probe {
   const valid = ro.valid.length ? ro.valid : [ro.on];
   const restrict = ro.restrict ?? [ro.on];
-  const typo = misspell(valid.find((v) => /^[a-z]{3,}$/i.test(v)) ?? ro.on);
+  // why: corpus finding (lane F9): a read-only switch can be an inverted allow-write flag, where the restricting value is "false".
+  // There TRUE, yes, on or 1 mean "permit", so a write under them is the switch working, and judging it would accuse a correct
+  // server. The variants are derived from the declared restricting value: its polarity decides which spellings are probed, and
+  // a value whose meaning is the opposite of restrict is never sent as a restrict variant (a value the declaration itself
+  // classes as restricting still is).
+  const sensesOf = (vs: string[]) => new Set(vs.map(switchSense).filter((x) => x !== null));
+  let senses = sensesOf([ro.on, ...restrict]);
+  // why: a restricting value that is a mode name (MODE=readonly) reads neither way; the values that permit then say which side
+  // of the switch permits (WRITE_ACCESS: readonly restricts, "true" permits), and the restricting side is the other one.
+  const permits = ro.valid.filter((v) => !restrict.includes(v));
+  // why: only the map form says a value permits; a list form (valid: ["readonly", "true"]) classes
+  // nothing, so it keeps the earlier reading (normal) and never turns the probes falsy on a correct server.
+  const classified = Array.isArray(ro.permit);
+  const fromPermits = classified && !senses.size && sensesOf(permits).size > 0;
+  if (fromPermits) senses = new Set([...sensesOf(permits)].map((x) => (x === 'true' ? ('false' as const) : ('true' as const))));
+  const polarity: Cfg1Polarity = senses.has('false') ? (senses.has('true') ? 'mixed' : 'inverted') : 'normal';
+  const against = polarity === 'normal' ? 'false' : polarity === 'inverted' ? 'true' : null;
+  // The misspelling is of a word with the restricting meaning: a typo of the permitting word is, if anything, a permit.
+  const alpha = (v: string) => /^[a-z]{3,}$/i.test(v);
+  let candidates: string[];
+  if (polarity === 'inverted') {
+    // why: only a value declared to restrict is misspelled (a false word that `valid` classes as permitting is not one).
+    const word = [ro.on, ...restrict].find((v) => alpha(v) && switchSense(v) !== 'true') ?? 'false';
+    candidates = ['FALSE', 'False', 'no', 'off', '0', 'disabled', transposeInner(word)];
+  } else if (polarity === 'normal') {
+    // why: the normal case keeps its list and its misspelling (the first alphabetic valid value), less a word that permits: a
+    // false word, and a word not declared to restrict where one that is declared so can be misspelled instead.
+    const words = valid.filter((v) => alpha(v) && switchSense(v) !== 'false');
+    candidates = ['yes', 'on', 'enabled', '1', 'TRUE', misspell(words.find((v) => restrict.includes(v)) ?? words[0] ?? ro.on)];
+  } else candidates = [misspell(ro.on)];
+  candidates = [...new Set([...candidates, ...(ro.empty_distinct ? [''] : [])])];
+  const isOpposite = (v: string) => !restrict.includes(v) && (against === null ? switchSense(v) !== null : switchSense(v) === against);
+  const opposite = candidates.filter(isOpposite);
   // why: spec R7-6: a probe the declaration lists as a valid value that permits writes is not sent; one that restricts writes is
   // sent. A listed value the declaration does not class is treated as permitting (sending it could accuse a correct server).
-  return [...new Set(['yes', 'on', 'enabled', '1', 'TRUE', typo, ...(ro.empty_distinct ? [''] : [])])].filter((v) => restrict.includes(v) || (!ro.valid.includes(v) && v !== ro.on));
+  const values = candidates.filter((v) => !opposite.includes(v) && (restrict.includes(v) || (!ro.valid.includes(v) && v !== ro.on)));
+  const read = `${JSON.stringify(ro.on)}${restrict.filter((v) => v !== ro.on).length ? ` and the values declared to restrict (${restrict.filter((v) => v !== ro.on).map((v) => JSON.stringify(v)).join(', ')})` : ''}`;
+  const how = fromPermits ? `the restricting value ${read} reads neither way, and the values declared to permit (${permits.filter((v) => switchSense(v) !== null).map((v) => JSON.stringify(v)).join(', ')}) read as` : `the restricting value ${read} reads as`;
+  const basis =
+    polarity === 'inverted'
+      ? `Polarity: inverted (${how} ${fromPermits ? 'true' : 'false'}, as on an allow-write flag); falsy variants were probed, and no value meaning true was sent as a restrict variant.`
+      : polarity === 'mixed'
+        ? `Polarity: mixed (${fromPermits ? `${how} both true and false` : `the restricting values ${read} read as both true and false`}); no spelling variant was sent, only a misspelling of ${JSON.stringify(ro.on)}.`
+        : `Polarity: normal (${how} ${fromPermits ? 'false' : 'true, or as neither'}); truthy variants were probed.`;
+  // why: procedure version 1 misspelled the first alphabetic valid value even where it permits writes
+  // (afsle beside on: "true"); version 2 never sends such a typo, so recheck sets a recorded start under one aside too.
+  const permitsWord = (w: string) => (against !== null && switchSense(w) === against) || (classified && !restrict.includes(w));
+  const permitTypo = (v: string) => !values.includes(v) && !restrict.includes(v) && valid.some((w) => alpha(w) && permitsWord(w) && (misspell(w) === v || transposeInner(w) === v));
+  return { polarity, values, opposite, basis, isOpposite, permitTypo };
+}
+
+export function cfg1Values(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean }): string[] {
+  return cfg1Probe(ro).values;
 }
 
 /** One write through a started server on the run's object; put back afterwards through the main connection. */
@@ -497,10 +592,19 @@ const openPart = (m: Cfg3Call[]): string => `${m.map((c) => c.tool).join(', ')},
 /** A note's answer for a call: a failure that is not a refusal is named as such. */
 const answered = (c: Cfg3Call): string => (c.pending ? 'answered with input_required or a task' : c.ok ? 'answered as a success' : c.failed ? `the call failed (${c.failed})` : 'refused');
 
-export function launchVerdicts(o: LaunchObs): Result[] {
+/** `ro`: the declared read-only setting, where the caller has the manifest: a recorded start under a value that means the opposite of restrict is set aside. */
+export function launchVerdicts(o0: LaunchObs, ro: Parameters<typeof cfg1Probe>[0] | null = null): Result[] {
   const sc = { id: ID, version: VERSION };
   const out: Result[] = [];
-  if (o.skipped) return (['MWS-CFG-1', 'MWS-CFG-2', 'MWS-CFG-3', 'MWS-CFG-4'] as const).map((id) => result(id, sw('(settings)'), sc, 'not tested', o.skipped!));
+  if (o0.skipped) return (['MWS-CFG-1', 'MWS-CFG-2', 'MWS-CFG-3', 'MWS-CFG-4'] as const).map((id) => result(id, sw('(settings)'), sc, 'not tested', o0.skipped!));
+  // why: a value that means the opposite of restrict on this switch (TRUE on an allow-write flag) is never judged, also where
+  // the evidence holds a start under it: a run of scenario version 1 sent the truthy variants whatever the polarity, and
+  // recheck reads such evidence with these rules.
+  const pb = ro && o0.cfg1 ? cfg1Probe(ro) : null;
+  const opp = pb && o0.cfg1 ? o0.cfg1.starts.filter((s) => pb.isOpposite(s.value)) : [];
+  const typo = pb && o0.cfg1 ? o0.cfg1.starts.filter((s) => !opp.includes(s) && pb.permitTypo(s.value)) : [];
+  const aside = [...opp, ...typo];
+  const o: LaunchObs = aside.length && o0.cfg1 ? { ...o0, cfg1: { ...o0.cfg1, starts: o0.cfg1.starts.filter((s) => !aside.includes(s)), polarity: pb!.polarity, basis: pb!.basis } } : o0;
   if (o.cfg1) {
     const w = sw(o.cfg1.env);
     // why: R7-6: a call is accepted when the read-back shows its write, whatever the answer said.
@@ -517,12 +621,16 @@ export function launchVerdicts(o: LaunchObs): Result[] {
     const noProbe = o.cfg1.starts.filter((s) => s.started && (!s.write || s.write.changed === null));
     const initFailed = o.cfg1.starts.filter((s) => s.init_failed);
     const notes = [
+      ...(o.cfg1.basis ? [`${o.cfg1.basis}${o.cfg1.opposite?.length ? ` Not sent, as meaning the opposite of restrict on this switch: ${o.cfg1.opposite.map((v) => JSON.stringify(v)).join(', ')}.` : ''}`] : []),
+      ...(opp.length ? [`Not judged: the evidence holds ${opp.length === 1 ? 'a start' : 'starts'} under ${opp.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, sent by an earlier procedure version; on this switch ${opp.length === 1 ? 'that value means' : 'those values mean'} the opposite of restrict (${opp.length === 1 ? 'it permits' : 'they permit'} writes), so a write under ${opp.length === 1 ? 'it' : 'them'} is the switch working.`] : []),
+      ...(typo.length ? [`Not judged: the evidence holds ${typo.length === 1 ? 'a start' : 'starts'} under ${typo.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, sent by an earlier procedure version; ${typo.length === 1 ? 'it is a misspelling' : 'they are misspellings'} of a value that permits writes on this switch, which this procedure no longer sends.`] : []),
       ...o.cfg1.starts.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}: ${s.started ? (s.write ? `started; the write was ${s.write.changed ? `applied (answered ${s.write.ok ? 'as a success' : 'as an error'})` : s.write.ok ? 'answered as a success but changed nothing' : 'refused'}` : 'started; no write was tried') : s.init_failed ? `started, but not tried: ${s.init_failed}` : `did not start (${s.reason})`}${s.tools ? `; every declared write tool called: ${s.tools.map((c) => `${c.tool} ${c.skipped ? `not called (${c.skipped})` : c.effect ? `wrote (${c.effect})` : c.observed === false ? 'outcome not read back' : 'no write'}`).join(', ')}` : ''}`),
       ...(base ? [`Positive control: with no setting, ${base.filter((c) => c.effect).map((c) => c.tool).join(', ') || 'no tool'} wrote; ${base.filter((c) => !c.effect && !c.skipped && c.step).map((c) => c.tool).join(', ') || 'none'} wrote nothing even then, so ${base.filter((c) => !c.effect && !c.skipped && c.step).length === 1 ? 'it is' : 'they are'} not compared.`] : []),
       ...partial.map((s) => `Observation: under ${o.cfg1!.env}=${JSON.stringify(s.value)} some write tools refused and others wrote, so the server recognized the value; the writes that went through are judged by MWS-CFG-3, not here (spec R7-6).`),
       ...bad.filter((s) => (s.tools ?? []).some((c) => c.skipped || !c.step || c.observed === false)).map((s) => `Under ${o.cfg1!.env}=${JSON.stringify(s.value)}, ${(s.tools ?? []).filter((c) => c.skipped || !c.step || c.observed === false).map((c) => c.tool).join(', ')} could not be called or read back; every tool that could be accepted a write.`),
     ];
-    if (bad.length) out.push(result('MWS-CFG-1', w, sc, 'violated', `The server started with writes enabled for ${bad.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}: every declared write tool that was called wrote, so the server did not recognize the value.`, { steps: bad.flatMap((s) => [s.write!.step, ...toolsOf(s).filter((c) => c.effect).map((c) => c.step!)]), notes }));
+    if (!o.cfg1.starts.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', 'no value was left to try: every candidate is a value the declaration lists as permitting writes, or means the opposite of restrict on this switch', { notes }));
+    else if (bad.length) out.push(result('MWS-CFG-1', w, sc, 'violated', `The server started with writes enabled for ${bad.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}: every declared write tool that was called wrote, so the server did not recognize the value.`, { steps: bad.flatMap((s) => [s.write!.step, ...toolsOf(s).filter((c) => c.effect).map((c) => c.step!)]), notes }));
     else if (open.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', `a write was applied under ${open.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, and whether every declared write tool accepted one (an unrecognized value) or only some (a partial leak, MWS-CFG-3) was not established`, { notes }));
     else if (initFailed.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', `the server started with ${initFailed.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, but its session.init call failed, so ${initFailed.length === 1 ? 'that value was' : 'those values were'} not tried (${initFailed[0]!.init_failed}); the other values are in the notes`, { notes }));
     else if (noProbe.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', 'the server started for some values, and no write could be tried or read back (the manifest declares no resource with an update tool, or the object did not read back)', { notes }));
