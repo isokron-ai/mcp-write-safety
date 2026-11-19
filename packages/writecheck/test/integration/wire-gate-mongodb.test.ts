@@ -147,6 +147,8 @@ resources:
     assert.throws(() => mk('mongodb+srv://cluster.example.com/x'), /SRV discovery/);
     assert.throws(() => mk('mongodb://a:27017,b:27017/x?replicaSet=rs0'), /several hosts/);
     assert.throws(() => mk('mongodb://a/x?tls=true'), /tls=true: TLS to the backend is not built/);
+    assert.throws(() => mk('mongodb://a/x?compressors=zstd'), /compressors=/);
+    assert.throws(() => mk('mongodb://a/x?loadBalanced=true'), /loadBalanced=true/);
   } finally {
     await db.close();
   }

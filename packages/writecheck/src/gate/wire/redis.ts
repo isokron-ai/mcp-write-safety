@@ -88,11 +88,12 @@ export function classifyRedis(args: string[]): Classified {
     return { verb: cmd, path: key, mutating: false, statement: statement(cmd, key) };
   }
   if (REDIS_CONTROL.has(cmd)) return { verb: cmd, path: '', mutating: false, statement: SECRET_ARGS.has(cmd) ? cmd : cmd === 'CLIENT' ? `CLIENT ${sub}` : cmd };
-  return { verb: cmd, path: args[1] && !SECRET_ARGS.has(cmd) ? args[1] : '', mutating: true, uncertain: `unknown command ${cmd}`, statement: cmd };
+  // why: an unknown command's arguments are not known to be keys; none is recorded.
+  return { verb: cmd, path: '', mutating: true, uncertain: `unknown command ${cmd}`, statement: cmd };
 }
 
-/** A complete RESP value at `at`: [end offset, summary], or null when more bytes are needed. */
-function value(b: Buffer, at: number, depth = 0): [number, string] | null {
+/** A complete RESP value at `at`: [end offset, summary], or null when more bytes are needed. `items` collects the summaries of a top-level aggregate's elements. */
+function value(b: Buffer, at: number, depth = 0, items?: string[]): [number, string] | null {
   if (depth > 64) throw new WireDesync('redis: reply nested too deep');
   if (at >= b.length) return null;
   const t = String.fromCharCode(b[at]!);
@@ -137,16 +138,18 @@ function value(b: Buffer, at: number, depth = 0): [number, string] | null {
       const n = Number(line);
       if (!Number.isInteger(n)) throw new WireDesync(`redis: aggregate length ${line}`);
       if (n < 0) return [after, 'nil'];
-      const items = t === '%' || t === '|' ? n * 2 : n;
+      const count = t === '%' || t === '|' ? n * 2 : n;
       let p = after;
-      for (let i = 0; i < items; i++) {
+      for (let i = 0; i < count; i++) {
         const v = value(b, p, depth + 1);
         if (!v) return null;
         p = v[0];
+        items?.push(v[1]);
       }
       if (t === '|') {
         // An attribute: the reply is the value after it.
-        const v = value(b, p, depth + 1);
+        if (items) items.length = 0;
+        const v = value(b, p, depth, items);
         if (!v) return null;
         return [v[0], v[1]];
       }
@@ -159,18 +162,21 @@ function value(b: Buffer, at: number, depth = 0): [number, string] | null {
 
 interface Meta {
   verb: string;
+  /** HELLO: the protocol version asked for. */
+  hello?: number;
 }
 
 export class RedisSession implements CodecSession {
   readonly protocol = 'redis' as const;
   private cbuf: Buffer = Buffer.alloc(0);
   private sbuf: Buffer = Buffer.alloc(0);
-  private readonly inflight: { id: number; verb: string }[] = [];
+  private readonly inflight: { id: number; verb: string; hello?: number }[] = [];
   private passthrough = false;
   private resp = 2;
-  private multi = false;
-  /** The backend's MULTI state, from its answers. */
+  /** The backend's MULTI state, from its answers (never from what the client sent: a pipelined MULTI may not be answered yet). */
   private multiReal = false;
+  /** Commands queued since MULTI was answered: the next one's position in the EXEC answer. */
+  private queued = 0;
   /** An error was injected while queuing: EXEC must be answered EXECABORT. */
   private execAbort = false;
 
@@ -201,10 +207,8 @@ export class RedisSession implements CodecSession {
       }
       const req = classifyRedis(args);
       const cmd = req.verb.split(' ')[0]!;
-      if (cmd === 'HELLO' && args[1]) this.resp = Number(args[1]) || this.resp;
-      if (cmd === 'MULTI') this.multi = true;
-      if (cmd === 'EXEC' || cmd === 'DISCARD') this.multi = false;
-      out.push({ bytes, req, txnKey: this.key, meta: { verb: cmd } satisfies Meta });
+      const hello = cmd === 'HELLO' && args[1] ? Number(args[1]) || undefined : undefined;
+      out.push({ bytes, req, txnKey: this.key, meta: { verb: cmd, ...(hello ? { hello } : {}) } satisfies Meta });
       if (cmd === 'MONITOR' || (PASSTHROUGH_AFTER.has(cmd) && this.resp < 3)) {
         // why: replies are no longer one per command; the rest of the connection is passed through unread.
         this.passthrough = true;
@@ -231,8 +235,8 @@ export class RedisSession implements CodecSession {
       const len = Number(b.toString('latin1', p + 1, e));
       if (!Number.isInteger(len) || len < 0 || len > MAX_BULK) throw new WireDesync('redis: argument length');
       if (b.length < e + 2 + len + 2) return null;
-      // why: only the command name and keys are ever read; a large value is not decoded past what classification needs.
-      args.push(i < 16 ? b.toString('utf8', e + 2, e + 2 + Math.min(len, 1024)) : '');
+      // why: only the command name, keys and option words (STORE) are ever read; a large value is not decoded past what classification needs.
+      args.push(b.toString('utf8', e + 2, e + 2 + Math.min(len, i < 16 ? 1024 : 16)));
       p = e + 2 + len + 2;
     }
     return [p, args];
@@ -250,7 +254,7 @@ export class RedisSession implements CodecSession {
 
   sent(id: number, u: ClientUnit): void {
     const m = u.meta as Meta | undefined;
-    if (m) this.inflight.push({ id, verb: m.verb });
+    if (m) this.inflight.push({ id, verb: m.verb, ...(m.hello ? { hello: m.hello } : {}) });
   }
 
   server(chunk: Buffer): ServerPiece[] {
@@ -263,14 +267,19 @@ export class RedisSession implements CodecSession {
         this.sbuf = Buffer.alloc(0);
         break;
       }
-      const v = value(this.sbuf, 0);
+      const items: string[] = [];
+      const v = value(this.sbuf, 0, 0, items);
       if (!v) break;
       const [end, summary] = v;
       const bytes = this.sbuf.subarray(0, end);
       this.sbuf = this.sbuf.subarray(end);
       if (bytes[0] === 0x3e) {
-        // A RESP3 push: out of band.
-        out.push({ bytes, unit: null });
+        // A RESP3 push is out of band, except that (P|S)(UN)SUBSCRIBE are answered by one.
+        const head = this.inflight[0];
+        if (head && /^[PS]?(UN)?SUBSCRIBE$/.test(head.verb)) {
+          this.inflight.shift();
+          out.push({ bytes, unit: head.id, end: this.outcome(head, summary, []) });
+        } else out.push({ bytes, unit: null });
         continue;
       }
       const f = this.inflight.shift();
@@ -278,22 +287,33 @@ export class RedisSession implements CodecSession {
         out.push({ bytes, unit: null });
         continue;
       }
-      out.push({ bytes, unit: f.id, end: this.outcome(f.verb, summary) });
+      out.push({ bytes, unit: f.id, end: this.outcome(f, summary, items) });
     }
     return out;
   }
 
-  private outcome(verb: string, summary: string): Outcome {
+  private outcome(f: { verb: string; hello?: number }, summary: string, items: string[]): Outcome {
+    const verb = f.verb;
     const err = summary.startsWith('-') ? summary.slice(1) : null;
     let ended = false;
     let committed = false;
-    if (verb === 'MULTI' && !err) this.multiReal = true;
-    else if (verb === 'EXEC' || verb === 'DISCARD') {
+    let queuedIndex: number | undefined;
+    let failedItems: number[] | undefined;
+    if (verb === 'MULTI' && !err) {
+      this.multiReal = true;
+      this.queued = 0;
+    } else if (verb === 'EXEC' || verb === 'DISCARD') {
       ended = this.multiReal;
       committed = this.multiReal && verb === 'EXEC' && /^[*~]/.test(summary);
+      if (committed) failedItems = items.flatMap((x, i) => (x.startsWith('-') ? [i] : []));
       this.multiReal = false;
-    }
-    return { status: err ? (UNAVAILABLE.test(err) ? 503 : 400) : 200, reply: summary, txn: this.txn(), ...(ended ? { ended } : {}), ...(committed ? { committed } : {}) };
+    } else if (verb === 'RESET' && !err) {
+      this.multiReal = false;
+      this.resp = 2;
+      this.execAbort = false;
+    } else if (verb === 'HELLO' && !err && f.hello) this.resp = f.hello;
+    else if (this.multiReal && summary === '+QUEUED') queuedIndex = this.queued++;
+    return { status: err ? (UNAVAILABLE.test(err) ? 503 : 400) : 200, reply: summary, txn: this.txn(), ...(ended ? { ended } : {}), ...(committed ? { committed } : {}), ...(queuedIndex !== undefined ? { queuedIndex } : {}), ...(failedItems?.length ? { failedItems } : {}) };
   }
 
   intercept(u: ClientUnit): Intercept | null {
@@ -313,7 +333,7 @@ export class RedisSession implements CodecSession {
   }
 
   injectError(_u: ClientUnit, message: string, realTxn: TxnState): { bytes: Buffer; note?: string } {
-    if (realTxn === 'in' || this.multi) this.execAbort = true;
+    if (realTxn === 'in') this.execAbort = true;
     return { bytes: Buffer.from(`-ERR ${(message || INJECTED).replace(/[\r\n]/g, ' ')}\r\n`, 'utf8'), ...(this.execAbort ? { note: 'inside MULTI: the EXEC is answered EXECABORT and the backend transaction discarded' } : {}) };
   }
 }

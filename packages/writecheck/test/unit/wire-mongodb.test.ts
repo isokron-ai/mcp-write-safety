@@ -42,6 +42,8 @@ test('mongodb: commands are named with their namespace; $out/$merge and unknown 
   assert.deepEqual(c({ hello: 1 }), ['hello', 'mwsc', false, 'certain']);
   assert.deepEqual(c({ commitTransaction: 1 }), ['commitTransaction', 'mwsc', false, 'certain']);
   assert.deepEqual(c({ fooBar: 'x' }), ['fooBar', 'mwsc.x', true, 'uncertain']);
+  assert.deepEqual(c({ createUser: 'alice', pwd: 'secret' }), ['createUser', 'mwsc', true, 'certain'], 'a user name is not recorded');
+  assert.deepEqual(c({ grantRolesToUser: 'alice', roles: [] }), ['grantRolesToUser', 'mwsc', true, 'certain']);
   assert.equal(classifyMongo({ $db: 'd', aggregate: 'c', pipeline: [{ $match: { secret: 'v' } }, { $merge: 'x' }] }, 'aggregate').statement, 'aggregate d.c [$match,$merge]', 'stage names, never values');
 });
 

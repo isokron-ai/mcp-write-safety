@@ -180,10 +180,12 @@ test('codec: transaction end and commit are reported from ReadyForQuery', () => 
   assert.deepEqual(step('UPDATE t SET a = 1', 2, [pg.complete('UPDATE 1'), pg.ready('in')]), { status: 200, reply: 'CommandComplete UPDATE 1', txn: 'in' });
   assert.deepEqual(step('COMMIT', 3, [pg.complete('COMMIT'), pg.ready('idle')]), { status: 200, reply: 'CommandComplete COMMIT', txn: 'idle', ended: true, committed: true });
   step('BEGIN', 4, [pg.complete('BEGIN'), pg.ready('in')]);
-  assert.deepEqual(step('ROLLBACK', 5, [pg.complete('ROLLBACK'), pg.ready('idle')]), { status: 200, reply: 'CommandComplete ROLLBACK', txn: 'idle', ended: true });
+  assert.deepEqual(step('ROLLBACK', 5, [pg.complete('ROLLBACK'), pg.ready('idle')]), { status: 200, reply: 'CommandComplete ROLLBACK', txn: 'idle', ended: true, rolledBack: true });
   step('BEGIN', 6, [pg.complete('BEGIN'), pg.ready('in')]);
   step('BAD', 7, [pg.error('42601', 'x'), pg.ready('failed')]);
-  assert.deepEqual(step('COMMIT', 8, [pg.complete('ROLLBACK'), pg.ready('idle')]), { status: 200, reply: 'CommandComplete ROLLBACK', txn: 'idle', ended: true }, 'COMMIT of a failed transaction is not a commit');
+  assert.deepEqual(step('COMMIT', 8, [pg.complete('ROLLBACK'), pg.ready('idle')]), { status: 200, reply: 'CommandComplete ROLLBACK', txn: 'idle', ended: true, rolledBack: true }, 'COMMIT of a failed transaction is not a commit');
+  step('BEGIN', 9, [pg.complete('BEGIN'), pg.ready('in')]);
+  assert.deepEqual(step("PREPARE TRANSACTION 'x'", 10, [pg.complete('PREPARE TRANSACTION'), pg.ready('idle')]), { status: 200, reply: 'CommandComplete PREPARE TRANSACTION', txn: 'idle', ended: true, rolledBack: true }, 'PREPARE TRANSACTION ends the transaction without committing it');
 });
 
 test('codec: after an error injected inside a transaction, the gate answers as a failed transaction until it ends', () => {
@@ -215,4 +217,35 @@ test('egress: database schemes only for the wire gate, with their default ports'
   assertEgress(new URL('postgres://db.local/x'), p, { wire: true });
   assert.throws(() => assertEgress(new URL('postgres://other/x'), p, { wire: true }), /not on the egress list/);
   assert.throws(() => assertEgress(new URL('file:///etc/passwd'), p, { wire: true }), /scheme/);
+});
+
+test('sql (review 3, 10): COPY (query), schema-qualified and pg_-named functions, cursors, backslash escapes, SET values', () => {
+  assert.deepEqual(one('COPY (DELETE FROM t WHERE a = 1 RETURNING *) TO STDOUT'), ['COPY (DELETE)', 't', true, 'certain']);
+  assert.deepEqual(one("COPY (SELECT nextval('s')) TO STDOUT"), ['COPY (SELECT)', '', true, 'uncertain']);
+  assert.deepEqual(one('COPY (SELECT a FROM t) TO STDOUT'), ['COPY TO', 't', false, 'certain']);
+  assert.deepEqual(one('SELECT evil.count(*) FROM t'), ['SELECT', 't', true, 'uncertain'], 'a qualified name outside pg_catalog is not trusted');
+  assert.match(combine(classifySql('SELECT evil.count(*) FROM t')).uncertain!, /evil\.count\(\)/);
+  assert.deepEqual(one('SELECT pg_catalog.count(*) FROM t'), ['SELECT', 't', false, 'certain']);
+  assert.deepEqual(one('SELECT pg_get_evil(1)'), ['SELECT', '', true, 'uncertain'], 'a pg_get_ prefix is not trusted');
+  const prepared = new Map();
+  assert.equal(combine(classifySql("DECLARE c CURSOR FOR SELECT nextval('s') FROM t", prepared)).mutating, false, 'DECLARE runs nothing');
+  const f = combine(classifySql('FETCH 10 FROM c', prepared));
+  assert.deepEqual([f.verb, f.mutating], ['FETCH', true]);
+  assert.match(f.uncertain!, /cursor c/);
+  classifySql('DECLARE r CURSOR WITH HOLD FOR SELECT a FROM t', prepared);
+  assert.equal(combine(classifySql('FETCH NEXT IN r', prepared)).mutating, false);
+  // standard_conforming_strings = off: a backslash escapes a quote, so the DELETE is code, not string.
+  const hidden = "SELECT 'a\\' x 'y; DELETE FROM t; --'";
+  assert.equal(combine(classifySql(hidden)).mutating, false, 'read as one string with the default setting');
+  assert.equal(combine(classifySql(hidden, new Map(), { backslashEscapes: true })).mutating, true, 'read as code with standard_conforming_strings off');
+  assert.equal(combine(classifySql('SET app.token = abc123')).statement, 'SET app.token');
+  assert.equal(combine(classifySql('SET SESSION search_path TO private_schema')).statement, 'SET search_path');
+});
+
+test('codec: standard_conforming_strings from ParameterStatus changes how later statements are read', () => {
+  const s = new PostgresSession('k');
+  s.client(startup());
+  s.server(Buffer.concat([pg.msg('S', Buffer.from('standard_conforming_strings\0off\0')), pg.ready('idle')]));
+  const [u] = s.client(PgClient.q("SELECT 'a\\' x 'y; DELETE FROM t; --'"));
+  assert.equal(u!.req!.mutating, true);
 });

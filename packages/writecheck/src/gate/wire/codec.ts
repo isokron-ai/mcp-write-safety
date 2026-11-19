@@ -52,6 +52,12 @@ export interface Outcome {
   ended?: boolean;
   /** This unit ended a transaction by committing it. */
   committed?: boolean;
+  /** The unit undid changes it or its transaction made (a ROLLBACK, ROLLBACK TO, PREPARE TRANSACTION, or a COMMIT answered ROLLBACK). */
+  rolledBack?: boolean;
+  /** Redis: the position of a command queued inside MULTI (its answer in the EXEC array). */
+  queuedIndex?: number;
+  /** Redis: positions in an EXEC answer that are errors. */
+  failedItems?: number[];
 }
 
 export interface ServerPiece {
@@ -83,6 +89,8 @@ export interface CodecSession {
   injectError(u: ClientUnit, message: string, realTxn: TxnState): { bytes: Buffer; note?: string };
   /** The backend's last reported transaction state for a txnKey. */
   txn(key: string | undefined): TxnState;
+  /** Why an injected error cannot be answered for this unit without leaving client and backend out of step (null: it can). */
+  cannotInject?(u: ClientUnit, realTxn: TxnState): string | null;
 }
 
 export class WireDesync extends Error {

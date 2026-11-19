@@ -86,6 +86,8 @@ export class PostgresSession implements CodecSession {
   private readonly stmts = new Map<string, StatementClass[]>();
   private readonly portals = new Map<string, string>();
   private readonly prepared: Prepared = new Map();
+  /** standard_conforming_strings, from the backend's ParameterStatus: off means a backslash escapes inside '…'. */
+  private scsOff = false;
   private group: { bytes: Buffer[]; msgs: Msg[]; classes: StatementClass[]; unknown: string[] } | null = null;
   private readonly inflight: Inflight[] = [];
   /** After an error in a flush unit the backend skips to the next Sync. */
@@ -151,7 +153,7 @@ export class PostgresSession implements CodecSession {
     switch (t) {
       case 'Q': {
         const [sql] = readCstr(body, 0);
-        const classes = classifySql(sql, this.prepared);
+        const classes = classifySql(sql, this.prepared, { backslashEscapes: this.scsOff });
         const pre = this.takeGroup('flush');
         if (pre) out.push(pre);
         out.push(this.unit({ kind: 'query', msgs: [{ t }], verbs: classes.map((c) => c.verb) }, [bytes], combine(classes)));
@@ -166,7 +168,7 @@ export class PostgresSession implements CodecSession {
       case 'P': {
         const [name, at] = readCstr(body, 0);
         const [sql] = readCstr(body, at);
-        this.stmts.set(name, classifySql(sql, this.prepared));
+        this.stmts.set(name, classifySql(sql, this.prepared, { backslashEscapes: this.scsOff }));
         g().bytes.push(bytes);
         g().msgs.push({ t });
         return out;
@@ -263,6 +265,10 @@ export class PostgresSession implements CodecSession {
 
   private serverMessage(t: string, bytes: Buffer, out: ServerPiece[]): void {
     const body = bytes.subarray(5);
+    if (t === 'S') {
+      const z = body.indexOf(0);
+      if (z > 0 && body.toString('latin1', 0, z) === 'standard_conforming_strings') this.scsOff = body.toString('latin1', z + 1, body.indexOf(0, z + 1)) === 'off';
+    }
     if (!this.ready) {
       if (t === 'Z') {
         this.ready = true;
@@ -324,10 +330,11 @@ export class PostgresSession implements CodecSession {
   private outcome(f: Inflight): Outcome {
     const after = this.state;
     const ended = (f.before === 'in' || f.before === 'failed') && after === 'idle';
-    const last = f.tags[f.tags.length - 1] ?? '';
-    const committed = ended && f.before === 'in' && !/^ROLLBACK/.test(last) && !f.error;
+    // why: a ROLLBACK tag answers ROLLBACK, ROLLBACK TO and a COMMIT of a failed transaction; PREPARE TRANSACTION ends a transaction without committing it.
+    const rolledBack = f.tags.some((x) => x === 'ROLLBACK' || x.startsWith('PREPARE TRANSACTION'));
+    const committed = ended && f.before === 'in' && !f.error && !rolledBack && f.tags.includes('COMMIT');
     const reply = f.error ? `ErrorResponse ${f.error}` : f.tags.length ? `CommandComplete ${f.tags.map(tagClass).join(', ')}` : f.meta.kind === 'flush' ? 'answered (flush)' : 'ReadyForQuery';
-    return { status: pgStatus(f.error), reply: cut(reply), txn: after, ...(ended ? { ended: true } : {}), ...(committed ? { committed: true } : {}) };
+    return { status: pgStatus(f.error), reply: cut(reply), txn: after, ...(ended ? { ended: true } : {}), ...(committed ? { committed: true } : {}), ...(rolledBack ? { rolledBack: true } : {}) };
   }
 
   intercept(u: ClientUnit): Intercept | null {

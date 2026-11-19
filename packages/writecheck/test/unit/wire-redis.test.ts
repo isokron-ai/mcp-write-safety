@@ -31,7 +31,7 @@ test('redis: commands are named with their key; unknown and scripts count as wri
   assert.deepEqual(c('CONFIG', 'GET', 'maxmemory'), ['CONFIG GET', '', false, 'certain']);
   assert.deepEqual(c('CONFIG', 'SET', 'maxmemory', '1'), ['CONFIG SET', '', true, 'uncertain']);
   assert.deepEqual(c('JSON.SET', 'doc', '$', '{}'), ['JSON.SET', 'doc', true, 'certain']);
-  assert.deepEqual(c('FT.CREATE', 'idx'), ['FT.CREATE', 'idx', true, 'uncertain']);
+  assert.deepEqual(c('FT.CREATE', 'idx'), ['FT.CREATE', '', true, 'uncertain'], 'an unknown command records no argument');
   assert.deepEqual(c('MULTI'), ['MULTI', '', false, 'certain']);
   assert.deepEqual(c('FLUSHDB'), ['FLUSHDB', '', true, 'certain']);
   const auth = classifyRedis(['AUTH', 'user', 'hunter2']);
@@ -78,7 +78,7 @@ test('redis codec: EXEC is the commit point; an error injected while queuing mak
     return s.server(Buffer.from(reply))[0]!.end!;
   };
   assert.equal(run(['MULTI'], '+OK\r\n', 1).txn, 'in');
-  assert.deepEqual(run(['SET', 'a', '1'], '+QUEUED\r\n', 2), { status: 200, reply: '+QUEUED', txn: 'in' });
+  assert.deepEqual(run(['SET', 'a', '1'], '+QUEUED\r\n', 2), { status: 200, reply: '+QUEUED', txn: 'in', queuedIndex: 0 });
   assert.deepEqual(run(['EXEC'], '*1\r\n+OK\r\n', 3), { status: 200, reply: '*1', txn: 'idle', ended: true, committed: true });
   run(['MULTI'], '+OK\r\n', 4);
   assert.deepEqual(run(['EXEC'], '*-1\r\n', 5), { status: 200, reply: 'nil', txn: 'idle', ended: true }, 'aborted by WATCH: not a commit');
@@ -100,4 +100,39 @@ test('redis codec: after SUBSCRIBE on RESP2 the connection is passed through', (
   s.sent(1, us[0]!);
   const ps = s.server(Buffer.from('*3\r\n$9\r\nsubscribe\r\n$2\r\nch\r\n:1\r\n*3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$1\r\nx\r\n'));
   assert.deepEqual(ps.map((p) => p.unit), [1, null]);
+});
+
+test('redis codec (review 3, 5): STORE past the 16th argument; HELLO, RESET and RESP3 subscribe pushes', () => {
+  const long = ['SORT', 'l', ...Array.from({ length: 20 }, (_, i) => `x${i}`), 'STORE', 'dst'];
+  const s0 = new RedisSession('k');
+  const [u] = s0.client(Buffer.from(RedisClient.cmd(...long)));
+  assert.equal(u!.req!.mutating, true, 'STORE found among later arguments');
+  // HELLO 3 refused: still RESP2, so SUBSCRIBE turns the connection to passthrough.
+  const s = new RedisSession('k');
+  const [h] = s.client(Buffer.from(RedisClient.cmd('HELLO', '3')));
+  s.sent(1, h!);
+  s.server(Buffer.from('-NOPROTO unsupported protocol version\r\n'));
+  const sub = s.client(Buffer.from(RedisClient.cmd('SUBSCRIBE', 'ch') + RedisClient.cmd('PING')));
+  assert.deepEqual(sub.map((x) => x.req?.verb ?? 'pass'), ['SUBSCRIBE', 'pass']);
+  // HELLO 3 accepted: SUBSCRIBE is answered by a push, and the next reply belongs to the next command.
+  const t = new RedisSession('k');
+  const [h3] = t.client(Buffer.from(RedisClient.cmd('HELLO', '3')));
+  t.sent(1, h3!);
+  t.server(Buffer.from('%1\r\n+proto\r\n:3\r\n'));
+  const us = t.client(Buffer.from(RedisClient.cmd('SUBSCRIBE', 'ch') + RedisClient.cmd('PING')));
+  assert.deepEqual(us.map((x) => x.req?.verb), ['SUBSCRIBE', 'PING']);
+  us.forEach((x, i) => t.sent(i + 2, x));
+  const ps = t.server(Buffer.from('>3\r\n$9\r\nsubscribe\r\n$2\r\nch\r\n:1\r\n+PONG\r\n>3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$1\r\nx\r\n'));
+  assert.deepEqual(ps.map((p) => [p.unit, p.end?.reply ?? null]), [[2, '>3'], [3, '+PONG'], [null, null]]);
+  // RESET ends MULTI.
+  const r = new RedisSession('k');
+  const step = (cmd: string[], reply: string, id: number) => {
+    const [x] = r.client(Buffer.from(RedisClient.cmd(...cmd)));
+    r.sent(id, x!);
+    return r.server(Buffer.from(reply))[0]!.end!;
+  };
+  step(['MULTI'], '+OK\r\n', 1);
+  assert.equal(r.txn(), 'in');
+  step(['RESET'], '+RESET\r\n', 2);
+  assert.equal(r.txn(), 'idle');
 });

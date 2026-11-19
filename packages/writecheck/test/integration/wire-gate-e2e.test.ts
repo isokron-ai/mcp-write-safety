@@ -18,7 +18,8 @@ import { fakePostgres } from '../wire/pg.js';
 
 const SERVER = join(dirname(fileURLToPath(import.meta.url)), '..', 'wire', 'pg-mcp-server.js');
 
-test('run: a database-backed server gets real held-request and gate-fault records through the wire gate', { timeout: 240_000 }, async () => {
+for (const txn of ['autocommit', 'commit'] as const)
+test(`run (${txn}): a database-backed server gets real held-request and gate-fault records through the wire gate`, { timeout: 240_000 }, async () => {
   const db = await fakePostgres({ 'title:mwsc-fx-1': 'alpha', 'status:mwsc-fx-1': 'open' });
   const dir = mkdtempSync(join(tmpdir(), 'b1-e2e-'));
   try {
@@ -29,6 +30,7 @@ test('run: a database-backed server gets real held-request and gate-fault record
 server:
   stdio: [${JSON.stringify(process.execPath)}, ${JSON.stringify(SERVER)}]
   env_passthrough: [DATABASE_URL]
+  env_public: [B1_TXN]
   processes: separate
 target:
   environment: test
@@ -47,7 +49,7 @@ resources:
     fields: [ { path: title, values: [alpha, bravo] }, { path: status, values: [open, closed] } ]
 `,
     );
-    const env = { PATH: process.env['PATH'], HOME: process.env['HOME'], DATABASE_URL: db.url };
+    const env = { PATH: process.env['PATH'], HOME: process.env['HOME'], DATABASE_URL: db.url, B1_TXN: txn };
     const quiet = () => {};
     const { hash } = await planCommand({ manifest, env, log: quiet });
     const out = await runCommand({ manifest, outRoot: join(dir, 'out'), stateDir: join(dir, 'state'), confirmTarget: 'b1-wire', planHash: hash, interactive: false, env, log: quiet, noSignals: true });
@@ -69,6 +71,7 @@ resources:
     const lost = res2.find((r) => r.scenario.id === 'held-request.unknown-outcome')!;
     assert.match(lost.reason, /the backend applied #\d+ UPDATE kv and the connection closed before the server received the answer/);
     assert.equal(lost.verdict, 'held', `the declared outcome_unknown pattern decides: ${lost.reason}`);
+    if (txn === 'commit') assert.match(JSON.stringify(lost), /COMMIT|deferred|UPDATE kv/, 'inside a transaction the answer lost is the COMMIT\'s');
     assert.equal(db.table.get('title:mwsc-fx-1'), 'alpha', 'the fixture is put back');
     assert.equal(db.table.get('status:mwsc-fx-1'), 'open');
   } finally {

@@ -37,11 +37,20 @@ export function wireRefusal(url: string): string | null {
     return 'not a URL the gate can read';
   }
   const q = (k: string) => [...u.searchParams.entries()].find(([n]) => n.toLowerCase() === k)?.[1]?.toLowerCase();
+  const has = (k: string) => [...u.searchParams.keys()].some((n) => n.toLowerCase() === k);
   if (scheme.startsWith('postgres') && ['require', 'verify-ca', 'verify-full'].includes(q('sslmode') ?? '')) return `sslmode=${q('sslmode')}: TLS to the backend is not built in this preview of the wire gate`;
   if (scheme === 'mongodb' && (q('tls') === 'true' || q('ssl') === 'true')) return 'tls=true: TLS to the backend is not built in this preview of the wire gate';
+  // why: each of these makes the client connect somewhere other than the authority the gate rewrites.
+  for (const k of ['host', 'hostaddr', 'port', 'service'])
+    if (scheme.startsWith('postgres') && has(k)) return `${k}= in the query: the client would connect to what it names, not to the gate (the gate rewrites the authority only)`;
   if (u.searchParams.has('host')) return 'the host is given in a query parameter; the gate rewrites the authority only';
+  if (scheme === 'mongodb' && has('compressors')) return 'compressors=: compressed messages cannot be read by the gate; leave wire compression off';
+  if (scheme === 'mongodb' && q('loadbalanced') === 'true') return 'loadBalanced=true cannot be combined with the directConnection=true the gate needs';
   return null;
 }
+
+/** Variables a Postgres client reads that would route it around the gate (libpq: PGHOSTADDR wins over the host's address; PGSERVICE names a whole connection). */
+export const PG_ROUTING_ENV = ['PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE'];
 
 /** The URL with only host and port replaced (Mongo: directConnection=true, so the driver never learns the real hosts from hello). */
 export function rewriteUrl(url: string, host: string, port: number): string {

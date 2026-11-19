@@ -18,6 +18,8 @@ import { defaultPort, rewriteUrl } from './url.js';
 
 /** A held unit is let go after this long whatever happens, so a run can never hang on the gate. */
 const HOLD_CEILING_MS = 120_000;
+/** How long a unit waits for earlier answers on its connection (a barrier, or an answer the gate writes) before the gate closes the connection. */
+const DEFAULT_BARRIER_MS = 60_000;
 
 export type CodecFactory = (key: string) => CodecSession;
 
@@ -30,7 +32,7 @@ interface Armed<T> {
   extra: T;
 }
 type HoldExtra = { release: () => void; released: Promise<void>; releasedAt: number | null };
-type FaultExtra = { kind: FaultSpec['kind']; status: number };
+type FaultExtra = { kind: FaultSpec['kind']; status: number; why: string | null };
 
 interface QUnit {
   u: ClientUnit;
@@ -52,6 +54,10 @@ interface Deferred {
   fault: Armed<FaultExtra>;
   rec: GateRequest;
   conn: Conn;
+  /** Redis: the write's position in the EXEC answer. */
+  queuedIndex?: number;
+  /** A ROLLBACK TO SAVEPOINT came after the write: whether the write was kept is not known. */
+  savepoint?: boolean;
 }
 
 class Conn {
@@ -60,6 +66,8 @@ class Conn {
   closed = false;
   /** commit_then_hang: everything from the backend is dropped from now on. */
   hung = false;
+  /** A barrier unit is waiting for its answer: pass-through units (COPY data) go straight on. */
+  inBarrier = false;
   readonly pending = new Map<number, Pending>();
   constructor(
     readonly id: number,
@@ -83,19 +91,29 @@ export class WireGate implements Gate {
   /** commit_then_* faults that hit a write inside a transaction, by transaction key: applied at the commit. */
   private readonly deferred = new Map<string, Deferred>();
   private readonly upstream: URL;
+  /** The gate's own egress list: the shared one plus its upstream (the tester's own HTTP client never gets the database host). */
+  private readonly egress: EgressPolicy;
+  private readonly barrierMs: number;
 
   constructor(
     readonly protocol: WireProtocol,
     private readonly envName: string,
     private readonly upstreamUrl: string,
-    private readonly egress: EgressPolicy,
+    egress: EgressPolicy,
     readonly holdTimeoutMs: number,
     private readonly codec: CodecFactory,
+    o: { barrierMs?: number } = {},
   ) {
     this.upstream = new URL(upstreamUrl);
-    // why: the gate's upstream is the manifest's backend, a host the tester is allowed to reach.
-    for (const h of egressFor([upstreamUrl]).allow) if (!egress.allow.includes(h)) egress.allow.push(h);
-    assertEgress(this.upstream, egress, { wire: true });
+    // why: the gate's upstream is the manifest's backend, a host the gate may reach; it is not added to the shared list, so no HTTP request of the tester can go there.
+    this.egress = { allow: [...new Set([...egress.allow, ...egressFor([upstreamUrl]).allow])] };
+    assertEgress(this.upstream, this.egress, { wire: true });
+    this.barrierMs = o.barrierMs ?? DEFAULT_BARRIER_MS;
+  }
+
+  /** The hosts the gate itself may reach. */
+  egressAllow(): string[] {
+    return [...this.egress.allow];
   }
 
   private get upstreamHost(): string {
@@ -152,9 +170,15 @@ export class WireGate implements Gate {
   }
 
   fault(spec: FaultSpec): FaultHandle {
-    const a: Armed<FaultExtra> = { spec, count: 0, hit: null, waiters: [], done: false, extra: { kind: spec.kind, status: spec.status ?? 500 } };
+    const a: Armed<FaultExtra> = { spec, count: 0, hit: null, waiters: [], done: false, extra: { kind: spec.kind, status: spec.status ?? 500, why: null } };
     this.faults.push(a);
-    return { waitHit: (ms) => waitFor(a, ms), clear: () => void (a.done = true) };
+    return {
+      waitHit: (ms) => waitFor(a, ms),
+      clear: () => void (a.done = true),
+      get why() {
+        return a.extra.why;
+      },
+    };
   }
 
   clear(): void {
@@ -207,24 +231,29 @@ export class WireGate implements Gate {
     c.client.destroy();
     c.upstream.destroy();
     for (const p of c.pending.values()) p.done();
-    for (const [k, d] of this.deferred) if (d.conn === c) this.deferred.delete(k);
+    // why: a Mongo session (lsid) outlives one pooled connection; a connection's own transaction ends with it.
+    for (const [k, d] of this.deferred)
+      if (d.conn === c && k.startsWith('conn:')) {
+        this.deferred.delete(k);
+        this.skip(d.fault, d.rec, 'the connection closed before the transaction ended');
+      }
   }
 
-  /** Framing lost: record it as an uncertain write and close the connection (bytes already taken by the codec cannot be replayed faithfully). */
+  /** Framing lost, an answer that never came, or an internal error: record an uncertain write and close the connection (bytes already taken by the codec cannot be replayed faithfully). */
   private desync(c: Conn, e: Error): void {
-    const rec: GateRequest = { seq: ++this.seq, method: '?', path: '', t_ms: nowMs(), mutating: true, status: null, wire: { protocol: this.protocol, statement: '', uncertain: `framing lost (${e.message}); the gate closed the connection` } };
+    const rec: GateRequest = { seq: ++this.seq, method: '?', path: '', t_ms: nowMs(), mutating: true, status: null, wire: { protocol: this.protocol, statement: '', uncertain: `the gate closed the connection: ${e.message}` } };
     this.log.push(rec);
     this.close(c);
   }
 
   private onClient(c: Conn, b: Buffer): void {
-    if (c.hung) return;
+    if (c.hung || c.closed) return;
     let units: ClientUnit[];
     try {
       units = c.codec.client(b);
     } catch (e) {
-      if (!(e instanceof WireDesync)) throw e;
-      this.desync(c, e);
+      // why: any error while reading the stream (not only a WireDesync) closes this connection, never the CLI.
+      this.desync(c, e instanceof Error ? e : new WireDesync(String(e)));
       return;
     }
     for (const u of units) {
@@ -243,7 +272,35 @@ export class WireGate implements Gate {
       }
       c.queue.push({ u, rec, hold, fault });
     }
-    void this.pump(c);
+    if (c.inBarrier) this.passThrough(c);
+    this.pump(c).catch((e: unknown) => this.desync(c, e instanceof Error ? e : new Error(String(e))));
+  }
+
+  /** While a barrier waits: pass-through units at the head of the queue (COPY data the backend needs to answer it) go on. */
+  private passThrough(c: Conn): void {
+    while (c.queue[0] && !c.queue[0].rec && !c.queue[0].u.localReply && !c.closed) c.upstream.write(c.queue.shift()!.u.bytes);
+  }
+
+  /** Wait until every unit already forwarded on this connection is answered, so an answer the gate writes comes after theirs. False: the connection closed or timed out. */
+  private async drain(c: Conn): Promise<boolean> {
+    const ps = [...c.pending.values()].map((p) => p.finished);
+    if (ps.length) {
+      let t: NodeJS.Timeout | undefined;
+      const ok = await Promise.race([Promise.all(ps).then(() => true), new Promise<boolean>((r) => (t = setTimeout(() => r(false), this.barrierMs)))]);
+      clearTimeout(t);
+      if (!ok) {
+        this.desync(c, new Error(`earlier answers did not arrive within ${this.barrierMs} ms`));
+        return false;
+      }
+    }
+    return !c.closed;
+  }
+
+  /** The fault matched this request but is not applied (the request goes on as it is); the check sees no hit, and `why`. */
+  private skip(fault: Armed<FaultExtra>, rec: GateRequest, why: string): void {
+    fault.done = true;
+    fault.extra.why = why;
+    rec.wire = { ...rec.wire!, note: `fault not applied: ${why}` };
   }
 
   private async pump(c: Conn): Promise<void> {
@@ -281,18 +338,29 @@ export class WireGate implements Gate {
     }
     const ic = c.codec.intercept(u);
     if (ic && 'synth' in ic) {
+      // why: the gate's answer must come after the answers to everything sent before it (pipelining).
+      if (!(await this.drain(c))) return;
       if (ic.synth.length) c.client.write(ic.synth);
       this.finishRec(rec, ic.outcome, true);
       if (q.fault) q.fault.count--; // why: an answer the gate wrote for its own emulation is not the backend request a fault names.
       return;
     }
-    const fault = q.fault;
+    let fault = q.fault;
     if (fault && fault.extra.kind === 'status') {
-      const inj = c.codec.injectError(u, INJECTED, c.codec.txn(u.txnKey));
-      if (inj.bytes.length) c.client.write(inj.bytes);
-      rec.status = fault.extra.status;
-      rec.wire = { ...rec.wire!, synthetic: true, reply: 'injected error (not forwarded)', ...(inj.note ? { note: inj.note } : {}) };
-      return this.hit(fault, rec);
+      // why: the injected answer is ordered after earlier answers, and the transaction state it is judged by is the backend's after them.
+      if (!(await this.drain(c))) return;
+      const realTxn = c.codec.txn(u.txnKey);
+      const cannot = c.codec.cannotInject?.(u, realTxn) ?? null;
+      if (cannot) {
+        this.skip(fault, rec, cannot);
+        fault = null;
+      } else {
+        const inj = c.codec.injectError(u, INJECTED, realTxn);
+        if (inj.bytes.length) c.client.write(inj.bytes);
+        rec.status = fault.extra.status;
+        rec.wire = { ...rec.wire!, synthetic: true, reply: 'injected error (not forwarded)', ...(inj.note ? { note: inj.note } : {}) };
+        return this.hit(fault, rec);
+      }
     }
     const deferredHere = u.txnKey ? this.deferred.get(u.txnKey) : undefined;
     const barrier = !!(fault && fault.extra.kind !== 'status') || !!deferredHere || !!(ic && 'forward' in ic);
@@ -304,13 +372,22 @@ export class WireGate implements Gate {
     if (u.noReply) {
       c.upstream.write(fwd.bytes);
       rec.wire = { ...rec.wire!, reply: 'no answer expected (moreToCome)' };
-      if (fault) this.apply(c, fault, rec, { status: 200, reply: 'no answer expected', txn: c.codec.txn(u.txnKey) }, p);
+      // why: with no answer there is nothing to lose, and no way to know the write was applied.
+      if (fault) this.skip(fault, rec, 'the request expects no answer, so whether it was applied is not known');
       return;
     }
     c.pending.set(id, p);
     c.codec.sent(id, fwd);
     c.upstream.write(fwd.bytes);
-    if (barrier) await finished;
+    if (barrier) {
+      c.inBarrier = true;
+      this.passThrough(c);
+      let t: NodeJS.Timeout | undefined;
+      const ok = await Promise.race([finished.then(() => true), new Promise<boolean>((r) => (t = setTimeout(() => r(false), this.barrierMs)))]);
+      clearTimeout(t);
+      c.inBarrier = false;
+      if (!ok) this.desync(c, new Error(`the answer to #${rec.seq} did not arrive within ${this.barrierMs} ms`));
+    }
   }
 
   private onServer(c: Conn, b: Buffer): void {
@@ -319,8 +396,7 @@ export class WireGate implements Gate {
     try {
       pieces = c.codec.server(b);
     } catch (e) {
-      if (!(e instanceof WireDesync)) throw e;
-      this.desync(c, e);
+      this.desync(c, e instanceof Error ? e : new WireDesync(String(e)));
       return;
     }
     const direct: Buffer[] = [];
@@ -368,33 +444,40 @@ export class WireGate implements Gate {
     this.finishRec(rec, o);
     const key = q.u.txnKey;
     const d = key ? this.deferred.get(key) : undefined;
+    const pass = () => (send(), p.done());
     if (q.fault && q.fault.extra.kind !== 'status') {
+      // why: a lost answer is a trial only of a write that was carried out and kept (docs/WIRE-GATE.md §5.3).
+      const notKept = o.status >= 400 ? `the write itself was refused (${o.reply})` : o.rolledBack ? `the request undid what it changed (${o.reply})` : null;
+      if (notKept) return (this.skip(q.fault, rec, notKept), pass());
       if (o.txn === 'in' && key) {
-        // why: inside a transaction the write is not committed yet; the answer to lose is the commit's (docs/WIRE-GATE.md §5.3).
-        this.deferred.set(key, { fault: q.fault, rec, conn: c });
+        // why: inside a transaction the write is not committed yet; the answer to lose is the commit's.
+        this.deferred.set(key, { fault: q.fault, rec, conn: c, ...(o.queuedIndex !== undefined ? { queuedIndex: o.queuedIndex } : {}) });
         rec.wire = { ...rec.wire!, deferred: { to: null, outcome: 'pending' } };
-        send();
-        p.done();
-        return;
+        return pass();
       }
       this.apply(c, q.fault, rec, o, p);
       return;
     }
+    if (d && d.rec !== rec && /\bROLLBACK TO\b/i.test(rec.wire?.statement ?? '')) d.savepoint = true;
     if (d && o.ended) {
       this.deferred.delete(key!);
-      if (o.committed) {
-        d.rec.wire = { ...d.rec.wire!, deferred: { to: rec.seq, outcome: 'committed' } };
-        this.apply(c, d.fault, d.rec, o, p, rec);
-        return;
+      const why = !o.committed
+        ? `the transaction was not committed (${o.reply})`
+        : d.savepoint
+          ? 'a ROLLBACK TO SAVEPOINT came after the write: whether the write was kept is not known'
+          : d.queuedIndex !== undefined && o.failedItems?.includes(d.queuedIndex)
+            ? 'the write failed inside EXEC'
+            : null;
+      if (why) {
+        d.rec.wire = { ...d.rec.wire!, deferred: { to: rec.seq, outcome: 'not committed' } };
+        this.skip(d.fault, d.rec, why);
+        return pass();
       }
-      d.rec.wire = { ...d.rec.wire!, deferred: { to: rec.seq, outcome: 'rolled back' } };
-      send();
-      p.done();
-      this.hit(d.fault, d.rec);
+      d.rec.wire = { ...d.rec.wire!, deferred: { to: rec.seq, outcome: 'committed' } };
+      this.apply(c, d.fault, d.rec, o, p, rec);
       return;
     }
-    send();
-    p.done();
+    pass();
   }
 
   /** Apply a commit_then_* fault to a unit whose answer is complete (and kept back). `rec` is the faulted request; `at` the unit answered (the commit, when deferred). */

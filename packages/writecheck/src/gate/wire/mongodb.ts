@@ -56,7 +56,9 @@ const lower = (s: string) => s.toLowerCase();
 export function classifyMongo(body: Record<string, Bson>, cmd: string): Classified {
   const db = typeof body['$db'] === 'string' ? body['$db'] : '';
   const v = body[cmd];
-  const coll = typeof v === 'string' ? v : cmd === 'getMore' && typeof body['collection'] === 'string' ? body['collection'] : '';
+  // why: user and role commands name a user or role, not a collection; it is not recorded.
+  const named = /user|role/i.test(cmd) ? '' : v;
+  const coll = typeof named === 'string' ? named : cmd === 'getMore' && typeof body['collection'] === 'string' ? body['collection'] : '';
   const path = coll ? `${db}.${coll}` : db;
   const k = lower(cmd);
   const statement = cut(`${cmd} ${path}`.trim());
@@ -286,11 +288,18 @@ export class MongoSession implements CodecSession {
     return null;
   }
 
+  cannotInject(u: ClientUnit, realTxn: TxnState): string | null {
+    const meta = u.meta as Meta | undefined;
+    if (meta && !u.noReply && (meta.inTxn || realTxn === 'in')) return 'inside a MongoDB transaction the gate cannot keep the session in step after an injected error (not emulated in this preview)';
+    return null;
+  }
+
   injectError(u: ClientUnit, message: string, realTxn: TxnState): { bytes: Buffer; note?: string } {
     const meta = u.meta as Meta | undefined;
     if (!meta || u.noReply) return { bytes: Buffer.alloc(0), note: 'the request expects no answer (moreToCome): nothing was sent back' };
     const id = this.shared.nextId--;
     const bytes = opMsg(id, meta.requestId, { ok: 0, errmsg: message || INJECTED, code: 1, codeName: 'InternalError' });
-    return { bytes, ...(realTxn === 'in' || meta.inTxn ? { note: 'inside a transaction: the backend transaction is not aborted by the gate (not emulated in this preview)' } : {}) };
+    void realTxn;
+    return { bytes };
   }
 }

@@ -6,7 +6,9 @@
  *   UPDATE kv SET v = '<v>' WHERE k = '<k>'      (or $1 / $2 parameters)
  *   INSERT INTO kv (k, v) VALUES ('<k>', '<v>')  (23505 when k exists)
  *   SELECT v FROM kv WHERE k = '<k>'
- *   BEGIN | COMMIT | END | ROLLBACK | SELECT 1
+ *   BEGIN | COMMIT | END | ROLLBACK | SELECT 1 | SAVEPOINT s | ROLLBACK TO s
+ *   COPY kv FROM STDIN                            (CopyData lines "k\tv\n", then CopyDone)
+ *   SELECT hang()                                 (never answered)
  * Everything else answers 42601. It is not Postgres: it exists to show the gate frames, names,
  * holds and fails the real protocol's messages, and keeps a log of what reached it.
  */
@@ -66,6 +68,8 @@ export async function fakePostgres(initial: Record<string, string> = {}): Promis
     const stmts = new Map<string, string>();
     const portals = new Map<string, { sql: string; params: string[] }>();
     let skipping = false;
+    let copying: number | null = null;
+    let savepoint: number | null = null;
 
     const run = (sqlIn: string, params: string[] = []): Buffer[] => {
       const sql = sqlIn.replace(/\$(\d+)/g, (_, n) => `'${params[Number(n) - 1] ?? ''}'`).trim().replace(/;$/, '');
@@ -82,6 +86,15 @@ export async function fakePostgres(initial: Record<string, string> = {}): Promis
         pending = [];
         state = 'I';
         return [msg('C', cstr(was === 'E' ? 'ROLLBACK' : 'COMMIT'))];
+      }
+      if (/^SAVEPOINT/.test(up)) {
+        savepoint = pending.length;
+        return [msg('C', cstr('SAVEPOINT'))];
+      }
+      if (/^ROLLBACK TO/.test(up)) {
+        if (savepoint !== null) pending = pending.slice(0, savepoint);
+        if (state === 'E') state = 'T';
+        return [msg('C', cstr('ROLLBACK'))];
       }
       if (/^(ROLLBACK|ABORT)/.test(up)) {
         pending = [];
@@ -153,8 +166,32 @@ export async function fakePostgres(initial: Record<string, string> = {}): Promis
           s.end();
           return;
         }
+        if (copying !== null) {
+          if (t === 'd') {
+            for (const line of body.toString('utf8').split('\n').filter(Boolean)) {
+              const [k, v] = line.split('\t');
+              table.set(k!, v!);
+              copying++;
+            }
+          } else if (t === 'c') {
+            seen.push(`COPY DONE ${copying}`);
+            out.push(msg('C', cstr(`COPY ${copying}`)), ready());
+            copying = null;
+          }
+          continue;
+        }
         if (t === 'Q') {
           const [sql] = cs(0);
+          if (/^COPY kv FROM STDIN$/i.test(sql.trim())) {
+            seen.push(sql.trim());
+            copying = 0;
+            out.push(msg('G', Buffer.concat([Buffer.from([0]), int16(2), int16(0), int16(0)])));
+            continue;
+          }
+          if (sql.trim() === 'SELECT hang()') {
+            seen.push('SELECT hang()');
+            continue;
+          }
           for (const one of sql.split(';').filter((x) => x.trim())) {
             const r = run(one);
             out.push(...r);

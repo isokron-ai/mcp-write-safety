@@ -9,8 +9,11 @@ import { cut, type Classified } from './codec.js';
 
 type Tok = { t: 'word' | 'qident' | 'str' | 'num' | 'param' | 'punct'; v: string; depth: number };
 
-/** Split SQL into tokens; comments and whitespace dropped. Never throws: an unterminated literal ends the text. */
-export function tokenize(sql: string): Tok[] {
+/**
+ * Split SQL into tokens; comments and whitespace dropped. Never throws: an unterminated literal ends the text.
+ * `backslashEscapes`: standard_conforming_strings is off, so a backslash escapes inside '…' as well as E'…'.
+ */
+export function tokenize(sql: string, o: { backslashEscapes?: boolean } = {}): Tok[] {
   const out: Tok[] = [];
   let i = 0;
   let depth = 0;
@@ -36,7 +39,7 @@ export function tokenize(sql: string): Tok[] {
       continue;
     }
     if (c === "'" || ((c === 'E' || c === 'e') && sql[i + 1] === "'")) {
-      const esc = c !== "'";
+      const esc = c !== "'" || o.backslashEscapes === true;
       i += esc ? 2 : 1;
       while (i < n) {
         if (esc && sql[i] === '\\') i += 2;
@@ -212,9 +215,10 @@ function unsafeCall(toks: Tok[]): string | null {
     if (toks[i - 1]?.v === '::') continue; // a type with a modifier: x::varchar(10)
     const name = t.v.toLowerCase();
     if (t.t === 'word' && NOT_CALLS.has(t.v.toUpperCase())) continue;
-    if (t.t === 'word' && SAFE_FUNCS.has(name)) continue;
-    if (t.t === 'word' && name.startsWith('pg_get_')) continue;
-    return name;
+    // why: a schema-qualified name is trusted only in pg_catalog (myschema.count() can be anything).
+    const qual = toks[i - 1]?.v === '.' ? (toks[i - 2]?.t === 'word' || toks[i - 2]?.t === 'qident' ? toks[i - 2]!.v.toLowerCase() : '?') : null;
+    if (t.t === 'word' && SAFE_FUNCS.has(name) && (qual === null || qual === 'pg_catalog')) continue;
+    return qual ? `${qual}.${name}` : name;
   }
   return null;
 }
@@ -257,7 +261,13 @@ export function classifyStatement(toks: Tok[], prepared: Prepared = new Map()): 
   if (MODIFY.has(first)) return modifyClass(toks, s, stmt);
   if (first === 'TRUNCATE') return { verb: first, path: nameAt(toks, skipWords(toks, s + 1, ['TABLE', 'ONLY']))[0], mutating: true, statement: stmt };
   if (first === 'COPY') {
-    if (toks[s + 1]?.v === '(') return { verb: 'COPY TO', path: '', mutating: false, statement: stmt };
+    if (toks[s + 1]?.v === '(') {
+      // why: COPY (query) TO runs the query: COPY (DELETE … RETURNING *) TO STDOUT writes.
+      const d = toks[s + 1]!.depth;
+      const end = toks.findIndex((t, k) => k > s + 1 && t.v === ')' && t.depth === d);
+      const inner = classifyStatement(toks.slice(s + 2, end < 0 ? toks.length : end), prepared);
+      return inner.mutating ? { ...inner, verb: `COPY (${inner.verb})`, statement: stmt } : { verb: 'COPY TO', path: inner.path, mutating: false, statement: stmt };
+    }
     const [name] = nameAt(toks, s + 1);
     const dir = toks.slice(s + 2).find((t) => t.depth === 0 && (W(t) === 'FROM' || W(t) === 'TO'));
     return W(dir) === 'TO' ? { verb: 'COPY TO', path: name, mutating: false, statement: stmt } : { verb: 'COPY FROM', path: name, mutating: true, statement: stmt };
@@ -276,10 +286,22 @@ export function classifyStatement(toks: Tok[], prepared: Prepared = new Map()): 
   }
   if (READS.has(first)) {
     if (first === 'DECLARE') {
-      const q = toks.findIndex((t) => W(t) === 'FOR');
-      return q < 0 ? { verb: first, path: '', mutating: false, statement: stmt } : { ...classifyStatement(toks.slice(q + 1), prepared), statement: stmt };
+      // why: the cursor's query runs as it is fetched; DECLARE itself runs nothing, FETCH and MOVE take the query's class.
+      const [name] = nameAt(toks, s + 1);
+      const q = toks.findIndex((t) => W(t) === 'FOR' && t.depth === 0);
+      const inner = q < 0 ? null : classifyStatement(toks.slice(q + 1), prepared);
+      if (inner) prepared.set(`cursor:${name}`, inner);
+      return { verb: first, path: inner?.path ?? '', mutating: false, statement: stmt };
     }
-    if (first === 'SHOW' || first === 'FETCH' || first === 'MOVE' || first === 'CLOSE') return { verb: first, path: '', mutating: false, statement: stmt };
+    if (first === 'FETCH' || first === 'MOVE') {
+      const words = toks.filter((t) => t.t === 'word' || t.t === 'qident');
+      const last = words[words.length - 1];
+      const name = last ? (last.t === 'word' ? last.v.toLowerCase() : last.v) : '';
+      const c = prepared.get(`cursor:${name}`);
+      if (c?.mutating) return { verb: first, path: c.path, mutating: true, uncertain: `fetches from cursor ${name}, whose query ${c.uncertain ? 'may write' : 'writes'}`, statement: stmt };
+      return { verb: first, path: c?.path ?? '', mutating: false, statement: stmt };
+    }
+    if (first === 'SHOW' || first === 'CLOSE') return { verb: first, path: '', mutating: false, statement: stmt };
     return readClass(first, toks.slice(s), stmt);
   }
   if (first === 'EXPLAIN') {
@@ -318,14 +340,20 @@ export function classifyStatement(toks: Tok[], prepared: Prepared = new Map()): 
     if (first === 'COMMIT' && W(toks[s + 1]) === 'PREPARED') return { verb: 'COMMIT PREPARED', path: '', mutating: true, uncertain: 'commits a prepared transaction whose statements were not seen', statement: stmt };
     if (first === 'ROLLBACK' && toks.slice(s + 1).some((t) => W(t) === 'TO')) return { verb: 'ROLLBACK TO', path: '', mutating: false, statement: stmt };
     const verb = first === 'START' ? 'BEGIN' : first === 'END' ? 'COMMIT' : first === 'ABORT' ? 'ROLLBACK' : first === 'ANALYSE' ? 'ANALYZE' : first;
+    // why: a SET value can be unquoted (SET app.token = abc123): record the setting's name only.
+    if (first === 'SET' || first === 'RESET') {
+      const i = skipWords(toks, s + 1, ['SESSION', 'LOCAL']);
+      const [name] = nameAt(toks, i);
+      return { verb, path: '', mutating: false, statement: `${first} ${name || W(toks[i])}`.trim() };
+    }
     return { verb, path: '', mutating: false, statement: stmt };
   }
   return { verb: first, path: '', mutating: true, uncertain: `unknown statement ${first}`, statement: stmt };
 }
 
 /** Classify a whole SQL text (one or more statements). Each statement's class, in order. */
-export function classifySql(sql: string, prepared: Prepared = new Map()): StatementClass[] {
-  const st = statements(tokenize(sql));
+export function classifySql(sql: string, prepared: Prepared = new Map(), o: { backslashEscapes?: boolean } = {}): StatementClass[] {
+  const st = statements(tokenize(sql, o));
   if (!st.length) return [{ verb: 'EMPTY', path: '', mutating: false, statement: '' }];
   return st.map((t) => classifyStatement(t, prepared));
 }

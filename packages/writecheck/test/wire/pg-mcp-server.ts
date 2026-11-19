@@ -63,7 +63,17 @@ async function call(name: string, a: Record<string, unknown>): Promise<unknown> 
   if (name === 'update_item') {
     if (typeof a['field'] !== 'string' || !FIELDS.includes(a['field'])) return text('field must be title or status', true);
     if (typeof a['value'] !== 'string') return text('value must be a string', true);
-    const r = await sql((c) => c.send(PgClient.ext('UPDATE kv SET v = $1 WHERE k = $2', [a['value'] as string, `${a['field']}:${a['id']}`]), { ms: 8000 }));
+    const upd = PgClient.ext('UPDATE kv SET v = $1 WHERE k = $2', [a['value'] as string, `${a['field']}:${a['id']}`]);
+    // B1_TXN=commit: the write inside an explicit transaction, as BEGIN, the UPDATE and COMMIT on one connection.
+    const r = await sql(async (c) => {
+      if (process.env['B1_TXN'] !== 'commit') return c.send(upd, { ms: 8000 });
+      const b = await c.query('BEGIN', 8000);
+      if (b.state === null || b.error) return b;
+      const u = await c.send(upd, { ms: 8000 });
+      if (u.state === null || u.error) return u.state === null ? u : (await c.query('ROLLBACK', 8000), u);
+      const cm = await c.query('COMMIT', 8000);
+      return cm.state === null || cm.error ? cm : u;
+    });
     if (r.state === null) return text('the database connection was lost; the update may or may not have been applied', true);
     if (r.error) return text(`the update was not applied (database error ${r.error})`, true);
     if (r.tags[0] !== 'UPDATE 1') return text(`item ${a['id']} not found`, true);

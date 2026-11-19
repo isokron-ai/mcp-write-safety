@@ -174,14 +174,15 @@ test('postgres gate: a lost-answer fault on a write inside a transaction is appl
     const commit = log.find((r) => r.method === 'COMMIT')!;
     assert.deepEqual([hit.method, hit.status, hit.wire?.deferred], ['UPDATE', null, { to: commit.seq, outcome: 'committed' }]);
     assert.equal(commit.status, null);
-    // Rolled back: the answer is delivered and the fault reports that nothing was committed.
+    // Rolled back: the answer is delivered, and the fault is not applied (nothing was committed, so there is no trial).
     const c2 = await PgClient.connect(port);
     const f2 = g.fault({ method: 'UPDATE', path: 'kv', nth: 1, kind: 'commit_then_reset' });
     await c2.query('BEGIN');
     await c2.query("UPDATE kv SET v = 'rb' WHERE k = 'a'");
     const rb = await c2.query('ROLLBACK');
     assert.deepEqual([rb.tags, rb.state], [['ROLLBACK'], 'I']);
-    assert.deepEqual((await f2.waitHit(500))?.wire?.deferred?.outcome, 'rolled back');
+    assert.equal(await f2.waitHit(300), null, 'not a trial');
+    assert.match(f2.why ?? '', /the transaction was not committed/);
     assert.equal(db.table.get('a'), 'tx');
     // BEGIN … COMMIT in one Query: the unit itself commits, so the fault applies to it directly.
     const c3 = await PgClient.connect(port);
@@ -237,7 +238,8 @@ resources:
     const egress = egressFor([]);
     const g = createGate(m, { DATABASE_URL: db.url }, { stateDir: '/tmp/b1-unused', egress })!;
     assert.equal(g.route, 'wire');
-    assert.ok(egress.allow.includes(`127.0.0.1:${db.port}`));
+    assert.ok(!egress.allow.includes(`127.0.0.1:${db.port}`), "the database host is not added to the tester's own egress list");
+    assert.ok((g as WireGate).egressAllow().includes(`127.0.0.1:${db.port}`), "it is on the gate's");
     await g.start();
     assert.match(g.serverEnv()['DATABASE_URL']!, /^postgres:\/\/mws:secret@127\.0\.0\.1:\d+\/mwsc$/);
     await g.stop();
@@ -246,6 +248,21 @@ resources:
     refuse('postgres://u@h1,h2/x', /several hosts/);
     refuse('postgres://u@%2Fvar%2Frun%2Fpostgresql/x', /Unix-socket/);
     refuse('postgres://169.254.169.254/x', /metadata/);
+    refuse('postgres://u@db/x?hostaddr=10.0.0.9', /hostaddr= in the query/);
+    refuse('postgres://u@db/x?port=6543', /port= in the query/);
+    refuse('postgres://u@db/x?service=prod', /service= in the query/);
+    const withEnv = parseManifestText(`mws: "0.9"
+server: { stdio: [node, s.js], env_passthrough: [DATABASE_URL, PGHOSTADDR] }
+target: { environment: test, confirm: x }
+backend: { gate: { rewrite_env: DATABASE_URL } }
+resources:
+  - name: r
+    fixture: { id: 1, name: mwsc-f }
+    read: { tool: get, args: {} }
+    update: { tool: upd, mode: field_patch, args: {} }
+    fields: [ { path: a, values: [1, 2] }, { path: b, values: [1, 2] } ]
+`, '/tmp/b1-m.yaml');
+    assert.throws(() => createGate(withEnv, { DATABASE_URL: db.url }, { stateDir: '/tmp/b1-unused', egress: egressFor([]) }), /given PGHOSTADDR, which would route its Postgres client around the wire gate/);
   } finally {
     await db.close();
   }

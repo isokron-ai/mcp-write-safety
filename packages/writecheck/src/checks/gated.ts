@@ -266,7 +266,7 @@ export const gatedCheck: CheckModule = {
       f.clear();
       const after = await d.readSettled('R', 'gate.res2.after', () => false);
       obs.res2 = { object: d.id, faulted: hit ? reqOf(hit) : null, call: brief(r), changed: before.ok && after.ok ? withoutIgnored(diff(before.obj, after.obj), ignoredPaths(res)).map((e) => e.path) : null, applied: after.ok ? deepEqual(valueAt(after.obj, f0.path), f0.values[1]) : null };
-      if (!hit) obs.res2.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
+      if (!hit) obs.res2.skipped = f.why ? `the fault was not applied: ${f.why}` : 'the fault was not applied (different backend requests than in the learning pass)';
       // Unknown outcome: the backend applies the request, and the connection closes before the server reads the answer.
       await d.reset();
       const b2 = await d.readOnce('R', ctx.session.stepId('gate.res2u.before'));
@@ -278,7 +278,8 @@ export const gatedCheck: CheckModule = {
       const reqsU = await gate.since(markU);
       const a2 = await d.readSettled('R', 'gate.res2u.after', () => false);
       obs.res2u = { object: d.id, faulted: hitu ? reqOf(hitu) : null, call: brief(ru), changed: b2.ok && a2.ok ? withoutIgnored(diff(b2.obj, a2.obj), ignoredPaths(res)).map((e) => e.path) : null, applied: a2.ok ? deepEqual(valueAt(a2.obj, f0.path), f0.values[1]) : null, requests: reqsU.map(reqOf), version_sent: b2.ok && res.version?.arg && !res.version.optional ? b2.version : null };
-      if (!hitu) obs.res2u.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
+      // why: the wire gate does not apply a lost-answer fault to a write that was refused or not kept (no trial), and says why.
+      if (!hitu) obs.res2u.skipped = fu.why ? `the fault was not applied: ${fu.why}` : 'the fault was not applied (different backend requests than in the learning pass)';
     }
     // A composite update: fail its second and its last mutating backend request.
     if (res.update!.mode === 'composite') {

@@ -45,7 +45,9 @@ The gate answers `N` to a Postgres SSLRequest and GSSENCRequest itself, so a cli
 
 Not built here, needed for t09 (URL in argv): an argv route (`rewrite_arg: N`). That touches `src/core/session.ts` (argv rewrite) and the plan (B9); it is listed in §8.
 
-Egress: `assertEgress` takes `{ wire: true }` for the gate's upstream only; the tester's own HTTP client still refuses every non-HTTP scheme. `egressFor` now uses the scheme's default port (a `postgres://b0` allow entry is `b0:5432`, not `b0:80`). The upstream connection goes through `vettedLookup` (no metadata address by name or by resolution), as the HTTP forwarder does.
+Also refused: Postgres `host=`, `hostaddr=`, `port=` or `service=` in the query, and a server given `PGHOSTADDR`, `PGSERVICE` or `PGSERVICEFILE` (each would route libpq around the gate); Mongo `compressors=` and `loadBalanced=true`.
+
+Egress: `assertEgress` takes `{ wire: true }` for the gate's upstream only; the tester's own HTTP client still refuses every non-HTTP scheme, and the gate keeps its upstream on a list of its own (the shared egress list is not changed). `egressFor` now uses the scheme's default port (a `postgres://b0` allow entry is `b0:5432`, not `b0:80`). The upstream connection goes through `vettedLookup` (no metadata address by name or by resolution), as the HTTP forwarder does.
 
 ## 3. Architecture
 
@@ -96,7 +98,7 @@ A tokenizer that understands `--` and nested `/* */` comments, `'…'` (with `''
 
 Extended protocol: a per-connection map `statement name → classification` (from Parse) and `portal → statement` (from Bind); each Execute is classified by its portal; a unit is a write if any Execute in it is. `PREPARE n AS …` / `EXECUTE n` are tracked the same way. An Execute of an unknown portal is a write, uncertain. A unit with several statements takes the verb and table of its first write and records `statements: n`.
 
-`wire.statement` keeps the SQL with every literal replaced by `?` and cut to 200 characters (values written are never logged; `ErrorResponse` is reduced to its SQLSTATE).
+`wire.statement` keeps the SQL with every literal replaced by `?` and cut to 200 characters (values written are never logged; `ErrorResponse` is reduced to its SQLSTATE; SET and RESET keep the setting's name only). `COPY (query) TO` takes the class of its query. A function call in a read is trusted only if it is on the read-only list and unqualified or in `pg_catalog`. `DECLARE … CURSOR FOR q` runs nothing; FETCH and MOVE on that cursor take the class of q. `standard_conforming_strings` is read from the backend's ParameterStatus: when off, a backslash escapes a quote inside '…'.
 
 ### 4.2 Redis
 
@@ -141,13 +143,17 @@ The gate keeps the client and the database in step after an injected error, wher
 - **Postgres, inside a transaction.** The backend never saw the failed unit and is still `T`, while the client was told `E`. The connection enters *emulated-failed* mode: any unit except ROLLBACK/ABORT/ROLLBACK TO/COMMIT/END is answered with `25P02 current transaction is aborted` and not forwarded; ROLLBACK, ABORT and ROLLBACK TO are forwarded as they are (leaving the mode); COMMIT/END is replaced by a `ROLLBACK` sent to the backend and answered to the client as Postgres answers a COMMIT of a failed transaction (`CommandComplete ROLLBACK`, `ReadyForQuery I`).
 - **Postgres, Flush unit.** The backend would skip everything up to the next Sync after an error; the gate answers those units itself (nothing, then `ReadyForQuery`) without forwarding them.
 - **Redis, inside MULTI.** Real Redis discards the transaction at EXEC after a queueing error. The gate replaces the EXEC with DISCARD and answers `-EXECABORT Transaction discarded because of previous errors.`
-- **Mongo, inside a transaction:** not emulated in this preview. The record says so (`wire.note`) and a check should treat the trial as `not tested`. Transactions need a replica set (C1) anyway.
+- **Mongo, inside a transaction:** not emulated in this preview, so the gate does not inject the error: the request goes on as it is and `FaultHandle.why` says so (the check records `not tested`). Transactions need a replica set (C1) anyway.
+
+**Ordering.** An answer the gate writes (an injected error, or an emulated one) waits until every unit already forwarded on that connection is answered, so a pipelining client gets the answers in order, and the transaction state an injected error is judged by is the backend's after them (MULTI state in Redis is taken from the backend's answers, never from what the client sent). A barrier (a unit carrying a `commit_then_*` fault, or one whose answer the gate replaces) lets pass-through units go on while it waits (COPY data the backend needs before it can answer). Both waits have a ceiling (60 s): after it the gate logs an uncertain write and closes the connection. Any error inside the gate (framing or otherwise) closes that connection and is logged; it never reaches the CLI.
 
 ### 5.3 The commit point (lost answer)
 
 The lost-answer trial needs the write to be **committed** before the answer is lost. With autocommit the write's own unit is the commit point. Inside an explicit transaction it is not: an `UPDATE`'s `CommandComplete` under `BEGIN` commits nothing, and cutting it would test a rolled-back write.
 
-So a `commit_then_*` fault that hits a write inside a transaction is **deferred**: the write's own answer is delivered, and the fault is applied to the unit that ends the transaction, if that unit commits it (Postgres: `ReadyForQuery` goes from `T` to `I` and the last tag is not `ROLLBACK`; Redis: EXEC answered with an array; Mongo: `commitTransaction` answered `ok: 1` on the same `lsid`). The faulted record is the write (so `nthOf`, the res2u "sent the cut request again" check and the report name the UPDATE), with `wire.deferred = { to: <seq of the commit>, outcome: 'committed' | 'rolled back' }` and `status: null`. If the transaction is rolled back, the answer is delivered, the fault is reported as hit with `outcome: 'rolled back'`, and nothing was committed: a check must read that as "the trial did not happen", never as a lost answer.
+So a `commit_then_*` fault that hits a write inside a transaction is **deferred**: the write's own answer is delivered, and the fault is applied to the unit that ends the transaction, if that unit commits it (Postgres: `ReadyForQuery` goes from `T` to `I` with a `COMMIT` tag and no `ROLLBACK` or `PREPARE TRANSACTION` tag; Redis: EXEC answered with an array; Mongo: `commitTransaction` answered `ok: 1` on the same `lsid`). The faulted record is the write (so `nthOf`, the res2u "sent the cut request again" check and the report name the UPDATE), with `wire.deferred = { to: <seq of the commit>, outcome: 'committed' | 'not committed' }` and `status: null`.
+
+**A lost-answer fault is a trial only of a write that was carried out and kept.** The gate does not apply it, delivers the real answer, never resolves `waitHit`, and sets `FaultHandle.why` (the checks put it in the `not tested` reason) when: the write itself was refused (status ≥ 400); the unit undid its own change (a ROLLBACK, ROLLBACK TO or PREPARE TRANSACTION tag); the transaction was not committed (ROLLBACK, a COMMIT answered ROLLBACK, PREPARE TRANSACTION, a Redis EXEC aborted by WATCH, a failed commitTransaction); a ROLLBACK TO SAVEPOINT came after the write; the write's own element of the EXEC answer is an error; the request expects no answer (moreToCome); or the connection closed first.
 
 The hold (CONC-3) is not deferred: it holds the write statement itself, before the database sees it, which is the interleaving the requirement is about. A hold on COMMIT would only show that row locks serialize writers.
 

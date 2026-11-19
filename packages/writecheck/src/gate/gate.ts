@@ -31,7 +31,7 @@ import { MongoSession, sharedMongo } from './wire/mongodb.js';
 import { PostgresSession } from './wire/postgres.js';
 import { WireGate } from './wire/proxy.js';
 import { RedisSession } from './wire/redis.js';
-import { wireProtocolOf, wireRefusal } from './wire/url.js';
+import { PG_ROUTING_ENV, wireProtocolOf, wireRefusal } from './wire/url.js';
 
 /** What the wire gate knows of a request beyond method and path (docs/WIRE-GATE.md §4, §5). */
 export interface WireInfo {
@@ -50,7 +50,7 @@ export interface WireInfo {
   /** What the gate did to keep client and backend in step, or could not do. */
   note?: string;
   /** A commit_then_* fault on a write inside a transaction, applied at the commit (seq `to`). */
-  deferred?: { to: number | null; outcome: 'pending' | 'committed' | 'rolled back' };
+  deferred?: { to: number | null; outcome: 'pending' | 'committed' | 'not committed' };
 }
 
 export interface GateRequest {
@@ -104,6 +104,8 @@ export interface FaultSpec {
 export interface FaultHandle {
   /** The faulted request once the fault has been applied, or null after `ms`. */
   waitHit(ms: number): Promise<GateRequest | null>;
+  /** Wire gate: why the request the fault matched was let through without the fault (its write failed, was rolled back, or could not be answered in step); null otherwise. */
+  readonly why?: string | null;
   clear(): void;
 }
 
@@ -157,6 +159,11 @@ export function createGate(m: Manifest, env: NodeJS.ProcessEnv, o: { stateDir: s
     if (wire) {
       const why = wireRefusal(upstream);
       if (why) throw new WritecheckError(`backend.gate.rewrite_env: ${g.rewrite_env} holds a ${wire} URL the wire gate cannot stand in for: ${why}`, 2);
+      if (wire === 'postgres') {
+        const given = [...m.server.env_passthrough, ...m.server.env_public, ...Object.keys(m.server.env ?? {})];
+        const route = PG_ROUTING_ENV.find((k) => given.includes(k));
+        if (route) throw new WritecheckError(`backend.gate.rewrite_env: the server is given ${route}, which would route its Postgres client around the wire gate; leave it out`, 2);
+      }
       // why: Mongo transactions belong to a session (lsid) that may use several pooled connections; their state is shared per gate.
       const shared = sharedMongo();
       const codec = wire === 'postgres' ? (k: string) => new PostgresSession(k) : wire === 'redis' ? (k: string) => new RedisSession(k) : (k: string) => new MongoSession(k, shared);
