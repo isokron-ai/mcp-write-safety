@@ -20,7 +20,7 @@ import { TEST_HASH_FORMAT } from '../../src/core/identity.js';
 import { parseManifestText, type Manifest } from '../../src/core/manifest.js';
 import { Redactor } from '../../src/core/redact.js';
 import { canonical, WritecheckError } from '../../src/core/util.js';
-import { compareDocs, RELAXED_REQUIRED_IS_SAME_TEST, summarize, type CompareDoc } from '../../src/report/compare.js';
+import { compareDocs, RELAXED_REQUIRED_IS_SAME_TEST, summarize, UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST, type CompareDoc } from '../../src/report/compare.js';
 import { signResults, verifyResults } from '../../src/report/sign.js';
 import { narrowSchema, stampTestHashes, testHash, testInputs, usedArgs, type TesterId } from '../../src/report/testhash.js';
 import { furtherProbes } from '../../src/checks/readback.js';
@@ -525,7 +525,7 @@ test('review F4 (R4): MWS-CONC-2 adds a version-left-out run only for an optiona
   assert.ok(y.same_test_because?.some((t) => /relaxed from required to optional/.test(t)));
 });
 
-test('review F4: a required argument the test does not send, no longer required, and an argument newly declared under additionalProperties false, are other tests', () => {
+test('review F4: a required argument the test does not send, no longer required, is another test; an argument the test sends, newly declared under additionalProperties false, stays rule A (owner decision) and is said', () => {
   const m = load();
   const r0 = rec('MWS-CONC-1', 'held');
   const before = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { tenant: { type: 'string' } }, ['id', 'tenant'])));
@@ -535,8 +535,9 @@ test('review F4: a required argument the test does not send, no longer required,
   const closedB = toolsFor(m, onTool('update_ticket', (s) => ({ ...without(s, 'expected_version'), additionalProperties: false })));
   const closedA = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, additionalProperties: false })));
   const x = cellOf(cmp(doc(stamped([viol(r0)], m, closedB)), doc(stamped([r0], m, closedA))), 'MWS-CONC-1@update_ticket');
-  assert.equal(x.transition, 'test-changed');
-  assert.match(x.why, /allows no undeclared argument/);
+  assert.equal(UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST, true);
+  assert.equal(x.label, 'fixed');
+  assert.ok(x.same_test_because?.some((t) => /allowed no undeclared argument: check that the before build accepted the call/.test(t)));
   // open schemas: still rule A (an optional argument the test sends, added)
   const openB = toolsFor(m, onTool('update_ticket', (s) => without(s, 'expected_version')));
   assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, openB)), doc(stamped([r0], m, toolsFor(m)))), 'MWS-CONC-1@update_ticket').label, 'fixed');
