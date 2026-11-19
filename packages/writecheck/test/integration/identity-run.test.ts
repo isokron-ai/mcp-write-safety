@@ -67,8 +67,13 @@ test('a run states its identity, hashes every record\'s test, signs results.json
     assert.ok(rc.identity?.rechecked_by && rc.results.every((r) => typeof r.test_hash === 'string'));
     assert.equal(validates(schema, JSON.parse(readFileSync(join(before.outDir, 'recheck', 'results.json'), 'utf8'))), true);
     assertPublishable(join(before.outDir, 'recheck'));
-    const rs = await finishRecheck(before.outDir, { key: privateKey, log });
+    assert.equal(rc.identity?.rechecked_by?.original_signature?.status, 'valid-unpinned');
+    // signing the copy needs the original pinned (--pubkey), or --allow-unsigned
+    await assert.rejects(finishRecheck(before.outDir, { key: privateKey, log }), /signs only a copy of a file signed by a pinned key/);
+    const rs = await finishRecheck(before.outDir, { key: privateKey, pubkey: publicKey, log });
     assert.equal(typeof rs.evidence.signature, 'object');
+    const os = rs.identity?.rechecked_by?.original_signature;
+    assert.ok(os && os.status === 'valid' && os.pinned === true && /^ed25519-/.test(os.key_id ?? '') && os.allow_unsigned === undefined, JSON.stringify(os));
     assert.equal(verifyResultsCommand({ file: join(before.outDir, 'recheck'), pubkey: join(tmp, 'pub.pem'), log }).exit, 0);
     const cmp = JSON.parse(readFileSync(join(tmp, 'cmp', 'compare.json'), 'utf8')) as unknown;
     assertMatchesSchema('mws-compare-1', cmp, 'compare.json');
