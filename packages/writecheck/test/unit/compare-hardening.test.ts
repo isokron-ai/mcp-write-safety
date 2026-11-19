@@ -342,6 +342,34 @@ test('S8 (p02, p16): narrowing follows a top-level $ref, $anchor and draft-07 de
   assert.ok(canonical(narrowSchema(named('string'), new Set(['description']))) !== canonical(narrowSchema(named('integer'), new Set(['description']))));
 });
 
+test('p16 F: a launch check (MWS-CFG-3, read-only mode calls every declared write tool) hashes every resource block and its tools: dropping a resource is never fixed', () => {
+  const m = load();
+  const tools = toolsFor(m);
+  const cfg3 = rec('MWS-CFG-3', 'violated', { resource: '(server)', tool: 'TRACKER_READ_ONLY', scenario: { id: 'read-only', version: '1' } });
+  const fewer = load();
+  fewer.resources = fewer.resources.filter((r) => r.name !== 'ticket-replace');
+  assert.notEqual(testHash(cfg3, { manifest: fewer, tools, tester }), testHash(cfg3, { manifest: m, tools, tester }), 'a dropped resource changes the test');
+  const i = testInputs(cfg3, { manifest: m, tools, tester });
+  assert.ok(Object.keys(i.tools).includes('replace_ticket'), 'the write tool of every resource is in the tool shapes');
+  const retyped = toolsFor(m, onTool('replace_ticket', (s) => withProps(s, { title: { type: 'integer' } })));
+  assert.notEqual(testHash(cfg3, { manifest: m, tools: retyped, tester }), testHash(cfg3, { manifest: m, tools, tester }), 'a retyped argument another resource sends changes the test');
+  const b = doc(stamped([cfg3], m, tools));
+  const a = doc(stamped([rec('MWS-CFG-3', 'held', { resource: '(server)', tool: 'TRACKER_READ_ONLY', scenario: { id: 'read-only', version: '1' } })], fewer, tools));
+  assert.notEqual(cellOf(cmp(b, a), 'MWS-CFG-3@TRACKER_READ_ONLY').label, 'fixed');
+  // a record of one resource is untouched by another resource's block
+  const res1 = rec('MWS-RES-1', 'held', { scenario: { id: 'read-after-write', version: '1' } });
+  assert.equal(testHash(res1, { manifest: fewer, tools, tester }), testHash(res1, { manifest: m, tools, tester }));
+});
+
+test('p16 E: a tool called with the manifest\'s calls args (annotation effects) hashes the arguments that call sends', () => {
+  const m = load();
+  const tools: Tool[] = [...toolsFor(m).filter((t) => t.name !== 'add_label'), { name: 'add_label', inputSchema: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } } }];
+  const ann = rec('MWS-ANN-1', 'held', { tool: 'add_label', scenario: { id: 'annotation-effects', version: '1' } });
+  const retyped = tools.map((t) => (t.name === 'add_label' ? { ...t, inputSchema: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' } } } } : t));
+  assert.notEqual(testHash(ann, { manifest: m, tools: retyped, tester }), testHash(ann, { manifest: m, tools, tester }));
+  assert.deepEqual(Object.keys(testInputs(ann, { manifest: m, tools, tester }).tools['add_label']!.p).sort(), ['id', 'name']);
+});
+
 test('scheme: records hashed under mws-test-hash/1 and /2 are never joined, and compare says so', () => {
   const m = load();
   const tools = toolsFor(m);

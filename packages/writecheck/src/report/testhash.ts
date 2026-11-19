@@ -419,16 +419,35 @@ type RecordKey = Pick<Result, 'requirement' | 'level' | 'scenario' | 'write_path
 /** Requirements whose verdict depends on the pace of writes: the concurrency checks and MWS-RETRY-2's simultaneous pairs. */
 const paced = (req: string): boolean => /^MWS-CONC-/.test(req) || req === 'MWS-RETRY-2';
 
+/** Requirements whose records name no resource block but whose procedure acts on every resource (the launch checks). */
+export const acrossResources = (req: string): boolean => /^MWS-CFG-/.test(req);
+
 /** The record's test inputs (mws-test-hash/2), from the manifest and the tool list. */
 export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedInputs(ctx.manifest, ctx.review)): TestInputs {
   const res = ctx.manifest.resources.find((x) => x.name === r.write_path.resource) ?? null;
-  const names = new Set<string>([r.write_path.tool, ...(res ? toolsNamedIn(res) : [])]);
+  // why: review p16 F: the launch checks (MWS-CFG-*) have no resource block of their own; in the read-only and deny modes
+  // they call every declared write tool on objects of every resource, so every resource block and its tools are their test.
+  const all = !res && acrossResources(r.requirement) ? ctx.manifest.resources : null;
+  const blocks = res ? [res] : (all ?? []);
+  // why: review p16 E: a tool the manifest's `calls` declares is called with those args (annotation effects, the launch checks).
+  const calls = (ctx.manifest.calls ?? {}) as Record<string, { args?: unknown } | undefined>;
+  const names = new Set<string>([r.write_path.tool, ...blocks.flatMap((b) => [...toolsNamedIn(b)]), ...(all ? Object.keys(calls) : [])]);
   const keep = r.requirement === 'MWS-IN-5';
-  const underTest = new Set([r.write_path.tool, res?.update?.tool, res?.create?.tool].filter((x): x is string => !!x));
   const tools: Record<string, ToolShape | null> = {};
   for (const n of [...names].sort()) {
     const t = ctx.tools.find((x) => x.name === n);
-    tools[n] = t ? toolShape(t['inputSchema'], usedArgs(n, res ? plain(res) : null, underTest.has(n)), keep) : null;
+    if (!t) {
+      tools[n] = null;
+      continue;
+    }
+    const used = new Set<string>();
+    for (const b of blocks.length ? blocks : [null]) {
+      const underTest = n === r.write_path.tool || n === b?.update?.tool || n === b?.create?.tool;
+      for (const a of usedArgs(n, b ? plain(b) : null, underTest)) used.add(a);
+    }
+    const declared = Object.prototype.hasOwnProperty.call(calls, n) ? calls[n]?.args : undefined;
+    if (isObj(declared)) for (const a of Object.keys(declared)) if (!a.includes('{{')) used.add(a);
+    tools[n] = toolShape(t['inputSchema'], used, keep);
   }
   const limits = paced(r.requirement) ? { ...(shared.limits as Record<string, unknown>), writes_per_second: shared.rate } : shared.limits;
   const extras: Record<string, unknown> = {};
@@ -443,7 +462,7 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     scenario: { id: r.scenario.id, version: r.scenario.version },
     write_path: { resource: r.write_path.resource, tool: r.write_path.tool, arm: r.write_path.arm },
     ...(r.case !== undefined ? { case: r.case } : {}),
-    resource: res ? relativized(plain(res), baseOf(ctx.manifest)) : null,
+    resource: res ? relativized(plain(res), baseOf(ctx.manifest)) : all ? relativized(plain(all), baseOf(ctx.manifest)) : null,
     declaration: shared.declaration,
     ...(shared.guard !== null ? { guard: shared.guard } : {}),
     limits,
