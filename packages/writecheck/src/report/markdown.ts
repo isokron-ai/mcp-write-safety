@@ -78,10 +78,25 @@ export function renderMarkdown(d: ResultsDoc): string {
   L.push('## Violations');
   L.push('');
   if (!vio.length) L.push('No requirement was violated in this run. That is not a statement that the server is safe: see what was not tested, below.');
-  for (const r of vio) L.push(`- **${r.requirement}** (${r.level}) on \`${writePathKey(r.write_path)}\`: ${r.reason}${r.attribution ? ` Attribution: ${r.attribution}.` : ''} Requirement: ${requirementLink(r.requirement)} (in the MWS repository).${r.steps.length ? ` Trace: ${r.steps.slice(0, 4).map((x) => `\`${x}\``).join(', ')}${r.steps.length > 4 ? ', …' : ''}.` : ''}`);
+  for (const r of vio) L.push(`- **${r.requirement}** (${r.level}) on \`${writePathKey(r.write_path)}\`: ${r.reason}${r.attribution ? ` Attribution: ${r.attribution}.` : ''}${r.validity ? ` Evidence: ${r.validity.class}${r.validity.failed.length ? ` (rules not met: ${r.validity.failed.join(', ')})` : ''}${r.validity.synthetic_fault ? ', under an injected fault' : ''}.` : ''} Requirement: ${requirementLink(r.requirement)} (in the MWS repository).${r.steps.length ? ` Trace: ${r.steps.slice(0, 4).map((x) => `\`${x}\``).join(', ')}${r.steps.length > 4 ? ', …' : ''}.` : ''}`);
   if (vio.some((r) => r.steps.length)) {
     L.push('');
     L.push('Each trace id is the `step` of lines in `capture/capture.jsonl` (the request and the answer, redacted): `grep \'"step":"<id>"\' capture/capture.jsonl`.');
+  }
+  // F1 (docs/CELLS.md): one row per declared write tool, one column per MUST requirement; each entry is the cell's verdict.
+  const cells = d.cells ?? [];
+  if (cells.length) {
+    const ABBR: Record<string, string> = { violated: 'V', platform: 'P', held: 'H', 'not observed': 'NO', 'not tested': 'NT', 'not applicable': 'na', 'self-attested': 'SA' };
+    const reqs = [...new Set(cells.map((c) => c.requirement))];
+    const short = (id: string) => id.replace(/^MWS-/, '');
+    L.push('');
+    L.push('## Cells');
+    L.push('');
+    L.push('One MUST requirement on one declared write tool (or on the server), merged across resources and scenarios (docs/CELLS.md). V violated, P platform, H held, NO not observed, NT not tested, na not applicable (with its rule in the records), SA self-attested; V? a violation whose evidence did not meet a validity rule (it does not count). Read tools are not cells.');
+    L.push('');
+    L.push(`| Tool | ${reqs.map(short).join(' | ')} |`);
+    L.push(`|---|${reqs.map(() => '---').join('|')}|`);
+    for (const tool of [...new Set(cells.map((c) => c.tool))]) L.push(`| ${esc(tool)} | ${reqs.map((q) => { const c = cells.find((x) => x.tool === tool && x.requirement === q); return c ? `${ABBR[c.verdict]}${c.verdict === 'violated' && c.validity === 'harness-suspect' ? '?' : ''}` : ''; }).join(' | ')} |`);
   }
   L.push('');
   L.push('Verdicts: `violated` (reproduced; if a control ran, the platform API did not do the same), `platform` (the platform API does the same), `held` (the situation was forced and the server did the right thing), `not observed` (attempted, not forced, nothing seen; not evidence of safety), `not tested` (with the reason), `not applicable`, `self-attested`. There is no total and no score.');
@@ -157,7 +172,18 @@ export function renderMarkdown(d: ResultsDoc): string {
   L.push('## Evidence');
   L.push('');
   L.push('`SHA256SUMS` lists every file in this folder. Check it with `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).');
-  if (d.evidence.signature) L.push(`It is signed with the runner's own SSH key (\`${d.evidence.signature}\`): \`ssh-keygen -Y verify -f allowed_signers -I <signer> -n mcp-writecheck -s SHA256SUMS.sig < SHA256SUMS\`. A signature shows the files were not changed afterwards; it does not show there were no other runs, and it is the runner's own statement about its own server.`);
+  // why: F8: evidence.signature is the ssh signature file of SHA256SUMS (a string), or a results signature naming it in `sums`.
+  const sig = d.evidence.signature;
+  const sums = typeof sig === 'string' ? sig : sig?.sums ?? null;
+  if (sums) L.push(`It is signed with the runner's own SSH key (\`${sums}\`): \`ssh-keygen -Y verify -f allowed_signers -I <signer> -n mcp-writecheck -s SHA256SUMS.sig < SHA256SUMS\`. A signature shows the files were not changed afterwards; it does not show there were no other runs, and it is the runner's own statement about its own server.`);
+  if (sig && typeof sig === 'object') L.push(`results.json is signed with the Ed25519 key \`${sig.key_id}\` (content digest \`${sig.digest}\`): \`mcp-writecheck verify-results results.json --pubkey <the signer's public key>\`. Check it against a key obtained from the signer, not the one embedded in the file.`);
+  else if (!sig) L.push('results.json is not signed.');
+  if (d.identity) {
+    const i = d.identity;
+    const srv = [i.server.repo, i.server.tag, i.server.commit ? `@ ${i.server.commit}` : null, i.server.image].filter(Boolean).join(' ');
+    L.push(`Run identity (\`results.identity\`): ${i.tester.name} ${i.tester.version} @ ${i.tester.commit ?? 'unstamped build'}${i.tester.dirty ? ' (uncommitted changes)' : ''}; MWS ${i.spec.version}; server build ${srv || 'not stated'}${i.backend.length ? `; backend ${i.backend.map((b) => `${b.name} ${b.image ?? '(no image)'}`).join(', ')}` : ''}. Each record carries a \`test_hash\`; \`mcp-writecheck compare\` joins two runs on it.`);
+    if (i.gaps.length) L.push(`Not stated or not pinned: ${i.gaps.map((g) => esc(g)).join('; ')}.`);
+  }
   L.push('`mcp-writecheck recheck <this folder>` re-applies the current rules to the recorded observations without contacting the server.');
   L.push('');
   L.push('Every `violated` from simultaneous or stale calls was produced deliberately; it says nothing about how often it happens in normal use.');

@@ -1,0 +1,26 @@
+{
+  "entry": "ledger-entry/1",
+  "seq": 2,
+  "at": "2026-11-16T20:00:00.000Z",
+  "clock_offset_ms": 0,
+  "boot_id": "3f9a01c27b4d5e60",
+  "kind": "execution",
+  "principal": "p-default",
+  "run": "run-3f9a01c2-8e41b07d29a6",
+  "operation_tag": "op-1",
+  "request": {
+    "method": "POST",
+    "path": "/tickets",
+    "key": "lrt-example-key-0001",
+    "fingerprint_hash": "8ce2634fdf294777e7f088577d8cff8050ad46286b6422d329f1952ee8a867b3"
+  },
+  "status": 201,
+  "execution_id": "X-1",
+  "objects": [
+    {
+      "type": "ticket",
+      "id": "T-1"
+    }
+  ],
+  "fault": null
+}

@@ -251,7 +251,9 @@ export const staleCheck: CheckModule = {
     for (const t of res.no_version_check) {
       const w = wp(res.name, t);
       // why: the tool deletes or writes, so MWS-CONC-2 applies; with no version check the stale call is row 3 or 4, and that run is not built for such tools here.
-      nr.push(result('MWS-CONC-2', w, { id: ID, version: VERSION }, 'not tested', `the declaration states that the backend has no version check for ${t}; the stale call through it, with a control arm (row 3, platform) or without (row 4), is not built in this preview`));
+      // why: TB-B2-2 (t23): the update tool already has its not-applicable record above (no version argument); a second, not-tested
+      // record for the same write path would contradict it.
+      if (!(res.update && t === res.update.tool && applies(res) === 'n/a')) nr.push(result('MWS-CONC-2', w, { id: ID, version: VERSION }, 'not tested', `the declaration states that the backend has no version check for ${t}; the stale call through it, with a control arm (row 3, platform) or without (row 4), is not built in this preview`));
       const q: Question = { id: questionId('MWS-CONC-5', w, 'description'), requirement: 'MWS-CONC-5', write_path: w, question: `The backend cannot detect a change for ${t} (as declared). Does its description state that stale writes are not detected, or are detected only on a best-effort basis?`, evidence: [{ step: null, text: String(toolByName(ctx.tools, t)?.description ?? '') }] };
       nr.push(reviewResult({ id: ID, version: VERSION }, q, answerOf({ ...ctx, review: ctx.review ?? ctx.manifest.review }, q, (ctx.review ?? ctx.manifest.review)?.stale_writes_disclosed ?? null)));
     }

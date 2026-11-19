@@ -23,6 +23,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `patterns` | no | How the tester decides what a result says (spec 7.3, rule 11); below |
 | `outcome_field` | no | A structured outcome field in the result: `{ path, applied, not_applied, unknown }` (below) |
 | `results` | no | `{ shape, tools: { <tool>: { shape } } }`: a result shape adopted by name and version (spec 7.3, rule 11; draft Annex B-9). Known: `write-result/0.1`. A tool's own entry overrides the top level; `shape: null` adopts none for it. An unknown name or version is refused at load. See [results](#results) |
+| `session` | no | `{ init: [{ tool, args, read_only }] }`: calls made on every MCP session before its first other tools/call; see [session](#session) |
 | `async_operations` | no | Tools whose operation the backend completes asynchronously (spec NF-19, Annex E): a result that says "accepted" or "pending" is then not read as a report of success. For any other tool it is |
 
 ## server
@@ -40,7 +41,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `cwd` | Working directory of a started server, relative to the manifest |
 | `processes` | `separate` or `shared`: whether the second connection of a concurrency test is a second server process |
 | `restart` | `{ stop: graceful \| kill }` (Annex E): the declaration's means to stop and start the server, for MWS-RETRY-2 step (e) and its crash form. The tester stops a server process it started for the step (`graceful`: closing stdin first for stdio, then SIGTERM; `kill`: SIGKILL) and starts it again with its own command and the same environment; a graceful stop after which the process did not exit by itself, and was killed, is recorded as a kill. Needs `stdio` or `launch`. Without it, both steps are `not tested` |
-| `decode` | `{ <tool>: json \| none }`: how each named tool's wrapped results (structuredContent `{"result": "<JSON as a string>"}`) are read; see [Wrapped results](#wrapped-results-decode) |
+| `decode` | `{ <tool>: json \| none \| { mode, extract } }`: how each named tool's wrapped results (structuredContent `{"result": "<JSON as a string>"}`) are read, and any [read extraction](#read-extraction-decodeextract) for it; see [Wrapped results](#wrapped-results-decode) |
 
 ## target
 
@@ -51,6 +52,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `guard` | `{ tool, args, path, pattern, read_only, decode }`: a read whose result at `path` must match `pattern`, or the run stops before any write. The tool must declare `readOnlyHint: true`; for a server that annotates no tool, `read_only: true` declares that it only reads (a tool that declares `readOnlyHint: false` or `destructiveHint: true` is refused either way). For a server whose only tool is a dispatcher (PostHog's `cli` mode, `exec`), `read_only_call: true` declares that this exact call (arguments written out in full, no templates) only reads: the guard then rests on the operator's declaration, which the results say; before any other write the same call is made three times and must answer identically, and the canaries and every declared list that needs no object must read the same before the first call and after the third; any error or difference refuses the run. Each of the three calls counts against `write_budget` and is recorded in the ledger and the results. Between checks the run asks `tools/list`, never the declared call. `plan` warns when the run would refuse the guard. `decode: json` or `none`: see [Wrapped results](#wrapped-results-decode) |
 | `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
 | `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
+| `provenance` | Optional. `{ repo, commit, tag, image, recipe, backend: [{ name, image, version }] }`: the server build under test and its backend images, copied into `results.identity` (see [Run identity](#run-identity)). `commit` must be a full 40- or 64-character git commit; an image is pinned only with `@sha256:<digest>`. Unknown keys are refused. It is part of the manifest bytes, so it changes `manifest.sha256` and the plan hash (never a test hash): for a before/after pair run one byte-identical manifest on both builds and give each build with `--server-commit`, `--server-image` or `--provenance` instead |
 
 Target hosts are listed on the plan's "Hosts reached or given to the server" line, and one that looks like production is refused unless listed in `allow_hosts`. They are the server URL, the control bases, any URL in the server's environment or command line, and a host given without a URL. Where in doubt a host is read: a false refusal is cleared with `allow_hosts`, a missed host is never checked.
 
@@ -63,9 +65,11 @@ Target hosts are listed on the plan's "Hosts reached or given to the server" lin
 
 | Key | Default | Meaning |
 |---|---|---|
-| `write_budget` | 500 | Writes a run may make; the plan states how many it will make at most |
+| `write_budget` | 500 | Writes a run may make; the plan states how many it will make at most, and how long they take at `writes_per_second`. With a pair budget and no declared `write_budget`, it is sized to fit: 1000, plus for each resource with an update tool and two fields 4 writes per barrier pair per repeat (doubled where a control block runs the control arm), plus `pairs` × 4 for each resource with an idempotency block (at least 500, at most 250000). A declared value is a hard cap |
 | `writes_per_second` | 5 | Pace of writes |
-| `pairs` | 40 | Simultaneous pairs per concurrency test; 30 overlapped pairs are needed before `not observed` (spec 8.2, rule 6) |
+| `pairs` | 40 (`pair_budget.pairs` with a pair budget) | Simultaneous pairs per repeat of the MWS-CONC-3 barrier-pair test (and the cap of the MWS-RETRY-2 step (d) pairs); 30 overlapped pairs are needed before `not observed` (spec 8.2, rule 6) |
+| `pair_repeats` | 1 (`pair_budget.repeats` with a pair budget, where `pairs` is not declared) | Repeats of the barrier-pair test, each with fresh server processes |
+| `pair_budget` | none (opt-in) | `{ repeats, pairs }`, or `--pair-budget RxP` on plan, run, rerun and demo (it enters the plan hash: give plan and run the same). The budget the record is judged against; rating method 0.4 asks for 2 × 1500. A run below it says "Not observed, below the pair budget", at it "Not observed at the full pair budget". Pairs never give `held`; a stopped repeat gives `not tested`. **Cost:** 2 × 1500 is about 12,000 writes per resource with an update tool (24,000 with a control block), about 40 minutes at the default 5 writes per second; the plan prints the estimate. A target with a rate limit may answer 429, which stops the run (`not tested`, never a partial result): raise `writes_per_second` only as far as the target allows |
 | `stale_reps` | 3 | Repetitions of each forced stale write |
 | `gate_reps` | 2 | Repetitions of each held-request schedule |
 | `timeout_ms` | 30000 | Per call |
@@ -209,9 +213,62 @@ The decode happens when both hold:
 
 Anything else is read as before: a string that is not JSON (or is a JSON number, string or null), structuredContent with any other member, or a tool that is neither marked nor declared.
 
-`decode` is declared on `read`, `list` or `target.guard` (for the tool they name), or per tool under `server.decode: { <tool>: json | none }` (for any tool, a write tool included). `none` never decodes the tool's results, even where its `outputSchema` marks them: use it for a tool whose sole `result` property is a string meant to stay a string (a message that happens to be JSON). A mode applies to every call of that tool in the run; two different modes for one tool are refused.
+`decode` is declared on `read`, `list` or `target.guard` (for the tool they name), or per tool under `server.decode: { <tool>: json | none | { mode, extract } }` (for any tool, a write tool included). `none` never decodes the tool's results, even where its `outputSchema` marks them: use it for a tool whose sole `result` property is a string meant to stay a string (a message that happens to be JSON). A mode applies to every call of that tool in the run; two different modes for one tool are refused.
 
 The record says what was decoded: each call record in `results.json` (the observations' call briefs and the experiments' call records) carries `decoded: { from: "structuredContent.result", basis: "outputSchema" | "manifest" }` and, beside the decoded `data`, `raw_structured`: structuredContent as received (clipped like `data`). `target.mcp.notes` says, once per tool, that its results were decoded and why, or that `decode: none` kept a marked tool's results as they are. The capture keeps every answer as received. Adding `decode` changes the manifest's bytes, so the plan hash changes; a manifest without it keeps its hash.
+
+### Read extraction (decode.extract)
+
+Some servers answer their JSON inside markup or prose, with no structuredContent: the whole answer wrapped in `<insecure-content>…</insecure-content>` tags, or a sentence before the document. For such a tool the declaration may say where the JSON is:
+
+```yaml
+read: { tool: query, args: { id: "{{id}}" }, decode: { extract: { between: ["<insecure-content>", "</insecure-content>"] } } }
+list: { tool: list_rows, args: {}, items: rows, decode: { extract: { regex: "<insecure-content>(.*?)</insecure-content>" } } }
+server: { decode: { run_sql: { mode: none, extract: { between: ["<data>", "</data>"], refusals: true } } } }
+```
+
+| Key | Meaning |
+|---|---|
+| `between` | `[start, end]`: the text after the first `start`, up to an `end` that follows it. Each following `end` is tried in turn (up to 64) until the text between parses, so a document that itself contains the end marker is read whole. Both markers non-empty, at most 512 characters. Prefer `between`: it is a plain substring search, linear in the answer |
+| `regex` | A regular expression (JavaScript syntax, applied with the `s` flag so `.` crosses lines) with exactly one capture group; the group's text in the first match. It runs under a hard limit of 100 ms per answer; past it the extraction fails for that answer |
+| `refusals` | `true`: also extract from an error answer, and let the structured refusal signals and the declared `outcome_field` read the extracted document. Default `false` |
+
+Exactly one of `between` and `regex`. The extracted text, trimmed, must parse as a JSON object or array (no Python-repr or YAML parsing). Only the first 256 KiB of the answer's text (all its text blocks, joined) is searched; the record says when an answer was longer.
+
+- **Where it applies:** only to an answer with no structuredContent (a tool that returns structuredContent is read from it, decoded as above where marked), for every call of the tool in the run. `decode` is declared on `read`, `list` or `target.guard`, or under `server.decode.<tool>`; the object form `{ mode, extract }` carries both the wrapped-result mode (`json` or `none`, optional) and the extraction. One extraction per tool: two different ones are refused.
+- **What reads it:** the paths (`read.object`, `read.items`, `list.items`, `target.guard.path`, a create's `id` …) read the extracted document, as they read structuredContent. The patterns and `mentions` read the answer's text as received (the wrapper and all), and, as for any answer, the string values of its data, never field names. An adopted result shape (`mws`) is not read from an extracted document.
+- **Refusals and outcomes:** without `refusals: true`, an error answer (isError, or a JSON-RPC error) is never extracted, and neither the structured refusal signals (a conflict, version-required or validation code at the top level or in `error`) nor the declared `outcome_field` read an extracted document: a refusal, and what an answer says about the outcome, are read from the answer as received. Declare `refusals: true` only where the server puts its refusals and outcomes inside the same wrapper.
+- **Nothing found:** where an answer is one to extract from and the markers or the regex find no document (a marker missing, text that is not a JSON object or array, the regex's time limit reached), the answer has no data (paths find nothing; the text is not parsed some other way), and its call record carries `extract_failed: { by, reason }`.
+- **Refused at load** (so `plan` refuses the manifest): a regex that does not compile, that has no capture group or more than one (use `(?:…)` for other groups), that is longer than 512 characters, whose group is not delimited on both sides by text the answer must contain (`(.*)`, `^(.*)$`, `<a>(.*)`, `\s*(.*?)\s*$`, an optional delimiter such as `x?(.*)y?` or `(?:<t>|)(.*)`), or with a quantified group that holds a quantifier of its own (`((?:x+)+)`). This check is a lint, not a guarantee: a regex that passes it can still backtrack badly on hostile text (`<t>(.*?)</t>` is quadratic on `<t>` repeated), which is why every regex extraction runs under the time and input limits above. A `between` whose markers are empty is refused too.
+- **Evidence:** each call record whose data was extracted carries `extracted: { from: "text", by: "between" | "regex", basis: "manifest", refusals }` in `results.json`, and each one where nothing was found carries `extract_failed`; `target.mcp.notes` says once per tool that its answers were extracted and how refusals are read, and once that an answer gave no document and why. The capture keeps every answer as received.
+- **Plan hash:** adding `decode.extract` changes the manifest's bytes, so the plan hash changes; a manifest without it keeps its hash.
+
+## session
+
+`session.init` is for a server that connects to its backend only after a tool call that carries the connection settings, at the start of each MCP session (`connect(host, user, password)`).
+
+```yaml
+session:
+  init:
+    - { tool: connect, args: { host: "{{env.DB_HOST}}", user: "{{env.DB_USER}}", password: "{{env.DB_PASSWORD}}" } }
+```
+
+| Key | Meaning |
+|---|---|
+| `init` | One to eight calls `{ tool, args, read_only }`, made in order |
+| `init[].args` | An object; its templates may use only `{{env.NAME}}`, a variable of the tester's environment (the run stops if it is not set). A value under a secret-like name must be exactly one `{{env.NAME}}`: a literal there is refused at load (a number only under a password-type name: `password`, `passwd`, `passphrase`, `pass`, `pwd`, `pin`). A name is secret-like when, split into its parts (camelCase, `_`, `-`, `.`, digits; case ignored; `apikey`, `accesstoken` and the like split too), a whole part is `password`, `passwd`, `passphrase`, `pass`, `pwd`, `secret`, `token`, `credential(s)`, `creds`, `cookie`, `dsn`, `auth`, `authorization`, `bearer` or `oauth`, or `connection`/`conn` with `string`/`str`, or `key` alone or with `api`, `private`, `access`, `secret`, `client`, `signing`, `encryption` or `master`. It is not when its last part describes the setting (`token_type`, `auth_mode`, `oauth_scope`, `secretName`, `cookie_name`, `password_policy`, `token_url`) or its first part makes it a limit (`max_tokens`); a part that only contains a marker does not count (`bypass`, `passport`, `tokenizer`, `primary_key`, `keyPath`). The rule also applies to each string in a list under a secret-like name, the element after a secret-like flag or after `-p` (`["--password", "{{env.DB_PASSWORD}}"]`; a port number after `-p` is fine), a secret-like `--flag=value` or `NAME=value` element, and the `value` of a `{ name, value }` pair whose name is secret-like (`Authorization`, `x-api-key`). A literal URL anywhere in the arguments is refused if it carries a credential: user-info (`user:pass@`) or a query parameter with a secret-like name |
+| `init[].read_only` | `true`: the operator declares the call only reads, so it is not counted as a write |
+
+- **When:** on every MCP session the run opens (each stdio server process, each HTTP session; the concurrency pairs' connections, a restarted server, a launch check's server and the clean-up's session included), once, before the session's first other `tools/call`. From the moment the run's plan is confirmed, it runs at the end of the handshake of every new connection, so a barrier that opens its connections first (simultaneous pairs) has no init call inside it. Before that, `tools/list` does not trigger it: the catalog and `plan` make no tool call.
+- **Secrets:** every value an init call takes from the environment is treated as a secret and redacted wherever it appears in the capture, the history, the ledger and the reports: a value given under a secret-like name from three characters on (a shorter one would mask parts of every word), any other value from six, like every other secret; arguments with a secret name are masked whatever their value. The plan lists each init call with its arguments as written: a `{{env.NAME}}` template as is, a credential inside a literal (a URL's password, a known key shape) masked.
+- **Write budget:** an init call counts as a write (reserved against `write_budget`, paced by `writes_per_second`) unless the operator declares it `read_only: true`; a server's `readOnlyHint` does not exempt it. A connect call usually changes no data, but the tester cannot know that from the call. The number of sessions depends on the run (pairs, restarts, launch checks, clean-up), so counted init calls are not in the plan's "at most" figure: the plan warns about them, and the run stops if they would exceed the budget. The clean-up's own init is counted but never refused, so the clean-up can run after the budget is spent.
+- **Failure:** an init call that fails (an error answer, a JSON-RPC error, no answer before the timeout, an unset variable):
+  - on a session of the run itself: stops the run. No further call is made except the clean-up's, and the run's `stopped_reason` is `stopped: session.init[i] (<tool>) failed on session <label>, before any probe on it: <reason>` (redacted);
+  - on a server a check starts for itself: that server is stopped and only what depended on it is `not tested`, with the reason; observations already gathered keep their verdicts, and the run goes on. For the launch checks that is the one setting the server was started with (an MWS-CFG-1 value, the MWS-CFG-2 deny-list, the MWS-CFG-4 allow-list, the MWS-CFG-3 read-only start; a value of MWS-CFG-1 that was not tried leaves MWS-CFG-1 `not tested` unless another value shows a violation, and the server started with no setting, which every launch check needs, leaves all four `not tested`); for MWS-RETRY-2 it is the restart step (e) or its crash form whose dedicated server failed, before or after the restart;
+  - on the clean-up's session: a clean-up failure (the objects stay in the ledger as not cleaned up); the init is tried once more on the next clean-up call, then not again.
+- **Side effects:** what an init call does on the server (a connection, a login, a session row) is not in the ledger and is not cleaned up.
+- **Evidence:** each init call is in the capture and the history like any call; `target.mcp.notes` says that session.init ran and whether it was counted. Where the tenant guard fails with an answer that says the server is not connected and no `session.init` is declared, the refusal points here.
+- **Plan hash:** a manifest with `session.init` has a `session_init` member in its plan (and new bytes), so a new hash; a manifest without it keeps its hash.
 
 ## resources
 
@@ -249,3 +306,78 @@ Each resource is one kind of object. Only `name` and `read` are required; every 
 | `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5) |
 | `fixed_constraints` | A list of `{ arg, pattern, reason }` (R10-8): refusals of the update tool that rest on a fixed constraint; MWS-IN-5 is `violated` only for a refusal whose text matches one, otherwise each refusal is listed, "seen, not judged", and the verdict is `not observed` |
 | `server_managed` | A list of fields the server sets itself (a timestamp, a revision). A field that `read.ignore` or a list's `ignore` names and that the tool under test can set (from its input schema) is warned in the plan and the report, and refused for a selector tool in opt-in mode, unless it is listed here: an ignored field must not hide a bystander change |
+
+## Run identity
+
+Every `results.json` this release writes carries `identity` (`mws-identity/1`) and a `test_hash` on every record, so two runs of one test on two builds can be compared, and a published file can be checked. All of it is optional in `mws-results/1`; files written before it still validate.
+
+`identity` states:
+
+| Member | Source |
+|---|---|
+| `tester` | name, version, and the git `commit` and `dirty` flag stamped into `dist/src/build-info.json` by `npm run build` (`scripts/build-stamp.mjs`); `commit` is null for a build made outside a git checkout |
+| `spec`, `manifest_sha256`, `plan_hash` | as in `spec`, `manifest` and `plan` |
+| `tools_fingerprint` | sha256 over the canonical, name-sorted tools/list entries (tools only; `target.catalog_fingerprint` also covers prompts and resource templates) |
+| `test_hash` | the algorithm of the records' `test_hash`, `mws-test-hash/1` |
+| `server` | `repo`, `commit`, `tag`, `image`, `recipe` from the provenance below; `launch` (the server command or URL, redacted) and `transport` from the run |
+| `backend` | `[{ name, image, version }]` from the provenance below |
+| `runner` | OS, architecture, Node.js version, and the GitHub Actions run (id, attempt, URL, workflow) where the environment names one; never a host name |
+| `started`, `finished` | the run's start, and when the identity was written |
+| `provenance` | which sources stated the build, and any value a later source replaced |
+| `gaps` | every member not stated or not pinned, with why: an unstamped or dirty tester (or a stamp that does not say, or is older than the compiled code), no server repo, commit or image, an image or backend image without a digest, a replaced value. Empty only for a fully pinned run |
+
+The provenance comes, in this order, each replacing what the one before set: the manifest's `target.provenance`, a `--provenance FILE` (YAML or JSON, the same keys), and the flags `--server-repo`, `--server-commit`, `--server-tag`, `--server-image` and `--backend-image name=REF` (repeatable) on `run` and `rerun`. A bad commit or an unknown key refuses the run before anything is written. The tester never infers a build.
+
+### test_hash
+
+`test_hash` is `sha256:` and the sha256 of the RFC 8785 canonical JSON of exactly these members:
+
+| Member | What |
+|---|---|
+| `format` | `mws-test-hash/1` |
+| `tester` | `{ name, version, commit }` of the tester build |
+| `spec` | the MWS version |
+| `requirement`, `level` | the record's requirement and level |
+| `scenario` | the procedure id and version |
+| `write_path` | `{ resource, tool, arm }` |
+| `tools` | for the write path's tool and every tool the record's resource block names (any `tool` member in it), the narrowed input schema, or null for a tool the catalog does not list. Narrowed: `type`; the subschemas, whole, of the arguments the test uses; `required` restricted to those; `required_other`, the names of any other required argument; every top-level keyword that constrains the arguments together (`allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `dependentRequired`, `dependentSchemas`, `additionalProperties`, `patternProperties`, `propertyNames`, `unevaluatedProperties`, `min`/`maxProperties`), whole; and every local `$ref` (`#/$defs/…`, `#/definitions/…`) reachable from those, resolved (Pydantic and FastMCP put argument types there). The arguments the test uses are the keys of every `args` template in the block for that tool (keys that are themselves templates excepted) and, for the write path's tool and the resource's update and create tools, every `arg` the block declares (fields, version, key, scope, idempotency) and every `restorable` argument |
+| `subject` | only where the requirement judges part of the tool entry, that part of the write path tool's entry, whole: the input schema for MWS-IN-2, IN-3, IN-5, IN-6 and IN-7; the annotations for MWS-ANN-*; the description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3. Such a record also carries `test_hash_core`, the hash without `subject` |
+| `resource` | the record's resource block as loaded (argument templates, fields, version, control, clean-up …); null for `(server)`, `(catalog)` and `(declaration)` records. A path the loader made absolute against the manifest's folder enters relative to it |
+| `declaration` | every other top-level member of the manifest except `server`, `target`, `resources`, `limits` and `prefix` (backend, calls, settings, secrets, canaries, review, patterns, …) |
+| `guard` | `target.guard`, where declared |
+| `limits` | every limit except `write_budget`; `writes_per_second` only for MWS-CONC-* records |
+| `extras` | the tester's MWS-IN-5 reading (`in5_reading`), for MWS-IN-5 records, in a build that has the MWS-IN-5 search |
+
+So a fix that only adds optional arguments keeps every hash it does not judge: descriptions, titles, annotations, output schemas, icons and `_meta` are left out, and so is any optional argument the test does not use, or a bound declared on one. A changed type or bound of an argument the test uses, a new required argument, another tester build, another procedure version, another argument template, guard or limit gives another hash. An argument a template already sends but the before build's schema did not declare enters as soon as a build declares it: that is a change of a used argument. Also left out: the rest of the tool list, the catalog fingerprint, `manifest.sha256` and the plan hash, `server` and the rest of `target` (they name the build, not the test), and anything measured.
+
+For a requirement that judges the schema, a schema change is a change of what is judged: `compare` reports it as `subject-changed` (not comparable) or, where the cell was violated before and is held after, `test_hash_core` is equal, and every slot violated before (judged-part slots and the others) is held after, `schema-fixed`. compare cannot read the schemas; check that the after build's schema declares the constraint the before run found.
+
+### Signed results
+
+`--sign-key FILE` (or `MWSC_SIGN_KEY`, a path or the PEM itself) signs `results.json` with an Ed25519 key: a PKCS#8 PEM key, or an unencrypted OpenSSH `ed25519` key. The key is never written anywhere and never printed: an error names `--sign-key`'s path, and for `MWSC_SIGN_KEY` says only that it is not a key or an existing path. `evidence.signature` becomes `mws-results-signature/1`:
+
+- the body is the document with `evidence.signature` replaced by its bound members `{ format, alg, key_id, sums }`, as RFC 8785 canonical JSON (UTF-8);
+- `digest` is `sha256:` and the sha256 of the body;
+- `value` is the standard base64 of the pure Ed25519 signature of `mcp-writecheck/results-signature/1` and a newline, followed by the body;
+- `key_id` is `ed25519-` and the first 16 hex characters of the sha256 of the public key's SPKI DER, and `public_key_pem` the public key (read as text only, never as a path);
+- `sums` names the ssh signature of `SHA256SUMS` where `--sign` made one too; it is signed.
+
+This follows the kronicle-lite evidence-bundle conventions (canonical JSON, a domain line, pure Ed25519, the same key id), so one key can sign a results.json and the Evidence Pack that wraps it, and `openssl pkeyutl -verify -rawin` checks it with nothing of ours. `mcp-writecheck verify-results <file> --pubkey KEY` (a PEM public key, an `ssh-ed25519` line or a file holding one) exits 0 only for a file signed by that key and unchanged; 1 for an unsigned file, a file with only the ssh signature of `SHA256SUMS`, or no `--pubkey` (the key embedded in the file says which key signed, not who); 2 for a key that cannot be read; 3 for a changed file, another key, or a file in which an object repeats a member name (JSON readers disagree on which copy counts). Unsigned results stay allowed; `compare` and `verify-results` flag them.
+
+`recheck` writes new verdicts into `<run>/recheck/`, which the original signature does not cover: its copy is unsigned, or signed again with `recheck --sign-key FILE` (or `MWSC_SIGN_KEY`; the key is read before recheck writes anything); every record it re-evaluated gets a `test_hash` from the rechecking build, and `identity.rechecked_by` names that build, the time and how many records it hashed.
+
+### compare
+
+`mcp-writecheck compare <before> <after> [--out DIR] [--pubkey KEY] [--fail-on-slot-regression true|false]` reads two results.json files (or run folders) and writes `compare.json` (`schema/mws-compare-1.schema.json`) and `compare.md`.
+
+- **Cells:** `<requirement>@<tool>` (a record's `cell` where the run stamped one). Each side's verdict is rolled up from the cell's records by MWS section 8.2 rule 13: violated, then platform, then held, then not observed, then not tested. A `violated` record whose validity does not count ranks below held and shows as `violated?`; `self-attested` ranks above not tested; not applicable is last. Where the run's own `cells` give another tested verdict than this roll-up, the cell is `rollup-mismatch` and not compared.
+- **Join, slot by slot:** a record's slot is its requirement, resource, tool and procedure id. A slot on both sides must have equal test hashes (else `test-changed`, naming the procedure versions where they differ, or `subject-changed` where only the judged part differs). A slot with a tested verdict on one side and none on the other, whether the other side has no record for it or only `not tested` or `not applicable`, makes the cell `coverage-change`. A record without `test_hash` makes the cell `no-test-hash`.
+- **Labels:** `fixed` only for violated → held where every slot violated (or `violated?`) before is held after on an equal hash and no slot is `violated?` after (otherwise `partly-held`, labelled `changed`); `schema-fixed` as above; `regressed` for held or not observed → violated; `unchanged` for the same verdict; `changed` for any other move between tested verdicts (violated → not observed, to or from platform, held → not observed), never a fix; `not comparable` for a changed test or subject, a coverage change, a cell on one side only, an unstable `violated?`, or a roll-up mismatch. `transition` gives the finer class.
+- **Slots inside a cell:** `slot_moves` lists every slot whose verdict moved; `slot_regressions` every slot that went from held or not observed to violated in a cell whose own label is not `regressed` (two slots that swap leave the roll-up `unchanged`), including a cell that is not comparable because another of its slots changed. Each is also a warning.
+- **Refused** (exit 2): a file that is not `mws-results/1`, different MWS versions, a test-hash algorithm other than `mws-test-hash/1`, a file whose records carry no `test_hash`, or a `--pubkey` that cannot be read. A file that repeats a member name is refused with exit 3. Different tester builds are not refused, but every test hash then differs and nothing is compared.
+- **Flagged** in `warnings`: an unsigned or unpinned file, a run that is not `complete`, identity gaps, different manifests, slot regressions.
+- With `--pubkey`, both files must be signed by that key (exit 3). Exit 1 when a cell regressed, or a slot regressed inside a cell (unless `--fail-on-slot-regression false`), else 0. `rating` is always null, and cells are listed, never counted.
+
+### Compatibility
+
+`identity`, `test_hash`, `test_hash_core` and the object form of `evidence.signature` are additions to `mws-results/1`, all optional: a file written before them still validates against this schema, and the format name stays `mws-results/1`. A reader that validates against the schema of an earlier release (which allows no other top-level member) rejects `identity`; use this release's schema.

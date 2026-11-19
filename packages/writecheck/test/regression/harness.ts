@@ -15,6 +15,7 @@
  * safety guard that must keep passing.
  */
 
+import { assertViolationsHaveSteps } from '../steps-lint.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -93,7 +94,10 @@ export async function startFixture(o: { profile: 'tracker' | 'payload' | 'k8s'; 
 export async function runFixture(f: Fixture, o: { log?: (s: string) => void } = {}): Promise<RunOutcome> {
   const quiet = () => {};
   const { hash } = await planCommand({ manifest: f.manifest, env: f.env, log: quiet });
-  return runCommand({ manifest: f.manifest, outRoot: join(f.dir, 'out'), stateDir: join(f.dir, 'state'), confirmTarget: CONFIRM, planHash: hash, interactive: false, env: f.env, log: o.log ?? quiet, noSignals: true });
+  const r = await runCommand({ manifest: f.manifest, outRoot: join(f.dir, 'out'), stateDir: join(f.dir, 'state'), confirmTarget: CONFIRM, planHash: hash, interactive: false, env: f.env, log: o.log ?? quiet, noSignals: true });
+  // why: review R2 (lane F1): no violated record without its trace steps, unless its evidence is not a call trace.
+  assertViolationsHaveSteps(r.doc);
+  return r;
 }
 
 /** The records for one requirement on one write path (`resource:tool`); there is one per test method. */
