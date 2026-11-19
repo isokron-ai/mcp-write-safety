@@ -36,7 +36,7 @@ const STATUS = ['open', 'closed', 'blocked'];
 const TOOLS: Obj[] = [
   { name: 'whoami', description: 'The tenant this server writes to.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: 'ticket_get', description: 'Read one ticket by id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false }, annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
-  { name: 'ticket_list', description: 'List tickets whose title starts with a prefix.', inputSchema: { type: 'object', properties: { prefix: { type: 'string' } }, additionalProperties: false }, annotations: on('MWS-ANN-4') ? undefined : { readOnlyHint: true, openWorldHint: false } },
+  { name: 'ticket_list', description: 'List tickets whose title starts with a prefix.', inputSchema: { type: 'object', properties: { prefix: { type: 'string' }, ...(on('list-lag') ? { consistent: { type: 'boolean' } } : {}) }, additionalProperties: false }, annotations: on('MWS-ANN-4') ? undefined : { readOnlyHint: true, openWorldHint: false } },
   {
     name: 'ticket_create',
     description: 'Create a ticket. Pass idempotency_key to make a retry safe.',
@@ -155,8 +155,9 @@ async function call(name: string, args: Obj): Promise<unknown> {
     case 'ticket_list': {
       const r = await api('GET', `/tickets?prefix=${encodeURIComponent(String(args['prefix'] ?? ''))}`);
       let items = (r.body['items'] as Obj[]) ?? [];
-      // Variant list-lag (lane F9): an eventually consistent list, which shows a new ticket only some 400 ms after it was made.
-      if (on('list-lag')) items = items.filter((t) => !(t['version'] === 1 && Date.now() - Date.parse(String(t['updated_at'])) < 400));
+      // Variant list-lag (lane F9): an eventually consistent list, which shows a new ticket only some 400 ms after it was made,
+      // unless the call asks for a consistent read (consistent: true), as a backend with such an option does.
+      if (on('list-lag') && args['consistent'] !== true) items = items.filter((t) => !(t['version'] === 1 && Date.now() - Date.parse(String(t['updated_at'])) < 400));
       if (on('MWS-ANN-1')) for (const t of items) await api('POST', `/tickets/${encodeURIComponent(String(t['id']))}/seen`);
       return ok({ items });
     }
@@ -200,7 +201,8 @@ async function call(name: string, args: Obj): Promise<unknown> {
       const r = await api('PATCH', path, fields);
       if (r.status !== 200) throw backendError(r);
       // Variant echo-update (lane F9): the answer is the call's own arguments, as a tool that returns its request does.
-      if (on('echo-update')) return ok({ id, ...fields });
+      // It also carries facts about the call (the operation's name, how long it took), which are not the backend's state.
+      if (on('echo-update')) return ok({ id, ...fields, operation: 'ticket_update', took_ms: 3 });
       return ok({ ticket: r.body });
     }
     case 'ticket_replace': {

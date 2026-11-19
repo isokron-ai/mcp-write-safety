@@ -243,7 +243,7 @@ Without a block, the requirements it unlocks are `not tested` (or `not applicabl
 | `key` | MWS-TGT-3, and MWS-ANN-2 for a create with a caller-chosen key |
 | `multi` | MWS-ATOM-1 and ATOM-2 |
 | `list_edit` | MWS-UPD-2 |
-| `list`, `creates` | MWS-RES-3, RES-4 and RETRY-1 for create tools |
+| `list`, `creates` | MWS-RES-3, RES-4 and RETRY-1 for create tools (`list.consistency` for a list that shows a new object only after a while) |
 | `idempotency` (with `list` and `{{marker}}` in its `args` for a create) | MWS-RETRY-2 steps (a) to (d); with `backend.gate`, the proxy-assisted step; with `server.restart`, step (e), and with both, its crash form. `own_checks`, `backend_key`, `key_record_survives` and `version_steps` (an update) are the declaration's statements the verdicts rely on (MANIFEST.md) |
 | `server.restart` (`stop: graceful` or `kill`) | MWS-RETRY-2 step (e) and its crash form: the tester stops and starts the server it launched |
 | `failures` | MWS-RES-2 for calls the backend will refuse |

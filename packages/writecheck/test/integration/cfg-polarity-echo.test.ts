@@ -74,7 +74,10 @@ test('list.consistency: an eventually consistent list finds the new object withi
   assert.notEqual(lagging, fakeManifest());
   const settled = lagging.replace('list: { tool: ticket_list, args: { prefix: "{{prefix}}" }, items: items, id: id, name: title }', 'list: { tool: ticket_list, args: { prefix: "{{prefix}}" }, items: items, id: id, name: title, consistency: { settle_ms: 3000 } }');
   assert.notEqual(settled, lagging);
-  for (const [text, want] of [[lagging, 'not tested'], [settled, 'held']] as const) {
+  // the backend's consistent-read option instead of a window: one read finds the object
+  const consistent = lagging.replace('list: { tool: ticket_list, args: { prefix: "{{prefix}}" }, items: items, id: id, name: title }', 'list: { tool: ticket_list, args: { prefix: "{{prefix}}" }, items: items, id: id, name: title, consistency: { args: { consistent: true } } }');
+  assert.notEqual(consistent, lagging);
+  for (const [text, want] of [[lagging, 'not tested'], [settled, 'held'], [consistent, 'held']] as const) {
     const f = await startFake({ manifestText: text, defects: ['list-lag'] });
     try {
       const r = await runFake(f);
@@ -83,6 +86,7 @@ test('list.consistency: an eventually consistent list finds the new object withi
       const retry1 = find(r.doc.results, 'MWS-RETRY-1', 'ticket:ticket_create');
       if (want === 'held') {
         assert.ok(r3.notes.some((n) => /list\.consistency/.test(n)), r3.notes.join('\n'));
+        if (text === consistent) assert.ok(r3.notes.some((n) => /consistent-read arguments \{"consistent":true\}/.test(n)), r3.notes.join('\n'));
         // the fake makes two tickets for two identical calls, and takes the declared key: RETRY-1 is decided, not skipped
         assert.equal(retry1?.verdict, 'held', retry1?.reason);
       } else assert.match(r3.reason, /0 objects carry the call's marker.*declare list\.consistency/);

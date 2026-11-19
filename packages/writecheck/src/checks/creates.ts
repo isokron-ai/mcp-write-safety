@@ -32,7 +32,9 @@ import { decidedByShape, quoteField, reportsSuccess, sameValue, shapeFallbackNot
 import { brief, forPatterns, mentions, offeredKeys, res2Judge, schemaProps, textStatement, toolByName, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'creates';
-const VERSION = '1';
+// '2': MWS-RES-3 and RES-4 read a receipt through the echo filter (echo.ts), and the finds follow a declared list.consistency;
+// '1' counted a value the answer repeated from the request.
+const VERSION = '2';
 
 interface CreateObs {
   name: string;
@@ -111,8 +113,10 @@ function createTools(res: ResourceSpec, all: ResourceSpec[] = [res]): CreateTool
         // as "not applicable"). list.consistency asks the backend for a consistent read, and/or re-reads within a window.
         const cons = res.list!.consistency;
         const once = async () => {
-          const a = render(res.list!.args, baseVars(res, ctx.prefix, { scope, marker }));
-          const r = await ctx.session.call(label, res.list!.tool, cons?.args ? { ...(isObj(a) ? a : {}), ...cons.args } : a, { write: false, step: ctx.session.stepId('creates.find') });
+          const vars = baseVars(res, ctx.prefix, { scope, marker });
+          const a = render(res.list!.args, vars);
+          const extra = cons?.args ? render(cons.args, vars) : null;
+          const r = await ctx.session.call(label, res.list!.tool, isObj(extra) ? { ...(isObj(a) ? a : {}), ...extra } : a, { write: false, step: ctx.session.stepId('creates.find') });
           const items = r.ok ? getPath(r.data, res.list!.items) : null;
           return Array.isArray(items) ? items.filter((it) => String(getPath(it, res.list!.name) ?? '') === marker).map((it) => getPath(it, res.list!.id)) : null;
         };
@@ -356,7 +360,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       // why: corpus finding (lane F9): an answer that only echoes the request (a SQL tool returning its own statement) carries an
       // identifier the call itself named whether or not anything was made. A value that appears verbatim in the arguments counts
       // only beside data the request did not contain (src/checks/echo.ts); an echo alone leaves the record open, never held.
-      const t3 = new Tally(echoOf(c.first, c.sent_args));
+      const t3 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
       t3.any(`the identifier (${short(c.found[0], 40)})`, [[true, c.found[0]]]);
       const lf = t3.echoOnly.length ? null : c.late_failure;
       let note = lf?.skipped ?? (lf ? '' : 'Whether the identifier survives a failure of a later step needs backend.gate; not tested.');
@@ -395,7 +399,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       const cfail = textStatement(c.first, 'not_applied');
       if (cfail) miss.push(`a text that does not say the create failed (${cfail}; rule 11, point 13: the shape beside it does not repair it)`);
       // why: the echo filter (src/checks/echo.ts) applies here too; an adopted shape is itself data the request did not contain.
-      const t4 = new Tally(echoOf(c.first, c.sent_args));
+      const t4 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
       const idOk = csh.object?.id !== undefined ? t4.any('the identifier', [[sameValue(csh.object.id, c.found[0]), c.found[0]], [c.parent !== null && (sameValue(csh.object.id, c.parent) || sameValue(csh.object.parent?.id, c.parent)), c.parent]]) : t4.any('the identifier', [[mentions(pc, c.found[0]), c.found[0]], [c.parent !== null && (mentions(pc, c.parent) || sameValue(csh.object?.parent?.id, c.parent)), c.parent]]);
       if (!idOk) miss.push(csh.object?.id !== undefined ? `the identifier (${quoteField('object.id', csh.object.id)}; the create made ${short(c.found[0], 40)})` : 'the identifier (no mws.object.id, and not in the rest of the answer)');
       if (c.name === res.name && res.version && c.version !== null && !t4.any('the new version', [[csh.object?.version !== undefined ? sameValue(csh.object.version, c.version) : mentions(pc, c.version), c.version]])) miss.push(csh.object?.version !== undefined ? `the new version (${quoteField('object.version', csh.object.version)}; the object reads ${short(c.version, 20)})` : `the new version (${short(c.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
@@ -406,7 +410,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       else out.push(result('MWS-RES-4', w, sc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''} (${quoteField('object', csh.object ?? null)}).`, { notes }));
     } else if (c.first?.ok && c.found.length === 1) {
       const miss: string[] = [];
-      const t4 = new Tally(echoOf(c.first, c.sent_args));
+      const t4 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
       if (!t4.any('the identifier', [[mentions(c.first, c.found[0]), c.found[0]], [c.parent !== null && mentions(c.first, c.parent), c.parent]])) miss.push('the identifier');
       if (c.name === res.name && res.version && c.version !== null && !t4.any(`the new version (${short(c.version, 20)})`, [[mentions(c.first, c.version), c.version]])) miss.push(`the new version (${short(c.version, 20)})`);
       // why: spec MWS-RES-4 (516c4ed): for a create, only the identifier and the declared version; the fields set are checked for updates.
@@ -447,7 +451,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
     // why: the echo filter (src/checks/echo.ts): an update's call always names the object, the field and the new value, so an
     // answer that repeats them shows nothing by itself; they count beside data the request did not contain (a new version, a
     // server count), and an answer with nothing else leaves the record open.
-    const tu = new Tally(echoOf(u.call!, u.sent_args));
+    const tu = new Tally(echoOf(u.call!, u.sent_args, u.read_keys));
     if (!tu.any('the identifier', [[mentions(u.call!, u.id), u.id]])) miss.push('the identifier');
     const lastSeg = u.field.split('.').pop()!;
     if (!u.changed) {
@@ -526,7 +530,7 @@ function receiptByShape(sh: NonNullable<ReturnType<typeof shapeOf>>, u: NonNulla
   const miss: string[] = [];
   // why: B-9 v2: a missing or malformed member decides nothing; for it the rest of the answer is read as without the shape.
   const pc = forPatterns(u.call!);
-  const tu = new Tally(echoOf(u.call!, u.sent_args));
+  const tu = new Tally(echoOf(u.call!, u.sent_args, u.read_keys));
   if (sh.outcome && !reportsSuccess(sh, false)) miss.push(`a report of the update as applied (${quoteField('outcome', sh.outcome)})`);
   // why: rule 11, point 13 (R14-5): a text that says by a declared pattern that the update failed is a false receipt of its own.
   const ufail = textStatement(u.call!, 'not_applied');
