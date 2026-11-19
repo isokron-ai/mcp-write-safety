@@ -120,7 +120,7 @@ const FIRST_WRITE_REASON = 'the first write after the create';
 /**
  * The whole-run adjustments made after the checks' evaluate(), one step for `run` and `recheck` (review M3), so a recheck by the
  * build that made the run gives the run's verdicts: the first write after a create that changed fields it did not name keeps
- * MWS-UPD-1 from `held` (gate-2 Grafana item 12); then adjustResults (a declared explicit override for MWS-CONC-1, an apply with
+ * MWS-UPD-1 from `held`; then adjustResults (a declared explicit override for MWS-CONC-1, an apply with
  * field ownership for MWS-CONC-2, and the note on a held record beside a violated one). Idempotent.
  */
 export function postEvaluate(m: Manifest, results: Result[], firstWrite: ReadonlyMap<string, string[]>): Result[] {

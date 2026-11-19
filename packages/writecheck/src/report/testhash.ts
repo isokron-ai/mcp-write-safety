@@ -288,7 +288,7 @@ function reachableRefs(node: unknown, root: unknown, keep: boolean): Record<stri
 
 /**
  * The schema whose `properties` describe the arguments: the input schema itself, or, where it is a top-level `$ref` (the
- * whole argument object behind a definition, as FastMCP and Pydantic write it), the definition it points at, merged under the
+ * whole argument object behind a definition, as some schema generators write it), the definition it points at, merged under the
  * schema's own other members (followed up to 8 references deep).
  */
 export function effectiveSchema(schema: unknown): unknown {
