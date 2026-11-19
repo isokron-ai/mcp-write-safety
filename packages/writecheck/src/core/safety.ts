@@ -341,7 +341,35 @@ const stringsIn = (v: unknown, out: string[] = []): string[] => {
 // fails closed: a false match only refuses, and the operator can rephrase the read.
 const WRITE_WORDS = /\b(insert|update|delete|replace|merge|upsert|drop|alter|create|truncate|rename|grant|revoke|call|exec|execute|load|lock|unlock|set|handler|do|copy|into|outfile|dumpfile|vacuum|analyze|optimize|repair|flush|reset|kill|shutdown|install|uninstall|prepare|deallocate|begin|commit|rollback|savepoint|start|attach|detach|pragma|import|export|refresh|reindex|cluster|notify|listen|discard|comment|security|nextval|setval|get_lock|release_lock|release_all_locks|lo_import|lo_export|dblink\w*|pg_\w*lock\w*|pg_terminate_backend|pg_cancel_backend|sp_\w+|xp_\w+)\b|for\s+(update|share|no\s+key\s+update|key\s+share)|\block\s+in\s+share\s+mode/i;
 
-/** Why the guard's arguments look like they may write, or null (review F2 on 1b7e1e1). Comments are stripped before matching, and any comment marker or a `;` that is not the last character refuses on its own. */
+// why: review of the lane (should-fix 1): the word list cannot name every function that changes state (lo_unlink(),
+// pg_drop_replication_slot(), set_config(), sys_exec(), any user-defined function). So any call is refused, fail-closed,
+// unless its name is on this short list of built-in functions that only compute a value. Names are compared without regard
+// to case. A schema-qualified name is accepted only under pg_catalog (any other schema may hold a user-defined function of the
+// same name); a quoted name ("count", `count`) is always refused, since quoting makes it a different, possibly user-defined,
+// function. The text is scanned as written, string literals included: a literal that reads like a call refuses too.
+// Keep this list minimal: a name added here is trusted never to write.
+export const GUARD_READ_FUNCTIONS: ReadonlySet<string> = new Set(['count', 'coalesce', 'nullif', 'now', 'lower', 'upper', 'length', 'max', 'min', 'sum', 'avg', 'cast', 'abs', 'round', 'trim', 'concat']);
+// SQL keywords that are not function calls but may stand before a parenthesis in a read (`IN (`, `EXISTS (`, `AS (`, `OVER (`).
+const PAREN_KEYWORDS: ReadonlySet<string> = new Set(['in', 'exists', 'any', 'all', 'some', 'not', 'and', 'or', 'on', 'using', 'as', 'from', 'join', 'lateral', 'where', 'select', 'having', 'over', 'filter', 'when', 'then', 'else', 'union', 'intersect', 'except']);
+// A name part: a bare identifier (letters, digits, _ and $ in any order, as some dialects allow) or a quoted one.
+const NAME_PART = '(?:[\\p{L}\\p{N}_$]+|"(?:[^"]|"")*"|`[^`]*`)';
+const CALL = new RegExp(`(${NAME_PART}(?:\\s*\\.\\s*${NAME_PART})*)\\s*\\(`, 'gu');
+
+/** The first call in `text` of a function not on the read-only list, or null. */
+export function unlistedFunctionCall(text: string): string | null {
+  for (const m of text.matchAll(CALL)) {
+    const parts = m[1]!.split(/\s*\.\s*/);
+    const name = parts[parts.length - 1]!;
+    if (/^["`]/.test(name)) return m[1]!;
+    const lower = name.toLowerCase();
+    if (parts.length === 1 && PAREN_KEYWORDS.has(lower)) continue;
+    if (!GUARD_READ_FUNCTIONS.has(lower)) return m[1]!;
+    if (parts.length > 2 || (parts.length === 2 && parts[0]!.toLowerCase() !== 'pg_catalog')) return m[1]!;
+  }
+  return null;
+}
+
+/** Why the guard's arguments look like they may write, or null (review F2 on 1b7e1e1). Comments are stripped before matching, and any comment marker or a `;` that is not the last character refuses on its own. Any function call whose name is not in GUARD_READ_FUNCTIONS refuses too. */
 export function guardArgsProblem(args: unknown): string | null {
   for (const raw of stringsIn(args)) {
     // why: MySQL runs the body of /*! ... */ and /*+ ... */ comments, so a comment is refused outright rather than trusted.
@@ -352,6 +380,8 @@ export function guardArgsProblem(args: unknown): string | null {
       const w = WRITE_WORDS.exec(t);
       if (w) return `${JSON.stringify(short(raw, 80))} contains ${JSON.stringify(w[0])}, a word that can write, lock or have a side effect`;
     }
+    const f = unlistedFunctionCall(raw);
+    if (f) return `${JSON.stringify(short(raw, 80))} calls ${f}(), a function not on the read-only list (${[...GUARD_READ_FUNCTIONS].join(', ')}; schema-qualified only under pg_catalog), so it may have side effects`;
   }
   return null;
 }
@@ -374,7 +404,7 @@ function sentText(g: NonNullable<Manifest['target']['guard']>, calls: GuardCall[
  * no object, marker or scope, each read to the end. A key per list or canary; the value is canonical JSON with the declared
  * ignored fields left out, or null where the read failed (that one is not compared).
  */
-async function stateSnapshot(m: Manifest, s: Session, label: string, step: string, o: { whole?: boolean; phase?: GuardStateRead['phase']; onStateRead?: GuardHooks['onStateRead'] } = {}): Promise<Map<string, string | null>> {
+async function stateSnapshot(m: Manifest, s: Session, label: string, step: string, o: { whole?: boolean; phase?: GuardStateRead['phase']; onStateRead?: GuardHooks['onStateRead']; listIds?: Map<string, string> } = {}): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
   const phase = o.phase ?? 'before';
   const announce = (st: string, tool: string, what: string): string => (o.onStateRead?.({ step: st, tool, phase, what }), st);
@@ -409,6 +439,7 @@ async function stateSnapshot(m: Manifest, s: Session, label: string, step: strin
     const args = render(l.args, baseVars(r, '', {}));
     const k = `list ${l.tool} ${canonical(args ?? null)}`;
     if (out.has(k)) continue;
+    o.listIds?.set(k, l.id);
     const got = await listAll(s, label, l, args, announce(s.stepId(`${step}.list.${r.name}`), l.tool, k));
     if (!got.ok || (o.whole && got.partial)) {
       out.set(k, null);
@@ -424,6 +455,66 @@ async function stateSnapshot(m: Manifest, s: Session, label: string, step: strin
   }
   return out;
 }
+
+/** The paths at which two values differ (at most `max`): `a.b`, `[0].c`; `(whole value)` where the root itself differs. */
+function changedPaths(a: unknown, b: unknown, path: string, out: string[], max: number): void {
+  if (out.length >= max || canonical(a ?? null) === canonical(b ?? null)) return;
+  const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+  if (obj(a) && obj(b)) {
+    for (const key of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) changedPaths(a[key], b[key], /^[A-Za-z_$][\w$]*$/.test(key) ? (path ? `${path}.${key}` : key) : `${path}[${JSON.stringify(key)}]`, out, max);
+    return;
+  }
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+    a.forEach((x, i) => changedPaths(x, b[i], `${path}[${i}]`, out, max));
+    return;
+  }
+  out.push(path || '(whole value)');
+}
+
+/** What changed in one compared read (its canonical form before and after); a list's rows are matched by its id path where it can be. */
+function stateChanges(key: string, before: string, after: string, idPath: string | undefined, max = 5): string[] {
+  const out: string[] = [];
+  try {
+    const a = JSON.parse(before) as unknown;
+    const b = JSON.parse(after) as unknown;
+    if (key.startsWith('list ') && Array.isArray(a) && Array.isArray(b)) {
+      const rows = (x: unknown[]): unknown[] => x.map((r) => JSON.parse(String(r)) as unknown);
+      const ra = rows(a);
+      const rb = rows(b);
+      const byId = (x: unknown[]): Map<string, unknown> | null => {
+        if (!idPath) return null;
+        const mp = new Map<string, unknown>();
+        for (const r of x) {
+          const id = getPath(r, idPath);
+          if (id === undefined || id === null || mp.has(canonical(id))) return null;
+          mp.set(canonical(id), r);
+        }
+        return mp;
+      };
+      const ma = byId(ra);
+      const mb = byId(rb);
+      if (ma && mb) {
+        for (const [id, r] of ma) if (mb.has(id)) changedPaths(r, mb.get(id), `[${idPath}=${id}]`, out, max);
+        for (const id of ma.keys()) if (!mb.has(id) && out.length < max) out.push(`[${idPath}=${id}] (row gone)`);
+        for (const id of mb.keys()) if (!ma.has(id) && out.length < max) out.push(`[${idPath}=${id}] (row added)`);
+        return out;
+      }
+      changedPaths(ra, rb, '', out, max);
+      return out;
+    }
+    changedPaths(a, b, '', out, max);
+  } catch {
+    // not JSON (cannot happen for canonical output): name nothing rather than guess
+  }
+  return out;
+}
+
+/** The field a changed path ends in (`[0].last_read_at` -> last_read_at), or null for a whole value, a row or an index. */
+const leafField = (p: string): string | null => {
+  if (/\((row gone|row added|whole value)\)$/.test(p)) return null;
+  const m = /(?:^|\.)([A-Za-z_$][\w$]*)$/.exec(p) ?? /\["((?:[^"\\]|\\.)*)"\]$/.exec(p);
+  return m ? m[1]! : null;
+};
 
 /** An answer that says the server has no connection yet (the hint toward session.init). */
 const NOT_CONNECTED = /\bnot connected\b|\bno (?:active |open )?connection\b|\bconnect first\b|\bcall (?:the )?connect\b|\bnot (?:yet )?(?:logged in|authenticated|initiali[sz]ed)\b|\bconnection (?:is )?(?:not|required)\b/i;
@@ -468,7 +559,8 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
   // third, and the same call made twice more must answer exactly as the first did. Any error, a different answer, or a changed
   // list or canary refuses the run. A write that changes nothing the manifest lets the tester read, and answers the same each
   // time, would still pass: the results say the guard rests on the declaration.
-  const before = await stateSnapshot(m, s, label, 'guard.state.before', { whole: dispatcher, phase: 'before', ...(o.onStateRead ? { onStateRead: o.onStateRead } : {}) });
+  const listIds = new Map<string, string>();
+  const before = await stateSnapshot(m, s, label, 'guard.state.before', { whole: dispatcher, phase: 'before', listIds, ...(o.onStateRead ? { onStateRead: o.onStateRead } : {}) });
   const first = await once(step, 'check');
   const differs = () => `target.guard: ${g.tool} is declared read-only (read_only_call), but the same call answered differently when made again, so it may change state; ${sentText(g, calls)}`;
   if ((await once(s.stepId('guard.dry'), 'dry')).whole !== first.whole) throw new WritecheckError(differs(), 3);
@@ -479,7 +571,16 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
     if (v === null) continue;
     const w = after.get(k);
     if (w === null || w === undefined) throw new WritecheckError(`target.guard: ${g.tool} is declared read-only (read_only_call); ${k} answered before the guard's calls and not after them, so whether they changed state is not known; ${sentText(g, calls)}`, 3);
-    if (w !== v) throw new WritecheckError(`target.guard: ${g.tool} is declared read-only (read_only_call), but ${k} changed across its three calls, so the call may change state (or something else changed the target meanwhile; either way the guard cannot be trusted); ${sentText(g, calls)}`, 3);
+    if (w !== v) {
+      // why: review of the lane (should-fix 2): a field that changes on every read (a last-read time) refused the run without
+      // saying which field; the error names the changed paths and says how such a field can be left out.
+      const paths = stateChanges(k, v, w, listIds.get(k));
+      const fields = [...new Set(paths.map(leafField).filter((f): f is string => !!f))];
+      const hint = !fields.length ? '' : dispatcher
+        ? `. If ${fields.join(', ')} changes on every read, no ignore applies here (through a tool that declares destructiveHint: true every fixture, canary and list is compared whole; read.ignore, list.ignore and a canary's ignore are not applied): declare that read so it leaves the field out (name the columns it selects)`
+        : `. If ${fields.join(', ')} changes on every read by itself, declare it ignored: ${k.startsWith('canary ') ? `the canary's ignore (canaries[].ignore: [${fields[0]}])` : `the resource's read.ignore or its list.ignore ([${fields[0]}])`}`;
+      throw new WritecheckError(`target.guard: ${g.tool} is declared read-only (read_only_call), but ${k} changed across its three calls${paths.length ? ` (changed: ${paths.join(', ')})` : ''}, so the call may change state (or something else changed the target meanwhile; either way the guard cannot be trusted); ${sentText(g, calls)}${hint}`, 3);
+    }
     compared.push(k);
   }
   const unread = [...before].filter(([, v]) => v === null).map(([k]) => k);

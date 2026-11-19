@@ -227,3 +227,74 @@ test('F4: every state read is announced before it is sent, with its phase, aroun
   assert.deepEqual(seen.filter((x) => !x.startsWith('sent')).slice(0, 3), ['state before fixture', 'state before list', 'call check']);
   assert.equal(seen.indexOf('state before fixture') + 1, seen.findIndex((x) => x.startsWith("sent SELECT * FROM mwsc_items WHERE id = 'mwsc-fx-1'")));
 });
+
+// ---- lane review: should-fix 1 (function calls) and should-fix 2 (the changed field named) ----
+
+test('S1: a function call not on the read-only list is refused, whatever its case or schema', () => {
+  for (const sql of [
+    'SELECT lo_unlink(16401)',
+    "SELECT pg_drop_replication_slot('s')",
+    "SELECT set_config('a.b', 'c', false)",
+    "SELECT sys_exec('x')",
+    'SELECT my_side_effect()',
+    "SELECT SET_CONFIG('a.b', 'c', false)",
+    "SELECT Set_Config('a.b', 'c', false)",
+    "SELECT pg_catalog.set_config('a.b', 'c', false)",
+    "SELECT PG_CATALOG.SET_CONFIG('a.b', 'c', false)",
+    "SELECT pg_catalog . set_config ('a.b', 'c', false)",
+    'SELECT lo_unlink (16401)',
+    'SELECT count(*) FROM t WHERE id = lo_unlink(1)',
+    'SELECT coalesce(lo_unlink(1), 0)',
+  ]) assert.match(guardArgsProblem({ sql }) ?? 'accepted', /calls .*a function not on the read-only list.*may have side effects/i, sql);
+  assert.match(guardArgsProblem({ sql: "SELECT pg_catalog.set_config('a', 'b', false)" })!, /calls pg_catalog\.set_config\(\)/);
+});
+
+test('S1: allowlisted functions are accepted in any case, bare or under pg_catalog; under any other schema or quoted they are refused', () => {
+  for (const sql of [
+    'SELECT COUNT(*) FROM mwsc_items',
+    'SELECT count (*) FROM mwsc_items',
+    "SELECT coalesce(max(version), 0), MIN(version), Sum(version), avg(version) FROM mwsc_items WHERE lower(name) = upper('x')",
+    'SELECT length(name), now(), cast(version AS char) FROM mwsc_items',
+    'SELECT pg_catalog.count(*) FROM mwsc_items',
+    "SELECT PG_CATALOG.LOWER(name) FROM mwsc_items WHERE id IN ('a', 'b') AND EXISTS (SELECT 1 FROM t) AND NOT (id = 'c')",
+  ]) assert.equal(guardArgsProblem({ sql }), null, sql);
+  for (const sql of ['SELECT myschema.count(*) FROM t', 'SELECT a.b.count(*) FROM t', 'SELECT "count"(*) FROM t', 'SELECT `count`(*) FROM t', 'SELECT pg_catalog."lower"(name) FROM t'])
+    assert.match(guardArgsProblem({ sql }) ?? 'accepted', /a function not on the read-only list/, sql);
+});
+
+test('S1: a function name inside a string literal refuses (text is checked as written); inside a comment the comment refuses first', () => {
+  assert.match(guardArgsProblem({ sql: "SELECT name FROM t WHERE note = 'set_config(1)'" }) ?? 'accepted', /calls set_config\(\)/);
+  assert.match(guardArgsProblem({ sql: 'SELECT name FROM t WHERE note = "lo_unlink(1)"' }) ?? 'accepted', /a function not on the read-only list/);
+  assert.equal(guardArgsProblem({ sql: "SELECT name FROM t WHERE note = 'count(1)'" }), null, 'an allowlisted name in a literal is harmless');
+  assert.equal(guardArgsProblem({ sql: "SELECT name FROM t WHERE note = 'set_config'" }), null, 'a name without ( is not a call');
+  assert.match(guardArgsProblem({ sql: 'SELECT 1 /* set_config(1) */' }) ?? 'accepted', /comment marker/);
+  assert.match(guardArgsProblem({ sql: 'SELECT 1 -- lo_unlink(1)' }) ?? 'accepted', /comment marker/);
+});
+
+test('S1: guardProblem refuses a destructive dispatcher guard that calls an unlisted function', () => {
+  const m = man({ list: true, guard: `{ tool: mysql_query, args: { sql: "SELECT pg_catalog.set_config('a.b', 'c', false)" }, path: x, pattern: "^a$", read_only_call: true }` });
+  assert.match(guardProblem(m.target.guard!, SQL, { readOnlyTools: [], manifest: m, tools: [SQL] })!, /destructiveHint: true, and the declared call's arguments .*calls pg_catalog\.set_config\(\).*must be a plain read/);
+});
+
+test('S2: a fixture field that changes on every read is named in the refusal, with how to leave it out', async () => {
+  const d = sqlServer({ guard: (rows) => ((rows.get('mwsc-fx-1')!['last_read_at'] = Date.now() + Math.random()), [{ name: 'mwsc-fx-1' }]) });
+  d.rows.get('mwsc-fx-1')!['last_read_at'] = 0;
+  await assert.rejects(
+    tenantGuard(man({ list: true }), d.session as never, 'G'),
+    refused([/fixture item "mwsc-fx-1" changed across its three calls \(changed: \[0\]\.last_read_at\)/, /If last_read_at changes on every read, no ignore applies here/, /name the columns it selects/]),
+  );
+});
+
+test('S2: a changed list row and a changed canary field are named; outside dispatcher mode the hint names the ignore to declare', async () => {
+  const d = sqlServer({ guard: (rows) => ((rows.get('mwsc-s-1')!['title'] = 'x'), [{ name: 'mwsc-fx-1' }]) });
+  await assert.rejects(tenantGuard(man({ list: true }), d.session as never, 'G'), refused([/list mysql_query .* changed across its three calls \(changed: \[id="mwsc-s-1"\]\.title\)/, /If title changes/]));
+  const c = sqlServer({ guard: (rows) => ((rows.get('mwsc-s-1')!['version'] as number)++, [{ name: 'mwsc-fx-1' }]) });
+  await assert.rejects(tenantGuard(man({ fixture: false, canary: true }), c.session as never, 'G'), refused([/canary count changed across its three calls \(changed: v\)/, /If v changes on every read, no ignore applies here/]));
+  // A guard tool that does not declare destructiveHint: true: ignores apply, so the hint names them.
+  const plain = { ...SQL, annotations: {} };
+  const q = sqlServer({ guard: (rows) => ((rows.get('mwsc-s-1')!['seen'] = Math.random()), [{ name: 'mwsc-fx-1' }]) });
+  await assert.rejects(
+    tenantGuard(man({ list: true }), { ...q.session, listTools: async () => [plain] } as never, 'G'),
+    refused([/list mysql_query .* changed across its three calls \(changed: \[id="mwsc-s-1"\]\.seen\)/, /If seen changes on every read by itself, declare it ignored: the resource's read\.ignore or its list\.ignore \(\[seen\]\)/]),
+  );
+});
