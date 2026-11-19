@@ -101,20 +101,24 @@ export function verifyResultsCommand(o: { file: string; pubkey?: string; log: (s
  */
 export function compareCommand(o: { before: string; after: string; out: string; pubkey?: string; allowUnsigned?: boolean; failOnSlotRegression?: boolean; failOnNewViolation?: boolean; log: (s: string) => void }): { exit: number; doc: CompareDoc } {
   const pinned = o.pubkey ? publicKeyFrom(o.pubkey) : null;
-  const load = (p: string, n: string) => {
+  const read = (p: string, n: string) => {
     const f = resultsFile(p);
     const { bytes, doc } = readDoc(f);
-    const sig = verifyResults(doc, pinned);
-    // why: review M5: a changed file is refused as verify-results refuses it, whether or not a key was pinned.
-    if (sig.status === 'invalid') throw new WritecheckError(`${n} ${f}: the results signature does not verify (${sig.detail}); compare refuses a changed file`, 3);
-    if (pinned && sig.status !== 'valid') throw new WritecheckError(`${n} ${f}: ${sig.status}: ${sig.detail}`, 3);
-    if (!pinned && !o.allowUnsigned) throw new WritecheckError(`${n} ${f}: ${sig.status === 'valid-unpinned' ? 'signed by a key that is not pinned' : `not signed (${sig.status})`}; give --pubkey KEY to check who signed, or --allow-unsigned to compare it anyway (the output then says the input is not pinned)`, 2);
-    const sum = summarize(doc, f, bytes, sig);
-    sum.signature.accepted = pinned ? 'pinned' : 'allow-unsigned';
-    return { doc, sum };
+    return { f, n, bytes, doc, sig: verifyResults(doc, pinned) };
   };
-  const b = load(o.before, 'before');
-  const a = load(o.after, 'after');
+  const files = [read(o.before, 'before'), read(o.after, 'after')];
+  // why: review M5: a changed file is refused as verify-results refuses it, whether or not a key was pinned (checked on both
+  // files before anything else, so the refusal names the changed file).
+  for (const x of files) if (x.sig.status === 'invalid') throw new WritecheckError(`${x.n} ${x.f}: the results signature does not verify (${x.sig.detail}); compare refuses a changed file`, 3);
+  for (const x of files) {
+    if (pinned && x.sig.status !== 'valid') throw new WritecheckError(`${x.n} ${x.f}: ${x.sig.status}: ${x.sig.detail}`, 3);
+    if (!pinned && !o.allowUnsigned) throw new WritecheckError(`${x.n} ${x.f}: ${x.sig.status === 'valid-unpinned' ? 'signed by a key that is not pinned' : `not signed (${x.sig.status})`}; give --pubkey KEY to check who signed, or --allow-unsigned to compare it anyway (the output then says the input is not pinned)`, 2);
+  }
+  const [b, a] = files.map((x) => {
+    const sum = summarize(x.doc, x.f, x.bytes, x.sig);
+    sum.signature.accepted = pinned ? 'pinned' : 'allow-unsigned';
+    return { doc: x.doc, sum };
+  }) as [{ doc: Record<string, unknown>; sum: ReturnType<typeof summarize> }, { doc: Record<string, unknown>; sum: ReturnType<typeof summarize> }];
   let doc: CompareDoc;
   try {
     doc = compareDocs(b.doc, a.doc, b.sum, a.sum);
