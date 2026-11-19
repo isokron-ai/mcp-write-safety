@@ -585,14 +585,16 @@ export const schemaCheck: CheckModule = {
         }
         const step = ctx.session.stepId(`in.${tool}.${c.prop}.${c.name}`);
         const r = await ctx.session.call(label, tool, args, { step, write: role === 'update' });
-        const o: ProbeObs = { tool, role, prop: c.prop, name: c.name, requirement: c.requirement, value: c.drop ? '(missing)' : short(c.value, 60), ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : short(r.text, 400), step, ...(r.timed_out || r.transport_error !== null || (r.result_type && r.result_type !== 'complete') ? { indeterminate: true } : {}) };
+        // why: the verdicts read the whole result (spec 7.3, rule 11); a notice after a long answer ("Ignored argument x" after a
+        // list of 400+ characters) was cut before saysNotUsed saw it, and a told argument read as dropped silently. Quotes are cut
+        // where they are made (short, around, saidBy, the review evidence).
+        const o: ProbeObs = { tool, role, prop: c.prop, name: c.name, requirement: c.requirement, value: c.drop ? '(missing)' : short(c.value, 60), ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text, step, ...(r.timed_out || r.transport_error !== null || (r.result_type && r.result_type !== 'complete') ? { indeterminate: true } : {}) };
         if (c.requirement === 'MWS-IN-1') Object.assign(o, { sent: c.value, type: c.type, required: !!c.required });
         // MWS-IN-2: an accepted extra argument on a write tool: did it have an effect? (read back, compared with the read before)
         if (c.requirement === 'MWS-IN-2' && role === 'update' && r.ok && !o.indeterminate) {
           const back = await d.readOnce(label, ctx.session.stepId(`in.${tool}.${c.prop}.effect`));
           const ign = [...res.read.ignore, ...(res.version ? [res.version.read] : [])];
           o.effect = back.ok ? withoutIgnored(diff(curObj, back.obj), ign).map((e) => e.path) : null;
-          if (r.text !== null) o.text = short(r.text, 1000);
         }
         // MWS-IN-1: establish the value an accepted probe was used as.
         if (c.requirement === 'MWS-IN-1' && r.ok && !o.indeterminate) {
@@ -1005,7 +1007,7 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
     if (cut[tool]) for (const [i, r] of out.entries()) if (r.write_path.tool === tool && r.verdict === 'held' && ['MWS-IN-1', 'MWS-IN-3', 'MWS-IN-6', 'MWS-IN-7', 'MWS-IN-2'].includes(r.requirement)) out[i] = result(r.requirement, w, sc, 'not tested', `the probe list for ${tool} was cut at limits.max_fuzz_cases (${cut[tool]!.sent} of ${cut[tool]!.total} sent), so "every probe" was not sent (raise the limit)`, { notes: r.notes });
     const tooled = refusals.filter((p) => !p.rpc_error && p.isError);
     if (tooled.length && ctx) {
-      const q: Question = { id: questionId('MWS-IN-4', w, 'reason'), requirement: 'MWS-IN-4', write_path: w, question: `Does each rejection by ${tool} give the reason the argument was refused?`, evidence: tooled.slice(0, 20).map((p) => ({ step: p.step, text: p.text ?? '' })) };
+      const q: Question = { id: questionId('MWS-IN-4', w, 'reason'), requirement: 'MWS-IN-4', write_path: w, question: `Does each rejection by ${tool} give the reason the argument was refused?`, evidence: tooled.slice(0, 20).map((p) => ({ step: p.step, text: short(p.text ?? '', 400) })) };
       out.push(reviewResult(sc, q, answerOf(ctx, q, ctx.review?.rejection_gives_reason ?? null)));
     }
   }

@@ -76,8 +76,10 @@ export type FieldOutcome = { outcome: 'applied' | 'not_applied' | 'unknown'; lin
  * The declared outcome field (rule-11 coverage package): where the declaration names one and the result's structured content
  * carries one of its values at the path, the outcome it states, with the record's line; else null (nothing decided).
  */
-export function outcomeByField(b: { data?: unknown }): FieldOutcome | null {
+export function outcomeByField(b: { data?: unknown; extracted?: { refusals: boolean } | null }): FieldOutcome | null {
   if (!field || b.data === null || b.data === undefined) return null;
+  // why: review of PR #14 (5): a document decode.extract took out of the text states no outcome unless declared (refusals: true).
+  if (b.extracted && !b.extracted.refusals) return null;
   let v: unknown;
   try {
     v = getPath(b.data, parsePath(field.path));
