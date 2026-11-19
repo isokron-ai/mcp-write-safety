@@ -30,7 +30,9 @@ import { decidedByShape, itemStatus, quoteField, shapeFallbackNote, shapeOf } fr
 import { appliedAllSaid, appliedAllUnread, brief, forPatterns, mentions, textStatement, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'multi-item';
-const VERSION = '1';
+// why: 2: the check also sends a call on good items only where there is no gate (MWS-RES-1, effects.ts multiRes1), and reads every
+// item back after the gate's learning pass; what the scenario sends changed, so its records hash apart (MANIFEST.md, test_hash).
+const VERSION = '2';
 
 export interface MultiTrial {
   kind: 'invalid item' | 'failed backend write';
@@ -102,7 +104,7 @@ export const multiCheck: CheckModule = {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
     return (obs.data as { tools: MultiObs[] }).tools.flatMap((m) => {
       const spec = res.multi.find((x) => x.tool === m.tool)!;
-      return [...multiVerdicts(m, res, spec), multiRes1(m, res, spec, ctx.manifest.async_operations ?? [])];
+      return [...multiVerdicts(m, res, spec), multiRes1(m, res, spec, ctx.manifest.async_operations ?? [], { id: ID, version: VERSION })];
     });
   },
 };

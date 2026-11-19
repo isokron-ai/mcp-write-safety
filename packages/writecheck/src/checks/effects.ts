@@ -30,6 +30,8 @@ import type { MultiObs } from './multi.js';
 const ID = 'effects';
 const VERSION = '1';
 const SC = { id: ID, version: VERSION };
+/** The multi-item check's scenario (src/checks/multi.ts passes its own; this default is for callers that judge a recorded observation). */
+const MULTI_SC = { id: 'multi-item', version: '2' };
 
 /** One effect trial: the call, and what the read-back showed of each declared condition. */
 export interface EffectTrial {
@@ -290,9 +292,8 @@ export function effectsVerdicts(trials: EffectTrial[], res: ResourceSpec, asyncO
  * MWS-RES-1 for a multi-item tool, from the multi-item check's call on good items only (`clean`): every item it was asked to
  * write must hold the declared effect after a report of success. The ATOM requirements judge the failed calls.
  */
-export function multiRes1(o: MultiObs, res: ResourceSpec, m: MultiSpec, asyncOps: string[] = []): Result {
+export function multiRes1(o: MultiObs, res: ResourceSpec, m: MultiSpec, asyncOps: string[] = [], sc: { id: string; version: string } = MULTI_SC): Result {
   const w = wp(res.name, o.tool);
-  const sc = { id: 'multi-item', version: '1' };
   const c = o.clean;
   if (o.skipped) return result('MWS-RES-1', w, sc, 'not tested', `${o.tool} was not called: ${o.skipped}`);
   if (!c) return result('MWS-RES-1', w, sc, 'not tested', `${o.tool} had no call on good items only`);
