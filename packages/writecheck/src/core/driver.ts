@@ -93,7 +93,7 @@ export class Driver {
     return withOverride(this.res, render(this.res.update!.args, this.vars({ field: field.arg, value, version: base?.version ?? null })));
   }
 
-  async update(label: string, field: FieldSpec, value: unknown, o: { step: string; base?: { obj: unknown; version: unknown } | null; paced?: boolean; counted?: boolean }): Promise<CallResult> {
+  async update(label: string, field: FieldSpec, value: unknown, o: { step: string; base?: { obj: unknown; version: unknown } | null; paced?: boolean; counted?: boolean }): Promise<CallResult & { sent_args?: unknown }> {
     let base = o.base ?? null;
     if (!base && needsBase(this.res)) {
       const r = await this.readOnce(label, this.session.stepId(`${o.step}.base`));
@@ -105,7 +105,8 @@ export class Driver {
     const r = await this.session.call(label, this.res.update!.tool, args, { step: o.step, ...(o.paced ? { paced: true } : {}), ...(o.counted ? { counted: true } : {}) });
     // why: B-9 "How a tester uses it": same_key / same_version name the key or the version only where the call carried one; the
     // trial records which it carried, so the reading does not take them as given.
-    return { ...r, carried: carriedBy(this.res, this.res.update!.tool, args, sent) };
+    // why: sent_args: the arguments as sent, for MWS-RES-4's echo filter (src/checks/echo.ts): a value the answer only repeats from them is no receipt.
+    return { ...r, carried: carriedBy(this.res, this.res.update!.tool, args, sent), sent_args: args };
   }
 
   /** Put both fields back to the baseline, and check it took. */

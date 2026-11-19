@@ -14,6 +14,22 @@ const on = (d: string) => DEFECTS.has(d);
 if (DEFECTS.size) process.stderr.write(`tiny-tracker (fake): DEFECTS ON: ${[...DEFECTS].join(', ')}\n`);
 
 type Obj = Record<string, unknown>;
+
+/**
+ * An inverted read-only switch (lane F9): TRACKER_ALLOW_WRITES is an allow-write flag, so its restricting value is "false".
+ * Unset or a true word (true, yes, on, 1, any case) allows writes; a false word (false, no, off, 0, any case) makes the server
+ * read-only; anything else stops it. Defect allow-writes-exact: only the exact string "false" turns writes off (GH-08's
+ * class, inverted), so FALSE or no start the server with writes on.
+ */
+const ALLOW = process.env['TRACKER_ALLOW_WRITES'];
+const READ_ONLY = (() => {
+  if (ALLOW === undefined) return false;
+  if (on('allow-writes-exact')) return ALLOW === 'false';
+  if (/^(true|yes|on|1)$/i.test(ALLOW)) return false;
+  if (/^(false|no|off|0)$/i.test(ALLOW)) return true;
+  process.stderr.write(`TRACKER_ALLOW_WRITES=${JSON.stringify(ALLOW)} is not recognized; use true or false. Not starting.\n`);
+  process.exit(2);
+})();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const STATUS = ['open', 'closed', 'blocked'];
@@ -124,6 +140,7 @@ const keyMap = new Map<string, string>();
 
 async function call(name: string, args: Obj): Promise<unknown> {
   check(name, args);
+  if (READ_ONLY && !['whoami', 'ticket_get', 'ticket_list'].includes(name)) throw new ToolError(`${name} is unavailable: writes are off (TRACKER_ALLOW_WRITES=${ALLOW}). Nothing was written.`);
   switch (name) {
     case 'whoami':
       // Variant whoami-writes (review B2): a "touch"-like call that answers the same each time and creates a ticket each time.
@@ -137,7 +154,9 @@ async function call(name: string, args: Obj): Promise<unknown> {
     }
     case 'ticket_list': {
       const r = await api('GET', `/tickets?prefix=${encodeURIComponent(String(args['prefix'] ?? ''))}`);
-      const items = (r.body['items'] as Obj[]) ?? [];
+      let items = (r.body['items'] as Obj[]) ?? [];
+      // Variant list-lag (lane F9): an eventually consistent list, which shows a new ticket only some 400 ms after it was made.
+      if (on('list-lag')) items = items.filter((t) => !(t['version'] === 1 && Date.now() - Date.parse(String(t['updated_at'])) < 400));
       if (on('MWS-ANN-1')) for (const t of items) await api('POST', `/tickets/${encodeURIComponent(String(t['id']))}/seen`);
       return ok({ items });
     }
@@ -180,6 +199,8 @@ async function call(name: string, args: Obj): Promise<unknown> {
       }
       const r = await api('PATCH', path, fields);
       if (r.status !== 200) throw backendError(r);
+      // Variant echo-update (lane F9): the answer is the call's own arguments, as a tool that returns its request does.
+      if (on('echo-update')) return ok({ id, ...fields });
       return ok({ ticket: r.body });
     }
     case 'ticket_replace': {

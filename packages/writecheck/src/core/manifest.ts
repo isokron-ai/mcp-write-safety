@@ -424,6 +424,12 @@ export interface ListSpec extends ToolTemplate, Decode {
   ignore: string[];
   /** How to ask for the next page: the value at `path` in an answer, sent as the argument `arg`; null: one answer is the list. */
   next: { path: string; arg: string } | null;
+  /**
+   * For an eventually consistent list (MWS-RES-3, RETRY-1): `args`, arguments merged into this list's arguments when it is read
+   * to find the run's own new objects (the backend's consistent-read option); `settle_ms`, how long such a find is repeated
+   * until it shows the objects it looks for. Absent: one plain read, as before.
+   */
+  consistency?: { args: Record<string, unknown> | null; settle_ms: number };
 }
 
 /** A case the declaration adds to MWS-RES-1: an update with these arguments must leave `expect` in effect. */
@@ -796,14 +802,25 @@ function control(v: unknown, where: string): ControlSpec {
 export const RESERVED_VARS = ['prefix', 'id', 'field', 'value', 'object', 'version', 'key', 'scope', 'marker', 'ids', 'batch', 'missing_id', 'names_inserted', 'position', 'element_id', 'n'];
 
 function listSpec(v: unknown, where: string): ListSpec {
-  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode']);
+  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode', 'consistency']);
+  let consistency: ListSpec['consistency'];
+  if (l['consistency'] !== undefined) {
+    const c = obj(l['consistency'], `${where}.consistency`);
+    keys(c, ['args', 'settle_ms'], `${where}.consistency`);
+    const args = c['args'] === undefined ? null : obj(c['args'], `${where}.consistency.args`);
+    const settle = c['settle_ms'] === undefined ? 0 : c['settle_ms'];
+    if (typeof settle !== 'number' || !Number.isInteger(settle) || settle < 0 || settle > 120_000) throw fail(`${where}.consistency.settle_ms`, 'a whole number of milliseconds from 0 to 120000');
+    if (!args && !settle) throw fail(`${where}.consistency`, '{ args, settle_ms }: the arguments of a consistent read, a settle window, or both');
+    if (args && l.args !== undefined && l.args !== null && (typeof l.args !== 'object' || Array.isArray(l.args))) throw fail(`${where}.consistency.args`, `merged into ${where}.args, which must then be an object`);
+    consistency = { args, settle_ms: settle };
+  }
   let next: ListSpec['next'] = null;
   if (l['next'] !== undefined) {
     const n = obj(l['next'], `${where}.next`);
     keys(n, ['path', 'arg'], `${where}.next`);
     next = { path: path(n['path'], `${where}.next.path`), arg: str(n['arg'], `${where}.next.arg`) };
   }
-  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...decodeOf(l['decode'], where) };
+  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...(consistency ? { consistency } : {}), ...decodeOf(l['decode'], where) };
 }
 
 const optBool = (v: unknown, where: string): boolean | null => {

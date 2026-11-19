@@ -21,12 +21,13 @@ import { baseVars, deleteArgs, needsVersion, objectFrom, type Driver, sameCollec
 import type { CreateSpec, ResourceSpec } from '../core/manifest.js';
 import { createVerified, goneByAnswer, goneFrom } from '../core/objects.js';
 import { render, templateRoots } from '../core/template.js';
-import { deepEqual, diff, getPath, isObj, short, withoutIgnored, type Obj } from '../core/util.js';
+import { deepEqual, diff, getPath, isObj, short, sleep, withoutIgnored, type Obj } from '../core/util.js';
 import { lastMutating, MUTATING } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { saidBy, says } from './says.js';
 import { scratch } from './scratch.js';
+import { echoOf, echoReason, keptArgs, Tally } from './echo.js';
 import { decidedByShape, quoteField, reportsSuccess, sameValue, shapeFallbackNote, shapeNamesField, shapeOf } from './shape.js';
 import { brief, forPatterns, mentions, offeredKeys, res2Judge, schemaProps, textStatement, toolByName, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
@@ -42,6 +43,8 @@ interface CreateObs {
   set_fields?: Record<string, unknown>;
   /** The first create and the object found by its marker (independently of the answer). */
   first: CallBrief | null;
+  /** The arguments the first create sent, for the echo filter (src/checks/echo.ts); absent in older evidence (no filter). */
+  sent_args?: unknown;
   found: unknown[];
   /** The second identical create (RETRY-1): objects found by the same marker afterwards. */
   repeat: CallBrief | null;
@@ -51,7 +54,9 @@ interface CreateObs {
   version: unknown;
   read_keys: string[] | null;
   /** RES-3, second clause: the last of several backend writes failed. */
-  late_failure: { skipped?: string; mutating: number; call: CallBrief | null; found: unknown[] } | null;
+  late_failure: { skipped?: string; mutating: number; call: CallBrief | null; found: unknown[]; sent_args?: unknown } | null;
+  /** How the finds read the list where list.consistency is declared; absent otherwise. */
+  consistency?: string;
   skipped?: string;
 }
 
@@ -59,7 +64,8 @@ interface CheckObs {
   creates: CreateObs[];
   /** Why no update receipt was collected for a resource with an update block (action dogfood SH-8); null where one was. */
   update_skipped?: string | null;
-  update_receipt: { id: unknown; call: CallBrief | null; field: string; arg: string; value: unknown; version: unknown; read_keys: string[] | null; changed?: { path: string; after: unknown }[] | null } | null;
+  /** sent_args: the update's arguments as sent, for the echo filter; absent in older evidence (no filter). */
+  update_receipt: { id: unknown; call: CallBrief | null; field: string; arg: string; value: unknown; version: unknown; read_keys: string[] | null; changed?: { path: string; after: unknown }[] | null; sent_args?: unknown } | null;
   /** changed: null when the object under test did not read back around the call. */
   /** values: the value each changed path has after the call (gate-2 safety re-run F2: a declared applied pattern may credit an error that names it). */
   failures: { name: string; tool: string; call: CallBrief; changed: string[] | null; values?: Record<string, unknown>; skipped?: string }[];
@@ -72,7 +78,10 @@ interface CreateTool {
   name: string;
   tool: string;
   args: unknown;
-  find: (ctx: RunContext, marker: string, label: string, scope: unknown) => Promise<unknown[] | null>;
+  /** want: how many objects the find expects at most (a declared list.consistency.settle_ms re-reads until it sees them). */
+  find: (ctx: RunContext, marker: string, label: string, scope: unknown, want?: number) => Promise<unknown[] | null>;
+  /** The declared consistency of the list the find reads (list.consistency), for the records; null: one plain read. */
+  consistency: string | null;
   idem: { key: { arg: string } | { meta: string } } | null;
 }
 
@@ -96,10 +105,24 @@ function createTools(res: ResourceSpec, all: ResourceSpec[] = [res]): CreateTool
         const d = all.find((r) => r.idempotency?.tool === res.create!.tool)?.idempotency;
         return d ? { key: d.key } : null;
       })(),
-      find: async (ctx, marker, label, scope) => {
-        const r = await ctx.session.call(label, res.list!.tool, render(res.list!.args, baseVars(res, ctx.prefix, { scope, marker })), { write: false, step: ctx.session.stepId('creates.find') });
-        const items = r.ok ? getPath(r.data, res.list!.items) : null;
-        return Array.isArray(items) ? items.filter((it) => String(getPath(it, res.list!.name) ?? '') === marker).map((it) => getPath(it, res.list!.id)) : null;
+      consistency: consistencyLine(res),
+      find: async (ctx, marker, label, scope, want = 1) => {
+        // why: an eventually consistent list can miss an object just made (RES-3: not found) or the second of two (RETRY-1: read
+        // as "not applicable"). list.consistency asks the backend for a consistent read, and/or re-reads within a window.
+        const cons = res.list!.consistency;
+        const once = async () => {
+          const a = render(res.list!.args, baseVars(res, ctx.prefix, { scope, marker }));
+          const r = await ctx.session.call(label, res.list!.tool, cons?.args ? { ...(isObj(a) ? a : {}), ...cons.args } : a, { write: false, step: ctx.session.stepId('creates.find') });
+          const items = r.ok ? getPath(r.data, res.list!.items) : null;
+          return Array.isArray(items) ? items.filter((it) => String(getPath(it, res.list!.name) ?? '') === marker).map((it) => getPath(it, res.list!.id)) : null;
+        };
+        let got = await once();
+        const until = Date.now() + (cons?.settle_ms ?? 0);
+        while (got !== null && got.length < want && Date.now() < until) {
+          await sleep(Math.max(20, Math.min(200, (cons?.settle_ms ?? 0) / 10)));
+          got = await once();
+        }
+        return got;
       },
     });
   for (const c of res.creates)
@@ -108,9 +131,18 @@ function createTools(res: ResourceSpec, all: ResourceSpec[] = [res]): CreateTool
       tool: c.tool,
       args: c.args,
       idem: c.idempotency,
+      consistency: null,
       find: async (ctx, marker, label) => findIn(ctx, res, c, marker, label),
     });
   return out;
+}
+
+/** The record's line on a declared list.consistency; null where none is declared. */
+function consistencyLine(res: ResourceSpec): string | null {
+  const c = res.list?.consistency;
+  if (!c) return null;
+  const parts = [...(c.args ? [`with the declared consistent-read arguments ${JSON.stringify(c.args)}`] : []), ...(c.settle_ms ? [`re-read for up to ${c.settle_ms} ms until it showed the objects looked for`] : [])];
+  return `The run's objects were found through ${res.list!.tool} ${parts.join(', and ')} (list.consistency).`;
 }
 
 async function findIn(ctx: RunContext, res: ResourceSpec, c: CreateSpec, marker: string, label: string): Promise<unknown[] | null> {
@@ -186,7 +218,7 @@ export const createsCheck: CheckModule = {
       const ign = [...res.read.ignore, ...(res.version ? [res.version.read] : [])];
       const changed = before.ok && back.ok ? withoutIgnored(diff(before.obj, back.obj), ign).map((e) => ({ path: e.path, after: e.after })) : null;
       obs.update_skipped = null;
-      obs.update_receipt = { id: d.id, call: brief(r), field: f.path, arg: f.arg, value: f.values[1], version: back.ok ? back.version : null, read_keys: back.ok && isObj(back.obj) ? Object.keys(back.obj) : null, changed };
+      obs.update_receipt = { id: d.id, call: brief(r), field: f.path, arg: f.arg, value: f.values[1], version: back.ok ? back.version : null, read_keys: back.ok && isObj(back.obj) ? Object.keys(back.obj) : null, changed, ...(r.sent_args !== undefined ? { sent_args: keptArgs(r.sent_args) } : {}) };
       await d.reset();
     }
     for (const f of res.failures) {
@@ -240,7 +272,7 @@ export const createsCheck: CheckModule = {
 };
 
 async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, label: string): Promise<CreateObs> {
-  const o: CreateObs = { name: c.name, tool: c.tool, parent: c.name === res.name ? null : ctx.driver.id, first: null, found: [], repeat: null, found_after_repeat: null, key: null, version: null, read_keys: null, late_failure: null };
+  const o: CreateObs = { name: c.name, tool: c.tool, parent: c.name === res.name ? null : ctx.driver.id, first: null, found: [], repeat: null, found_after_repeat: null, key: null, version: null, read_keys: null, late_failure: null, ...(c.consistency ? { consistency: c.consistency } : {}) };
   const scope = ctx.driver.scope;
   const marker = ctx.marker('cr');
   const isMain = c.name === res.name;
@@ -261,6 +293,7 @@ async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, labe
   };
   const r1 = await send(args, 'first');
   o.first = r1 ? brief(r1) : null;
+  o.sent_args = keptArgs(args);
   const learned = gate ? await gate.since(mark) : [];
   const found = await c.find(ctx, marker, label, scope);
   if (found === null) return { ...o, skipped: 'the created object could not be looked for (the find or list call failed)' };
@@ -273,7 +306,7 @@ async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, labe
   // MWS-RETRY-1: the same call again (a new JSON-RPC id), then count.
   const r2 = await send(args, 'repeat');
   o.repeat = r2 ? brief(r2) : null;
-  const again = await c.find(ctx, marker, label, scope);
+  const again = await c.find(ctx, marker, label, scope, 2);
   o.found_after_repeat = again === null ? null : again.length;
   if (o.found_after_repeat !== null && o.found_after_repeat >= 2) {
     const t = toolByName(ctx.tools, c.tool);
@@ -296,12 +329,13 @@ async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, labe
       const m3 = ctx.marker('crf');
       const f = gate.fault({ method: '*', path: '*', nth: muts.length, kind: 'status', status: 500 });
       const intent = isMain ? ctx.ledger.intent(res.name, c.tool, 'MWS-RES-3 create whose last backend write is failed') : null;
-      const r = await ctx.session.call(label, c.tool, render(c.args, ctx.driver.vars({ marker: m3, scope, id: isMain ? null : ctx.driver.id })), { step: ctx.session.stepId(`creates.${c.name}.late`) });
+      const lateArgs = render(c.args, ctx.driver.vars({ marker: m3, scope, id: isMain ? null : ctx.driver.id }));
+      const r = await ctx.session.call(label, c.tool, lateArgs, { step: ctx.session.stepId(`creates.${c.name}.late`) });
       const hit = await f.waitHit(500);
       f.clear();
       if (intent !== null) ctx.ledger.append({ kind: 'create_unknown', intent, resource: res.name, reason: 'a later backend write was failed on purpose; the object may exist' });
       const found = await c.find(ctx, m3, label, scope);
-      o.late_failure = !hit ? { skipped: 'the fault on the last backend write was not applied (different requests than in the learning pass)', mutating: muts.length, call: brief(r), found: [] } : found === null ? { skipped: 'the objects could not be looked for after the failed write', mutating: muts.length, call: brief(r), found: [] } : { mutating: muts.length, call: brief(r), found };
+      o.late_failure = !hit ? { skipped: 'the fault on the last backend write was not applied (different requests than in the learning pass)', mutating: muts.length, call: brief(r), found: [] } : found === null ? { skipped: 'the objects could not be looked for after the failed write', mutating: muts.length, call: brief(r), found: [] } : { mutating: muts.length, call: brief(r), found, sent_args: keptArgs(lateArgs) };
     }
   }
   return o;
@@ -316,20 +350,37 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
     // MWS-RES-3
     if (c.skipped || !c.first || c.first.indeterminate) out.push(result('MWS-RES-3', w, sc, 'not tested', c.skipped ?? 'the create\'s outcome is unknown'));
     else if (!c.first.ok) out.push(result('MWS-RES-3', w, sc, 'not tested', `the create did not succeed (${short(c.first.text ?? c.first.rpc_error?.message ?? '', 120)})`));
-    else if (c.found.length !== 1) out.push(result('MWS-RES-3', w, sc, 'not tested', `${c.found.length} objects carry the call's marker; the object the call made could not be identified`));
+    else if (c.found.length !== 1) out.push(result('MWS-RES-3', w, sc, 'not tested', `${c.found.length} objects carry the call's marker; the object the call made could not be identified${c.found.length === 0 && !c.consistency ? ' (for a list that shows a new object only after a while, declare list.consistency)' : ''}`, { notes: c.consistency ? [c.consistency] : [] }));
     else if (!mentions(c.first, c.found[0])) out.push(result('MWS-RES-3', w, sc, 'violated', `${c.tool} created ${short(c.found[0], 40)} (found by its marker), and its answer does not carry that identifier.`, { steps: [c.first.step] }));
     else {
-      const lf = c.late_failure;
+      // why: corpus finding (lane F9): an answer that only echoes the request (a SQL tool returning its own statement) carries an
+      // identifier the call itself named whether or not anything was made. A value that appears verbatim in the arguments counts
+      // only beside data the request did not contain (src/checks/echo.ts); an echo alone leaves the record open, never held.
+      const t3 = new Tally(echoOf(c.first, c.sent_args));
+      t3.any(`the identifier (${short(c.found[0], 40)})`, [[true, c.found[0]]]);
+      const lf = t3.echoOnly.length ? null : c.late_failure;
       let note = lf?.skipped ?? (lf ? '' : 'Whether the identifier survives a failure of a later step needs backend.gate; not tested.');
+      const notes: string[] = [];
+      let lateEcho: string | null = null;
       if (lf && !lf.skipped && lf.call) {
         const made = lf.found;
         if (made.length && !lf.call.ok && !made.every((id) => mentions(lf.call!, id))) {
           out.push(result('MWS-RES-3', w, sc, 'violated', `With its last backend write failed, ${c.tool} left ${made.map((v) => short(v, 30)).join(', ')} created, and its error does not carry the identifier.`, { steps: [lf.call.step] }));
           continue;
         }
+        if (made.length && !lf.call.ok) {
+          const tl = new Tally(echoOf(lf.call, lf.sent_args));
+          for (const id of made) tl.any(`the identifier (${short(id, 30)})`, [[true, id]]);
+          if (tl.echoOnly.length) lateEcho = `with its last backend write failed, ${echoReason(c.tool, tl.echoOnly)} (the answer is the error)`;
+          const n = tl.note();
+          if (n) notes.push(n);
+        }
         note = `With the last of ${lf.mutating} backend writes failed, ${made.length ? 'the error carried the identifier of the object that exists' : 'no object was left'}.`;
       }
-      out.push(result('MWS-RES-3', w, sc, 'held', `The answer carries the identifier of the object the create made (${short(c.found[0], 40)}).`, { notes: note ? [note] : [] }));
+      const n3 = t3.note();
+      if (t3.echoOnly.length) out.push(result('MWS-RES-3', w, sc, 'not tested', echoReason(c.tool, t3.echoOnly)));
+      else if (lateEcho) out.push(result('MWS-RES-3', w, sc, 'not tested', lateEcho));
+      else out.push(result('MWS-RES-3', w, sc, 'held', `The answer carries the identifier of the object the create made (${short(c.found[0], 40)}).`, { notes: [...(note ? [note] : []), ...(n3 ? [n3] : []), ...notes, ...(c.consistency ? [c.consistency] : [])] }));
     }
     // MWS-RES-4 for the create: identity, version where declared, no server-managed field the read omits.
     const csh = c.first?.ok && c.found.length === 1 ? shapeOf(c.first) : null;
@@ -343,28 +394,34 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       // why: rule 11, point 13 (R14-5): a text that says by a declared pattern that the create failed is a false receipt of its own.
       const cfail = textStatement(c.first, 'not_applied');
       if (cfail) miss.push(`a text that does not say the create failed (${cfail}; rule 11, point 13: the shape beside it does not repair it)`);
-      const idOk = csh.object?.id !== undefined ? sameValue(csh.object.id, c.found[0]) || (c.parent !== null && (sameValue(csh.object.id, c.parent) || sameValue(csh.object.parent?.id, c.parent))) : mentions(pc, c.found[0]) || (c.parent !== null && (mentions(pc, c.parent) || sameValue(csh.object?.parent?.id, c.parent)));
+      // why: the echo filter (src/checks/echo.ts) applies here too; an adopted shape is itself data the request did not contain.
+      const t4 = new Tally(echoOf(c.first, c.sent_args));
+      const idOk = csh.object?.id !== undefined ? t4.any('the identifier', [[sameValue(csh.object.id, c.found[0]), c.found[0]], [c.parent !== null && (sameValue(csh.object.id, c.parent) || sameValue(csh.object.parent?.id, c.parent)), c.parent]]) : t4.any('the identifier', [[mentions(pc, c.found[0]), c.found[0]], [c.parent !== null && (mentions(pc, c.parent) || sameValue(csh.object?.parent?.id, c.parent)), c.parent]]);
       if (!idOk) miss.push(csh.object?.id !== undefined ? `the identifier (${quoteField('object.id', csh.object.id)}; the create made ${short(c.found[0], 40)})` : 'the identifier (no mws.object.id, and not in the rest of the answer)');
-      if (c.name === res.name && res.version && c.version !== null && !(csh.object?.version !== undefined ? sameValue(csh.object.version, c.version) : mentions(pc, c.version))) miss.push(csh.object?.version !== undefined ? `the new version (${quoteField('object.version', csh.object.version)}; the object reads ${short(c.version, 20)})` : `the new version (${short(c.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
+      if (c.name === res.name && res.version && c.version !== null && !t4.any('the new version', [[csh.object?.version !== undefined ? sameValue(csh.object.version, c.version) : mentions(pc, c.version), c.version]])) miss.push(csh.object?.version !== undefined ? `the new version (${quoteField('object.version', csh.object.version)}; the object reads ${short(c.version, 20)})` : `the new version (${short(c.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
       // why: a nested create is judged on the identifier, and its parent's counts (as without the shape): B-9 v2's object.parent.
-      const notes = [decidedByShape([['outcome', csh.outcome], ['object', csh.object ?? null]], c.first), ...(c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts, as mws.object.id or mws.object.parent.id).'])];
+      const notes = [decidedByShape([['outcome', csh.outcome], ['object', csh.object ?? null]], c.first), ...(c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts, as mws.object.id or mws.object.parent.id).']), ...(t4.note() ? [t4.note()!] : [])];
       if (miss.length) out.push(result('MWS-RES-4', w, sc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes }));
+      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, sc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes }));
       else out.push(result('MWS-RES-4', w, sc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''} (${quoteField('object', csh.object ?? null)}).`, { notes }));
     } else if (c.first?.ok && c.found.length === 1) {
       const miss: string[] = [];
-      if (!mentions(c.first, c.found[0]) && !(c.parent !== null && mentions(c.first, c.parent))) miss.push('the identifier');
-      if (c.name === res.name && res.version && c.version !== null && !mentions(c.first, c.version)) miss.push(`the new version (${short(c.version, 20)})`);
+      const t4 = new Tally(echoOf(c.first, c.sent_args));
+      if (!t4.any('the identifier', [[mentions(c.first, c.found[0]), c.found[0]], [c.parent !== null && mentions(c.first, c.parent), c.parent]])) miss.push('the identifier');
+      if (c.name === res.name && res.version && c.version !== null && !t4.any(`the new version (${short(c.version, 20)})`, [[mentions(c.first, c.version), c.version]])) miss.push(`the new version (${short(c.version, 20)})`);
       // why: spec MWS-RES-4 (516c4ed): for a create, only the identifier and the declared version; the fields set are checked for updates.
       const extra = c.read_keys ? extraManaged(c.first, ign, c.read_keys) : [];
       const measured = extra.length ? [`Measured, not judged (spec Annex A, A-3): server-managed field(s) the read tool omits: ${extra.join(', ')}.`] : [];
       const nested = c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts).'];
+      const en = t4.note();
       if (miss.length) out.push(result('MWS-RES-4', w, sc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes: [...measured, ...nested] }));
-      else out.push(result('MWS-RES-4', w, sc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''}.`, { notes: [...measured, ...nested] }));
+      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, sc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes: [...measured, ...nested] }));
+      else out.push(result('MWS-RES-4', w, sc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''}.`, { notes: [...measured, ...nested, ...(en ? [en] : [])] }));
     }
     // MWS-RETRY-1
     // why: a list that cannot see what the first call made (found != 1) cannot count a second object either.
     if (c.first?.ok && c.found.length === 1 && c.found_after_repeat !== null && c.repeat && !c.repeat.indeterminate) {
-      if (c.found_after_repeat < 2) out.push(result('MWS-RETRY-1', w, sc, 'not applicable', `Two calls with the same arguments did not make two objects (${c.found_after_repeat} found; the second call ${c.repeat.ok ? `was answered without isError${c.repeat.text ? `: ${JSON.stringify(short(c.repeat.text, 100))}` : ''}` : 'was refused'}).`));
+      if (c.found_after_repeat < 2) out.push(result('MWS-RETRY-1', w, sc, 'not applicable', `Two calls with the same arguments did not make two objects (${c.found_after_repeat} found; the second call ${c.repeat.ok ? `was answered without isError${c.repeat.text ? `: ${JSON.stringify(short(c.repeat.text, 100))}` : ''}` : 'was refused'}).`, { notes: c.consistency ? [c.consistency] : [] }));
       else if (!c.key) out.push(result('MWS-RETRY-1', w, sc, 'not tested', 'two identical calls made two objects; the key check did not run'));
       else if (!c.key.declared) {
         // why: dogfood C4: a tool whose input schema offers a key the declaration does not name is a declaration gap, not a finding.
@@ -387,22 +444,28 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
     else {
     const fb = shapeFallbackNote(u.call!);
     const miss: string[] = [];
-    if (!mentions(u.call!, u.id)) miss.push('the identifier');
+    // why: the echo filter (src/checks/echo.ts): an update's call always names the object, the field and the new value, so an
+    // answer that repeats them shows nothing by itself; they count beside data the request did not contain (a new version, a
+    // server count), and an answer with nothing else leaves the record open.
+    const tu = new Tally(echoOf(u.call!, u.sent_args));
+    if (!tu.any('the identifier', [[mentions(u.call!, u.id), u.id]])) miss.push('the identifier');
     const lastSeg = u.field.split('.').pop()!;
     if (!u.changed) {
-      if (!mentions(u.call!, lastSeg) && !mentions(u.call!, u.arg) && !mentions(u.call!, u.value)) miss.push(`the field set (${u.field}) or its new value`);
+      if (!tu.any(`the field set (${u.field}) or its new value`, [[mentions(u.call!, lastSeg), lastSeg], [mentions(u.call!, u.arg), u.arg], [mentions(u.call!, u.value), u.value]])) miss.push(`the field set (${u.field}) or its new value`);
     } else {
       // every field the read-back shows changed: its name or its new value
       const top = (p: string) => p.replace(/\[[^\]]*\]/g, '').split('.')[0]!;
       const fields = [...new Map(u.changed.map((c) => [top(c.path), c])).values()];
-      const unnamed = fields.filter((c) => !mentions(u.call!, top(c.path)) && !mentions(u.call!, c.path.split('.').pop()) && !(c.path === u.field && mentions(u.call!, u.arg)) && !mentions(u.call!, c.after));
+      const unnamed = fields.filter((c) => !tu.any(top(c.path), [[mentions(u.call!, top(c.path)), top(c.path)], [mentions(u.call!, c.path.split('.').pop()), c.path.split('.').pop()], [c.path === u.field && mentions(u.call!, u.arg), u.arg], [mentions(u.call!, c.after), c.after]]));
       if (unnamed.length) miss.push(`${unnamed.map((c) => top(c.path)).join(', ')} (changed by the call, as the read-back shows), by name or new value`);
     }
-    if (res.version && u.version !== null && !mentions(u.call!, u.version)) miss.push(`the new version (${short(u.version, 20)})`);
+    if (res.version && u.version !== null && !tu.any(`the new version (${short(u.version, 20)})`, [[mentions(u.call!, u.version), u.version]])) miss.push(`the new version (${short(u.version, 20)})`);
     const extra = u.read_keys ? extraManaged(u.call!, ign, u.read_keys) : [];
     const measured = extra.length ? [`Measured, not judged (spec Annex A, A-3): server-managed field(s) the read tool omits: ${extra.join(', ')}.`] : [];
+    const en = tu.note();
     if (miss.length) out.push(result('MWS-RES-4', w, sc, 'violated', `${res.update.tool}'s answer lacks ${miss.join(', ')}.`, { steps: [u.call!.step], notes: [...(fb ? [fb] : []), ...measured] }));
-    else out.push(result('MWS-RES-4', w, sc, 'held', `${res.update.tool}'s answer identifies the object, names ${u.changed ? `each field the call changed (${[...new Set(u.changed.map((c) => c.path.replace(/\[[^\]]*\]/g, '').split('.')[0]))].join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})` : 'the field set (the object did not read back around the call)'}${res.version ? ' and carries the new version' : ''}.`, { notes: [...(fb ? [fb] : []), ...measured] }));
+    else if (tu.echoOnly.length) out.push(result('MWS-RES-4', w, sc, 'not tested', echoReason(res.update.tool, tu.echoOnly), { notes: [...(fb ? [fb] : []), ...measured] }));
+    else out.push(result('MWS-RES-4', w, sc, 'held', `${res.update.tool}'s answer identifies the object, names ${u.changed ? `each field the call changed (${[...new Set(u.changed.map((c) => c.path.replace(/\[[^\]]*\]/g, '').split('.')[0]))].join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})` : 'the field set (the object did not read back around the call)'}${res.version ? ' and carries the new version' : ''}.`, { notes: [...(fb ? [fb] : []), ...measured, ...(en ? [en] : [])] }));
     }
   }
   // why: action dogfood SH-8: a write path whose update gave no receipt to read gets a record that says why, never no record.
@@ -463,11 +526,12 @@ function receiptByShape(sh: NonNullable<ReturnType<typeof shapeOf>>, u: NonNulla
   const miss: string[] = [];
   // why: B-9 v2: a missing or malformed member decides nothing; for it the rest of the answer is read as without the shape.
   const pc = forPatterns(u.call!);
+  const tu = new Tally(echoOf(u.call!, u.sent_args));
   if (sh.outcome && !reportsSuccess(sh, false)) miss.push(`a report of the update as applied (${quoteField('outcome', sh.outcome)})`);
   // why: rule 11, point 13 (R14-5): a text that says by a declared pattern that the update failed is a false receipt of its own.
   const ufail = textStatement(u.call!, 'not_applied');
   if (ufail) miss.push(`a text that does not say the update failed (${ufail}; rule 11, point 13: the shape beside it does not repair it)`);
-  if (sh.object?.id !== undefined ? !sameValue(sh.object.id, u.id) : !mentions(pc, u.id)) miss.push(sh.object?.id !== undefined ? `the identifier (${quoteField('object.id', sh.object.id)}; the call wrote ${short(u.id, 30)})` : 'the identifier (no mws.object.id, and not in the rest of the answer)');
+  if (!tu.any('the identifier', [[sh.object?.id !== undefined ? sameValue(sh.object.id, u.id) : mentions(pc, u.id), u.id]])) miss.push(sh.object?.id !== undefined ? `the identifier (${quoteField('object.id', sh.object.id)}; the call wrote ${short(u.id, 30)})` : 'the identifier (no mws.object.id, and not in the rest of the answer)');
   const top = (p: string) => p.replace(/\[[^\]]*\]/g, '').split('.')[0]!;
   const want = u.changed ? [...new Set(u.changed.map((c) => top(c.path)))] : [top(u.field)];
   if (sh.changed !== undefined) {
@@ -475,14 +539,15 @@ function receiptByShape(sh: NonNullable<ReturnType<typeof shapeOf>>, u: NonNulla
     if (unnamed.length) miss.push(`${unnamed.join(', ')} in its list of changed fields (${quoteField('changed', sh.changed)}; the read-back shows ${want.join(', ') || 'none'} changed)`);
   } else if (!u.changed) {
     const lastSeg = u.field.split('.').pop()!;
-    if (!mentions(pc, lastSeg) && !mentions(pc, u.arg) && !mentions(pc, u.value)) miss.push(`the field set (${u.field}) or its new value (no mws.changed)`);
+    if (!tu.any(`the field set (${u.field}) or its new value`, [[mentions(pc, lastSeg), lastSeg], [mentions(pc, u.arg), u.arg], [mentions(pc, u.value), u.value]])) miss.push(`the field set (${u.field}) or its new value (no mws.changed)`);
   } else {
     const fields = [...new Map(u.changed.map((c) => [top(c.path), c])).values()];
-    const unnamed = fields.filter((c) => !mentions(pc, top(c.path)) && !mentions(pc, c.path.split('.').pop()) && !(c.path === u.field && mentions(pc, u.arg)) && !mentions(pc, c.after));
+    const unnamed = fields.filter((c) => !tu.any(top(c.path), [[mentions(pc, top(c.path)), top(c.path)], [mentions(pc, c.path.split('.').pop()), c.path.split('.').pop()], [c.path === u.field && mentions(pc, u.arg), u.arg], [mentions(pc, c.after), c.after]]));
     if (unnamed.length) miss.push(`${unnamed.map((c) => top(c.path)).join(', ')} (changed by the call, as the read-back shows), by name or new value (no mws.changed)`);
   }
-  if (res.version && u.version !== null && !(sh.object?.version !== undefined ? sameValue(sh.object.version, u.version) : mentions(pc, u.version))) miss.push(sh.object?.version !== undefined ? `the new version (${quoteField('object.version', sh.object.version)}; the object reads ${short(u.version, 20)})` : `the new version (${short(u.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
-  const notes = [decidedByShape([['outcome', sh.outcome], ['object', sh.object], ['changed', sh.changed]], u.call)];
+  if (res.version && u.version !== null && !tu.any('the new version', [[sh.object?.version !== undefined ? sameValue(sh.object.version, u.version) : mentions(pc, u.version), u.version]])) miss.push(sh.object?.version !== undefined ? `the new version (${quoteField('object.version', sh.object.version)}; the object reads ${short(u.version, 20)})` : `the new version (${short(u.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
+  const notes = [decidedByShape([['outcome', sh.outcome], ['object', sh.object], ['changed', sh.changed]], u.call), ...(tu.note() ? [tu.note()!] : [])];
+  if (!miss.length && tu.echoOnly.length) return result('MWS-RES-4', w, sc, 'not tested', echoReason(res.update!.tool, tu.echoOnly), { notes });
   return miss.length ? result('MWS-RES-4', w, sc, 'violated', `${res.update!.tool}'s answer lacks ${miss.join(', ')}.`, { steps: [u.call!.step], notes }) : result('MWS-RES-4', w, sc, 'held', `${res.update!.tool}'s answer identifies the object, names each field the call changed (${want.join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})${res.version ? ' and carries the new version' : ''}${sh.object ? ` (${quoteField('object', sh.object)}${sh.changed ? `, ${quoteField('changed', sh.changed)}` : ''})` : ''}.`, { notes });
 }
 
