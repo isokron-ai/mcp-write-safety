@@ -40,7 +40,10 @@ import { decidedByShape, quoteField, shapeNamesField, shapeOf, type WriteResult 
 import { appliedAllSaid, appliedAllUnread, brief, failedKind, identifiesChangeText, KNOWN_RESULT_TYPES, mayBeUnknown, notAppliedText, proseOf, readSecondClause, res2Judge, saysUnknownText, valueMentioned, wp, type CallBrief, type CheckModule, type FollowThroughRead, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'held-request';
-const VERSION = '1';
+// why: spec 13.6: version 2 adds the follow-through of the lost-answer trial (R10-11: an out-of-band change, the call sent again
+// once with the version it carried, a read-back) and counts a success over a failed request as the server's own retry only
+// where the gate shows the request sent again; both can change a verdict, and the version enters every record's test_hash.
+const VERSION = '2';
 
 type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null };
 const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status });

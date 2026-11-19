@@ -31,7 +31,9 @@ import { SYNTHETIC_FAULT } from './writefaults.js';
 import { appliedAllSaid, appliedAllUnread, brief, forPatterns, mentions, res2Judge, textStatement, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'multi-item';
-const VERSION = '1';
+// why: spec 13.6: version 2: with the gate, the learning pass is read back (the settled outcome, R9-1) and a lost-answer trial
+// follows the failed-request trials; the procedure version enters every record's test_hash.
+const VERSION = '2';
 
 export interface MultiTrial {
   kind: 'invalid item' | 'failed backend write';
