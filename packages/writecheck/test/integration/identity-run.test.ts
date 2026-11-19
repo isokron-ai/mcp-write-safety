@@ -57,11 +57,11 @@ test('a run states its identity, hashes every record\'s test, signs results.json
     assert.ok(!c.cells.some((x) => x.label === 'fixed'), 'nothing is fixed by a defect');
     // Review: recheck's copy is not covered by the original signature; it is unsigned, every record hashed, the recheck named.
     recheckCommand({ dir: before.outDir, log });
-    const rc = await finishRecheck(before.outDir, { env: {}, log });
+    const rc = await finishRecheck(before.outDir, { key: null, log });
     assert.equal(rc.evidence.signature, null);
     assert.ok(rc.identity?.rechecked_by && rc.results.every((r) => typeof r.test_hash === 'string'));
     assert.equal(validates(schema, JSON.parse(readFileSync(join(before.outDir, 'recheck', 'results.json'), 'utf8'))), true);
-    const rs = await finishRecheck(before.outDir, { signKey: join(tmp, 'key.pem'), env: {}, log });
+    const rs = await finishRecheck(before.outDir, { key: privateKey, log });
     assert.equal(typeof rs.evidence.signature, 'object');
     assert.equal(verifyResultsCommand({ file: join(before.outDir, 'recheck'), pubkey: join(tmp, 'pub.pem'), log }).exit, 0);
     const cschema = JSON.parse(readFileSync(join(here, '..', '..', '..', 'schema', 'mws-compare-1.schema.json'), 'utf8')) as Record<string, unknown>;

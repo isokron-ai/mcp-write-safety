@@ -19,7 +19,7 @@ import { validates } from '../../src/core/jsonschema.js';
 import { canonical, WritecheckError } from '../../src/core/util.js';
 import { classify, compareDocs, joinCell, rollUp, summarize, type Side } from '../../src/report/compare.js';
 import { duplicateKey, keyId, loadSigningKey, privateKeyFrom, publicKeyFrom, RESULTS_SIGNATURE_DOMAIN, signedBody, signResults, verifyResults } from '../../src/report/sign.js';
-import { testHash, testHashInput } from '../../src/report/testhash.js';
+import { narrowSchema, testHash, testHashInput } from '../../src/report/testhash.js';
 import { result, type Result } from '../../src/report/verdicts.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -307,6 +307,47 @@ test('review: keys are never echoed, embedded keys are never paths, sums is sign
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('re-review: slot regressions survive not-comparable cells; fixes need every violated slot held; schemas resolve $ref', () => {
+  const R = (req: string, sc: string, res: string, verdict: string, h: string, core?: string, extra: object = {}) => ({ requirement: req, level: 'MUST', write_path: { resource: res, tool: 'update_ticket' }, scenario: { id: sc, version: '1' }, verdict, reason: verdict, test_hash: h, ...(core ? { test_hash_core: core } : {}), ...extra });
+  const cell = (b: ReturnType<typeof R>[], a: ReturnType<typeof R>[]) => {
+    const B = miniDoc(b as never);
+    const A = miniDoc(a as never);
+    const sum = (d: Record<string, unknown>) => summarize(d, 'f', JSON.stringify(d), verifyResults(d, null));
+    return compareDocs(B, A, sum(B), sum(A));
+  };
+  const suspect = { validity: { counts: false } };
+  // A, A2: schema-fixed only when every slot violated before is held after.
+  const A = cell([R('MWS-IN-2', 's1', 'ticket', 'violated', 'h1', 'c1'), R('MWS-IN-2', 's2', 'ticket', 'held', 'h2', 'c2')], [R('MWS-IN-2', 's1', 'ticket', 'not observed', 'H1', 'c1'), R('MWS-IN-2', 's2', 'ticket', 'held', 'H2', 'c2')]).cells[0]!;
+  assert.equal(A.label, 'not comparable');
+  const A2 = cell([R('MWS-IN-2', 's1', 'ticket', 'violated', 'h1', 'c1'), R('MWS-IN-2', 's2', 'ticket', 'violated', 'h2', 'c2')], [R('MWS-IN-2', 's1', 'ticket', 'held', 'H1', 'c1'), R('MWS-IN-2', 's2', 'ticket', 'violated', 'H2', 'c2', suspect)]).cells[0]!;
+  assert.equal(A2.label, 'not comparable');
+  const B3 = cell([R('MWS-IN-2', 's1', 'ticket', 'violated', 'h1', 'c1'), R('MWS-IN-2', 's2', 'board', 'not observed', 'h2', 'c2')], [R('MWS-IN-2', 's1', 'ticket', 'held', 'H1', 'c1'), R('MWS-IN-2', 's2', 'board', 'not observed', 'h2', 'c2')]);
+  assert.equal(B3.cells[0]!.label, 'schema-fixed');
+  // B1, B2: a slot regression next to a changed test or a coverage change is still reported and warned.
+  for (const after of [[R('MWS-W-1', 's1', 'ticket', 'violated', 'h1'), R('MWS-W-1', 's2', 'ticket', 'held', 'hX')], [R('MWS-W-1', 's1', 'ticket', 'violated', 'h1'), R('MWS-W-1', 's2', 'ticket', 'not tested', 'h2')]]) {
+    const c = cell([R('MWS-W-1', 's1', 'ticket', 'held', 'h1'), R('MWS-W-1', 's2', 'ticket', 'violated', 'h2')], after);
+    assert.equal(c.cells[0]!.label, 'not comparable');
+    assert.deepEqual(c.cells[0]!.slot_regressions, ['ticket/s1 held → violated']);
+    assert.ok(c.warnings.some((w) => /slot regressed/.test(w)));
+  }
+  // E: a slot still violated? after keeps the cell from being fixed.
+  const E = cell([R('MWS-W-1', 's1', 'ticket', 'violated', 'h1'), R('MWS-W-1', 's2', 'ticket', 'violated', 'h2', undefined, suspect)], [R('MWS-W-1', 's1', 'ticket', 'held', 'h1'), R('MWS-W-1', 's2', 'ticket', 'violated', 'h2', undefined, suspect)]).cells[0]!;
+  assert.equal(E.transition, 'partly-held');
+  // p3: $ref/$defs reachable from a used argument, top-level combinators and additionalProperties are in the hash.
+  const used = new Set(['id', 'status']);
+  const base = { type: 'object', properties: { id: { type: 'string' }, status: { $ref: '#/$defs/Status' } }, required: ['id', 'status'], $defs: { Status: { type: 'string', enum: ['open', 'closed'] }, Unused: { type: 'string' } } };
+  const n0 = canonical(narrowSchema(base, used));
+  const differs = (s: object, why: string) => assert.notEqual(canonical(narrowSchema(s, used)), n0, why);
+  differs({ ...base, $defs: { ...base.$defs, Status: { type: 'integer' } } }, '$defs');
+  differs({ ...base, allOf: [{ properties: { status: { const: 'closed' } } }] }, 'allOf');
+  differs({ ...base, additionalProperties: false }, 'additionalProperties');
+  differs({ ...base, definitions: {}, properties: { ...base.properties, status: { $ref: '#/definitions/S' } } }, 'definitions');
+  assert.equal(canonical(narrowSchema({ ...base, $defs: { ...base.$defs, Unused: { type: 'integer' } } }, used)), n0, 'an unreachable definition');
+  assert.equal(canonical(narrowSchema({ ...base, properties: { ...base.properties, note: { $ref: '#/$defs/Unused' } } }, used)), n0, 'an optional argument added');
+  // A --pubkey that is a directory is a usage error.
+  assert.throws(() => publicKeyFrom(tmpdir()), (e: unknown) => e instanceof WritecheckError && e.code === 2);
 });
 
 const side = (verdict: Side['verdict'], h = 'sha256:x', o: Partial<Side> = {}): Side => ({ verdict, test_hash: h, level: 'MUST', run_cell: null, reason: 'r', records: [], scenarios: ['s v1'], ...o });

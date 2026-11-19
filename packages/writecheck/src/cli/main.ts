@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { catalogCommand, cleanupCommand, planCommand, recheckCommand, rerunCommand, reviewCommand } from './commands.js';
+import { loadSigningKey } from '../report/sign.js';
 import { compareCommand, finishRecheck, IDENTITY_FLAGS, IDENTITY_USAGE, identityOptions, verifyResultsCommand } from './compare.js';
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
@@ -285,10 +286,12 @@ export async function main(argv: string[]): Promise<number> {
     }
     case 'recheck': {
       const review = one(a, '--review');
-      recheckCommand({ dir: folder(), ...(review ? { review } : {}), log });
-      // why: F8 review: the rechecked copy is not covered by the original signature; it is unsigned or signed again.
+      // why: F8 review: the rechecked copy is not covered by the original signature; it is unsigned or signed again. The key is
+      // read before recheck writes anything, so a bad key leaves no half-finished copy.
       const sk = one(a, '--sign-key');
-      await finishRecheck(folder(), { ...(sk ? { signKey: sk } : {}), env: process.env, log });
+      const key = loadSigningKey(sk, sk ? {} : process.env);
+      recheckCommand({ dir: folder(), ...(review ? { review } : {}), log });
+      await finishRecheck(folder(), { key, log });
       return 0;
     }
     case 'review':

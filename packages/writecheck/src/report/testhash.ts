@@ -69,7 +69,9 @@ export async function hashExtras(): Promise<HashExtras> {
     return typeof m.IN5_READING?.value === 'string' ? { in5_reading: m.IN5_READING.value } : {};
   } catch (e) {
     if ((e as { code?: string }).code === 'ERR_MODULE_NOT_FOUND') return {};
-    throw e;
+    // why: re-review: a build that has the module but cannot load it must not hash IN-5 records as if it had no reading.
+    process.stderr.write(`warning: the MWS-IN-5 reading could not be read (${(e as Error).message}); MWS-IN-5 test hashes do not include it\n`);
+    return {};
   }
 }
 
@@ -138,14 +140,52 @@ export function usedArgs(t: string, res: unknown, underTest: boolean): Set<strin
   return out;
 }
 
-/** The part of an input schema a test depends on: see the header. */
+/** Top-level schema keywords that constrain the arguments as a whole: they enter whole (re-review 3). */
+export const SCHEMA_WHOLE = ['allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'dependentRequired', 'dependentSchemas', 'additionalProperties', 'patternProperties', 'propertyNames', 'unevaluatedProperties', 'minProperties', 'maxProperties'] as const;
+
+/** Resolve a local JSON Pointer (`#/$defs/X`, `#/definitions/X`) in a schema; undefined when it does not resolve. */
+function pointer(root: unknown, ref: string): unknown {
+  if (!ref.startsWith('#')) return undefined;
+  let v: unknown = root;
+  for (const raw of ref.slice(1).split('/').filter((x) => x !== '')) {
+    const k = decodeURIComponent(raw).replace(/~1/g, '/').replace(/~0/g, '~');
+    if (Array.isArray(v)) v = v[Number(k)];
+    else if (isObj(v)) v = v[k];
+    else return undefined;
+  }
+  return v;
+}
+
+/**
+ * The part of an input schema a test depends on: `type`; the subschemas of the arguments the test uses; `required` restricted
+ * to them and `required_other`, the names of the other required arguments; every top-level keyword that constrains the
+ * arguments together (SCHEMA_WHOLE), whole; and `refs`, every local `$ref` (`#/$defs/…`, `#/definitions/…`) reachable from
+ * those, resolved, by pointer (Pydantic and FastMCP put argument types there). A remote `$ref` enters as written.
+ */
 export function narrowSchema(schema: unknown, used: Set<string>): unknown {
   if (!isObj(schema)) return plain(schema);
   const props = isObj(schema['properties']) ? schema['properties'] : {};
   const req = Array.isArray(schema['required']) ? schema['required'].filter((x): x is string => typeof x === 'string') : [];
   const keep: Record<string, unknown> = {};
   for (const u of [...used].sort()) if (u in props) keep[u] = plain(props[u]);
-  return { type: plain(schema['type']), properties: keep, required: req.filter((r) => used.has(r)).sort(), required_other: req.filter((r) => !used.has(r)).sort() };
+  const whole: Record<string, unknown> = {};
+  for (const k of SCHEMA_WHOLE) if (k in schema) whole[k] = plain(schema[k]);
+  const refs: Record<string, unknown> = {};
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (isObj(v)) {
+      for (const [k, x] of Object.entries(v)) {
+        if (k === '$ref' && typeof x === 'string' && x.startsWith('#') && !(x in refs)) {
+          const t = pointer(schema, x);
+          refs[x] = t === undefined ? null : plain(t);
+          walk(t);
+        } else walk(x);
+      }
+    }
+  };
+  walk(keep);
+  walk(whole);
+  return { type: plain(schema['type']), properties: keep, required: req.filter((r) => used.has(r)).sort(), required_other: req.filter((r) => !used.has(r)).sort(), ...(Object.keys(whole).length ? { whole } : {}), ...(Object.keys(refs).length ? { refs } : {}) };
 }
 
 function toolPart(tools: TestHashContext['tools'], name: string, used: Set<string>): unknown {

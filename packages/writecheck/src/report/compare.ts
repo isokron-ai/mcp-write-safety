@@ -227,6 +227,8 @@ export interface Join {
   problem: { transition: Transition; why: string; facets?: Facet[] } | null;
   /** Every slot on both sides with equal hashes, with its rolled-up verdict on each side. */
   slots: SlotMove[];
+  /** Slots on both sides whose hashes differ only in the judged part of the tool entry (equal test_hash_core). */
+  subjectSlots: SlotMove[];
 }
 
 const isRegression = (m: SlotMove) => (m.before === 'held' || m.before === 'not observed') && m.after === 'violated';
@@ -234,7 +236,7 @@ const isRegression = (m: SlotMove) => (m.before === 'held' || m.before === 'not 
 /** Whether two cells' records are the same tests, slot by slot (see the header). */
 export function joinCell(b: Rec[], a: Rec[]): Join {
   const noHash = [...b.map((r) => ['before', r] as const), ...a.map((r) => ['after', r] as const)].find(([, r]) => typeof r.test_hash !== 'string');
-  if (noHash) return { problem: { transition: 'no-test-hash', why: `${noHash[0]}: the record ${slotName(noHash[1])} carries no test_hash` }, slots: [] };
+  if (noHash) return { problem: { transition: 'no-test-hash', why: `${noHash[0]}: the record ${slotName(noHash[1])} carries no test_hash` }, slots: [], subjectSlots: [] };
   const group = (rs: Rec[]) => {
     const m = new Map<string, Rec[]>();
     for (const r of rs) m.set(slotOf(r), [...(m.get(slotOf(r)) ?? []), r]);
@@ -245,6 +247,7 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
   const set = (rs: Rec[], k: 'test_hash' | 'test_hash_core') => [...new Set(rs.map((r) => r[k] ?? ''))].sort().join('\n');
   const changed: string[] = [];
   const subject: string[] = [];
+  const subjectSlots: SlotMove[] = [];
   const facets = new Set<Facet>();
   const slots: SlotMove[] = [];
   const coverage: string[] = [];
@@ -257,6 +260,7 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
       if (cores && set(x, 'test_hash_core') === set(y, 'test_hash_core')) {
         for (const f of subjectFacets(x[0]!.requirement)) facets.add(f);
         subject.push(name);
+        subjectSlots.push({ slot: name, before: rollUp(x).verdict, after: rollUp(y).verdict });
         continue;
       }
       const vb = [...new Set(x.map((r) => r.scenario.version))].join('/');
@@ -269,17 +273,17 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
     if (UNTESTED.includes(m.before) !== UNTESTED.includes(m.after)) coverage.push(`${name} ${m.before} → ${m.after}`);
     slots.push(m);
   }
-  if (changed.length) return { problem: { transition: 'test-changed', why: `the test changed: ${changed.join('; ')}` }, slots };
+  if (changed.length) return { problem: { transition: 'test-changed', why: `the test changed: ${changed.join('; ')}` }, slots, subjectSlots };
   const oneSided = (m: Map<string, Rec[]>, other: Map<string, Rec[]>) => [...m].filter(([k]) => !other.has(k)).flatMap(([, rs]) => rs).filter((r) => !UNTESTED.includes(stateOf(r)));
   const onlyB = oneSided(sb, sa);
   const onlyA = oneSided(sa, sb);
   const say = (rs: Rec[]) => rs.map((r) => `${slotName(r)} ${r.verdict}`).join(', ');
   if (onlyB.length || onlyA.length || coverage.length) {
     const parts = [onlyB.length ? `before only: ${say(onlyB)}` : '', onlyA.length ? `after only: ${say(onlyA)}` : '', coverage.length ? `tested on one build only: ${coverage.join(', ')}` : ''].filter(Boolean);
-    return { problem: { transition: 'coverage-change', why: `evidence on one build only (${parts.join('; ')})` }, slots };
+    return { problem: { transition: 'coverage-change', why: `evidence on one build only (${parts.join('; ')})` }, slots, subjectSlots };
   }
-  if (subject.length) return { problem: { transition: 'subject-changed', why: `the tool's ${[...facets].join(' and ')} changed, which is what this requirement judges (${subject.join(', ')})`, facets: [...facets] }, slots };
-  return { problem: null, slots };
+  if (subject.length) return { problem: { transition: 'subject-changed', why: `the tool's ${[...facets].join(' and ')} changed, which is what this requirement judges (${subject.join(', ')})`, facets: [...facets] }, slots, subjectSlots };
+  return { problem: null, slots, subjectSlots };
 }
 
 type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[] };
@@ -289,23 +293,33 @@ export function classify(b: Side, a: Side): Classified {
   const ma = mismatch(a);
   if (mb || ma) return { transition: 'rollup-mismatch', label: 'not comparable', why: [mb && `before: ${mb}`, ma && `after: ${ma}`].filter(Boolean).join('; ') };
   let slots: SlotMove[] = [];
+  // why: re-review 1: the slot moves (and regressions) on equal hashes are reported whatever else makes the cell not comparable.
+  const withSlots = (c: Classified): Classified => {
+    const moved = slots.filter((m) => m.before !== m.after);
+    const regs = moved.filter(isRegression).map((m) => `${m.slot} ${m.before} → violated`);
+    return { ...c, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && c.label !== 'regressed' ? { slot_regressions: regs } : {}) };
+  };
   if (b.recs && a.recs) {
     const j = joinCell(b.recs, a.recs);
     slots = j.slots;
     if (j.problem?.transition === 'subject-changed') {
-      if (j.problem.facets?.includes('schema') && b.verdict === 'violated' && a.verdict === 'held')
-        return { transition: 'schema-fixed', label: 'schema-fixed', why: `${j.problem.why}: violated before, held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` };
-      return { ...j.problem, label: 'not comparable' };
+      // why: re-review 2: schema-fixed needs every slot violated before (judged-part slots and the others) held after.
+      const open = openSlots([...slots, ...j.subjectSlots]);
+      if (j.problem.facets?.includes('schema') && b.verdict === 'violated' && a.verdict === 'held' && !open.length)
+        return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` });
+      return withSlots({ ...j.problem, label: 'not comparable', ...(open.length && b.verdict === 'violated' ? { why: `${j.problem.why}; not schema-fixed: ${open.map((m) => `${m.slot} ${m.before} → ${m.after}`).join(', ')}` } : {}) });
     }
-    if (j.problem) return { transition: j.problem.transition, why: j.problem.why, label: 'not comparable' };
+    if (j.problem) return withSlots({ transition: j.problem.transition, why: j.problem.why, label: 'not comparable' });
   } else {
     if (!b.test_hash || !a.test_hash) return { transition: 'no-test-hash', label: 'not comparable', why: `${!b.test_hash ? 'before' : 'after'}: a record of this cell carries no test_hash` };
     if (b.test_hash !== a.test_hash) return { transition: 'test-changed', label: 'not comparable', why: 'the test changed: the test hashes differ' };
   }
-  const c = verdictMove(b, a, slots);
-  const moved = slots.filter((m) => m.before !== m.after);
-  const regs = moved.filter(isRegression).map((m) => `${m.slot} ${m.before} → violated`);
-  return { ...c, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && c.label !== 'regressed' ? { slot_regressions: regs } : {}) };
+  return withSlots(verdictMove(b, a, slots));
+}
+
+/** Slots that keep a fix from being claimed: violated (or violated?) before and not held after, or violated? after. */
+function openSlots(slots: SlotMove[]): SlotMove[] {
+  return slots.filter((m) => ((m.before === 'violated' || m.before === 'violated?') && m.after !== 'held') || m.after === 'violated?');
 }
 
 function verdictMove(b: Side, a: Side, slots: SlotMove[]): Classified {
@@ -319,7 +333,7 @@ function verdictMove(b: Side, a: Side, slots: SlotMove[]): Classified {
   if (UNTESTED.includes(v0) || UNTESTED.includes(v1)) return { transition: 'coverage-change', label: 'not comparable', why: UNTESTED.includes(v1) ? `no longer tested: ${a.reason}` : `newly tested (before: ${b.reason})` };
   if (v0 === 'violated' && v1 === 'held') {
     // why: review: fixed only where every slot violated before is held after, on an equal hash.
-    const open = slots.filter((m) => m.before === 'violated' && m.after !== 'held');
+    const open = openSlots(slots);
     if (open.length) return { transition: 'partly-held', label: 'changed', why: `the cell is held after, but ${open.map((m) => `${m.slot} went violated → ${m.after}`).join(', ')}; not a fix` };
     return { transition: 'fixed', label: 'fixed', why: 'violated on the before build; every slot that was violated held on the after build, same tests' };
   }

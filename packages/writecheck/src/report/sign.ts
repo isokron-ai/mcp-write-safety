@@ -143,8 +143,9 @@ export function loadSigningKey(flag: string | undefined, env: NodeJS.ProcessEnv)
 
 /** A pinned public key from the operator: a PEM (SPKI) or `ssh-ed25519 AAAA…` text, or a file holding one. Bad input: exit 2. */
 export function publicKeyFrom(src: string): KeyObject {
-  const text = !src.includes('-----BEGIN') && !/^ssh-ed25519\s/.test(src.trim()) && existsSync(src) ? readFileSync(src, 'utf8') : src;
   try {
+    // why: re-review 4: a directory or an unreadable file is a usage error too.
+    const text = !src.includes('-----BEGIN') && !/^ssh-ed25519\s/.test(src.trim()) && existsSync(src) ? readFileSync(src, 'utf8') : src;
     return publicKeyFromText(text);
   } catch (e) {
     // why: review: a truncated or garbled key is a usage error, never a crash (exit 4) or a verdict.

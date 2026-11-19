@@ -5,12 +5,14 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import type { KeyObject } from 'node:crypto';
+
 import type { Tool } from '../checks/types.js';
 import { buildStamp } from '../core/identity.js';
 import { parseManifestText } from '../core/manifest.js';
 import { renderMarkdown } from '../report/markdown.js';
 import type { ResultsDoc } from '../report/results.js';
-import { loadSigningKey, signResults } from '../report/sign.js';
+import { signResults } from '../report/sign.js';
 import { hashExtras, stampTestHashes } from '../report/testhash.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import { readCatalogFile } from './commands.js';
@@ -126,11 +128,11 @@ export function compareCommand(o: { before: string; after: string; out: string; 
  * test_hash from this tester build, and identity.rechecked_by names the build and the time. Records kept as recorded keep the
  * hash they were made with.
  */
-export async function finishRecheck(runDir: string, o: { signKey?: string; env: NodeJS.ProcessEnv; log: (s: string) => void }): Promise<ResultsDoc> {
+export async function finishRecheck(runDir: string, o: { key: KeyObject | null; log: (s: string) => void }): Promise<ResultsDoc> {
   const dir = join(runDir, 'recheck');
   const file = join(dir, 'results.json');
   const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
-  const key = loadSigningKey(o.signKey, o.signKey ? {} : o.env);
+  const key = o.key;
   const manifestFile = join(runDir, doc.manifest.path);
   const manifest = parseManifestText(readFileSync(manifestFile, 'utf8'), manifestFile);
   const tools = readCatalogFile(join(runDir, 'catalog.json')).tools as Tool[];
