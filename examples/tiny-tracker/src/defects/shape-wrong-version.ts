@@ -11,7 +11,7 @@
 //
 // Mirrors: none published; a structured receipt built from the request
 // instead of the backend's answer (the same class as Grafana B1, B2).
-//   https://isokron.ai/research/grafana-mcp-server-audit#findings-register
+//   https://isokron.ai/research/grafana-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool, rewriteShape } from "./types.js";

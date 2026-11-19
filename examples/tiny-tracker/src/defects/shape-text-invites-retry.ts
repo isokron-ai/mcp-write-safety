@@ -14,7 +14,7 @@
 //
 // Mirrors: the unknown-outcome study (an error that invites a repeat after a
 // lost answer leads to a duplicate or a lost update) and GitHub GH-05.
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

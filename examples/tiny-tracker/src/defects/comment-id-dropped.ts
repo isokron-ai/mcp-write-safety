@@ -10,7 +10,7 @@
 // other check when all defects are on.)
 //
 // Mirrors: GitHub GH-05 (the new pull request's number and URL lost).
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
