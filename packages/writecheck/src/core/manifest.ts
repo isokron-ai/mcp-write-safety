@@ -195,10 +195,31 @@ export interface SessionInit {
   read_only: boolean;
   /** Every environment variable the arguments name (`{{env.NAME}}`). */
   env: string[];
+  /** Those given under a secret-like name: their values are secrets however short (from three characters). */
+  secret_env: string[];
 }
 
-/** Argument names that carry a credential or a connection string (session.init: their values must come from the environment). */
-const SECRET_ARG = /^(?:pass(?:word|wd|phrase)?|pwd|secret|.*[_-]secret|client[_-]?secret|token|.*[_-]token|auth|authorization|api[_-]?key|apikey|key|.*[_-]key|private[_-]?key|access[_-]?key|dsn|connection[_-]?string|conn[_-]?str(?:ing)?|connection[_-]?url|database[_-]?url|db[_-]?url|uri|url|credentials?|cookie)$/i;
+/**
+ * Is an argument name (or a command-line flag's name) secret-like: one that carries a credential or a connection string? The
+ * name is split into its parts (camelCase, `_`, `-`, `.`, digits), case ignored: a part `key`, `auth`, `url`, `uri` or `dsn`,
+ * or a name that contains `pass`, `pwd`, `secret`, `token`, `credential`, `cookie`, `apikey`, `connectionstring`, `authorization`, `oauth` or `bearer`
+ * (`Authorization`, `accessToken`, `passwd2`, `dbPassword`, `authToken`, `clientSecret`, `privateKey`, `x-api-key`).
+ */
+export function secretLikeName(name: string): boolean {
+  const parts = name
+    .replace(/^-+/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_.\-\d]+/)
+    .map((p) => p.toLowerCase())
+    .filter(Boolean);
+  if (parts.some((p) => ['key', 'auth', 'url', 'uri', 'dsn', 'creds'].includes(p))) return true;
+  const joined = parts.join('');
+  return /pass|pwd|secret|token|credential|cookie|apikey|connectionstring|connstr|authori[sz]|oauth|bearer/.test(joined);
+}
+
+/** A string that is exactly one `{{env.NAME}}`: its NAME, else null. */
+const envOnly = (x: string): string | null => /^\{\{\s*\??env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(x)?.[1] ?? null;
 
 function sessionOf(v: unknown): { init: SessionInit[] } | null {
   if (v === undefined) return null;
@@ -223,18 +244,39 @@ function sessionOf(v: unknown): { init: SessionInit[] } | null {
       else if (isObj(s)) for (const [k, x] of Object.entries(s)) (walk(k), walk(x));
     };
     walk(t.args);
-    // why: review of PR #14 (8): a credential is never written in the manifest; under a secret-like name it must come from {{env.NAME}}.
+    // why: review of PR #14 (8) and its follow-up (B): a credential is never written in the manifest; under a secret-like name
+    // (an object key, a `--flag` in a list, `name=value` in a list) it must be exactly one {{env.NAME}}, whose value is then a secret
+    // however short (secret_env).
+    const secretEnv = new Set<string>();
+    const why = 'a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest';
+    const check = (x: unknown, at: string): void => {
+      if (x === null || x === undefined || x === '' || typeof x === 'boolean') return;
+      const n = typeof x === 'string' ? envOnly(x) : null;
+      if (!n) throw fail(`${w}.args${at}`, why);
+      secretEnv.add(n);
+    };
     const lit = (v: unknown, at: string): void => {
-      if (Array.isArray(v)) return v.forEach((x, j) => lit(x, `${at}[${j}]`));
+      if (Array.isArray(v)) {
+        v.forEach((x, j) => {
+          const here = `${at}[${j}]`;
+          if (typeof x === 'string') {
+            const kv = /^(-{0,2}[A-Za-z][\w.-]*)=(.*)$/s.exec(x);
+            if (kv && secretLikeName(kv[1]!)) return check(kv[2], here);
+            const flag = /^-{1,2}([A-Za-z][\w.-]*)$/.exec(x);
+            if (flag && secretLikeName(flag[1]!) && j + 1 < v.length && (typeof v[j + 1] === 'string' || typeof v[j + 1] === 'number') && !/^-{1,2}[A-Za-z]/.test(String(v[j + 1]))) check(v[j + 1], `${at}[${j + 1}] (after ${x})`);
+          } else lit(x, here);
+        });
+        return;
+      }
       if (isObj(v)) {
         for (const [k, x] of Object.entries(v)) {
-          if (SECRET_ARG.test(k) && (typeof x === 'number' || (typeof x === 'string' && x !== '' && !/^\{\{\s*\??env\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$/.test(x)))) throw fail(`${w}.args${at}.${k}`, `a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest`);
-          lit(x, `${at}.${k}`);
+          if (secretLikeName(k) && (typeof x === 'string' || typeof x === 'number')) check(x, `${at}.${k}`);
+          else lit(x, `${at}.${k}`);
         }
       }
     };
     lit(t.args, '');
-    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env] };
+    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env], secret_env: [...secretEnv] };
   });
   return { init };
 }

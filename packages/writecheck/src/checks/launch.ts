@@ -31,7 +31,7 @@ import { declaredWriteTools, readOnlyMarkedCalls } from './coverage.js';
 import { baseVars, deleteArgs, needsVersion, type Driver } from '../core/driver.js';
 import type { ResourceSpec } from '../core/manifest.js';
 import { definitelyGone, goneFrom } from '../core/objects.js';
-import type { LaunchResult } from '../core/session.js';
+import { LaunchInitFailed, type LaunchResult } from '../core/session.js';
 import { render } from '../core/template.js';
 import { deepEqual, diff, getPath, short, withoutIgnored } from '../core/util.js';
 import { result, type Result } from '../report/verdicts.js';
@@ -83,6 +83,8 @@ interface Start {
   /** The write probe on a started server: answered as a success, and whether the object changed. */
   /** changed: null when the object did not read back around the write. */
   write: { ok: boolean; changed: boolean | null; step: string } | null;
+  /** The server started, but its session.init failed: this value was not tried. */
+  init_failed?: string;
   /** Where the write probe was accepted: every declared write tool called under the same value (spec R7-6), to tell an unrecognized value from a partial leak (MWS-CFG-3). */
   tools?: Cfg3Call[];
 }
@@ -115,8 +117,8 @@ interface LaunchObs {
   /** baseline_tools: every declared write tool called on a server started with no setting, where a value's follow-up ran (a positive control). */
   cfg1: { env: string; starts: Start[]; baseline_tools?: Cfg3Call[] } | null;
   /** invented: the misspelled tool name the tester put in the list (MWS-CFG-4's echo rule). */
-  cfg2: { env: string; kind: string; value: string; started: boolean; reason: string | null; calls?: Cfg3Call[]; list_error?: string | null; invented?: string }[];
-  cfg3: { env: string; started: boolean; reason: string | null; calls: Cfg3Call[] } | null;
+  cfg2: { env: string; kind: string; value: string; started: boolean; reason: string | null; calls?: Cfg3Call[]; list_error?: string | null; invented?: string; init_failed?: string }[];
+  cfg3: { env: string; started: boolean; reason: string | null; calls: Cfg3Call[]; init_failed?: string } | null;
   skipped?: string;
 }
 
@@ -160,7 +162,13 @@ export const launchCheck: GlobalCheck = {
     const labelOf = (t: string) => ctx.label(`LAUNCH.${t}`);
     const start = async (env: Record<string, string>, tag: string): Promise<{ label: string; r: LaunchResult }> => {
       const label = labelOf(tag);
-      return { label, r: await ctx.session.launch({ label, env }) };
+      // why: follow-up to PR #14 (A): a server whose session.init fails leaves only the setting it was started for not tested.
+      try {
+        return { label, r: await ctx.session.launch({ label, env }) };
+      } catch (e) {
+        if (e instanceof LaunchInitFailed) return { label, r: { started: false, exit_code: null, reason: e.message, stderr_tail: '', init_failed: e.message } };
+        throw e;
+      }
     };
     const b = await start({}, 'base');
     obs.baseline = { started: b.r.started, reason: why(b.r) };
@@ -171,13 +179,14 @@ export const launchCheck: GlobalCheck = {
     // Positive control: a server started with no setting must accept the probe write, or a refusal later shows nothing.
     const base = b.r.started && pr && pd ? await writeProbe(ctx, pr, pd, b.label) : null;
     await ctx.session.release([b.label]);
+    if (!b.r.started && b.r.init_failed) return { check: ID, version: VERSION, resource: '(server)', data: { ...obs, skipped: `the server started with no setting, but ${b.r.init_failed}` } };
     if (!b.r.started) return { check: ID, version: VERSION, resource: '(server)', data: { ...obs, skipped: `the server does not start with no setting: ${why(b.r)}` } };
     if (base && !(base.ok && base.changed === true)) return { check: ID, version: VERSION, resource: '(server)', data: { ...obs, skipped: 'the positive control failed: a server started with no setting did not apply the probe write, so a refused write under a setting would show nothing' } };
     if (st.read_only) {
       obs.cfg1 = { env: st.read_only.env, starts: [] };
       for (const v of cfg1Values(st.read_only)) {
         const s = await start({ [st.read_only.env]: v }, 'cfg1');
-        const rec: Start = { value: v, started: s.r.started, reason: why(s.r), write: null };
+        const rec: Start = { value: v, started: s.r.started, reason: why(s.r), write: null, ...(!s.r.started && s.r.init_failed ? { init_failed: s.r.init_failed } : {}) };
         if (s.r.started && pr && pd) rec.write = await writeProbe(ctx, pr, pd, s.label);
         await ctx.session.release([s.label]);
         // why: R7-6: an accepted write is judged here only where every declared write tool accepted one under the value;
@@ -191,6 +200,7 @@ export const launchCheck: GlobalCheck = {
           }
           const r3 = await cfg3(ctx, st.read_only.env, v, start);
           if (r3?.started) rec.tools = r3.calls;
+          else if (r3?.init_failed) rec.init_failed = r3.init_failed;
         }
         obs.cfg1.starts.push(rec);
       }
@@ -203,7 +213,7 @@ export const launchCheck: GlobalCheck = {
       if (f.kind === 'deny') {
         // why: held needs every declared write tool absent or refusing, so each is called, as in read-only mode.
         const r3 = await cfg3(ctx, f.env, bad, start, undefined, { marked: true });
-        obs.cfg2.push({ env: f.env, kind: f.kind, value: bad, started: !!r3?.started, reason: r3?.reason ?? null, calls: r3?.calls ?? [] });
+        obs.cfg2.push({ env: f.env, kind: f.kind, value: bad, started: !!r3?.started, reason: r3?.reason ?? null, calls: r3?.calls ?? [], ...(r3?.init_failed ? { init_failed: r3.init_failed } : {}) });
         continue;
       }
       const value = [keep, bad].join(f.separator);
@@ -220,7 +230,7 @@ export const launchCheck: GlobalCheck = {
           listError = short((e as Error).message, 300);
         }
       }
-      obs.cfg2.push({ env: f.env, kind: f.kind, value, started: listed, reason: s.r.started ? (listed ? null : `the server started and refused tools/list${listError ? `: ${listError}` : ''}`) : why(s.r), list_error: listError, invented: bad });
+      obs.cfg2.push({ env: f.env, kind: f.kind, value, started: listed, reason: s.r.started ? (listed ? null : `the server started and refused tools/list${listError ? `: ${listError}` : ''}`) : why(s.r), list_error: listError, invented: bad, ...(!s.r.started && s.r.init_failed ? { init_failed: s.r.init_failed } : {}) });
       await ctx.session.release([s.label]);
     }
     return { check: ID, version: VERSION, resource: '(server)', data: obs };
@@ -425,7 +435,7 @@ async function cfg3(ctx: Omit<RunContext, 'driver'>, env: string, on: string, st
     }, how);
   }
   const s = await start(envOverride ?? { [env]: on }, 'cfg3');
-  const out: NonNullable<LaunchObs['cfg3']> = { env, started: s.r.started, reason: why(s.r), calls: [] };
+  const out: NonNullable<LaunchObs['cfg3']> = { env, started: s.r.started, reason: why(s.r), calls: [], ...(!s.r.started && s.r.init_failed ? { init_failed: s.r.init_failed } : {}) };
   let listed = new Set<string>();
   if (s.r.started) {
     listed = new Set((await ctx.session.listTools(s.label)).map((t) => String(t['name'])));
@@ -505,14 +515,16 @@ export function launchVerdicts(o: LaunchObs): Result[] {
     const partial = accepted.filter((s) => s.tools && refusedSome(s));
     const open = accepted.filter((s) => !s.tools || !toolsOf(s).length);
     const noProbe = o.cfg1.starts.filter((s) => s.started && (!s.write || s.write.changed === null));
+    const initFailed = o.cfg1.starts.filter((s) => s.init_failed);
     const notes = [
-      ...o.cfg1.starts.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}: ${s.started ? (s.write ? `started; the write was ${s.write.changed ? `applied (answered ${s.write.ok ? 'as a success' : 'as an error'})` : s.write.ok ? 'answered as a success but changed nothing' : 'refused'}` : 'started; no write was tried') : `did not start (${s.reason})`}${s.tools ? `; every declared write tool called: ${s.tools.map((c) => `${c.tool} ${c.skipped ? `not called (${c.skipped})` : c.effect ? `wrote (${c.effect})` : c.observed === false ? 'outcome not read back' : 'no write'}`).join(', ')}` : ''}`),
+      ...o.cfg1.starts.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}: ${s.started ? (s.write ? `started; the write was ${s.write.changed ? `applied (answered ${s.write.ok ? 'as a success' : 'as an error'})` : s.write.ok ? 'answered as a success but changed nothing' : 'refused'}` : 'started; no write was tried') : s.init_failed ? `started, but not tried: ${s.init_failed}` : `did not start (${s.reason})`}${s.tools ? `; every declared write tool called: ${s.tools.map((c) => `${c.tool} ${c.skipped ? `not called (${c.skipped})` : c.effect ? `wrote (${c.effect})` : c.observed === false ? 'outcome not read back' : 'no write'}`).join(', ')}` : ''}`),
       ...(base ? [`Positive control: with no setting, ${base.filter((c) => c.effect).map((c) => c.tool).join(', ') || 'no tool'} wrote; ${base.filter((c) => !c.effect && !c.skipped && c.step).map((c) => c.tool).join(', ') || 'none'} wrote nothing even then, so ${base.filter((c) => !c.effect && !c.skipped && c.step).length === 1 ? 'it is' : 'they are'} not compared.`] : []),
       ...partial.map((s) => `Observation: under ${o.cfg1!.env}=${JSON.stringify(s.value)} some write tools refused and others wrote, so the server recognized the value; the writes that went through are judged by MWS-CFG-3, not here (spec R7-6).`),
       ...bad.filter((s) => (s.tools ?? []).some((c) => c.skipped || !c.step || c.observed === false)).map((s) => `Under ${o.cfg1!.env}=${JSON.stringify(s.value)}, ${(s.tools ?? []).filter((c) => c.skipped || !c.step || c.observed === false).map((c) => c.tool).join(', ')} could not be called or read back; every tool that could be accepted a write.`),
     ];
     if (bad.length) out.push(result('MWS-CFG-1', w, sc, 'violated', `The server started with writes enabled for ${bad.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}: every declared write tool that was called wrote, so the server did not recognize the value.`, { steps: bad.flatMap((s) => [s.write!.step, ...toolsOf(s).filter((c) => c.effect).map((c) => c.step!)]), notes }));
     else if (open.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', `a write was applied under ${open.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, and whether every declared write tool accepted one (an unrecognized value) or only some (a partial leak, MWS-CFG-3) was not established`, { notes }));
+    else if (initFailed.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', `the server started with ${initFailed.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, but its session.init call failed, so ${initFailed.length === 1 ? 'that value was' : 'those values were'} not tried (${initFailed[0]!.init_failed}); the other values are in the notes`, { notes }));
     else if (noProbe.length) out.push(result('MWS-CFG-1', w, sc, 'not tested', 'the server started for some values, and no write could be tried or read back (the manifest declares no resource with an update tool, or the object did not read back)', { notes }));
     else out.push(result('MWS-CFG-1', w, sc, 'held', `For every value tried the server either did not start or started with writes refused. (A value it recognised and one it treated as restrictive look the same; both are held.)`, { notes }));
   }
@@ -522,6 +534,10 @@ export function launchVerdicts(o: LaunchObs): Result[] {
     // gate-2 re-run on 378f32f (note 19, R12; rule 11): "because no tool is enabled" is read by patterns.no_tools; where only the
     // default decides, a list error that it does not match is not a refusal the tester can credit either.
     // the error's own message is read (the JSON-RPC envelope around it is not an echo to strip)
+    if (f.init_failed) {
+      out.push(result(f.kind === 'allow' ? 'MWS-CFG-4' : 'MWS-CFG-2', w, sc, 'not tested', `the server started with ${f.env}=${JSON.stringify(f.value)}, but ${f.init_failed}`));
+      continue;
+    }
     const msg = f.list_error ? listErrorMessage(f.list_error) : '';
     const echo = f.kind === 'allow' && !f.started && f.list_error && !(fromDeclaration('no_tools') && says('no_tools', msg)) ? namesInvented(f) : null;
     if (echo) out.push(result('MWS-CFG-4', w, sc, 'held', `The server started with ${f.env}=${JSON.stringify(f.value)} and answered tools/list with an error that names the misspelled tool the tester put in the list (${JSON.stringify(echo.invented)}): a refusal of the list.`, { notes: [echo.line] }));
@@ -548,7 +564,8 @@ export function launchVerdicts(o: LaunchObs): Result[] {
   }
   if (o.cfg3) {
     const w = sw(o.cfg3.env);
-    if (!o.cfg3.started) out.push(result('MWS-CFG-3', w, sc, 'not tested', `the server did not start in read-only mode (${o.cfg3.reason})`));
+    if (o.cfg3.init_failed) out.push(result('MWS-CFG-3', w, sc, 'not tested', `the server started in read-only mode, but ${o.cfg3.init_failed}`));
+    else if (!o.cfg3.started) out.push(result('MWS-CFG-3', w, sc, 'not tested', `the server did not start in read-only mode (${o.cfg3.reason})`));
     else {
       const took = o.cfg3.calls.filter((c) => c.effect);
       // why: "absent or refused" is asked of the declared write tools. A tool marked read-only is called because the mode must

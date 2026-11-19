@@ -11,7 +11,9 @@ import { initSecretsOf, redactorFor, secretsOf } from '../../src/cli/run.js';
 import { outcomeByField, usePatterns } from '../../src/checks/says.js';
 import { conflictSignal } from '../../src/checks/signals.js';
 import { brief } from '../../src/checks/types.js';
-import { declaredExtracts, extractRegexProblem, parseManifestText, type Extract } from '../../src/core/manifest.js';
+import { launchVerdicts } from '../../src/checks/launch.js';
+import { judgeRestart } from '../../src/checks/retry2.js';
+import { declaredExtracts, extractRegexProblem, parseManifestText, secretLikeName, type Extract } from '../../src/core/manifest.js';
 import { buildPlan, planHash, renderPlan } from '../../src/core/plan.js';
 import { extractDoc, extractJson, toCallResult } from '../../src/core/session.js';
 import { getPath } from '../../src/core/util.js';
@@ -203,13 +205,39 @@ test('session.init: loads with {{env.NAME}} arguments; anything else is refused'
   for (const [t, why] of bad) assert.throws(() => load(base({ top: t })), why, t);
 });
 
-test('session.init: every value it takes from the environment is a secret, from three characters', () => {
+test('session.init: env values are secrets; from three characters only under a secret-like name, from six otherwise', () => {
   const m = load(base({ top: INIT }));
   const env = { DB_HOST: 'db.internal.test', DB_USER: 'sa', DB_PASSWORD: 'pw1', DB_SCHEMA: 'tst' };
-  assert.deepEqual(initSecretsOf(m, env).sort(), ['db.internal.test', 'pw1', 'sa', 'tst']);
+  const s = initSecretsOf(m, env);
+  assert.deepEqual(s.short, ['pw1']);
+  assert.deepEqual(s.long.sort(), ['db.internal.test', 'sa', 'tst']);
   assert.deepEqual(secretsOf(m, env), [], 'not in the passthrough list');
   const red = redactorFor(m, env);
-  assert.equal(red.text('{"host":"db.internal.test","user":"sa","password":"pw1","schema":"tst"}'), '{"host":"[REDACTED]","user":"sa","password":"[REDACTED]","schema":"[REDACTED]"}');
+  assert.equal(red.text('login to db.internal.test as sa with pw1, schema tst'), 'login to [REDACTED] as sa with [REDACTED], schema tst');
+});
+
+test('secret-like names: name parts, camelCase and compounds, case ignored', () => {
+  for (const n of ['password', 'PASSWORD', 'passwd2', 'dbPassword', 'accessToken', 'authToken', 'clientSecret', 'privateKey', 'api_key', 'x-api-key', 'apiKey', 'AUTH', 'Authorization', 'credentials', 'awsCreds', 'session_cookie', 'dsn', 'DATABASE_URL', 'connectionString', 'conn_str', 'pwd', '--db-password', 'key'])
+    assert.ok(secretLikeName(n), n);
+  for (const n of ['host', 'user', 'username', 'port', 'database', 'schema', 'monkey', 'keyboard', 'author', 'name', 'timeout'])
+    assert.ok(!secretLikeName(n), n);
+});
+
+test('session.init: a literal under a secret-like name is refused in objects and in argument lists', () => {
+  const bad: [string, RegExp][] = [
+    ['{ accessToken: abc }', /args\.accessToken: a value under a secret-like name/],
+    ['{ conn: { dbPassword: hunter2 } }', /args\.conn\.dbPassword/],
+    ['{ PASSWD2: hunter2 }', /args\.PASSWD2/],
+    ['{ argv: ["--password", "lit"] }', /args\.argv\[1\] \(after --password\)/],
+    ['{ argv: ["--host", "h", "--authToken", "lit"] }', /args\.argv\[3\] \(after --authToken\)/],
+    ['{ argv: ["--client-secret=lit"] }', /args\.argv\[0\]/],
+    ['{ argv: ["PASSWORD=lit"] }', /args\.argv\[0\]/],
+    ['{ list: [ { privateKey: lit } ] }', /args\.list\[0\]\.privateKey/],
+  ];
+  for (const [a, why] of bad) assert.throws(() => load(base({ top: `session: { init: [ { tool: connect, args: ${a} } ] }` })), why, a);
+  const ok = load(base({ top: 'session: { init: [ { tool: connect, args: { argv: ["--host", "h", "--password", "{{env.P}}", "--api-key={{env.K}}", "--verbose"], dbPassword: "{{env.Q}}", user: plain } } ] }' }));
+  assert.deepEqual(ok.session!.init[0]!.secret_env.sort(), ['K', 'P', 'Q']);
+  assert.deepEqual(ok.session!.init[0]!.env.sort(), ['K', 'P', 'Q']);
 });
 
 const TOOLS = [
@@ -247,4 +275,43 @@ test('plan: session.init is listed (templates as written, credentials in literal
   // and the same manifest bytes give the same hash as before these features (only manifest_sha256 moves with the bytes)
   const again = buildPlan(load(base()), TOOLS);
   assert.equal(planHash(plain), planHash(again));
+});
+
+test('launch checks: a setting whose server failed its session.init is not tested; the other settings keep their verdicts', () => {
+  const acc = (tool: string, effect: string | null, ok = true) => ({ tool, absent: false, ok, effect, step: 's', observed: true });
+  const base = { baseline: { started: true, reason: null } };
+  const fail = 'session.init[0] (connect) failed on session LAUNCH.cfg1, before any probe on it: an error answer: refused (a server started by a check; that check is not tested)';
+  // CFG-1: one value tried and refused, one not tried
+  const refused = { value: 'yes', started: true, reason: null, write: { ok: false, changed: false, step: 's' } };
+  const notTried = { value: '1', started: false, reason: fail, write: null, init_failed: fail };
+  const c1 = launchVerdicts({ ...base, cfg1: { env: 'RO', starts: [refused, notTried] }, cfg2: [], cfg3: null } as never).find((r) => r.requirement === 'MWS-CFG-1')!;
+  assert.equal(c1.verdict, 'not tested');
+  assert.match(c1.reason, /RO="1", but its session\.init call failed/);
+  assert.ok(c1.notes.some((n) => /RO="yes": started; the write was refused/.test(n)), 'the observation already gathered is kept');
+  assert.ok(c1.notes.some((n) => /RO="1": started, but not tried/.test(n)));
+  // a violation found under another value still stands
+  const leaked = { value: 'on', started: true, reason: null, write: { ok: true, changed: true, step: 's' }, tools: [acc('t_update', 'status')] };
+  assert.equal(launchVerdicts({ ...base, cfg1: { env: 'RO', starts: [leaked, notTried] }, cfg2: [], cfg3: null } as never)[0]!.verdict, 'violated');
+  // CFG-2 / CFG-4 / CFG-3: only the affected setting
+  const v = launchVerdicts({
+    ...base,
+    cfg1: null,
+    cfg2: [
+      { env: 'DENY', kind: 'deny', value: 'x', started: false, reason: fail, calls: [], init_failed: fail },
+      { env: 'ALLOW', kind: 'allow', value: 'a,x', started: true, reason: null, list_error: null, invented: 'x' },
+    ],
+    cfg3: { env: 'RO', started: false, reason: fail, calls: [], init_failed: fail },
+  } as never);
+  const by = (id: string) => v.find((r) => r.requirement === id)!;
+  assert.equal(by('MWS-CFG-2').verdict, 'not tested');
+  assert.match(by('MWS-CFG-2').reason, /started with DENY="x", but session\.init/);
+  assert.equal(by('MWS-CFG-4').verdict, 'violated', 'the allow-list setting is judged as before');
+  assert.equal(by('MWS-CFG-3').verdict, 'not tested');
+  assert.match(by('MWS-CFG-3').reason, /started in read-only mode, but session\.init/);
+});
+
+test('MWS-RETRY-2 step (e): a server whose session.init fails after the restart leaves the step not tested', () => {
+  const v = judgeRestart({ key: 'k', t0: null, a1: null, t1: null, restart: { stop_requested: 'graceful', stop_used: 'graceful', ended_by: 'closed stdin', t_stop_ms: 0, t_stopped_ms: 1, t_ready_ms: null, started: false, reason: 'it started again, but session.init[0] (connect) failed', init_failed: 'session.init[0] (connect) failed' }, tr: null, a2: null, t2: null, t3: null, gap_ms: null, settle_ms: 0 } as never, { countable: true } as never);
+  assert.equal(v.verdict, 'not tested');
+  assert.match(v.reason, /it started again, but session\.init\[0\] \(connect\) failed/);
 });
