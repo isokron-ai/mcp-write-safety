@@ -107,13 +107,29 @@ export function extractRegexProblem(src: string): string | null {
     }
   }
   if (open < 0 || close < 0) return 'the capture group could not be located';
-  const bare = (s: string) => s.replace(/\\[bBAzZ]|[\^$]/g, '').replace(/(?:\.|\[\\s\\S\]|\[\^\]\]|\\[sSwWdD])[*+?]+\??|\{\d*,?\d*\}/g, '').trim();
-  const before = bare(src.slice(0, open));
-  let after = src.slice(close + 1).replace(/^(?:[*+?]|\{\d*,?\d*\})\??/, '');
-  after = bare(after);
-  if (!before || !after) return 'unbounded: the capture group must be delimited on both sides by text the answer must contain (e.g. "<tag>(.*?)</tag>"), or it could take the whole answer';
+  const before = required(src.slice(0, open));
+  const after = required(src.slice(close + 1).replace(/^(?:[*+?]|\{\d*,?\d*\})\??/, ''));
+  if (!before || !after) return 'unbounded: the capture group must be delimited on both sides by text the answer must contain (e.g. "<tag>(.*?)</tag>"), or it could take the whole answer; prefer between: [start, end]';
   if (/\((?:[^()\\]|\\.)*[*+](?:[^()\\]|\\.)*\)[*+{]/.test(src)) return 'unbounded: a quantified group holds a quantifier (catastrophic backtracking)';
   return null;
+}
+
+/**
+ * What a regex fragment requires the text to contain: anchors, optional atoms and groups (`x?`, `x*`, `x{0,n}`, `(?:…)?`), a group
+ * with an empty alternative (`(?:<t>|)`) and match-anything runs (`.+`, `[\s\S]+`, `\S+`) taken out. Empty: no delimiter.
+ */
+function required(s: string): string {
+  const G = String.raw`(?:[^()\\]|\\.)*`;
+  let x = s.replace(/\\[bBAzZ]|[\^$]/g, '');
+  const optGroup = new RegExp(String.raw`\((?:\?:)?${G}\)(?:[?*]|\{0(?:,\d*)?\})\??`, 'g');
+  const emptyAlt = new RegExp(String.raw`\((?:\?:)?(?:\|${G}|${G}\||${G}\|\|${G})\)`, 'g');
+  for (let prev = ''; prev !== x; ) {
+    prev = x;
+    x = x.replace(optGroup, '').replace(emptyAlt, '');
+  }
+  x = x.replace(/(?:\\.|\[(?:[^\]\\]|\\.)*\]|[^\\()|])(?:[?*]|\{0(?:,\d*)?\})\??/g, '');
+  x = x.replace(/(?:\.|\[\\s\\S\]|\[\\S\\s\]|\[\^\]\]|\\[sSwWdD])\+\??/g, '');
+  return x.replace(/\(\?:|[()|]/g, '').trim();
 }
 
 function extractOf(v: unknown, where: string): Extract {
@@ -181,6 +197,9 @@ export interface SessionInit {
   env: string[];
 }
 
+/** Argument names that carry a credential or a connection string (session.init: their values must come from the environment). */
+const SECRET_ARG = /^(?:pass(?:word|wd|phrase)?|pwd|secret|.*[_-]secret|client[_-]?secret|token|.*[_-]token|auth|authorization|api[_-]?key|apikey|key|.*[_-]key|private[_-]?key|access[_-]?key|dsn|connection[_-]?string|conn[_-]?str(?:ing)?|connection[_-]?url|database[_-]?url|db[_-]?url|uri|url|credentials?|cookie)$/i;
+
 function sessionOf(v: unknown): { init: SessionInit[] } | null {
   if (v === undefined) return null;
   const o = obj(v, 'session');
@@ -204,6 +223,17 @@ function sessionOf(v: unknown): { init: SessionInit[] } | null {
       else if (isObj(s)) for (const [k, x] of Object.entries(s)) (walk(k), walk(x));
     };
     walk(t.args);
+    // why: review of PR #14 (8): a credential is never written in the manifest; under a secret-like name it must come from {{env.NAME}}.
+    const lit = (v: unknown, at: string): void => {
+      if (Array.isArray(v)) return v.forEach((x, j) => lit(x, `${at}[${j}]`));
+      if (isObj(v)) {
+        for (const [k, x] of Object.entries(v)) {
+          if (SECRET_ARG.test(k) && (typeof x === 'number' || (typeof x === 'string' && x !== '' && !/^\{\{\s*\??env\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$/.test(x)))) throw fail(`${w}.args${at}.${k}`, `a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest`);
+          lit(x, `${at}.${k}`);
+        }
+      }
+    };
+    lit(t.args, '');
     return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env] };
   });
   return { init };

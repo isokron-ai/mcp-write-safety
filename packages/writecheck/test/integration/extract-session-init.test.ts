@@ -17,7 +17,7 @@ import { Driver } from '../../src/core/driver.js';
 import { egressFor } from '../../src/core/egress.js';
 import { parseManifestText } from '../../src/core/manifest.js';
 import { tenantGuard } from '../../src/core/safety.js';
-import { Interrupted, Session, SessionInitFailed } from '../../src/core/session.js';
+import { BudgetExhausted, Interrupted, LaunchInitFailed, Session, SessionInitFailed } from '../../src/core/session.js';
 import { getPath } from '../../src/core/util.js';
 
 const SECRET = 'pw-Zq81-very-secret-value';
@@ -192,5 +192,62 @@ test('without decode.extract the wrapped JSON is not read; without session.init 
     const r = await s.call('MAIN', 'get_row', { id: 'F1' }, { write: false });
     assert.equal(r.isError, true);
     assert.match(r.text ?? '', /not connected/);
+  });
+});
+
+test('the clean-up session runs its init after the budget is spent (counted, never refused); a failed one is a clean-up failure, retried once', async () => {
+  await withServer(manifestText({ init: INIT, budget: 2 }), ENV, async (s) => {
+    await s.call('MAIN', 'whoami', {}, { write: false });
+    await s.call('OTHER', 'whoami', {}, { write: false });
+    assert.equal(s.writes, 2);
+    await assert.rejects(s.call('THIRD', 'whoami', {}, { write: false }), BudgetExhausted);
+    const r = await s.call('CLEANUP', 'get_row', { id: 'F1' }, { write: false });
+    assert.equal(r.ok, true, 'the clean-up still works after the budget is spent');
+    assert.equal(s.writes, 3, 'its init is counted');
+    assert.equal(s.initFailure, null);
+  });
+  await withServer(manifestText({ init: INIT }), { ...ENV, DB_PASSWORD: 'wrong-password-123456' }, async (s) => {
+    const e1 = await s.call('CLEANUP', 'get_row', { id: 'F1' }, { write: false }).then(() => null, (x: Error) => x);
+    assert.ok(e1 && !(e1 instanceof SessionInitFailed), String(e1));
+    assert.match(e1.message, /^clean-up: session\.init\[0\] \(connect\) failed on session CLEANUP/);
+    assert.equal(s.initFailure, null, 'a clean-up init failure does not abort the run');
+    await assert.rejects(s.call('CLEANUP', 'get_row', { id: 'F1' }, { write: false }), /^Error: clean-up: session\.init/);
+    assert.equal(s.initCalls, 2, 'retried once');
+    await assert.rejects(s.call('CLEANUP', 'get_row', { id: 'F1' }, { write: false }), /clean-up: session\.init/);
+    assert.equal(s.initCalls, 2, 'not a third time');
+  });
+});
+
+test('init on a server a launch check starts: a failure is LaunchInitFailed (that check not tested), and the run is not aborted', async () => {
+  await withServer(manifestText({ init: INIT }), ENV, async (s) => {
+    const ok = await s.launch({ label: 'LAUNCH.ok', env: {} });
+    assert.equal(ok.started, true);
+    assert.equal(s.initCalls, 1, 'a launched server runs its init at once');
+    await s.release(['LAUNCH.ok']);
+    const e = await s.launch({ label: 'LAUNCH.bad', env: { EXPECT_PW: 'something-else' } }).then(() => null, (x: Error) => x);
+    assert.ok(e instanceof LaunchInitFailed, String(e));
+    assert.match(e.message, /that check is not tested/);
+    assert.equal(s.initFailure, null);
+    const r = await s.call('MAIN', 'whoami', {}, { write: false });
+    assert.equal(r.ok, true, 'the run goes on');
+  });
+});
+
+test('once armed, a new connection runs its init in connect(), before any call (no init inside a barrier)', async () => {
+  await withServer(manifestText({ init: INIT }), ENV, async (s) => {
+    await s.catalog('MAIN');
+    await s.connect('PAIR.a');
+    assert.equal(s.initCalls, 0, 'not armed: tools/list and connect make no tool call');
+    s.armInit();
+    await s.connect('PAIR.b');
+    assert.equal(s.initCalls, 1);
+    await s.call('PAIR.a', 'whoami', {}, { write: false });
+    assert.equal(s.initCalls, 2, 'a connection opened before arming gets its init before its first call');
+  });
+});
+
+test('the tenant guard hints at session.init when the server says it is not connected', async () => {
+  await withServer(manifestText({}), ENV, async (s, m) => {
+    await assert.rejects(tenantGuard(m, s, 'MAIN'), /not connected.*declare that call under session\.init/);
   });
 });

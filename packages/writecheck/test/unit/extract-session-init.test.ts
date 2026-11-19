@@ -7,12 +7,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { secretsOf } from '../../src/cli/run.js';
+import { initSecretsOf, redactorFor, secretsOf } from '../../src/cli/run.js';
+import { outcomeByField, usePatterns } from '../../src/checks/says.js';
 import { conflictSignal } from '../../src/checks/signals.js';
 import { brief } from '../../src/checks/types.js';
 import { declaredExtracts, extractRegexProblem, parseManifestText, type Extract } from '../../src/core/manifest.js';
 import { buildPlan, planHash, renderPlan } from '../../src/core/plan.js';
-import { extractJson, toCallResult } from '../../src/core/session.js';
+import { extractDoc, extractJson, toCallResult } from '../../src/core/session.js';
 import { getPath } from '../../src/core/util.js';
 
 const base = (o: { guardDecode?: string; readDecode?: string; serverDecode?: string; top?: string } = {}) => `mws: "0.9"
@@ -55,6 +56,11 @@ test('decode.extract: refused at load (so at plan time) when invalid or unbounde
     ['{ extract: { regex: "(.*)</a>" } }', /unbounded/],
     ['{ extract: { regex: "\\\\s*(.*?)\\\\s*$" } }', /unbounded/],
     ['{ extract: { regex: "<a>((?:x+)+)</a>" } }', /catastrophic backtracking/],
+    ['{ extract: { regex: "x?(.*)y?" } }', /unbounded/],
+    ['{ extract: { regex: "(?:<t>|)(.*)(?:</t>|)" } }', /unbounded/],
+    ['{ extract: { regex: "(?:<t>)?(.*)</t>" } }', /unbounded/],
+    ['{ extract: { regex: "(?:<t>){0,1}(.*)</t>" } }', /unbounded/],
+    ['{ extract: { regex: ".+(.*).+" } }', /unbounded/],
     ['{ extract: { between: ["<a>", ""] } }', /two non-empty strings/],
     ['{ extract: { between: ["<a>"] } }', /two non-empty strings/],
     ['{ extract: { between: ["<a>", "</a>"], regex: "<a>(.*)</a>" } }', /exactly one of between/],
@@ -67,6 +73,7 @@ test('decode.extract: refused at load (so at plan time) when invalid or unbounde
   for (const [d, why] of bad) assert.throws(() => load(base({ readDecode: d })), why, d);
   assert.equal(extractRegexProblem('<insecure-content>([\\s\\S]*?)</insecure-content>'), null);
   assert.equal(extractRegexProblem('Result: (?<doc>\\{.*\\})\\s*End'), null);
+  assert.equal(extractRegexProblem('(?:<t>|<u>)(.*?)(?:</t>|</u>)'), null, 'an alternation with no empty branch is a delimiter');
   assert.equal(extractRegexProblem('x'.repeat(600)), 'longer than 512 characters');
 });
 
@@ -82,6 +89,29 @@ test('extractJson: the JSON object or array between the markers or in the captur
   assert.equal(extractJson('<insecure-content>plain words</insecure-content>', between), undefined, 'not JSON');
   assert.equal(extractJson('<insecure-content>42</insecure-content>', between), undefined, 'a JSON scalar');
   assert.equal(extractJson("<insecure-content>{'a': 1}</insecure-content>", between), undefined, 'a Python repr is not parsed');
+  // the document may contain the end marker: later end markers are tried until the text parses
+  assert.deepEqual(extractJson('<insecure-content>{"note":"</insecure-content> inside"}</insecure-content>', between), { note: '</insecure-content> inside' });
+  assert.match((extractDoc('<insecure-content>{"a":1}', between) as { failed: string }).failed, /no end marker/);
+  assert.match((extractDoc('x', regex) as { failed: string }).failed, /does not match/);
+});
+
+test('regex extraction is bounded in time and input: the reviewer\'s patterns finish fast on hostile text', () => {
+  const cases: [string, string][] = [
+    ['<t>(.*?)</t>', '<t>'.repeat(80_000)],
+    ['<t>((?:a|a)*)</t>', '<t>' + 'a'.repeat(60) + '!'],
+    ['<t>((?:a*)*)b</t>', '<t>' + 'a'.repeat(40)],
+    ['<t>([\\s\\S]*?)</t>', '<t>'.repeat(200_000)],
+  ];
+  for (const [re, text] of cases) {
+    const t0 = Date.now();
+    const r = extractDoc(text, { regex: re, refusals: false });
+    const ms = Date.now() - t0;
+    assert.ok(ms < 1500, `${re}: ${ms} ms`);
+    assert.ok('failed' in r, re);
+  }
+  // only the first 256 KiB is searched, and the record says so
+  const big = 'x'.repeat(300_000) + '<insecure-content>{"a":1}</insecure-content>';
+  assert.match((extractDoc(big, { between: ['<insecure-content>', '</insecure-content>'], refusals: false }) as { failed: string }).failed, /only the first 262144 characters/);
 });
 
 const outcome = (result: Record<string, unknown>) => ({ message: { jsonrpc: '2.0', id: 1, result }, timed_out: false, transport_error: null, http_status: 200, rpc_id: 1, t_start_ms: 0, t_end_ms: 1 }) as never;
@@ -102,6 +132,27 @@ test('toCallResult: the extracted document is the data of an ordinary answer, re
   const sc = toCallResult(outcome({ content: [{ type: 'text', text: wrappedText({ id: 'F1' }) }], structuredContent: { id: 'S' } }), 's.1', 'MAIN', 'get_row', null, X);
   assert.equal(sc.extracted, undefined);
   assert.equal(getPath(sc.data, 'id'), 'S');
+  // declared, nothing found: recorded, and the text is not parsed some other way
+  const miss = toCallResult(outcome({ content: [{ type: 'text', text: '{"id": "plain JSON, no markers"}' }] }), 's.1', 'MAIN', 'get_row', null, X);
+  assert.equal(miss.data, null);
+  assert.equal(miss.extracted, undefined);
+  assert.deepEqual(miss.extract_failed?.by, 'between');
+  assert.match(miss.extract_failed!.reason, /start marker/);
+  assert.deepEqual(brief(miss).extract_failed, miss.extract_failed);
+});
+
+test('a declared outcome_field does not read an extracted document unless refusals: true', () => {
+  usePatterns({ patterns: {}, outcome_field: { path: 'state', applied: ['done'], not_applied: ['refused'], unknown: [] } as never });
+  try {
+    const t = wrappedText({ state: 'refused' });
+    const plain = toCallResult(outcome({ content: [{ type: 'text', text: t }] }), 's.1', 'MAIN', 'set_row', null, X);
+    assert.equal(outcomeByField(plain), null);
+    assert.equal(outcomeByField(brief(plain)), null);
+    const declared = toCallResult(outcome({ content: [{ type: 'text', text: t }] }), 's.1', 'MAIN', 'set_row', null, { ...X, refusals: true });
+    assert.equal(outcomeByField(declared)?.outcome, 'not_applied');
+  } finally {
+    usePatterns(null);
+  }
 });
 
 test('a refusal is classified on the answer as received unless refusals: true is declared', () => {
@@ -126,13 +177,13 @@ test('a refusal is classified on the answer as received unless refusals: true is
 const INIT = `session:
   init:
     - { tool: connect, args: { host: "{{env.DB_HOST}}", user: "{{env.DB_USER}}", password: "{{env.DB_PASSWORD}}", port: 5432 } }
-    - { tool: use_db, args: { name: test, password: literal-secret-value }, read_only: true }`;
+    - { tool: use_db, args: { name: "postgres://u:hunter2-secret@db/x", schema: "{{env.DB_SCHEMA}}" }, read_only: true }`;
 
 test('session.init: loads with {{env.NAME}} arguments; anything else is refused', () => {
   const m = load(base({ top: INIT }));
   assert.deepEqual(m.session!.init.map((c) => [c.tool, c.read_only, c.env]), [
     ['connect', false, ['DB_HOST', 'DB_USER', 'DB_PASSWORD']],
-    ['use_db', true, []],
+    ['use_db', true, ['DB_SCHEMA']],
   ]);
   assert.equal(load(base()).session, undefined);
   const bad: [string, RegExp][] = [
@@ -144,13 +195,21 @@ test('session.init: loads with {{env.NAME}} arguments; anything else is refused'
     ['session: { init: [ { tool: connect, read_only: 1 } ] }', /read_only: true or false/],
     ['session: { init: [ { args: {} } ] }', /tool: a non-empty string/],
     ['session: { other: 1 }', /unknown key other/],
+    ['session: { init: [ { tool: connect, args: { password: hunter2 } } ] }', /password: a value under a secret-like name is given as \{\{env\.NAME\}\}/],
+    ['session: { init: [ { tool: connect, args: { opts: { api_key: "k-{{env.K}}" } } } ] }', /opts\.api_key: a value under a secret-like name/],
+    ['session: { init: [ { tool: connect, args: { dsn: "postgres://u:p@h/db" } } ] }', /dsn: a value under a secret-like name/],
+    ['session: { init: [ { tool: connect, args: { token: 12345 } } ] }', /token: a value under a secret-like name/],
   ];
   for (const [t, why] of bad) assert.throws(() => load(base({ top: t })), why, t);
 });
 
-test('session.init: every value it takes from the environment is a secret', () => {
+test('session.init: every value it takes from the environment is a secret, from three characters', () => {
   const m = load(base({ top: INIT }));
-  assert.deepEqual(secretsOf(m, { DB_HOST: 'db.internal.test', DB_USER: 'tester', DB_PASSWORD: 'pw-123456789' }).sort(), ['db.internal.test', 'pw-123456789', 'tester']);
+  const env = { DB_HOST: 'db.internal.test', DB_USER: 'sa', DB_PASSWORD: 'pw1', DB_SCHEMA: 'tst' };
+  assert.deepEqual(initSecretsOf(m, env).sort(), ['db.internal.test', 'pw1', 'sa', 'tst']);
+  assert.deepEqual(secretsOf(m, env), [], 'not in the passthrough list');
+  const red = redactorFor(m, env);
+  assert.equal(red.text('{"host":"db.internal.test","user":"sa","password":"pw1","schema":"tst"}'), '{"host":"[REDACTED]","user":"sa","password":"[REDACTED]","schema":"[REDACTED]"}');
 });
 
 const TOOLS = [
@@ -160,7 +219,7 @@ const TOOLS = [
   { name: 'use_db', inputSchema: { type: 'object' } },
 ] as never[];
 
-test('plan: session.init is listed (secret-named literals masked) and counted; a manifest without it keeps its plan hash', () => {
+test('plan: session.init is listed (templates as written, credentials in literals masked) and counted; a manifest without it keeps its plan hash', () => {
   const m = load(base({ top: INIT }));
   const p = buildPlan(m, TOOLS);
   assert.deepEqual(
@@ -170,18 +229,17 @@ test('plan: session.init is listed (secret-named literals masked) and counted; a
       ['use_db', false],
     ],
   );
-  assert.equal(getPath(p.session_init![1]!.args, 'password'), '[REDACTED]');
-  assert.equal(getPath(p.session_init![0]!.args, 'password'), '[REDACTED]', 'a secret-named argument is masked even as a template');
+  assert.equal(getPath(p.session_init![0]!.args, 'password'), '{{env.DB_PASSWORD}}', 'a template is shown as written');
+  assert.equal(getPath(p.session_init![1]!.args, 'name'), 'postgres://u:[REDACTED]@db/x', 'a credential in a literal URL is masked');
   const text = renderPlan(p, planHash(p));
   assert.match(text, /Session init: on every MCP session/);
   assert.match(text, /- connect .* \(counted as a write\)/);
-  assert.match(text, /- use_db .* \(read-only, not counted\)/);
-  assert.ok(!text.includes('literal-secret-value'));
+  assert.match(text, /- use_db .* \(declared read-only, not counted\)/);
+  assert.ok(!text.includes('hunter2-secret'));
   assert.ok(p.warnings.some((w) => /session\.init: connect is not declared read-only/.test(w)));
-  // a tool marked readOnlyHint: true is not counted
+  // a server's readOnlyHint does not exempt an init call: only the operator's read_only does
   const ro = buildPlan(m, TOOLS.map((t) => ((t as { name: string }).name === 'connect' ? { ...(t as object), annotations: { readOnlyHint: true } } : t)) as never[]);
-  assert.equal(ro.session_init![0]!.counted, false);
-  assert.ok(!ro.warnings.some((w) => /session\.init/.test(w)));
+  assert.equal(ro.session_init![0]!.counted, true);
   // without session.init: no member, no warning, no line
   const plain = buildPlan(load(base()), TOOLS);
   assert.equal(Object.hasOwn(plain, 'session_init'), false);

@@ -120,13 +120,17 @@ export interface PlanOptions {
   catalog?: { tools: unknown[]; prompts?: unknown[]; resourceTemplates?: unknown[] };
 }
 
-/** session.init as the plan states it: a call counts as a write unless declared read_only or marked readOnlyHint: true in tools/list. */
-export function sessionInitPlan(manifest: Manifest, tools: Tool[]): Plan['session_init'] {
+/**
+ * session.init as the plan states it: a call counts as a write unless the operator declares it read_only (a server's
+ * readOnlyHint does not exempt it). Arguments are shown as written: a `{{env.NAME}}` template as is (it is no secret), any
+ * other string through the redactor's shape rules (a credential in a URL, a known key shape).
+ */
+export function sessionInitPlan(manifest: Manifest, _tools: Tool[] = []): Plan['session_init'] {
   const inits = manifest.session?.init;
   if (!inits?.length) return undefined;
-  const ro = (name: string) => tools.some((t) => t.name === name && (t as { annotations?: { readOnlyHint?: unknown } }).annotations?.readOnlyHint === true);
   const mask = new Redactor([]);
-  return inits.map((c) => ({ tool: c.tool, args: mask.value(c.args), counted: !c.read_only && !ro(c.tool) }));
+  const show = (v: unknown): unknown => (typeof v === 'string' ? (/\{\{/.test(v) ? v : mask.text(v)) : Array.isArray(v) ? v.map(show) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, show(x)])) : v);
+  return inits.map((c) => ({ tool: c.tool, args: show(c.args), counted: !c.read_only }));
 }
 
 export function buildPlan(manifest: Manifest, tools: Tool[], hosts: string[] = [], o: PlanOptions = {}): Plan {
@@ -150,7 +154,7 @@ export function buildPlan(manifest: Manifest, tools: Tool[], hosts: string[] = [
   const not_built: NotRun[] = REQUIREMENTS.filter((r) => NOT_BUILT[r.id]).map((r) => ({ requirement: r.id, verdict: 'not tested' as const, reason: NOT_BUILT[r.id]! }));
   const writes = resources.reduce((n, r) => n + r.setup_writes + r.checks.reduce((m, c) => m + c.writes, 0), 0) + global.reduce((n, c) => n + c.writes, 0);
   const init = sessionInitPlan(manifest, tools);
-  const initWarn = init?.some((c) => c.counted) ? [`session.init: ${init.filter((c) => c.counted).map((c) => c.tool).join(', ')} ${init.filter((c) => c.counted).length === 1 ? 'is' : 'are'} not declared read-only, so each call counts against the write budget, once per MCP session the run opens; that number depends on the run (concurrency pairs, restarts, launch checks, clean-up), so these calls are not in "at most" above, and the run stops if they would exceed the budget`] : [];
+  const initWarn = init?.some((c) => c.counted) ? [`session.init: ${init.filter((c) => c.counted).map((c) => c.tool).join(', ')} ${init.filter((c) => c.counted).length === 1 ? 'is' : 'are'} not declared read-only (session.init[].read_only), so each call counts against the write budget, once per MCP session the run opens; that number depends on the run (concurrency pairs, restarts, launch checks, clean-up), so these calls are not in "at most" above, and the run stops if they would exceed the budget (the clean-up's own init is counted but never refused)`] : [];
   const creates = resources.reduce((n, r) => n + r.setup_creates + r.checks.reduce((m, c) => m + c.creates, 0), 0) + global.reduce((n, c) => n + c.creates, 0);
   return {
     format: 'mws-plan/1',
@@ -186,7 +190,7 @@ export function renderPlan(p: Plan, hash: string): string {
   if (p.session_init?.length) {
     L.push('');
     L.push('Session init: on every MCP session the run opens, after the handshake and before its first other tools/call (tools/list alone does not trigger it); a failure stops the run:');
-    for (const c of p.session_init) L.push(`  - ${c.tool} ${JSON.stringify(c.args)} (${c.counted ? 'counted as a write' : 'read-only, not counted'})`);
+    for (const c of p.session_init) L.push(`  - ${c.tool} ${JSON.stringify(c.args)} (${c.counted ? 'counted as a write' : 'declared read-only, not counted'})`);
   }
   for (const r of p.resources) {
     L.push('');

@@ -88,14 +88,17 @@ export interface RunOutcome {
 export function secretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
   const names = new Set<string>([...m.server.env_passthrough, ...Object.values(m.server.headers_env).map((h) => h.env)]);
   for (const r of m.resources) if (r.control?.auth) names.add(r.control.auth.env);
-  // why: CLI feature B: every value a session.init call takes from the environment is a secret (connection settings, a password).
-  for (const c of m.session?.init ?? []) for (const n of c.env) names.add(n);
   return [...names].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v.length >= 6);
+}
+
+/** Every value a session.init call takes from the environment: secrets however short (connection settings, a password). */
+export function initSecretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
+  return [...new Set((m.session?.init ?? []).flatMap((c) => c.env))].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v !== '');
 }
 
 export function redactorFor(m: Manifest, env: NodeJS.ProcessEnv): Redactor {
   const paths: ScrubPath[] = [{ prefix: resolve(process.cwd()), role: 'WORKSPACE' }, { prefix: homedir(), role: 'HOME' }];
-  return new Redactor(secretsOf(m, env), { paths });
+  return new Redactor(secretsOf(m, env), { paths, short: initSecretsOf(m, env) });
 }
 
 export function egressOf(m: Manifest, env: NodeJS.ProcessEnv) {
@@ -256,6 +259,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     hash = planHash(plan);
     o.log(renderPlan(plan, hash));
     await confirm(manifest, hash, { ...(o.confirmTarget !== undefined ? { confirmTarget: o.confirmTarget } : {}), ...(o.planHash !== undefined ? { planHash: o.planHash } : {}), interactive: o.interactive, ...(o.ask ? { ask: o.ask } : {}) });
+    // why: CLI feature B: from the confirmed plan on, every new connection runs session.init at once (none before: plan makes no tool call).
+    session.armInit();
     ledger = new Ledger(join(o.stateDir, runId), runId, (s) => red.text(s));
     ledger.append({ kind: 'run_start', run_id: runId, prefix, manifest_sha256: manifest.source.sha256, hosts: plan.target.hosts });
     const g = await tenantGuard(manifest, session, 'MAIN', { onCall: onGuardCall });
