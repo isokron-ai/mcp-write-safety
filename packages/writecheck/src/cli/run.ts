@@ -201,6 +201,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   let protocol: string | null = null;
   /** Bystander losses outside any check's records (review S3): a failed set-up, or after the last check. */
   const runLosses: (Loss & { where: string })[] = [];
+  /** Corpus target t14: a declared fixture the bystander inventory of another resource lists under that resource's key, said in safety.warnings. */
+  const inventoryWarnings: string[] = [];
   let finalInventory: (() => Promise<void>) | null = null;
 
   let cleanupRun: Promise<CleanupReport | null> | null = null;
@@ -326,6 +328,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       // why: a scope resource whose scopes another bracketed resource's inventory lists (as scope entries) is not listed twice.
       for (const r of listable) if (r.selector?.send_empty_forms || !listable.some((x) => x !== r && x.scope?.resource === r.name)) bracketed.push(r);
       for (const r of bracketed) lastInv.set(r.name, start.get(r.name)!);
+      for (const r of bracketed) for (const f of start.get(r.name)!.covered.fixtures ?? []) inventoryWarnings.push(`${r.name}: in the list of objects outside the tester's own, ${f}; any other change to it, and its loss, is reported`);
       startInv = start;
     }
     finalInventory = async () => {
@@ -776,7 +779,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     cleanup: cl ? { deleted: cl.deleted, failed: cl.failed, unknown: cl.unknown, stopped: cl.stopped, prefix: cl.prefix } : null,
     observations,
     evidence: { capture: cap, checksums: 'SHA256SUMS', signature: null },
-    safety: { canaries, fixtures_restored: fixturesRestored, gate: gate ? { route: gate.route, description: gate.describe() } : null, protocol, rerun_of: o.rerunOf ?? null, ...(plan?.warnings?.length ? { warnings: plan.warnings } : {}), ...(runLosses.length ? { run_losses: runLosses } : {}) },
+    safety: { canaries, fixtures_restored: fixturesRestored, gate: gate ? { route: gate.route, description: gate.describe() } : null, protocol, rerun_of: o.rerunOf ?? null, ...(plan?.warnings?.length || inventoryWarnings.length ? { warnings: [...(plan?.warnings ?? []), ...inventoryWarnings] } : {}), ...(runLosses.length ? { run_losses: runLosses } : {}) },
   };
   // why: F8 (before/after pages): each record says which test it is; the run says which tester, test and build it was.
   const stamp = buildStamp();
