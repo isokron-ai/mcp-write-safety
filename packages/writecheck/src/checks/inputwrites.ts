@@ -12,7 +12,7 @@
  *   object      a scratch object; after any call that may have written it, the next call gets a fresh scratch object
  *   confirm     as object; an input_required answer is intermediate: where the declaration gives answers for every input
  *               request it makes (input_required[].answers), the call is retried with them and the final result is judged;
- *               otherwise the answer is read as the tool taking the call, and MWS-IN-2 and MWS-IN-7 are not judged on it
+ *               otherwise what the call took is not judged (MWS-IN-1, IN-2, IN-3, IN-6, IN-7); a refusal is final and judged
  *   delete      a scratch object, made again whenever a call removed it
  *   multi       items of the tester's own in a container the tester created (multiGate decides whether the tool may be sent)
  *   selector    only under the operator's disposable-backend declaration (selector.send_empty_forms), with selector.narrow, and
@@ -282,6 +282,63 @@ function fieldPath(res: ResourceSpec, prop: string, obj: unknown): string | null
   return res.fields?.find((f) => f.arg === prop)?.path ?? (isObj(obj) && Object.hasOwn(obj, prop) ? prop : null);
 }
 
+/** A call's outcome is unknown: it timed out, the connection broke, or the result is not a final one. */
+const callUnknown = (r: CallResult): boolean => r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete');
+
+/** What one send leaves for the next step of the probes. */
+export interface SendState {
+  /** Whether the next send is covered by spec 7.3, rule 1 (bracketed by the bystander inventory). */
+  covered: boolean;
+  /** The id of the object the last create-kind send made, or null. */
+  lastCreated: unknown;
+  /** The last send ended on an input_required answer (not retried, or asked again on the retry): intermediate, not final. */
+  lastIntermediate: boolean;
+}
+
+/**
+ * One call of the tool under probe, as every probe, control and base call is sent: bracketed by the bystander inventory where
+ * `st.covered`, a create read back by its id, and an input_required answer of a confirmation tool retried with the declared answers.
+ * `wrote` is called where the call may have written (any call but a base call), so the next call gets a fresh object.
+ */
+export function makeSend(ctx: RunContext, res: ResourceSpec, c: WriteCall, label: string, o: WriteToolObs, st: SendState, wrote: () => void): (args: Obj, tag: string, o2?: { base?: boolean }) => Promise<CallResult> {
+  const tool = c.tool;
+  return async (args, tag, o2 = {}) => {
+    const step = ctx.session.stepId(`inw.${tool}.${tag}`);
+    const inv0 = st.covered ? await inventory(ctx, res, label, { readById: true }) : null;
+    let r: CallResult;
+    st.lastCreated = null;
+    if (c.kind === 'create') {
+      const cr = await createVerified(ctx.session, ctx.ledger, res, ctx.prefix, { tool, args, purpose: `MWS-IN probe of ${tool} (${tag})`, label, step, ...(c.meta ? { meta: c.meta } : {}) });
+      r = cr.call ?? ({ ok: false, isError: false, rpc_error: null, text: cr.reason, timed_out: false, transport_error: 'not sent', step } as unknown as CallResult);
+      st.lastCreated = cr.id ?? (r.ok ? idFromResult(res, r) : null);
+    } else r = await ctx.session.call(label, tool, args, { step, write: true, ...(c.meta ? { meta: c.meta } : {}) });
+    // why: an input_required answer is intermediate, not final: what the tool does with the arguments (takes a value, says an
+    // argument was not used) may show only in the completed result. Where the declaration answers every input request, the call
+    // is retried with those answers and the final result is judged. Otherwise the answer is read as the tool taking the call (a
+    // refusal would have been final), and st.lastIntermediate marks it so the verdicts do not judge what it took.
+    st.lastIntermediate = false;
+    if (c.kind === 'confirm' && r.result_type === 'input_required') {
+      const answers = declaredAnswers(res, tool, r.input_required?.inputRequests ?? null);
+      if (answers) {
+        const params: Record<string, unknown> = { inputResponses: answers, ...(r.input_required?.requestState ? { requestState: r.input_required.requestState } : {}) };
+        r = await ctx.session.call(label, tool, args, { step: ctx.session.stepId(`inw.${tool}.${tag}.answered`), write: true, ...(c.meta ? { meta: c.meta } : {}), params });
+      }
+      if (r.result_type === 'input_required') {
+        st.lastIntermediate = true;
+        r = { ...r, ok: true, result_type: null };
+      }
+    }
+    if (inv0) {
+      o.inventory_calls++;
+      o.losses.push(await compare(ctx, res, label, inv0, await inventory(ctx, res, label, { readById: true }), { selector: c.kind === 'selector' }));
+    }
+    // why: a base call may be repeated on the same object (control (a) is sent to the object the probe went to); any other call that
+    // may have written gives the next call a fresh object.
+    if (!o2.base && (r.ok || callUnknown(r))) wrote();
+    return r;
+  };
+}
+
 async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label: string, o: WriteToolObs, out: ProbeObs[]): Promise<void> {
   const tool = c.tool;
   const t = toolByName(ctx.tools, tool)!;
@@ -371,47 +428,9 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   };
 
   // --- one call ---------------------------------------------------------------------------------------------------------
-  const unknownOutcome = (r: CallResult) => r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete');
-  let lastCreated: unknown = null;
-  /** The last send ended on an input_required answer (not retried, or asked again on the retry): intermediate, not final. */
-  let lastIntermediate = false;
-  /** Whether the next send is covered by spec 7.3, rule 1 (bracketed by the bystander inventory). */
-  let covered = false;
-  const send = async (args: Obj, tag: string, o2: { base?: boolean } = {}): Promise<CallResult> => {
-    const step = ctx.session.stepId(`inw.${tool}.${tag}`);
-    const inv0 = covered ? await inventory(ctx, res, label, { readById: true }) : null;
-    let r: CallResult;
-    lastCreated = null;
-    if (c.kind === 'create') {
-      const cr = await createVerified(ctx.session, ctx.ledger, res, ctx.prefix, { tool, args, purpose: `MWS-IN probe of ${tool} (${tag})`, label, step, ...(c.meta ? { meta: c.meta } : {}) });
-      r = cr.call ?? ({ ok: false, isError: false, rpc_error: null, text: cr.reason, timed_out: false, transport_error: 'not sent', step } as unknown as CallResult);
-      lastCreated = cr.id ?? (r.ok ? idFromResult(res, r) : null);
-    } else r = await ctx.session.call(label, tool, args, { step, write: true, ...(c.meta ? { meta: c.meta } : {}) });
-    // why: an input_required answer is intermediate, not final: what the tool says about the arguments (a notice that one was not
-    // used, say) may come only in the completed result. Where the declaration answers every input request, the call is retried
-    // with those answers and the final result is judged. Otherwise the answer is read as the tool taking the call (a refusal
-    // would have been final), and the probe is marked so MWS-IN-2 and MWS-IN-7 are not judged on it.
-    lastIntermediate = false;
-    if (c.kind === 'confirm' && r.result_type === 'input_required') {
-      const answers = declaredAnswers(res, tool, r.input_required?.inputRequests ?? null);
-      if (answers) {
-        const params: Record<string, unknown> = { inputResponses: answers, ...(r.input_required?.requestState ? { requestState: r.input_required.requestState } : {}) };
-        r = await ctx.session.call(label, tool, args, { step: ctx.session.stepId(`inw.${tool}.${tag}.answered`), write: true, ...(c.meta ? { meta: c.meta } : {}), params });
-      }
-      if (r.result_type === 'input_required') {
-        lastIntermediate = true;
-        r = { ...r, ok: true, result_type: null };
-      }
-    }
-    if (inv0) {
-      o.inventory_calls++;
-      o.losses.push(await compare(ctx, res, label, inv0, await inventory(ctx, res, label, { readById: true }), { selector: c.kind === 'selector' }));
-    }
-    // why: a base call may be repeated on the same object (control (a) is sent to the object the probe went to); any other call that
-    // may have written gives the next call a fresh object.
-    if (!o2.base && (r.ok || unknownOutcome(r))) fx.dirty = true;
-    return r;
-  };
+  const unknownOutcome = callUnknown;
+  const sx: SendState = { covered: false, lastCreated: null, lastIntermediate: false };
+  const send = makeSend(ctx, res, c, label, o, sx, () => void (fx.dirty = true));
   /** Paths the call changed, per fixture object (`i:path`; `i:(gone)` for an object that no longer reads back). */
   const changed = (pre: unknown[], post: unknown[]): Set<string> => {
     const s = new Set<string>();
@@ -432,8 +451,8 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   /** The object or element one create-like call made, read back (null where it cannot be found). */
   const madeBy = async (marker: string): Promise<unknown> => {
     if (c.kind === 'append') return appended(marker);
-    if (lastCreated === null) return null;
-    const r = await reader(lastCreated).readOnce(label, ctx.session.stepId(`inw.${tool}.made`));
+    if (sx.lastCreated === null) return null;
+    const r = await reader(sx.lastCreated).readOnce(label, ctx.session.stepId(`inw.${tool}.made`));
     return r.ok ? r.obj : null;
   };
   /** What an accepted extra argument did, beside what the base call does (spec MWS-IN-2: the read-back). */
@@ -444,7 +463,7 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   const never = neverProbed(c, res);
   for (const [arg, why] of never) if (Object.hasOwn(propsSchema, arg)) o.unprobed.push({ arg, why });
   if (!disposable) for (const k of targets) if (!never.has(k) && Object.hasOwn(propsSchema, k)) o.unprobed.push({ arg: k, why: 'it names the objects the call acts on (an identifier or a selector), and such a probe is sent only under the operator\'s declaration that every object is disposable (spec 7.3, rule 1)' });
-  covered = inventoryCovers(c.kind, true);
+  sx.covered = inventoryCovers(c.kind, true);
   const st0 = await ensure();
   if (!st0.ok) return void (o.not_probed = st0.why);
   const r0 = await send({ ...st0.base }, 'base_call', { base: true });
@@ -480,7 +499,7 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
     // spec 7.3, rule 1: on a tool that deletes or acts on several objects every call after the declared base call is bracketed
     // (the probe, its controls, a base call with the counterpart's value), not only one that changes an identifier or a selector:
     // an argument that names no target (one that widens the call to every object, or forces it) can reach bystanders too.
-    covered = inventoryCovers(c.kind, false);
+    sx.covered = inventoryCovers(c.kind, false);
     let st = await ensure();
     if (!st.ok) {
       out.push(blank(`not sent: ${st.why}`));
@@ -527,8 +546,9 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
     // Quotes are cut where they are made (short, around, saidBy, the review evidence).
     const po: ProbeObs = { tool, role: 'write', prop: p.prop, name: p.name, requirement: p.requirement, value, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text, step: r.step, ...(unknownOutcome(r) ? { indeterminate: true } : {}) };
     if (p.requirement === 'MWS-IN-1') Object.assign(po, { sent: p.value, type: p.type, required: !!p.required });
-    // why: an extra argument's fate (used, refused, said not to be used) is known only from a final result.
-    if (lastIntermediate && p.requirement === 'MWS-IN-2') Object.assign(po, { intermediate: true, control: INTERMEDIATE });
+    // why: an input_required answer is intermediate, not final: whether the tool takes the value (MWS-IN-1, IN-3, IN-6) or the extra
+    // argument (MWS-IN-2, IN-7) shows only in a final result. A refusal is final and never gets here (only a taken call is rewritten).
+    if (sx.lastIntermediate) Object.assign(po, { intermediate: true, control: INTERMEDIATE });
     if (r.ok && !po.indeterminate && !po.intermediate) await accepted(p, po, st.before, st.marker);
     if (!r.ok && !po.indeterminate) await controls(p, po, r, cp, trigger && !viaBase, baseNote, viaBase);
     out.push(po);

@@ -331,8 +331,9 @@ export interface ProbeObs {
   /** Timed out or the connection broke: the outcome is unknown, so the probe is not judged. */
   indeterminate?: boolean;
   /**
-   * An MWS-IN-2 probe answered with input_required and no final result (the declaration gives no answers to retry with, or the
-   * retry asked again): whether the argument was used or said not to be is not known, so MWS-IN-2 and MWS-IN-7 do not judge it.
+   * A probe answered with input_required and no final result (the declaration gives no answers to retry with, or the retry asked
+   * again): whether the tool takes the value or the argument is not known, so MWS-IN-1, IN-2, IN-3, IN-6 and IN-7 do not judge it.
+   * Only a taken call is so marked; a refusal is final.
    */
   intermediate?: boolean;
   /** MWS-IN-1 probes. */
@@ -927,11 +928,26 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
     const unknown = mine.filter((p) => p.indeterminate);
     const asOmitted = mine.filter((p) => p.as_omitted);
     const judged = mine.filter((p) => !setAside.includes(p) && !p.indeterminate && !p.as_omitted && !p.cannot_tell && !p.intermediate);
-    const interim = mine.filter((p) => p.intermediate && p.requirement === 'MWS-IN-2');
+    const interimOf = (req: string): ProbeObs[] => mine.filter((p) => p.intermediate && p.requirement === req);
+    // why: an input_required answer is intermediate: what the tool does with a value or an argument shows only in a final result.
+    const interimWhyOf = (xs: ProbeObs[]): string => `${INTERMEDIATE} (${tool} answered ${xs.slice(0, 4).map((p) => `${p.prop}=${p.value} (${p.name})`).join(', ')}${xs.length > 4 ? ', …' : ''} with input_required, and no final result was seen: the declaration gives no answers for the input request, or the retry asked again)`;
+    /** Records from `from` on: a held one becomes not tested (not every probe was judged); any other gets the note. */
+    const interimApply = (from: number, xs: ProbeObs[]): void => {
+      if (!xs.length) return;
+      const why = interimWhyOf(xs);
+      for (let i = from; i < out.length; i++) {
+        const r = out[i]!;
+        if (r.verdict === 'held') out[i] = result(r.requirement, w, sc, 'not tested', why, { steps: xs.map((p) => p.step), notes: r.notes });
+        else if (r.verdict === 'violated') r.notes.push(`${why}.`);
+      }
+    };
+    const interim = interimOf('MWS-IN-2');
     const cannot = mine.filter((p) => p.cannot_tell);
     const firstOut = out.length;
     // MWS-IN-1 (meaning rule) and MWS-IN-6 (any accepted probe), on the same probes.
     {
+      const firstIn1 = out.length;
+      const interim1 = interimOf('MWS-IN-1');
       const built = mine.filter((p) => p.requirement === 'MWS-IN-1');
       const cases = judged.filter((p) => p.requirement === 'MWS-IN-1');
       const accepted = cases.filter((p) => p.ok);
@@ -950,6 +966,8 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
       } else if (!built.length) {
         out.push(result('MWS-IN-1', w, sc, 'not applicable', `the input schema of ${tool} declares no typed argument that the tester may probe`, { notes }));
         out.push(result('MWS-IN-6', w, sc, 'not applicable', `the input schema of ${tool} declares no typed argument that the tester may probe`, { notes }));
+      } else if (!cases.length && interim1.length) {
+        for (const r of ['MWS-IN-1', 'MWS-IN-6'] as const) out.push(result(r, w, sc, 'not tested', interimWhyOf(interim1), { steps: interim1.map((p) => p.step), notes }));
       } else if (!cases.length) {
         for (const r of ['MWS-IN-1', 'MWS-IN-6'] as const) out.push(result(r, w, sc, 'not tested', `every probe of ${tool} was set aside or had an unknown outcome`, { notes }));
       } else {
@@ -960,6 +978,7 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
         // why: a null treated as not sent was dropped, not rejected: it counts against MWS-IN-6 (review).
         if (accepted.length + dropped.length) out.push(result('MWS-IN-6', w, sc, 'violated', `${tool} accepted or dropped ${accepted.length + dropped.length} of ${cases.length + dropped.length} value(s) of a type its schema does not declare, instead of rejecting them: ${[...accepted, ...dropped].slice(0, 6).map((p) => `${p.prop}=${p.value} (${p.name})`).join('; ')}${accepted.length + dropped.length > 6 ? '; …' : ''} (${listed}).`, { numbers: { probes: cases.length + dropped.length, accepted: accepted.length, dropped: dropped.length }, steps: [...accepted, ...dropped].map((p) => p.step), notes }));
         else out.push(result('MWS-IN-6', w, sc, 'held', `${tool} rejected all ${cases.length} value(s) of another type (${listed}).`, { numbers: { probes: cases.length }, notes }));
+        interimApply(firstIn1, interim1);
       }
     }
     // MWS-IN-2 (MUST: not dropped silently) and MWS-IN-7 (SHOULD: rejected), on the same two probes.
@@ -969,12 +988,11 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
       // why: spec MWS-IN-2 (R7-5): the record states the name and the value of each extra argument sent.
       const sentLine = built.length ? [`Extra arguments sent: ${built.map((p) => `${p.name === 'misspelled_argument' ? 'a misspelling' : 'an unrelated name'}, ${p.prop}=${p.value}`).join('; ')}${built.some((p) => p.name === 'misspelled_argument') ? '' : ' (no argument long enough to misspell, so only the unrelated probe)'}.`] : [];
       // why: an input_required answer is intermediate: what the tool does with the argument shows only in a final result.
-      const interimWhy = interim.length ? `${INTERMEDIATE} (${tool} answered ${interim.map((p) => `${p.prop} (${p.name})`).join(' and ')} with input_required, and no final result was seen: the declaration gives no answers for the input request${interim.length > 1 ? 's' : ''}, or the retry asked again)` : '';
       const firstIn2 = out.length;
       if (!built.length) {
         for (const r of ['MWS-IN-2', 'MWS-IN-7'] as const) out.push(result(r, w, sc, 'not applicable', `the input schema of ${tool} allows additional properties`));
       } else if (!cases.length && interim.length) {
-        for (const r of ['MWS-IN-2', 'MWS-IN-7'] as const) out.push(result(r, w, sc, 'not tested', interimWhy, { steps: interim.map((p) => p.step), notes: sentLine }));
+        for (const r of ['MWS-IN-2', 'MWS-IN-7'] as const) out.push(result(r, w, sc, 'not tested', interimWhyOf(interim), { steps: interim.map((p) => p.step), notes: sentLine }));
       } else if (!cases.length) {
         for (const r of ['MWS-IN-2', 'MWS-IN-7'] as const) out.push(result(r, w, sc, 'not tested', `every extra-argument probe of ${tool} had an unknown outcome`, { notes: sentLine }));
       } else {
@@ -1002,13 +1020,7 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
         if (acc.length) out.push(result('MWS-IN-7', w, sc, 'violated', `${tool} accepted ${acc.map((p) => `${p.prop} (${p.name})`).join(' and ')}, an argument its schema does not define, instead of rejecting it.`, { steps: acc.map((p) => p.step), notes: sentLine }));
         else out.push(result('MWS-IN-7', w, sc, 'held', `${tool} rejected each of the ${cases.length} extra argument(s).`, { notes: sentLine }));
         // why: "held" needs every extra argument judged; one with only an intermediate answer leaves the record not tested.
-        if (interim.length) {
-          for (let i = firstIn2; i < out.length; i++) {
-            const r = out[i]!;
-            if (r.verdict === 'held') out[i] = result(r.requirement, w, sc, 'not tested', interimWhy, { steps: interim.map((p) => p.step), notes: r.notes });
-            else r.notes.push(`${interimWhy}.`);
-          }
-        }
+        interimApply(firstIn2, interim);
       }
     }
     for (const req of ['MWS-IN-3'] as const) {
@@ -1017,12 +1029,16 @@ export function schemaVerdicts(probes: ProbeObs[], res: ResourceSpec, tools: Too
       const notes = [...unsent(req), ...setAside.filter((p) => p.requirement === req).map((p) => ruleNote('STATUS_IN_RESULT', `${p.prop}=${p.value} (${p.name}) returned success carrying an HTTP error status`)), ...unknown.filter((p) => p.requirement === req).map((p) => `${p.prop}=${p.value} (${p.name}): the outcome is unknown (timeout or broken connection); not judged`)];
       // why: IN-1 applies to a declared type and IN-3 to a declared bound or enumeration; a schema with none makes the condition false.
       const built = mine.filter((p) => p.requirement === req);
+      const interim3 = interimOf(req);
+      const firstIn3 = out.length;
       if (!built.length && cut[tool]) out.push(result(req, w, sc, 'not tested', `the probe list for ${tool} was cut at limits.max_fuzz_cases (${cut[tool]!.sent} of ${cut[tool]!.total} sent) before any ${req} probe (raise the limit)`, { notes }));
       else if (!built.length && (notSent.some((p) => p.requirement === req) || prot.length)) out.push(result(req, w, sc, 'not tested', `no constraint probe of ${tool} could be sent`, { notes }));
       else if (!built.length) out.push(result(req, w, sc, 'not applicable', `the input schema of ${tool} declares no constraint keyword (that the tester may probe)`, { notes }));
+      else if (!cases.length && interim3.length) out.push(result(req, w, sc, 'not tested', interimWhyOf(interim3), { steps: interim3.map((p) => p.step), notes }));
       else if (!cases.length) out.push(result(req, w, sc, 'not tested', `every probe of ${tool} for ${req} was set aside or had an unknown outcome`, { notes }));
       else if (accepted.length) out.push(result(req, w, sc, 'violated', `${tool} accepted ${accepted.length} of ${cases.length} value(s) its schema does not allow: ${accepted.slice(0, 6).map((p) => `${p.prop}=${p.value} (${p.name})`).join('; ')}${accepted.length > 6 ? '; …' : ''}.`, { numbers: { cases: cases.length, accepted: accepted.length }, steps: accepted.map((p) => p.step), notes }));
       else out.push(result(req, w, sc, 'held', `${tool} refused all ${cases.length} invalid value(s).`, { numbers: { cases: cases.length }, notes }));
+      interimApply(firstIn3, interim3);
     }
     // why: R6-2: a rejection that MCP itself requires or defines as a JSON-RPC error is not judged by MWS-IN-4.
     const defined = judged.filter((p) => !p.ok && mcpDefinedError(p.rpc_error));

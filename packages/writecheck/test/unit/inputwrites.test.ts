@@ -8,9 +8,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { counterpartArgsAllowed, declaredAnswers, inputWritesCheck, inputWritesVerdicts, inventoryCovers, writeCallFor, writeCallGate, writeToolsOf, type WriteKind, type WriteToolObs } from '../../src/checks/inputwrites.js';
+import { counterpartArgsAllowed, declaredAnswers, inputWritesCheck, inputWritesVerdicts, inventoryCovers, makeSend, writeCallFor, writeCallGate, writeToolsOf, type WriteKind, type WriteToolObs } from '../../src/checks/inputwrites.js';
 import { INTERMEDIATE, type ProbeObs } from '../../src/checks/schema.js';
-import type { PlanContext, Tool } from '../../src/checks/types.js';
+import type { PlanContext, RunContext, Tool } from '../../src/checks/types.js';
+import type { CallResult } from '../../src/core/session.js';
 import { parseManifestText } from '../../src/core/manifest.js';
 import { TT_MANIFEST } from '../tiny-tracker/harness.js';
 
@@ -204,4 +205,109 @@ test('counterpart_args on a delete or bulk tool: refused at load unless the back
   assert.equal(counterpartArgsAllowed(ok, 'object'), true);
   // an empty list declares nothing and is not refused
   assert.doesNotThrow(() => parseManifestText(off.replace(/counterpart_args: \[(force|assignee|all)\]/g, 'counterpart_args: []'), TT_MANIFEST));
+});
+
+// --- MWS-IN-1, IN-3 and IN-6 on an intermediate answer -----------------------------------------------------------------------
+
+const typeProbe = (o: Partial<ProbeObs> = {}) => probe({ tool: 'close_ticket', prop: 'id', text: 'id: expected string, got integer', ...o });
+const boundProbe = (o: Partial<ProbeObs> = {}) => probe({ tool: 'close_ticket', requirement: 'MWS-IN-3', prop: 'id', name: 'pattern_mismatch', value: 'x', type: undefined, text: 'id: does not match ^T-[0-9]+$', ...o });
+const taken = { ok: true, isError: false, text: '', refused_by: undefined, intermediate: true, control: INTERMEDIATE, step: 's-ir' } as Partial<ProbeObs>;
+
+test('verdicts: a value taken only into an input_required answer (no declared answers) leaves MWS-IN-1, IN-3 and IN-6 not judged', () => {
+  const rs = inputWritesVerdicts([typeProbe(taken), boundProbe(taken)], [ct()], res('ticket'), ctx);
+  const v = by(rs);
+  for (const id of ['MWS-IN-1', 'MWS-IN-6', 'MWS-IN-3']) {
+    assert.equal(v[id], 'not tested', id);
+    assert.ok(rs.find((x) => x.requirement === id)!.reason.startsWith(INTERMEDIATE), id);
+  }
+  // the old reading (the same answer judged as a final acceptance) made IN-3 and IN-6 violated
+  const old = by(inputWritesVerdicts([typeProbe({ ...taken, intermediate: undefined, meaning: { kind: 'keeps', why: 'x' } }), boundProbe({ ...taken, intermediate: undefined })], [ct()], res('ticket'), ctx));
+  assert.equal(old['MWS-IN-3'], 'violated');
+  assert.equal(old['MWS-IN-6'], 'violated');
+});
+
+test('verdicts: a refusal stays a refusal beside an intermediate answer; held is withheld, a violation by another probe stands', () => {
+  const refusedType = typeProbe({ name: 'boolean', value: 'true' });
+  const rs = inputWritesVerdicts([refusedType, typeProbe(taken), boundProbe(), boundProbe({ ...taken, name: 'too_long', value: 'xxxx' })], [ct()], res('ticket'), ctx);
+  const v = by(rs);
+  assert.equal(v['MWS-IN-1'], 'not tested');
+  assert.equal(v['MWS-IN-6'], 'not tested');
+  assert.equal(v['MWS-IN-3'], 'not tested');
+  assert.equal(v['MWS-IN-4'], 'held', 'the two refusals are judged by MWS-IN-4 as before');
+  assert.equal(rs.find((x) => x.requirement === 'MWS-IN-4' && !x.scenario.id.endsWith('.review'))!.numbers['refusals'], 2);
+  // a final acceptance of another value is still violated, with the note
+  const rs2 = inputWritesVerdicts([boundProbe({ ok: true, isError: false, text: 'Closed.', refused_by: undefined, name: 'too_long', value: 'yyyy' }), boundProbe(taken)], [ct()], res('ticket'), ctx);
+  const in3 = rs2.find((x) => x.requirement === 'MWS-IN-3')!;
+  assert.equal(in3.verdict, 'violated');
+  assert.ok(in3.notes.some((n) => n.startsWith(INTERMEDIATE)));
+});
+
+test('verdicts: with declared answers the final result decides (no intermediate mark): refused is held, taken is violated', () => {
+  assert.equal(by(inputWritesVerdicts([typeProbe(), boundProbe()], [ct()], res('ticket'), ctx))['MWS-IN-3'], 'held');
+  const v = by(inputWritesVerdicts([typeProbe(), boundProbe({ ok: true, isError: false, text: 'Closed T-1.', refused_by: undefined })], [ct()], res('ticket'), ctx));
+  assert.equal(v['MWS-IN-3'], 'violated');
+  assert.equal(v['MWS-IN-1'], 'held');
+});
+
+// --- send() itself, on a fake session -----------------------------------------------------------------------------------------
+
+type Sent = { tool: string; args: unknown; opts: { step?: string; params?: Record<string, unknown> } };
+const answer = (o: Partial<CallResult>): CallResult => ({ kind: 'call', ok: true, isError: false, result_type: null, input_required: null, rpc_error: null, text: '', data: null, timed_out: false, transport_error: null, step: '', ...o }) as unknown as CallResult;
+const asking = (requestState: string | null, inputRequests: unknown = { confirm: { method: 'elicitation/create' } }) => answer({ ok: false, result_type: 'input_required', input_required: { inputRequests, requestState } });
+function fakeSend(answers: CallResult[], r = res('ticket')) {
+  const sent: Sent[] = [];
+  let wrote = 0;
+  const session = { stepId: (s: string) => s, call: async (_l: string, tool: string, args: unknown, opts: Sent['opts']) => (sent.push({ tool, args, opts }), { ...answers.shift()!, step: opts.step ?? '' }) };
+  const runCtx = { session, manifest: man, prefix: 'mwsc' } as unknown as RunContext;
+  const st = { covered: false, lastCreated: null as unknown, lastIntermediate: false };
+  const c = writeCallFor(man, r, 'close_ticket')!;
+  const send = makeSend(runCtx, r, c, 'L', obs({ tool: 'close_ticket', kind: 'confirm' }), st, () => void wrote++);
+  return { send, sent, st, wrote: () => wrote };
+}
+
+test('send(): an input_required answer is retried with the declared answers and the requestState; the final result is returned', async () => {
+  const f = fakeSend([asking('rs-1'), answer({ text: 'Closed T-1. Ignored argument zz.' })]);
+  const r = await f.send({ id: 'T-1', zz: 1 }, 'zz.undefined_argument');
+  assert.equal(f.sent.length, 2);
+  assert.deepEqual(f.sent[1]!.args, { id: 'T-1', zz: 1 }, 'the retry carries the same arguments');
+  assert.deepEqual(f.sent[1]!.opts.params, { inputResponses: res('ticket').input_required.find((x) => x.tool === 'close_ticket')!.answers, requestState: 'rs-1' });
+  assert.equal(f.sent[1]!.opts.step, 'inw.close_ticket.zz.undefined_argument.answered');
+  assert.ok(f.sent.every((x) => x.opts.params === undefined || x === f.sent[1]));
+  assert.equal(r.ok, true);
+  assert.equal(r.text, 'Closed T-1. Ignored argument zz.');
+  assert.equal(f.st.lastIntermediate, false);
+  assert.equal(f.wrote(), 1, 'a probe that may have written gives the next call a fresh object');
+  // a refusal in the final result is returned as the refusal
+  const g = fakeSend([asking(null), answer({ ok: false, isError: true, text: 'id: ticket x not found' })]);
+  const r2 = await g.send({ id: 'x' }, 'id.pattern_mismatch');
+  assert.equal(r2.ok, false);
+  assert.equal(g.st.lastIntermediate, false);
+  assert.equal(g.sent[1]!.opts.params!['requestState'], undefined, 'no requestState given, none echoed');
+});
+
+test('send(): a retry that asks again is intermediate (taken, marked); with no answers there is no retry and it is intermediate', async () => {
+  const f = fakeSend([asking('rs-1'), asking('rs-2')]);
+  const r = await f.send({ id: 'T-1' }, 'base_call', { base: true });
+  assert.equal(f.sent.length, 2);
+  assert.equal(r.ok, true);
+  assert.equal(r.result_type, null);
+  assert.equal(f.st.lastIntermediate, true);
+  assert.equal(f.wrote(), 0, 'a base call does not ask for a fresh object');
+  const none = { ...res('ticket'), input_required: res('ticket').input_required.map((x) => ({ ...x, answers: {} })) };
+  const g = fakeSend([asking('rs-1')], none);
+  const r2 = await g.send({ id: 'T-1', zz: 1 }, 'zz.undefined_argument');
+  assert.equal(g.sent.length, 1, 'no answers: not retried');
+  assert.equal(r2.ok, true);
+  assert.equal(g.st.lastIntermediate, true);
+  // a request the declaration does not answer: not retried either
+  const h = fakeSend([asking('rs-1', { confirm: {}, reason: {} })]);
+  await h.send({ id: 'T-1' }, 'p');
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.st.lastIntermediate, true);
+  // a refusal is final: not retried, not intermediate
+  const k = fakeSend([answer({ ok: false, isError: true, text: 'id: does not match' })]);
+  const r3 = await k.send({ id: 'x' }, 'id.pattern_mismatch');
+  assert.equal(k.sent.length, 1);
+  assert.equal(r3.ok, false);
+  assert.equal(k.st.lastIntermediate, false);
 });
