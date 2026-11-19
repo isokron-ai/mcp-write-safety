@@ -10,7 +10,8 @@
  * hash). The per-record test_hash (report/testhash.ts) never includes provenance.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { arch, platform, release } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -180,6 +181,21 @@ export interface BuildStamp {
   dirty: boolean | null;
   /** Why commit is null (no git, not a checkout), when it is. */
   note?: string;
+  /** Compiled code is newer than the stamp (tsc was run without the stamp step): the stamp may name another commit. */
+  stale?: boolean;
+}
+
+/** The newest modification time of a .js file under a folder (0 when none). */
+function newestJs(dir: string): number {
+  let t = 0;
+  try {
+    for (const e of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (e.isFile() && e.name.endsWith('.js')) t = Math.max(t, statSync(join(e.parentPath ?? (e as unknown as { path: string }).path, e.name)).mtimeMs);
+    }
+  } catch {
+    return 0;
+  }
+  return t;
 }
 
 let stampCache: BuildStamp | null = null;
@@ -192,6 +208,8 @@ export function buildStamp(at?: string): BuildStamp {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
     const commit = typeof raw['commit'] === 'string' && COMMIT_RE.test(raw['commit']) ? raw['commit'] : null;
     s = { commit, dirty: typeof raw['dirty'] === 'boolean' ? raw['dirty'] : null, ...(commit ? {} : { note: typeof raw['note'] === 'string' ? raw['note'] : 'the build stamp names no commit' }) };
+    // why: review: a tsc run after the stamp leaves a stamp that may name another commit than the code that runs.
+    if (newestJs(dirname(file)) > statSync(file).mtimeMs + 1000) s.stale = true;
   } catch {
     s = { commit: null, dirty: null, note: 'no build stamp (dist/src/build-info.json): this build was not made with npm run build' };
   }
@@ -220,7 +238,7 @@ export function runnerInfo(env: NodeJS.ProcessEnv = process.env): Runner {
 
 export interface RunIdentity {
   format: typeof IDENTITY_FORMAT;
-  tester: { name: string; version: string; commit: string | null; dirty: boolean | null };
+  tester: { name: string; version: string; commit: string | null; dirty: boolean | null; stale?: boolean };
   spec: { version: string };
   manifest_sha256: string;
   plan_hash: string;
@@ -237,12 +255,16 @@ export interface RunIdentity {
   provenance: { sources: string[]; overridden: string[] };
   /** Each identity member that is not stated or not pinned, with why. Empty only for a fully pinned run. */
   gaps: string[];
+  /** Set by `recheck` on its copy: the tester build that re-applied the rules, when, and how many records it hashed anew. */
+  rechecked_by?: { name: string; version: string; commit: string | null; at: string; records_rehashed: number };
 }
 
 export function identityGaps(i: Omit<RunIdentity, 'gaps'>): string[] {
   const g: string[] = [];
   if (!i.tester.commit) g.push('tester.commit: not stamped (build with npm run build in a git checkout)');
   else if (i.tester.dirty) g.push('tester.dirty: the tester was built from a working tree with uncommitted changes');
+  else if (i.tester.dirty === null) g.push('tester.dirty: the build stamp does not say whether the working tree was clean');
+  if (i.tester.stale) g.push('tester.stale: the compiled code is newer than the build stamp (run npm run build, not tsc alone)');
   if (!i.server.repo) g.push('server.repo: not stated (--server-repo or target.provenance.repo)');
   if (!i.server.commit) g.push('server.commit: not stated (--server-commit or target.provenance.commit)');
   if (!i.server.image) g.push('server.image: not stated (--server-image or target.provenance.image)');
@@ -270,7 +292,7 @@ export function buildIdentity(o: {
   const st = o.stamp ?? buildStamp();
   const base: Omit<RunIdentity, 'gaps'> = {
     format: IDENTITY_FORMAT,
-    tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: st.commit, dirty: st.dirty },
+    tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: st.commit, dirty: st.dirty, ...(st.stale ? { stale: true } : {}) },
     spec: { version: SPEC_VERSION },
     manifest_sha256: o.manifestSha256,
     plan_hash: o.planHash,

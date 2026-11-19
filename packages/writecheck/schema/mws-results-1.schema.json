@@ -321,7 +321,12 @@
           "test_hash": {
             "type": "string",
             "pattern": "^sha256:[0-9a-f]{64}$",
-            "description": "What defines this record's test (mws-test-hash/1, MANIFEST.md \"Run identity\"): the tester build, the spec version, the requirement and level, the scenario and its version, the write path, the tools/list entries of the write path's tool and of the tools its resource block names, that resource block, the rest of the declaration except server, target, resources and limits, and every limit except write_budget and writes_per_second. Not the rest of the tool list, so the same test on a build with more tools has the same hash. Absent in files written before it."
+            "description": "What defines this record's test (mws-test-hash/1, MANIFEST.md \"Run identity\"): the tester build, the spec version, the requirement and level, the procedure and its version, the write path, the narrowed input schemas of the tools its resource block names (the arguments the test uses, and the names of other required arguments), the part of the tool entry the requirement judges, that resource block, the rest of the declaration except server, target, resources and limits, target.guard, the limits other than write_budget (and writes_per_second except for MWS-CONC-*), and the tester's MWS-IN-5 reading where the build has one. Adding an optional argument the test does not use keeps the hash. Absent in files written before it."
+          },
+          "test_hash_core": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "Only on a record whose requirement judges part of the tool entry (the input schema for MWS-IN-2/3/5/6/7, the annotations for MWS-ANN-*, the description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3): the test hash without that part, so compare can tell a changed subject from a changed test."
           },
           "attribution": {
             "enum": [
@@ -592,6 +597,10 @@
                 "null"
               ],
               "description": "The tester's sources had uncommitted changes when it was built."
+            },
+            "stale": {
+              "type": "boolean",
+              "description": "The compiled code is newer than the build stamp."
             }
           }
         },
@@ -806,6 +815,39 @@
             "type": "string"
           },
           "description": "Each identity member not stated or not pinned, with why."
+        },
+        "rechecked_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version",
+            "commit",
+            "at",
+            "records_rehashed"
+          ],
+          "description": "Set by recheck on its copy.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "type": "string"
+            },
+            "records_rehashed": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     }
@@ -823,7 +865,7 @@
         "value",
         "sums"
       ],
-      "description": "An Ed25519 signature of this document with evidence.signature null: value = base64(Ed25519(\"mcp-writecheck/results-signature/1\\n\" + RFC 8785 canonical JSON)). Trust it only against a key pinned out of band.",
+      "description": "An Ed25519 signature of this document with evidence.signature replaced by { format, alg, key_id, sums }: value = base64(Ed25519(\"mcp-writecheck/results-signature/1\\n\" + RFC 8785 canonical JSON)). Trust it only against a key pinned out of band.",
       "properties": {
         "format": {
           "const": "mws-results-signature/1"

@@ -2,7 +2,7 @@
  * Signing results.json (`mws-results-signature/1`): an Ed25519 signature over the file's own content, stored in
  * `evidence.signature`, so a published results.json can be checked on its own (no folder, no SHA256SUMS) against a pinned key.
  *
- *   body     = the results document with evidence.signature set to null
+ *   body     = the results document with evidence.signature replaced by its bound members { format, alg, key_id, sums }
  *   canon    = RFC 8785 (JCS) canonical JSON of body, UTF-8
  *   digest   = "sha256:" + hex sha256(canon)
  *   message  = "mcp-writecheck/results-signature/1\n" + canon
@@ -20,7 +20,7 @@
  */
 
 import { createHash, createPrivateKey, createPublicKey, sign as edSign, verify as edVerify, type KeyObject } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import { canonical, isObj, WritecheckError } from '../core/util.js';
 
@@ -107,22 +107,60 @@ export function privateKeyFrom(text: string): KeyObject {
 
 /** The signing key named by `--sign-key` (a path) or MWSC_SIGN_KEY (a path, or the PEM itself); null when neither is given. */
 export function loadSigningKey(flag: string | undefined, env: NodeJS.ProcessEnv): KeyObject | null {
-  const src = flag ?? env[SIGN_KEY_ENV];
-  if (!src) return null;
-  if (src.includes('-----BEGIN')) return privateKeyFrom(src);
-  if (!existsSync(src)) throw new WritecheckError(`signing key ${src} does not exist (--sign-key or ${SIGN_KEY_ENV})`, 2);
-  return privateKeyFrom(readFileSync(src, 'utf8'));
+  if (flag !== undefined) {
+    // why: review: --sign-key names a path; errors print the path, never the file's content.
+    if (!existsSync(flag)) throw new WritecheckError(`--sign-key ${flag} does not exist`, 2);
+    try {
+      return privateKeyFrom(readFileSync(flag, 'utf8'));
+    } catch (e) {
+      throw new WritecheckError(`--sign-key ${flag}: ${e instanceof WritecheckError ? e.message.replace(/^signing key: /, '') : 'not a readable Ed25519 private key'}`, 2);
+    }
+  }
+  const v = env[SIGN_KEY_ENV];
+  if (!v) return null;
+  // why: review: the variable may hold key material; it is never echoed. Key material if it parses, else a path, else refused.
+  const generic = new WritecheckError(`${SIGN_KEY_ENV} is not a key or an existing path`, 2);
+  if (v.includes('-----BEGIN')) {
+    try {
+      return privateKeyFrom(v);
+    } catch (e) {
+      throw e instanceof WritecheckError && /Ed25519 only|encrypted/.test(e.message) ? new WritecheckError(`${SIGN_KEY_ENV}: ${e.message.replace(/^signing key: /, '')}`, 2) : generic;
+    }
+  }
+  let isFile = false;
+  try {
+    isFile = existsSync(v) && statSync(v).isFile();
+  } catch {
+    isFile = false;
+  }
+  if (!isFile) throw generic;
+  try {
+    return privateKeyFrom(readFileSync(v, 'utf8'));
+  } catch (e) {
+    throw e instanceof WritecheckError && /Ed25519 only|encrypted/.test(e.message) ? new WritecheckError(`${SIGN_KEY_ENV} (a path): ${e.message.replace(/^signing key: /, '')}`, 2) : new WritecheckError(`${SIGN_KEY_ENV} names a file that is not an Ed25519 private key`, 2);
+  }
 }
 
-/** A public key from a PEM (SPKI) file or text, or an OpenSSH `ssh-ed25519 AAAA…` line or .pub file. */
+/** A pinned public key from the operator: a PEM (SPKI) or `ssh-ed25519 AAAA…` text, or a file holding one. Bad input: exit 2. */
 export function publicKeyFrom(src: string): KeyObject {
   const text = !src.includes('-----BEGIN') && !/^ssh-ed25519\s/.test(src.trim()) && existsSync(src) ? readFileSync(src, 'utf8') : src;
+  try {
+    return publicKeyFromText(text);
+  } catch (e) {
+    // why: review: a truncated or garbled key is a usage error, never a crash (exit 4) or a verdict.
+    throw e instanceof WritecheckError ? e : new WritecheckError(`public key: not a PEM public key or an ssh-ed25519 line (${(e as Error).message})`, 2);
+  }
+}
+
+/** A public key from text only (never a path): what a results file embeds is never opened as a file. */
+export function publicKeyFromText(text: string): KeyObject {
   const t = text.trim();
   let k: KeyObject;
   if (/^ssh-ed25519\s/.test(t)) {
     const blob = Buffer.from(t.split(/\s+/)[1] ?? '', 'base64');
+    if (blob.length < 8) throw new WritecheckError('public key: a truncated ssh-ed25519 key', 2);
     const n = blob.readUInt32BE(0);
-    if (blob.subarray(4, 4 + n).toString() !== 'ssh-ed25519') throw new WritecheckError('public key: not an ssh-ed25519 key', 2);
+    if (blob.subarray(4, 4 + n).toString() !== 'ssh-ed25519' || blob.length < 8 + n) throw new WritecheckError('public key: not an ssh-ed25519 key, or truncated', 2);
     const m = blob.readUInt32BE(4 + n);
     const raw = blob.subarray(8 + n, 8 + n + m);
     if (raw.length !== 32) throw new WritecheckError('public key: a damaged ssh-ed25519 key', 2);
@@ -131,7 +169,7 @@ export function publicKeyFrom(src: string): KeyObject {
     try {
       k = createPublicKey(t);
     } catch (e) {
-      throw new WritecheckError(`public key: not a PEM public key, an ssh-ed25519 line or a file holding one (${(e as Error).message})`, 2);
+      throw new WritecheckError(`public key: not a PEM public key or an ssh-ed25519 line (${(e as Error).message})`, 2);
     }
   }
   if (k.asymmetricKeyType !== 'ed25519') throw new WritecheckError(`public key: a ${k.asymmetricKeyType} key; results are signed with Ed25519 only`, 2);
@@ -143,19 +181,84 @@ export function keyId(k: KeyObject): string {
   return `ed25519-${createHash('sha256').update(pub.export({ format: 'der', type: 'spki' })).digest('hex').slice(0, 16)}`;
 }
 
-/** The canonical body a signature covers: the document with evidence.signature null. */
-export function signedBody(doc: unknown): string {
+/** The signature members the body binds (review: `sums` and the key id are signed, not only carried). */
+export const BOUND_MEMBERS = ['format', 'alg', 'key_id', 'sums'] as const;
+
+/**
+ * The canonical body a signature covers: the document with evidence.signature replaced by its bound members
+ * ({ format, alg, key_id, sums }); `meta` gives them when signing, otherwise they are read from the document.
+ */
+export function signedBody(doc: unknown, meta?: Pick<ResultsSignature, (typeof BOUND_MEMBERS)[number]>): string {
   if (!isObj(doc) || !isObj(doc['evidence'])) throw new WritecheckError('not a results document (no evidence block)', 2);
-  return canonical({ ...doc, evidence: { ...doc['evidence'], signature: null } });
+  const sig = doc['evidence']['signature'];
+  const from = meta ?? (isObj(sig) ? sig : null);
+  const bound = from ? Object.fromEntries(BOUND_MEMBERS.map((k) => [k, (from as Record<string, unknown>)[k] ?? null])) : null;
+  return canonical({ ...doc, evidence: { ...doc['evidence'], signature: bound } });
+}
+
+/** The first member name an object in this JSON text repeats (`$.a.b`), or null. JSON.parse keeps the last silently. */
+export function duplicateKey(text: string): string | null {
+  let i = 0;
+  const ws = () => {
+    while (i < text.length && ' \t\n\r'.includes(text[i]!)) i++;
+  };
+  const str = (): string => {
+    const start = i;
+    i++;
+    while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    i++;
+    return JSON.parse(text.slice(start, i)) as string;
+  };
+  const value = (path: string): string | null => {
+    ws();
+    const c = text[i];
+    if (c === '{') {
+      i++;
+      const seen = new Set<string>();
+      ws();
+      if (text[i] === '}') return (i++, null);
+      for (;;) {
+        ws();
+        const k = str();
+        if (seen.has(k)) return `${path}.${k}`;
+        seen.add(k);
+        ws();
+        i++; // :
+        const d = value(`${path}.${k}`);
+        if (d) return d;
+        ws();
+        if (text[i++] === '}') return null;
+      }
+    }
+    if (c === '[') {
+      i++;
+      ws();
+      if (text[i] === ']') return (i++, null);
+      for (let n = 0; ; n++) {
+        const d = value(`${path}[${n}]`);
+        if (d) return d;
+        ws();
+        if (text[i++] === ']') return null;
+      }
+    }
+    if (c === '"') {
+      str();
+      return null;
+    }
+    while (i < text.length && !',}] \t\n\r'.includes(text[i]!)) i++;
+    return null;
+  };
+  return value('$');
 }
 
 const digestOf = (body: string) => `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`;
 
 export function signResults(doc: unknown, key: KeyObject, sums: string | null = null): ResultsSignature {
-  const body = signedBody(doc);
-  const value = edSign(null, Buffer.from(RESULTS_SIGNATURE_DOMAIN + body, 'utf8'), key).toString('base64');
   const pub = createPublicKey(key);
-  return { format: RESULTS_SIGNATURE_FORMAT, alg: 'ed25519', key_id: keyId(pub), public_key_pem: pub.export({ format: 'pem', type: 'spki' }).toString(), digest: digestOf(body), value, sums };
+  const meta = { format: RESULTS_SIGNATURE_FORMAT as typeof RESULTS_SIGNATURE_FORMAT, alg: 'ed25519' as const, key_id: keyId(pub), sums };
+  const body = signedBody(doc, meta);
+  const value = edSign(null, Buffer.from(RESULTS_SIGNATURE_DOMAIN + body, 'utf8'), key).toString('base64');
+  return { ...meta, public_key_pem: pub.export({ format: 'pem', type: 'spki' }).toString(), digest: digestOf(body), value };
 }
 
 export type VerifyStatus = 'valid' | 'valid-unpinned' | 'unsigned' | 'ssh-only' | 'invalid';
@@ -189,7 +292,8 @@ export function verifyResults(doc: unknown, pinned: KeyObject | null): VerifyOut
     key = pinned;
   } else {
     try {
-      key = publicKeyFrom(String(sig['public_key_pem'] ?? ''));
+      // why: review: the embedded key is text; a path named inside results.json is never opened.
+      key = publicKeyFromText(String(sig['public_key_pem'] ?? ''));
     } catch (e) {
       return { status: 'invalid', detail: `the embedded public key cannot be read: ${(e as Error).message}`, key_id: kid, digest };
     }

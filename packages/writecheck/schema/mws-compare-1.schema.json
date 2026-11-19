@@ -573,12 +573,16 @@
               "unstable",
               "rollup-mismatch",
               "new-cell",
-              "removed-cell"
+              "removed-cell",
+              "partly-held",
+              "subject-changed",
+              "schema-fixed"
             ]
           },
           "label": {
             "enum": [
               "fixed",
+              "schema-fixed",
               "regressed",
               "unchanged",
               "changed",
@@ -587,6 +591,53 @@
           },
           "why": {
             "type": "string"
+          },
+          "slot_moves": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "slot",
+                "before",
+                "after"
+              ],
+              "properties": {
+                "slot": {
+                  "type": "string"
+                },
+                "before": {
+                  "enum": [
+                    "violated",
+                    "platform",
+                    "held",
+                    "violated?",
+                    "not observed",
+                    "self-attested",
+                    "not tested",
+                    "not applicable"
+                  ]
+                },
+                "after": {
+                  "enum": [
+                    "violated",
+                    "platform",
+                    "held",
+                    "violated?",
+                    "not observed",
+                    "self-attested",
+                    "not tested",
+                    "not applicable"
+                  ]
+                }
+              }
+            }
+          },
+          "slot_regressions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

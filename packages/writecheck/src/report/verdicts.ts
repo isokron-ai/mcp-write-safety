@@ -39,6 +39,8 @@ export interface Result {
   notes: string[];
   /** What defines this record's test (report/testhash.ts, `mws-test-hash/1`); stamped at the end of a run. Absent in files written before it. */
   test_hash?: string;
+  /** For a requirement that judges part of the tool entry (testhash.ts subjectFacets): the hash without that part. */
+  test_hash_core?: string;
   /**
    * Spec 8.2 rule 3: for a requirement that lists platform, a violated or platform record carries one of
    * server (a control arm ran and the platform API did not show the behavior), platform (it did), or

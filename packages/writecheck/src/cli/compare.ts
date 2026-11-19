@@ -5,10 +5,20 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import type { Tool } from '../checks/types.js';
+import { buildStamp } from '../core/identity.js';
+import { parseManifestText } from '../core/manifest.js';
+import { renderMarkdown } from '../report/markdown.js';
+import type { ResultsDoc } from '../report/results.js';
+import { loadSigningKey, signResults } from '../report/sign.js';
+import { hashExtras, stampTestHashes } from '../report/testhash.js';
+import { SUITE_NAME, SUITE_VERSION } from '../version.js';
+import { readCatalogFile } from './commands.js';
+
 import type { ProvenanceFlags } from '../core/identity.js';
 import { WritecheckError } from '../core/util.js';
 import { compareDocs, CompareRefused, renderCompareMarkdown, summarize, type CompareDoc } from '../report/compare.js';
-import { publicKeyFrom, verifyResults, type VerifyOutcome } from '../report/sign.js';
+import { duplicateKey, publicKeyFrom, verifyResults, type VerifyOutcome } from '../report/sign.js';
 
 /** Flags `run` and `rerun` take for the run identity and the results signature (main.ts adds them to both commands). */
 export const IDENTITY_FLAGS = ['--provenance', '--server-repo', '--server-commit', '--server-tag', '--server-image', '--backend-image', '--sign-key'];
@@ -55,6 +65,9 @@ function readDoc(f: string): { bytes: Buffer; doc: Record<string, unknown> } {
   } catch (e) {
     throw new WritecheckError(`${f}: not JSON (${(e as Error).message})`, 2);
   }
+  // why: review: JSON.parse keeps the last of two equal member names; another reader may keep the first. Such a file is refused.
+  const dup = duplicateKey(bytes.toString('utf8'));
+  if (dup) throw new WritecheckError(`${f}: the member ${dup} appears twice; a signed or compared file has each member once`, 3);
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) throw new WritecheckError(`${f}: not a results document`, 2);
   return { bytes, doc: doc as Record<string, unknown> };
 }
@@ -74,10 +87,12 @@ export function verifyResultsCommand(o: { file: string; pubkey?: string; log: (s
 }
 
 /**
- * `compare <before> <after> [--out DIR] [--pubkey KEY]`: writes compare.json and compare.md. With --pubkey both files must be
- * signed by that key (exit 3 otherwise). Exit 1 when a cell regressed, else 0; 2 when the two cannot be compared.
+ * `compare <before> <after> [--out DIR] [--pubkey KEY] [--fail-on-slot-regression true|false]`: writes compare.json and
+ * compare.md. With --pubkey both files must be signed by that key (exit 3 otherwise). Exit 1 when a cell regressed, or (unless
+ * --fail-on-slot-regression false) a slot regressed inside a cell whose roll-up did not; else 0; 2 when the two cannot be
+ * compared.
  */
-export function compareCommand(o: { before: string; after: string; out: string; pubkey?: string; log: (s: string) => void }): { exit: number; doc: CompareDoc } {
+export function compareCommand(o: { before: string; after: string; out: string; pubkey?: string; failOnSlotRegression?: boolean; log: (s: string) => void }): { exit: number; doc: CompareDoc } {
   const pinned = o.pubkey ? publicKeyFrom(o.pubkey) : null;
   const load = (p: string, n: string) => {
     const f = resultsFile(p);
@@ -101,5 +116,32 @@ export function compareCommand(o: { before: string; after: string; out: string; 
   for (const w of doc.warnings) o.log(`warning: ${w}`);
   for (const label of ['regressed', 'fixed'] as const) for (const c of doc.cells.filter((x) => x.label === label)) o.log(`${label}: ${c.key} (${c.before?.verdict} → ${c.after?.verdict})`);
   o.log(`compare: ${join(o.out, 'compare.md')} (also compare.json); cells are listed there, not counted`);
-  return { exit: doc.cells.some((c) => c.label === 'regressed') ? 1 : 0, doc };
+  const slotRegressed = doc.cells.some((c) => c.slot_regressions?.length);
+  return { exit: doc.cells.some((c) => c.label === 'regressed') || (slotRegressed && o.failOnSlotRegression !== false) ? 1 : 0, doc };
+}
+
+/**
+ * After `recheck` wrote <run>/recheck/: the copy holds new verdicts, so the original results signature no longer covers it.
+ * Its signature is set to null (or made again with --sign-key / MWSC_SIGN_KEY), every record recheck re-evaluated gets a
+ * test_hash from this tester build, and identity.rechecked_by names the build and the time. Records kept as recorded keep the
+ * hash they were made with.
+ */
+export async function finishRecheck(runDir: string, o: { signKey?: string; env: NodeJS.ProcessEnv; log: (s: string) => void }): Promise<ResultsDoc> {
+  const dir = join(runDir, 'recheck');
+  const file = join(dir, 'results.json');
+  const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
+  const key = loadSigningKey(o.signKey, o.signKey ? {} : o.env);
+  const manifestFile = join(runDir, doc.manifest.path);
+  const manifest = parseManifestText(readFileSync(manifestFile, 'utf8'), manifestFile);
+  const tools = readCatalogFile(join(runDir, 'catalog.json')).tools as Tool[];
+  const stamp = buildStamp();
+  const fresh = doc.results.filter((r) => typeof r.test_hash !== 'string');
+  stampTestHashes(fresh, { manifest, tools, tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit }, extras: await hashExtras() });
+  if (doc.identity) doc.identity.rechecked_by = { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit, at: new Date().toISOString(), records_rehashed: fresh.length };
+  doc.evidence.signature = null;
+  if (key) doc.evidence.signature = signResults(doc, key, null);
+  writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+  writeFileSync(join(dir, 'report.md'), renderMarkdown(doc));
+  o.log(key ? 'recheck: results.json is signed again with the given key' : 'recheck: the original results signature does not cover the rechecked copy; its signature is null (give --sign-key to sign it)');
+  return doc;
 }

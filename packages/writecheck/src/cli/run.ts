@@ -53,7 +53,7 @@ import { signChecksums, writeChecksums } from '../report/evidence.js';
 import { buildIdentity, buildStamp, manifestProvenance, resolveProvenance } from '../core/identity.js';
 import { catalogFingerprint as toolsFingerprintOf } from '../checks/catalog.js';
 import { loadSigningKey, signResults } from '../report/sign.js';
-import { stampTestHashes } from '../report/testhash.js';
+import { hashExtras, stampTestHashes } from '../report/testhash.js';
 import type { IdentityOptions } from './compare.js';
 import { renderJunit } from '../report/junit.js';
 import { renderMarkdown } from '../report/markdown.js';
@@ -717,7 +717,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   };
   // why: F8 (before/after pages): each record says which test it is; the run says which tester, test and build it was.
   const stamp = buildStamp();
-  stampTestHashes(doc.results, { manifest, tools, tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit } });
+  stampTestHashes(doc.results, { manifest, tools, tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit }, extras: await hashExtras() });
   doc.identity = buildIdentity({ manifestSha256: manifest.source.sha256, planHash: hash, toolsFingerprint: tools.length ? toolsFingerprintOf(tools) : 'sha256:unknown', launch: serverLabel(manifest), transport: mcp.transport, provenance: prov.provenance, sources: prov.sources, overridden: prov.overridden, started: doc.run.started, finished: iso(Date.now()), env: o.env, stamp });
   const baseline = applyBaseline(results, o.baseline ? loadBaseline(o.baseline) : []);
   if (o.sign) doc.evidence.signature = 'SHA256SUMS.sig';

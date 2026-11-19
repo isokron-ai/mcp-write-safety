@@ -18,7 +18,7 @@ import { parseManifestText, type Manifest } from '../../src/core/manifest.js';
 import { validates } from '../../src/core/jsonschema.js';
 import { canonical, WritecheckError } from '../../src/core/util.js';
 import { classify, compareDocs, joinCell, rollUp, summarize, type Side } from '../../src/report/compare.js';
-import { keyId, loadSigningKey, privateKeyFrom, publicKeyFrom, RESULTS_SIGNATURE_DOMAIN, signedBody, signResults, verifyResults } from '../../src/report/sign.js';
+import { duplicateKey, keyId, loadSigningKey, privateKeyFrom, publicKeyFrom, RESULTS_SIGNATURE_DOMAIN, signedBody, signResults, verifyResults } from '../../src/report/sign.js';
 import { testHash, testHashInput } from '../../src/report/testhash.js';
 import { result, type Result } from '../../src/report/verdicts.js';
 
@@ -66,7 +66,7 @@ test('test_hash: equal across what names the build, not the test (server block, 
     ttManifest.replace('command: [node, dist/src/cli.js, server, --port, "0"]', 'command: [node, build/patched.js, server, --port, "0"]'),
     ttManifest.replace('confirm: tiny-tracker', 'confirm: tiny-tracker-patched'),
     ttManifest.replace('confirm: tiny-tracker', `confirm: tiny-tracker\n  provenance: { repo: https://github.com/x/y, commit: ${'b'.repeat(40)} }`),
-    ttManifest.replace('write_budget: 20000, writes_per_second: 1000', 'write_budget: 90000, writes_per_second: 50'),
+    ttManifest.replace('write_budget: 20000', 'write_budget: 90000'),
     ttManifest.replace(/^# .*\n/gm, ''),
   ];
   for (const [i, v] of variants.entries()) assert.equal(testHash(rec(), { manifest: load(v), tools, tester }), h0, `variant ${i}`);
@@ -83,8 +83,33 @@ test('test_hash: differs when the test\'s own inputs change', () => {
   // The write path tool's schema (a patch adds a version argument), its description, its annotations.
   const patch = (f: (t: { name: string; [k: string]: unknown }) => object) => tools.map((t) => (t.name === 'update_ticket' ? { ...t, ...f(t) } : t));
   differs(testHash(rec(), { ...ctx, tools: patch(() => ({ inputSchema: { type: 'object', properties: { id: { type: 'string' }, resourceVersion: { type: 'string' } } } })) }), 'input schema');
-  differs(testHash(rec(), { ...ctx, tools: patch(() => ({ description: 'Stale writes are not detected.' })) }), 'description');
-  differs(testHash(rec(), { ...ctx, tools: patch(() => ({ annotations: { destructiveHint: true } })) }), 'annotations');
+  // Owner rule (review item 6): description, annotations, output schema and optional arguments the test does not use are not
+  // part of a test that does not judge them; a used argument's type and a new required argument are.
+  const same = (h: string, why: string) => assert.equal(h, h0, why);
+  same(testHash(rec(), { ...ctx, tools: patch(() => ({ description: 'Stale writes are not detected.' })) }), 'description');
+  same(testHash(rec(), { ...ctx, tools: patch(() => ({ annotations: { destructiveHint: true }, outputSchema: { type: 'object' } })) }), 'annotations, output schema');
+  const withProps = (extra: Record<string, unknown>, required?: string[]) => patch((t) => ({ inputSchema: { type: 'object', properties: { ...((t['inputSchema'] as { properties: object }).properties), ...extra }, ...(required ? { required } : {}) } }));
+  same(testHash(rec(), { ...ctx, tools: withProps({ resourceVersion: { type: 'string' } }) }), 'an optional argument added');
+  same(testHash(rec(), { ...ctx, tools: withProps({ notes: { type: 'string', maxLength: 10 } }) }), 'a bound on an argument the test does not use');
+  differs(testHash(rec(), { ...ctx, tools: withProps({ id: { type: 'integer' } }) }), 'a used argument\'s type');
+  differs(testHash(rec(), { ...ctx, tools: withProps({ resourceVersion: { type: 'string' } }, ['resourceVersion']) }), 'a new required argument');
+  // A requirement that judges part of the entry hashes that part whole, and carries the hash without it.
+  const in3 = rec({ requirement: 'MWS-IN-3', scenario: { id: 'schema-probes', version: '1' } });
+  assert.notEqual(testHash(in3, { ...ctx, tools: withProps({ resourceVersion: { type: 'string' } }) }), testHash(in3, ctx), 'IN-3 judges the schema');
+  assert.equal(testHash(in3, { ...ctx, tools: withProps({ resourceVersion: { type: 'string' } }) }, undefined, true), testHash(in3, ctx, undefined, true), 'its core is the same');
+  const c5 = rec({ requirement: 'MWS-CONC-5' });
+  assert.notEqual(testHash(c5, { ...ctx, tools: patch(() => ({ description: 'not detected' })) }), testHash(c5, ctx), 'CONC-5 judges the description');
+  const a1 = rec({ requirement: 'MWS-ANN-1', scenario: { id: 'annotation-effects', version: '2' } });
+  assert.notEqual(testHash(a1, { ...ctx, tools: patch(() => ({ annotations: { readOnlyHint: true } })) }), testHash(a1, ctx), 'ANN-1 judges the annotations');
+  // The guard, the rate for concurrency records, and the MWS-IN-5 reading.
+  differs(testHash(rec(), { ...ctx, manifest: load(ttManifest.replace('pattern: "\\"inbox\\""', 'pattern: "\\"other\\""')) }), 'target.guard');
+  const c3 = rec({ requirement: 'MWS-CONC-3', scenario: { id: 'pairs', version: '2' } });
+  const fast = load(ttManifest.replace('writes_per_second: 1000', 'writes_per_second: 5'));
+  assert.notEqual(testHash(c3, { ...ctx, manifest: fast }), testHash(c3, ctx), 'the rate for a concurrency record');
+  assert.equal(testHash(rec({ requirement: 'MWS-UPD-1' }), { ...ctx, manifest: fast }), testHash(rec({ requirement: 'MWS-UPD-1' }), ctx), 'not for others');
+  const in5 = rec({ requirement: 'MWS-IN-5', scenario: { id: 'in5-search', version: '1' } });
+  assert.notEqual(testHash(in5, { ...ctx, extras: { in5_reading: 'tester' } }), testHash(in5, { ...ctx, extras: { in5_reading: 'declaration' } }));
+  assert.equal(testHash(rec(), { ...ctx, extras: { in5_reading: 'tester' } }), h0, 'the reading enters IN-5 records only');
   // A tool the resource block names (the read tool), and the write path tool missing from the catalog.
   differs(testHash(rec(), { ...ctx, tools: tools.map((t) => (t.name === 'get_ticket' ? { ...t, inputSchema: { type: 'object' } } : t)) }), 'read tool');
   differs(testHash(rec(), { ...ctx, tools: tools.filter((t) => t.name !== 'update_ticket') }), 'tool removed');
@@ -225,7 +250,7 @@ test('results signature: signs the canonical document, verifies against a pinned
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  assert.equal(signedBody(round), canonical({ ...round, evidence: { ...round.evidence, signature: null } }));
+  assert.equal(signedBody(round), canonical({ ...round, evidence: { ...round.evidence, signature: { format: sig.format, alg: sig.alg, key_id: sig.key_id, sums: null } } }), 'the body binds format, alg, key_id and sums');
   // The schema accepts the signature object and the legacy string.
   const schema = JSON.parse(readFileSync(join(pkg, 'schema', 'mws-results-1.schema.json'), 'utf8')) as { properties: { evidence: unknown } };
   for (const s of [sig, 'SHA256SUMS.sig', null]) assert.equal(validates(schema.properties.evidence, { capture: null, checksums: 'SHA256SUMS', signature: JSON.parse(JSON.stringify(s)) }, schema), true);
@@ -245,6 +270,43 @@ test('signing keys: PKCS#8 PEM and unencrypted OpenSSH; public keys as PEM or ss
   assert.equal(keyId(loadSigningKey(undefined, { MWSC_SIGN_KEY: pem })!), keyId(privateKey));
   assert.equal(loadSigningKey(undefined, {}), null);
   assert.throws(() => loadSigningKey('/no/such/key', {}), /does not exist/);
+});
+
+test('review: keys are never echoed, embedded keys are never paths, sums is signed, duplicates and bad pins are refused', () => {
+  const secret = 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ SECRETMATERIAL';
+  for (const v of [secret, `-----BEGIN PRIVATE KEY-----\n${secret}\n-----END PRIVATE KEY-----`]) {
+    assert.throws(() => loadSigningKey(undefined, { MWSC_SIGN_KEY: v }), (e: unknown) => e instanceof WritecheckError && e.code === 2 && !e.message.includes('SECRETMATERIAL') && /MWSC_SIGN_KEY is not a key or an existing path/.test(e.message));
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-rev-'));
+  try {
+    writeFileSync(join(dir, 'k'), `garbage ${secret}`);
+    assert.throws(() => loadSigningKey(join(dir, 'k'), {}), (e: unknown) => e instanceof Error && !e.message.includes('SECRETMATERIAL') && e.message.includes(join(dir, 'k')));
+    assert.throws(() => loadSigningKey(undefined, { MWSC_SIGN_KEY: join(dir, 'k') }), (e: unknown) => e instanceof Error && !e.message.includes('SECRETMATERIAL'));
+    const { privateKey } = generateKeyPairSync('ed25519');
+    // The embedded public key is text: a path there is never opened.
+    writeFileSync(join(dir, 'pub.pem'), createPublicKey(privateKey).export({ format: 'pem', type: 'spki' }));
+    const d = miniDoc([rec()]) as unknown as Record<string, unknown> & { evidence: { signature: Record<string, unknown> } };
+    d.evidence.signature = signResults(d, privateKey) as never;
+    d.evidence.signature['public_key_pem'] = join(dir, 'pub.pem');
+    assert.equal(verifyResults(d, null).status, 'invalid');
+    // sums is bound: changing it breaks the signature.
+    const d2 = miniDoc([rec()]) as unknown as Record<string, unknown> & { evidence: { signature: Record<string, unknown> } };
+    d2.evidence.signature = signResults(d2, privateKey, 'SHA256SUMS.sig') as never;
+    assert.equal(verifyResults(d2, createPublicKey(privateKey)).status, 'valid');
+    d2.evidence.signature['sums'] = 'evil.sig';
+    assert.equal(verifyResults(d2, createPublicKey(privateKey)).status, 'invalid');
+    // Duplicate member names are refused by the readers.
+    assert.equal(duplicateKey('{"a":1,"b":{"c":[{"d":1,"d":2}]}}'), '$.b.c[0].d');
+    assert.equal(duplicateKey('{"a":"x\\"y","b":[1,{"a":2}]}'), null);
+    const signed = { ...d2, evidence: { ...d2.evidence, signature: signResults(d2, privateKey) } };
+    mkdirSync(join(dir, 'run'));
+    writeFileSync(join(dir, 'run', 'results.json'), JSON.stringify(signed).replace('"format":"mws-results/1"', '"format":"mws-results/1","format":"mws-results/1"'));
+    assert.throws(() => verifyResultsCommand({ file: join(dir, 'run'), pubkey: join(dir, 'pub.pem'), log: () => {} }), (e: unknown) => e instanceof WritecheckError && e.code === 3);
+    // A truncated or garbled pin is a usage error (exit 2), not a crash.
+    for (const bad of ['ssh-ed25519 AAAA', 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5', 'not a key']) assert.throws(() => publicKeyFrom(bad), (e: unknown) => e instanceof WritecheckError && e.code === 2, bad);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const side = (verdict: Side['verdict'], h = 'sha256:x', o: Partial<Side> = {}): Side => ({ verdict, test_hash: h, level: 'MUST', run_cell: null, reason: 'r', records: [], scenarios: ['s v1'], ...o });
@@ -277,14 +339,30 @@ test('compare: rule 13 roll-up, and only violated → held on an equal test hash
   // not tested, and is a coverage change when it carries evidence; the same slot with another hash is a changed test.
   const R = (verdict: string, scenario: { id: string; version: string }, hash: string, resource = 'a') => ({ requirement: 'MWS-RES-1', write_path: { resource, tool: 't' }, scenario, verdict, test_hash: hash });
   const s1 = { id: 'rw', version: '1' };
-  assert.equal(joinCell([R('held', s1, 'h1')], [R('held', s1, 'h1'), R('not tested', { id: 'creates', version: '1' }, 'h2')]), null);
-  assert.equal(joinCell([R('held', s1, 'h1'), R('not observed', s1, 'h3', 'b')], [R('held', s1, 'h1')])?.transition, 'coverage-change');
-  assert.match(joinCell([R('held', s1, 'h1')], [R('held', { id: 'rw', version: '2' }, 'h9')])?.why ?? '', /procedure v1 → v2/);
-  assert.equal(joinCell([R('held', s1, 'h1')], [R('held', s1, 'h8')])?.transition, 'test-changed');
-  assert.equal(joinCell([{ ...R('held', s1, 'h1'), test_hash: undefined as never }], [R('held', s1, 'h1')])?.transition, 'no-test-hash');
+  assert.equal(joinCell([R('held', s1, 'h1')], [R('held', s1, 'h1'), R('not tested', { id: 'creates', version: '1' }, 'h2')]).problem, null);
+  assert.equal(joinCell([R('held', s1, 'h1'), R('not observed', s1, 'h3', 'b')], [R('held', s1, 'h1')]).problem?.transition, 'coverage-change');
+  assert.match(joinCell([R('held', s1, 'h1')], [R('held', { id: 'rw', version: '2' }, 'h9')]).problem?.why ?? '', /procedure v1 → v2/);
+  assert.equal(joinCell([R('held', s1, 'h1')], [R('held', s1, 'h8')]).problem?.transition, 'test-changed');
+  assert.equal(joinCell([{ ...R('held', s1, 'h1'), test_hash: undefined as never }], [R('held', s1, 'h1')]).problem?.transition, 'no-test-hash');
+  // Review: the same slot, tested on one build and not tested on the other, is a coverage change.
+  assert.equal(joinCell([R('violated', s1, 'h1')], [R('not tested', s1, 'h1')]).problem?.transition, 'coverage-change');
   const withRecs = (v: Side['verdict'], recs: ReturnType<typeof R>[]) => side(v, 'sha256:x', { recs: recs as never });
   assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1')])).label, 'fixed');
   assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1'), R('held', s1, 'h1', 'b')])).transition, 'coverage-change', 'held where before had no evidence is not a fix');
+  // Reviewer probes: a violated slot not re-tested while another slot is newly held is never fixed.
+  const s2 = { id: 'probes', version: '1' };
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('not tested', s2, 'h2')]), withRecs('held', [R('not tested', s1, 'h1'), R('held', s2, 'h2')])).transition, 'coverage-change');
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('not tested', s1, 'h3', 'b')]), withRecs('held', [R('not tested', s1, 'h1'), R('held', s1, 'h3', 'b')])).transition, 'coverage-change');
+  // A violated slot that went to not observed while another held: the cell rolls up to held, but it is not a fix.
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('held', s2, 'h2')]), withRecs('held', [R('not observed', s1, 'h1'), R('held', s2, 'h2')])).transition, 'partly-held');
+  // A regression hidden by the roll-up is reported per slot.
+  const hidden = classify(withRecs('violated', [R('violated', s1, 'h1'), R('held', s1, 'h3', 'b')]), withRecs('violated', [R('held', s1, 'h1'), R('violated', s1, 'h3', 'b')]));
+  assert.equal(hidden.label, 'unchanged');
+  assert.deepEqual(hidden.slot_regressions, ['b/rw held → violated']);
+  // A requirement that judges the schema: the schema changed and the violation is gone.
+  const X = (verdict: string, h: string) => ({ ...R(verdict, s1, h), requirement: 'MWS-IN-3', test_hash_core: 'core' });
+  assert.equal(classify(withRecs('violated', [X('violated', 'h1')]), withRecs('held', [X('held', 'h2')])).label, 'schema-fixed');
+  assert.equal(classify(withRecs('violated', [X('violated', 'h1')]), withRecs('violated', [X('violated', 'h2')])).transition, 'subject-changed');
   // The run's own cell disagrees with the records: not compared.
   assert.equal(classify(side('held', 'sha256:x', { run_cell: 'platform' }), side('held')).transition, 'rollup-mismatch');
   assert.equal(classify(side('not tested', 'sha256:x', { run_cell: 'not applicable' }), side('not tested')).label, 'unchanged');

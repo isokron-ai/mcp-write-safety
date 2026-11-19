@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 
 import { isObj, sha256 } from '../core/util.js';
 import { TEST_HASH_FORMAT } from '../core/identity.js';
+import { subjectFacets, type Facet } from './testhash.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import type { VerifyOutcome } from './sign.js';
 
@@ -37,7 +38,7 @@ export const COMPARE_FORMAT = 'mws-compare/1';
 export type CellState = 'violated' | 'platform' | 'held' | 'violated?' | 'not observed' | 'self-attested' | 'not tested' | 'not applicable';
 export const ROLLUP_ORDER: CellState[] = ['violated', 'platform', 'held', 'violated?', 'not observed', 'self-attested', 'not tested', 'not applicable'];
 
-export type Label = 'fixed' | 'regressed' | 'unchanged' | 'changed' | 'not comparable';
+export type Label = 'fixed' | 'schema-fixed' | 'regressed' | 'unchanged' | 'changed' | 'not comparable';
 export type Transition =
   | 'fixed'
   | 'regressed'
@@ -55,7 +56,10 @@ export type Transition =
   | 'unstable'
   | 'rollup-mismatch'
   | 'new-cell'
-  | 'removed-cell';
+  | 'removed-cell'
+  | 'partly-held'
+  | 'subject-changed'
+  | 'schema-fixed';
 
 interface Rec {
   requirement: string;
@@ -66,6 +70,7 @@ interface Rec {
   reason?: string;
   cell?: string;
   test_hash?: string;
+  test_hash_core?: string;
   validity?: { counts?: boolean; class?: string };
   attribution?: string | null;
 }
@@ -96,6 +101,10 @@ export interface CellCompare {
   label: Label;
   /** Why, in a sentence (always for not comparable and changed). */
   why: string;
+  /** Slots (resource/procedure) of the cell whose verdict moved, on equal test hashes; absent when none moved. */
+  slot_moves?: { slot: string; before: CellState; after: CellState }[];
+  /** Slots that went from held or not observed to violated, in a cell whose own label is not `regressed`. */
+  slot_regressions?: string[];
 }
 
 export interface RunSummary {
@@ -207,55 +216,99 @@ function mismatch(s: Side): string | null {
 const slotOf = (r: Rec) => `${r.requirement}|${r.write_path.resource}|${r.write_path.tool}|${r.scenario.id}`;
 const slotName = (r: Rec) => `${r.write_path.resource}/${r.scenario.id} v${r.scenario.version}`;
 
-/** Whether two cells' records are the same tests (see the header); null when they are, else why not. */
-export function joinCell(b: Rec[], a: Rec[]): { transition: Transition; why: string } | null {
+export interface SlotMove {
+  slot: string;
+  before: CellState;
+  after: CellState;
+}
+
+export interface Join {
+  /** Why the cell is not compared, or null when every slot is the same test. */
+  problem: { transition: Transition; why: string; facets?: Facet[] } | null;
+  /** Every slot on both sides with equal hashes, with its rolled-up verdict on each side. */
+  slots: SlotMove[];
+}
+
+const isRegression = (m: SlotMove) => (m.before === 'held' || m.before === 'not observed') && m.after === 'violated';
+
+/** Whether two cells' records are the same tests, slot by slot (see the header). */
+export function joinCell(b: Rec[], a: Rec[]): Join {
   const noHash = [...b.map((r) => ['before', r] as const), ...a.map((r) => ['after', r] as const)].find(([, r]) => typeof r.test_hash !== 'string');
-  if (noHash) return { transition: 'no-test-hash', why: `${noHash[0]}: the record ${slotName(noHash[1])} carries no test_hash` };
-  const slots = (rs: Rec[]) => {
-    const m = new Map<string, { hashes: Set<string>; recs: Rec[] }>();
-    for (const r of rs) {
-      const e = m.get(slotOf(r)) ?? { hashes: new Set<string>(), recs: [] };
-      e.hashes.add(r.test_hash!);
-      e.recs.push(r);
-      m.set(slotOf(r), e);
-    }
+  if (noHash) return { problem: { transition: 'no-test-hash', why: `${noHash[0]}: the record ${slotName(noHash[1])} carries no test_hash` }, slots: [] };
+  const group = (rs: Rec[]) => {
+    const m = new Map<string, Rec[]>();
+    for (const r of rs) m.set(slotOf(r), [...(m.get(slotOf(r)) ?? []), r]);
     return m;
   };
-  const sb = slots(b);
-  const sa = slots(a);
+  const sb = group(b);
+  const sa = group(a);
+  const set = (rs: Rec[], k: 'test_hash' | 'test_hash_core') => [...new Set(rs.map((r) => r[k] ?? ''))].sort().join('\n');
   const changed: string[] = [];
+  const subject: string[] = [];
+  const facets = new Set<Facet>();
+  const slots: SlotMove[] = [];
+  const coverage: string[] = [];
   for (const [k, x] of sb) {
     const y = sa.get(k);
     if (!y) continue;
-    const same = x.hashes.size === y.hashes.size && [...x.hashes].every((h) => y.hashes.has(h));
-    if (!same) {
-      const vb = [...new Set(x.recs.map((r) => r.scenario.version))].join('/');
-      const va = [...new Set(y.recs.map((r) => r.scenario.version))].join('/');
-      changed.push(`${slotName(x.recs[0]!).replace(/ v.*$/, '')}${vb !== va ? ` (procedure v${vb} → v${va})` : ' (a tool entry, the resource block, the declaration, a limit or the tester differs)'}`);
+    const name = slotName(x[0]!).replace(/ v.*$/, '');
+    if (set(x, 'test_hash') !== set(y, 'test_hash')) {
+      const cores = [...x, ...y].every((r) => typeof r.test_hash_core === 'string');
+      if (cores && set(x, 'test_hash_core') === set(y, 'test_hash_core')) {
+        for (const f of subjectFacets(x[0]!.requirement)) facets.add(f);
+        subject.push(name);
+        continue;
+      }
+      const vb = [...new Set(x.map((r) => r.scenario.version))].join('/');
+      const va = [...new Set(y.map((r) => r.scenario.version))].join('/');
+      changed.push(`${name}${vb !== va ? ` (procedure v${vb} → v${va})` : ' (a used argument, the resource block, the declaration, a limit or the tester differs)'}`);
+      continue;
     }
+    const m = { slot: name, before: rollUp(x).verdict, after: rollUp(y).verdict };
+    // why: review: a slot tested on one build and not on the other has no evidence to compare on the other.
+    if (UNTESTED.includes(m.before) !== UNTESTED.includes(m.after)) coverage.push(`${name} ${m.before} → ${m.after}`);
+    slots.push(m);
   }
-  if (changed.length) return { transition: 'test-changed', why: `the test changed: ${changed.join('; ')}` };
-  const tested = (m: Map<string, { recs: Rec[] }>, other: Map<string, unknown>) => [...m].filter(([k]) => !other.has(k)).flatMap(([, e]) => e.recs).filter((r) => !UNTESTED.includes(stateOf(r)));
-  const onlyB = tested(sb, sa);
-  const onlyA = tested(sa, sb);
-  if (onlyB.length || onlyA.length) {
-    const say = (rs: Rec[]) => rs.map((r) => `${slotName(r)} ${r.verdict}`).join(', ');
-    return { transition: 'coverage-change', why: `evidence on one build only${onlyB.length ? `; before only: ${say(onlyB)}` : ''}${onlyA.length ? `; after only: ${say(onlyA)}` : ''} (the other build made no record for it)` };
+  if (changed.length) return { problem: { transition: 'test-changed', why: `the test changed: ${changed.join('; ')}` }, slots };
+  const oneSided = (m: Map<string, Rec[]>, other: Map<string, Rec[]>) => [...m].filter(([k]) => !other.has(k)).flatMap(([, rs]) => rs).filter((r) => !UNTESTED.includes(stateOf(r)));
+  const onlyB = oneSided(sb, sa);
+  const onlyA = oneSided(sa, sb);
+  const say = (rs: Rec[]) => rs.map((r) => `${slotName(r)} ${r.verdict}`).join(', ');
+  if (onlyB.length || onlyA.length || coverage.length) {
+    const parts = [onlyB.length ? `before only: ${say(onlyB)}` : '', onlyA.length ? `after only: ${say(onlyA)}` : '', coverage.length ? `tested on one build only: ${coverage.join(', ')}` : ''].filter(Boolean);
+    return { problem: { transition: 'coverage-change', why: `evidence on one build only (${parts.join('; ')})` }, slots };
   }
-  return null;
+  if (subject.length) return { problem: { transition: 'subject-changed', why: `the tool's ${[...facets].join(' and ')} changed, which is what this requirement judges (${subject.join(', ')})`, facets: [...facets] }, slots };
+  return { problem: null, slots };
 }
 
-export function classify(b: Side, a: Side): { transition: Transition; label: Label; why: string } {
+type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[] };
+
+export function classify(b: Side, a: Side): Classified {
   const mb = mismatch(b);
   const ma = mismatch(a);
   if (mb || ma) return { transition: 'rollup-mismatch', label: 'not comparable', why: [mb && `before: ${mb}`, ma && `after: ${ma}`].filter(Boolean).join('; ') };
+  let slots: SlotMove[] = [];
   if (b.recs && a.recs) {
     const j = joinCell(b.recs, a.recs);
-    if (j) return { ...j, label: 'not comparable' };
+    slots = j.slots;
+    if (j.problem?.transition === 'subject-changed') {
+      if (j.problem.facets?.includes('schema') && b.verdict === 'violated' && a.verdict === 'held')
+        return { transition: 'schema-fixed', label: 'schema-fixed', why: `${j.problem.why}: violated before, held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` };
+      return { ...j.problem, label: 'not comparable' };
+    }
+    if (j.problem) return { transition: j.problem.transition, why: j.problem.why, label: 'not comparable' };
   } else {
     if (!b.test_hash || !a.test_hash) return { transition: 'no-test-hash', label: 'not comparable', why: `${!b.test_hash ? 'before' : 'after'}: a record of this cell carries no test_hash` };
     if (b.test_hash !== a.test_hash) return { transition: 'test-changed', label: 'not comparable', why: 'the test changed: the test hashes differ' };
   }
+  const c = verdictMove(b, a, slots);
+  const moved = slots.filter((m) => m.before !== m.after);
+  const regs = moved.filter(isRegression).map((m) => `${m.slot} ${m.before} → violated`);
+  return { ...c, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && c.label !== 'regressed' ? { slot_regressions: regs } : {}) };
+}
+
+function verdictMove(b: Side, a: Side, slots: SlotMove[]): Classified {
   const v0 = b.verdict;
   const v1 = a.verdict;
   if (v0 === 'violated?' || v1 === 'violated?') return { transition: 'unstable', label: 'not comparable', why: 'a violated record on one side does not count (harness-suspect validity): re-run before claiming a change' };
@@ -264,7 +317,12 @@ export function classify(b: Side, a: Side): { transition: Transition; label: Lab
     return { transition: t, label: 'unchanged', why: `${v0} on both builds` };
   }
   if (UNTESTED.includes(v0) || UNTESTED.includes(v1)) return { transition: 'coverage-change', label: 'not comparable', why: UNTESTED.includes(v1) ? `no longer tested: ${a.reason}` : `newly tested (before: ${b.reason})` };
-  if (v0 === 'violated' && v1 === 'held') return { transition: 'fixed', label: 'fixed', why: 'violated on the before build; the same test held on the after build' };
+  if (v0 === 'violated' && v1 === 'held') {
+    // why: review: fixed only where every slot violated before is held after, on an equal hash.
+    const open = slots.filter((m) => m.before === 'violated' && m.after !== 'held');
+    if (open.length) return { transition: 'partly-held', label: 'changed', why: `the cell is held after, but ${open.map((m) => `${m.slot} went violated → ${m.after}`).join(', ')}; not a fix` };
+    return { transition: 'fixed', label: 'fixed', why: 'violated on the before build; every slot that was violated held on the after build, same tests' };
+  }
   if ((v0 === 'held' || v0 === 'not observed') && v1 === 'violated') return { transition: 'regressed', label: 'regressed', why: `${v0} on the before build; the same test is violated on the after build` };
   if (v1 === 'platform') return { transition: '→platform', label: 'changed', why: `${v0} → platform: the backend shows the same behaviour on the after build; not a fix` };
   if (v0 === 'platform') return { transition: 'platform→', label: 'changed', why: `platform → ${v1}: the backend showed the behaviour on the before build; not a fix` };
@@ -272,7 +330,7 @@ export function classify(b: Side, a: Side): { transition: Transition; label: Lab
   return { transition: 'changed', label: 'changed', why: `${v0} → ${v1}` };
 }
 
-const LABEL_ORDER: Label[] = ['regressed', 'fixed', 'changed', 'not comparable', 'unchanged'];
+const LABEL_ORDER: Label[] = ['regressed', 'fixed', 'schema-fixed', 'changed', 'not comparable', 'unchanged'];
 
 export function summarize(doc: Record<string, unknown>, file: string, bytes: Buffer | string, sig: VerifyOutcome): RunSummary {
   const run = isObj(doc['run']) ? doc['run'] : {};
@@ -342,6 +400,8 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
   for (const c of cells) {
     if (c.before) delete c.before.recs;
     if (c.after) delete c.after.recs;
+    // why: review: a slot that regressed inside a cell whose roll-up did not move is said, never hidden by the roll-up.
+    for (const r of c.slot_regressions ?? []) warnings.push(`${c.key}: slot regressed inside a cell labelled ${c.label}: ${r}`);
   }
   cells.sort((p, q) => LABEL_ORDER.indexOf(p.label) - LABEL_ORDER.indexOf(q.label) || (p.key < q.key ? -1 : p.key > q.key ? 1 : 0));
   return { format: COMPARE_FORMAT, tool: { name: SUITE_NAME, version: SUITE_VERSION }, rating: null, spec: { version: before.spec ?? '' }, test_hash: TEST_HASH_FORMAT, before, after, same, warnings, cells };
@@ -350,6 +410,7 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
 const HEAD: Record<Label, string> = {
   regressed: 'Regressed (held or not observed before, violated after, same test)',
   fixed: 'Fixed (violated before, held after, same test)',
+  'schema-fixed': 'Schema fixed (the requirement judges the schema; the schema changed and the violation is gone; check the new schema)',
   changed: 'Changed, no claim (another move between tested verdicts; never a fix)',
   'not comparable': 'Not comparable (no transition is claimed)',
   unchanged: 'Unchanged (the same verdict on both builds)',
@@ -388,7 +449,7 @@ export function renderCompareMarkdown(c: CompareDoc): string {
     }
     L.push('| Cell | Before | After | Transition | Why | Test hash |');
     L.push('|---|---|---|---|---|---|');
-    for (const r of rows) L.push(`| \`${r.key}\` | ${fmt(r.before)} | ${fmt(r.after)} | ${r.transition} | ${r.why.replace(/\|/g, '\\|').replace(/\n/g, ' ')} | ${short(r.before?.test_hash)}${r.before?.test_hash !== r.after?.test_hash ? ` / ${short(r.after?.test_hash)}` : ''} |`);
+    for (const r of rows) L.push(`| \`${r.key}\` | ${fmt(r.before)} | ${fmt(r.after)} | ${r.transition} | ${(r.why + (r.slot_regressions?.length ? `. Slot regressed: ${r.slot_regressions.join(', ')}` : '')).replace(/\|/g, '\\|').replace(/\n/g, ' ')} | ${short(r.before?.test_hash)}${r.before?.test_hash !== r.after?.test_hash ? ` / ${short(r.after?.test_hash)}` : ''} |`);
   }
   return L.join('\n') + '\n';
 }
