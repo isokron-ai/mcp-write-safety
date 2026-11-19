@@ -362,7 +362,8 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
   const ign = res.read.ignore;
   for (const c of o.creates) {
     const w = wp(res.name, c.tool);
-    const scc = filterOff(c.sent_args) ? V1 : sc;
+    // why: only an observed create has arguments to keep; a skipped create (no first call) in a version-2 run stays version 2.
+    const scc = c.first && filterOff(c.sent_args) ? V1 : sc;
     // why: the identifier a create made is an echo only where the request holds it as the object's own id, or it contains the marker.
     const idEcho = (args: unknown) => (v: unknown) => createdIdEcho(args, v, { marker: c.marker ?? null, keys: [res.key?.arg, res.create?.id?.split('.').pop()?.replace(/\[.*$/, '')] });
     // MWS-RES-3

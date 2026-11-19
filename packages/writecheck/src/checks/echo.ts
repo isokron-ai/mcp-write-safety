@@ -104,6 +104,10 @@ const PLACEHOLDER = /(?<![A-Za-z0-9_])[$?:]\d+(?![A-Za-z0-9_])/g;
 /** Words of a free text after which a token names what a write made: a write word, or an identifier or version word. */
 const TEXT_WRITE_WORD = /^(created?|creates|updated?|modified|changed|deleted|written|wrote|inserted|saved|generated|assigned|stored|upserted|added)$/i;
 const TEXT_ID_WORD = /^(id|uid|uuid|rowid|version|revision|rev|etag|generation|seq|sequence)$/i;
+/** Words that name the server or its infrastructure: a number tied to one ("server version 16.1", "API version 2", "shard 3") is not a fact of the object. */
+const INFRA_WORD = /^(server|api|protocol|schema|node|shard|cluster|replica|partition|engine|db|database|driver|client)$/i;
+/** A bare status-like value: 0 or 1, an HTTP-like code, true or false. Not server data unless an id or version word names it. */
+const STATUSY = /^(0|1|[1-5]\d\d|true|false)$/i;
 
 /**
  * Tokens of a free text that could carry server state: they hold a digit, and they come right after a write word or an
@@ -120,9 +124,17 @@ function tokens(s: string): string[] {
     if (/\d/.test(t)) {
       // why: an echoing tool's free text carries digit tokens of its own (a request id, a job number);
       // only one placed as what a write made, or as an identifier that is not the call's, states something of the backend.
+      // A write word in the window names it whatever nouns stand between ("saved user 42"); an id or version word names it unless
+      // the word right before that id word is the call's ("request id 99"). A token right after an infrastructure word, or after
+      // an id word that one qualifies ("shard 3", "server version 16.1"), is never the object's; nor is a bare status-like value
+      // (0, 1, 200) that no id or version word names, as for a lone scalar.
       const before = words.slice(-3).map((w) => w.toLowerCase());
-      const named = before.some((w) => TEXT_WRITE_WORD.test(w) || (TEXT_ID_WORD.test(w) && !CALL_WORD.test(before[before.indexOf(w) - 1] ?? '')));
-      if (kept || (named && !before.some((w) => CALL_WORD.test(w) && !TEXT_ID_WORD.test(w) && !TEXT_WRITE_WORD.test(w)))) out.push(t);
+      const [p2, p1] = [before.at(-2) ?? '', before.at(-1) ?? ''];
+      const infra = INFRA_WORD.test(p1) || (TEXT_ID_WORD.test(p1) && INFRA_WORD.test(p2));
+      const byWrite = before.some((w) => TEXT_WRITE_WORD.test(w));
+      const byId = before.some((w, i) => TEXT_ID_WORD.test(w) && !CALL_WORD.test(before[i - 1] ?? '') && !INFRA_WORD.test(before[i - 1] ?? ''));
+      const statusy = STATUSY.test(t) && !TEXT_ID_WORD.test(p1);
+      if (kept || (!infra && !statusy && (byWrite || byId))) out.push(t);
     }
     for (const w of t.split(/[_.:/-]+/)) if (w) words.push(w);
   }
@@ -182,7 +194,8 @@ export function serverData(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<Ca
     if (typeof x === 'string' && (/\s/.test(x) || x.length > 200)) return free(x, where);
     if (key === '' || CARRIER_KEY.test(key)) {
       // why: a lone scalar under a key that only carries the result (result: "T-907") is the result itself, not prose around it.
-      if (/\d/.test(String(x)) && !inRequest(hay, String(x))) add(`${where}: ${JSON.stringify(x)}`);
+      // A status-like value (0, 1, 200, true) under such a key is how the call went, as in free text.
+      if (/\d/.test(String(x)) && !STATUSY.test(String(x)) && !inRequest(hay, String(x))) add(`${where}: ${JSON.stringify(x)}`);
       return;
     }
     // why: the answer of an echoing tool also carries facts about the call (duration_ms, statusCode, operation, database,
@@ -227,25 +240,33 @@ export function echoOf(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBr
 /**
  * Is the identifier of the object a create made an echo of its request? Only where the request holds it as a value under a
  * key that names the object's own identifier (`id`, `uid`, `uuid`, `key`, `name`, `slug`, the declared caller-chosen key, the
- * last segment of the create's declared id path), as a whole token inside a text it sent (a statement: `VALUES (42, …)`), or
+ * last segment of the create's declared id path) at the top level of the arguments, as a whole token inside a statement it
+ * sent (a text that starts with a statement or command verb, or one under a key that names a query or statement), or
  * where it contains the call's marker. A scalar argument under any other key (priority: 1, ticket_id: 1) does not make the
  * server's new id 1 an echo.
  *
  * why: a whole-token match anywhere in the arguments demoted true receipts: a create sent with
  * priority 1 that the server answered with its new id 1, or a comment created on ticket_id 1 that got id 1.
  */
+/** A text argument that is a statement or a command: it starts with a statement or command verb. */
+const STATEMENT = /^\s*(select|insert|update|delete|upsert|merge|replace|create|alter|drop|with|call|exec|execute|set|get|put|post|patch|del|hset|incr)\b/i;
+/** An argument key that names a query, a statement or a command. */
+const STATEMENT_KEY = /(sql|query|statement|stmt|command|cmd|script)$/i;
+
 export function createdIdEcho(args: unknown, v: unknown, o: { marker?: string | null; keys?: readonly (string | null | undefined)[] }): boolean {
   if (v === null || v === undefined || v === '') return false;
   if (o.marker && typeof v === 'string' && v.includes(o.marker)) return true;
   const keys = new Set(['id', 'uid', 'uuid', 'key', 'name', 'slug', ...(o.keys ?? []).filter((k): k is string => !!k)]);
   const same = (y: unknown) => y !== null && y !== undefined && typeof y !== 'object' && String(y) === String(v);
+  // why: only the object's own identifier, at the top level of the arguments, is an echo by key; a parent reference nested under
+  // an id key (ticket: { id: 1 }) names another object.
+  if (isObj(args) && Object.entries(args).some(([k, y]) => keys.has(k) && same(y))) return true;
   let hit = false;
   const walk = (x: unknown, key: string | null): void => {
     if (hit || x === null || x === undefined) return;
     if (Array.isArray(x)) x.forEach((y) => walk(y, key));
     else if (isObj(x)) for (const [k, y] of Object.entries(x)) walk(y, k);
-    else if (key !== null && keys.has(key) && same(x)) hit = true;
-    else if (typeof x === 'string' && /\s/.test(x) && inRequest(x, v)) hit = true;
+    else if (typeof x === 'string' && (STATEMENT.test(x) || (key !== null && STATEMENT_KEY.test(key))) && inRequest(x, v)) hit = true;
   };
   walk(args, null);
   return hit;

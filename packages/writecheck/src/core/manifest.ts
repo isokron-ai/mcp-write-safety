@@ -669,7 +669,7 @@ export interface Manifest {
     /** Settings applied with a request (spec 516c4ed, MWS-CFG-1 to CFG-4) are declared with `applied: request`; this preview does not test them. */
     per_request: { name: string; kind: 'read_only' | 'deny' | 'allow' }[];
     /** valid: every value the declaration lists as valid; restrict: those it says restrict writes (Annex E, R7-6). The `on` value restricts. */
-    read_only: { env: string; on: string; valid: string[]; restrict: string[]; empty_distinct: boolean } | null;
+    read_only: { env: string; on: string; valid: string[]; restrict: string[]; empty_distinct: boolean; permit?: string[] } | null;
     tool_filters: { env: string; kind: 'allow' | 'deny'; separator: string }[];
   };
   /** MWS-SEC-1: extra values to look for (environment variable names; never the values) and URL query parameters that carry a token or a signature. */
@@ -1223,13 +1223,6 @@ const PATTERN_KINDS = ['applied_all', 'not_applied', 'write_failed', 'repeat_inv
  * a literal value sits under the scope argument; `ids` where a template refers to the tester's exact objects ({{ids}},
  * {{ids[0]}}, {{json:ids}}).
  */
-/**
- * settings.read_only blocks whose `valid` is the map form ({ value: restrict | permit }), which classes every value. Kept outside
- * the parsed object so the declaration that enters each record's test_hash is unchanged (a list form and a map form whose
- * values are all permit parse alike otherwise).
- */
-export const classifiedReadOnly = new WeakSet<object>();
-
 export function multiBinding(args: unknown, scopeArg: string | null): { scope: boolean; ids: boolean } {
   const roots = templateRoots(args);
   const literal = !!scopeArg && isObj(args) && Object.hasOwn(args, scopeArg);
@@ -1317,7 +1310,9 @@ function topLevel(o: Obj): Pick<Manifest, 'settings' | 'secrets' | 'canaries' | 
       }
       const on = String(ro['on'] ?? 'true');
       settings.read_only = { env: str(ro['env'], 'settings.read_only.env', ENV), on, valid, restrict: [...new Set([on, ...restrict])], empty_distinct: ro['empty_distinct'] === true };
-      if (!Array.isArray(ro['valid']) && ro['valid'] !== undefined) classifiedReadOnly.add(settings.read_only);
+      // why: the map form classes every value; `permit` (present only for it) keeps that in the parsed declaration, so it enters
+      // each record's test_hash and survives a copy, while a list-form manifest parses, and hashes, as before.
+      if (!Array.isArray(ro['valid']) && ro['valid'] !== undefined) settings.read_only.permit = valid.filter((v) => !settings.read_only!.restrict.includes(v));
     }
     if (st['tool_filters'] !== undefined) {
       if (!Array.isArray(st['tool_filters'])) throw fail('settings.tool_filters', 'a list of { env, kind: allow | deny }');

@@ -26,7 +26,7 @@
  */
 
 import { multiGate } from './multi.js';
-import { classifiedReadOnly, multiBinding } from '../core/manifest.js';
+import { multiBinding } from '../core/manifest.js';
 import { fromDeclaration, saidBy, says } from './says.js';
 import { declaredWriteTools, readOnlyMarkedCalls } from './coverage.js';
 import { baseVars, deleteArgs, needsVersion, type Driver } from '../core/driver.js';
@@ -285,8 +285,8 @@ export interface Cfg1Probe {
   permitTypo: (v: string) => boolean;
 }
 
-/** `classified`: `valid` was the map form, which classes each value as restrict or permit (read from the manifest where absent). */
-export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean; classified?: boolean }): Cfg1Probe {
+/** `permit`: present where `valid` was the map form, which classes each value as restrict or permit. */
+export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean; permit?: string[] }): Cfg1Probe {
   const valid = ro.valid.length ? ro.valid : [ro.on];
   const restrict = ro.restrict ?? [ro.on];
   // why: corpus finding (lane F9): a read-only switch can be an inverted allow-write flag, where the restricting value is "false".
@@ -301,7 +301,7 @@ export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]
   const permits = ro.valid.filter((v) => !restrict.includes(v));
   // why: only the map form says a value permits; a list form (valid: ["readonly", "true"]) classes
   // nothing, so it keeps the earlier reading (normal) and never turns the probes falsy on a correct server.
-  const classified = ro.classified ?? classifiedReadOnly.has(ro);
+  const classified = Array.isArray(ro.permit);
   const fromPermits = classified && !senses.size && sensesOf(permits).size > 0;
   if (fromPermits) senses = new Set([...sensesOf(permits)].map((x) => (x === 'true' ? ('false' as const) : ('true' as const))));
   const polarity: Cfg1Polarity = senses.has('false') ? (senses.has('true') ? 'mixed' : 'inverted') : 'normal';
