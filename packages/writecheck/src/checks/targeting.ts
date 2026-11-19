@@ -390,7 +390,7 @@ export function withLoss(r: Result, losses: (Loss | undefined)[], canViolate: bo
       ...r.numbers,
       // why: k1 brackets apply withLoss again to a record that already has losses; the lists are merged, never replaced.
       ...(lost ? { bystanders_lost: [...new Set([...(Array.isArray(r.numbers['bystanders_lost']) ? (r.numbers['bystanders_lost'] as string[]) : []), ...gone, ...changed, ...missing.map((m) => `${m} (missing; not confirmed gone)`)])] } : {}),
-      ...(unavailable ? { bystander_inventory: { unavailable } } : covered ? { bystander_inventory: { scopes: covered.scopes, objects: covered.objects, lists: [...new Set(covered.lists)], read_back_by_id: covered.read_back_by_id, partial } } : {}),
+      ...(unavailable ? { bystander_inventory: { unavailable } } : covered ? { bystander_inventory: { scopes: covered.scopes, objects: covered.objects, lists: [...new Set(covered.lists)], read_back_by_id: covered.read_back_by_id, partial, ...(covered.fixtures?.length ? { fixtures: covered.fixtures } : {}) } } : {}),
     },
     notes: [...r.notes],
   };
