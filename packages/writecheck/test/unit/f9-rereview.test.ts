@@ -61,14 +61,13 @@ test('M2: the map form of valid is in the parsed declaration: a different CFG-1 
   assert.equal(cfg1Probe(structuredClone(list.settings.read_only!)).polarity, 'normal');
 });
 
-test('L1: only a statement-like text or a top-level id key makes the new id an echo', () => {
-  assert.equal(createdIdEcho({ title: 'buy 2 apples', note: 'see 7 first' }, 7, {}), false, 'prose is not a statement');
+test('L1 (as revised by the third review): a nested parent id is not the object\'s own; any text holding the id is an echo', () => {
+  assert.equal(createdIdEcho({ title: 'buy 2 apples', note: 'see 7 first' }, 7, {}), true, 'prose or statement cannot be told apart: an echo (not tested)');
   assert.equal(createdIdEcho({ sql: 'INSERT INTO t (id) VALUES (7)' }, 7, {}), true);
-  assert.equal(createdIdEcho({ body: '  insert into t values (7)' }, 7, {}), true, 'a text that starts with a statement verb');
-  assert.equal(createdIdEcho({ query: 'tickets where id 7' }, 7, {}), true, 'a key that names a query');
-  assert.equal(createdIdEcho({ ticket: { id: 1 }, body: 'hello' }, 1, {}), false, 'a nested parent id is another object');
+  assert.equal(createdIdEcho({ ticket: { id: 1 }, body: 'hello' }, 1, { others: ['ticket'] }), false, 'a nested id under another resource is another object');
+  assert.equal(createdIdEcho({ parent: { id: 1 }, body: 'hello' }, 1, {}), false, 'a parent reference');
   assert.equal(createdIdEcho({ id: 1, body: 'hello' }, 1, {}), true);
-  const r3 = createsVerdicts({ creates: [{ name: 'ticket', tool: 'ticket_create', parent: null, first: call({ data: { id: 1, ticket: { id: 1 } } }), sent_args: { ticket: { id: 1 }, body: 'hello' }, found: [1], repeat: null, found_after_repeat: null, key: null, version: null, read_keys: null, late_failure: null }], update_receipt: null, failures: [], delete_case: null, jobs: [] } as never, res, ctx).find((x) => x.requirement === 'MWS-RES-3')!;
+  const r3 = createsVerdicts({ creates: [{ name: 'ticket', tool: 'ticket_create', parent: null, first: call({ data: { id: 1, parent: { id: 1 } } }), sent_args: { parent: { id: 1 }, body: 'hello' }, found: [1], repeat: null, found_after_repeat: null, key: null, version: null, read_keys: null, late_failure: null }], update_receipt: null, failures: [], delete_case: null, jobs: [] } as never, res, ctx).find((x) => x.requirement === 'MWS-RES-3')!;
   assert.equal(r3.verdict, 'held', r3.reason);
 });
 

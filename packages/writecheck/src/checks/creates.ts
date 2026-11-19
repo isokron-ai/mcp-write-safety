@@ -365,7 +365,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
     // why: only an observed create has arguments to keep; a skipped create (no first call) in a version-2 run stays version 2.
     const scc = c.first && filterOff(c.sent_args) ? V1 : sc;
     // why: the identifier a create made is an echo only where the request holds it as the object's own id, or it contains the marker.
-    const idEcho = (args: unknown) => (v: unknown) => createdIdEcho(args, v, { marker: c.marker ?? null, keys: [res.key?.arg, res.create?.id?.split('.').pop()?.replace(/\[.*$/, '')] });
+    const idEcho = (args: unknown) => (v: unknown) => createdIdEcho(args, v, { marker: c.marker ?? null, keys: [res.key?.arg, res.create?.id?.split('.').pop()?.replace(/\[.*$/, '')], others: ctx.manifest.resources.map((r) => r.name).filter((n) => n !== c.name) });
     // MWS-RES-3
     if (c.skipped || !c.first || c.first.indeterminate) out.push(result('MWS-RES-3', w, scc, 'not tested', c.skipped ?? 'the create\'s outcome is unknown'));
     else if (!c.first.ok) out.push(result('MWS-RES-3', w, scc, 'not tested', `the create did not succeed (${short(c.first.text ?? c.first.rpc_error?.message ?? '', 120)})`));

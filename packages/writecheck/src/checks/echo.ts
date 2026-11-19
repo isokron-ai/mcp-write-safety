@@ -108,6 +108,12 @@ const TEXT_ID_WORD = /^(id|uid|uuid|rowid|version|revision|rev|etag|generation|s
 const INFRA_WORD = /^(server|api|protocol|schema|node|shard|cluster|replica|partition|engine|db|database|driver|client)$/i;
 /** A bare status-like value: 0 or 1, an HTTP-like code, true or false. Not server data unless an id or version word names it. */
 const STATUSY = /^(0|1|[1-5]\d\d|true|false)$/i;
+/**
+ * Words that name the call or its own unit of work without doubt. A token right after one ("request 8f2c91ab", "job 4411",
+ * "pid 4242"), or after an id word that one qualifies ("request_id 8f2c91ab", "request id 99"), is never server data, even
+ * beside a write word. Nouns that may also name a resource (user, message, task, run, client, tenant) do not veto.
+ */
+const STRICT_CALL_WORD = /^(request|req|trace|span|session|correlation|connection|conn|call|rpc|invocation|query|job|execution|exec|statement|stmt|operation|op|pid|process)$/i;
 
 /**
  * Tokens of a free text that could carry server state: they hold a digit, and they come right after a write word or an
@@ -124,13 +130,15 @@ function tokens(s: string): string[] {
     if (/\d/.test(t)) {
       // why: an echoing tool's free text carries digit tokens of its own (a request id, a job number);
       // only one placed as what a write made, or as an identifier that is not the call's, states something of the backend.
-      // A write word in the window names it whatever nouns stand between ("saved user 42"); an id or version word names it unless
+      // A write word in the window names it whatever resource nouns stand between ("saved user 42"); an id or version word names it unless
       // the word right before that id word is the call's ("request id 99"). A token right after an infrastructure word, or after
       // an id word that one qualifies ("shard 3", "server version 16.1"), is never the object's; nor is a bare status-like value
       // (0, 1, 200) that no id or version word names, as for a lone scalar.
       const before = words.slice(-3).map((w) => w.toLowerCase());
       const [p2, p1] = [before.at(-2) ?? '', before.at(-1) ?? ''];
-      const infra = INFRA_WORD.test(p1) || (TEXT_ID_WORD.test(p1) && INFRA_WORD.test(p2));
+      // why: when unsure, the filter fails toward not tested: a strict call word right before the token, or before the id word
+      // right before it, vetoes even a write word in the window ("updated (job 4411)", "updated, request_id 8f2c91ab").
+      const infra = INFRA_WORD.test(p1) || (TEXT_ID_WORD.test(p1) && INFRA_WORD.test(p2)) || STRICT_CALL_WORD.test(p1) || (TEXT_ID_WORD.test(p1) && STRICT_CALL_WORD.test(p2));
       const byWrite = before.some((w) => TEXT_WRITE_WORD.test(w));
       const byId = before.some((w, i) => TEXT_ID_WORD.test(w) && !CALL_WORD.test(before[i - 1] ?? '') && !INFRA_WORD.test(before[i - 1] ?? ''));
       const statusy = STATUSY.test(t) && !TEXT_ID_WORD.test(p1);
@@ -238,35 +246,38 @@ export function echoOf(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBr
 }
 
 /**
- * Is the identifier of the object a create made an echo of its request? Only where the request holds it as a value under a
- * key that names the object's own identifier (`id`, `uid`, `uuid`, `key`, `name`, `slug`, the declared caller-chosen key, the
- * last segment of the create's declared id path) at the top level of the arguments, as a whole token inside a statement it
- * sent (a text that starts with a statement or command verb, or one under a key that names a query or statement), or
- * where it contains the call's marker. A scalar argument under any other key (priority: 1, ticket_id: 1) does not make the
- * server's new id 1 an echo.
+ * Is the identifier of the object a create made an echo of its request? The rule leans to "echo": where the filter cannot
+ * tell, the record is `not tested`, never `held`. The identifier is an echo where
+ *   - it contains the call's marker;
+ *   - the request holds it as the value of the object's own id key (`id`, `uid`, `uuid`, `key`, `name`, `slug`, the declared
+ *     caller-chosen key, the last segment of the create's declared id path), at the top level or inside any object the
+ *     arguments wrap it in (`input`, `data`, `record`, the resource's own name …);
+ *   - any text the request sent holds it as a whole token inside a longer text (a statement, a command, a query in any
+ *     language, a path, or prose: no verb test, since a statement can open with a comment, a parenthesis, BEGIN or a
+ *     GraphQL keyword).
+ * Only what names another object is passed over: a key that is another declared resource's name, `parent`, a key ending in
+ * `_ref`, `_id` or `Id` (other than the object's own id key). A scalar argument equal to the id under any other key
+ * (priority: 1, ticket_id: 1) does not make the server's new id 1 an echo.
  *
- * why: a whole-token match anywhere in the arguments demoted true receipts: a create sent with
- * priority 1 that the server answered with its new id 1, or a comment created on ticket_id 1 that got id 1.
+ * why: a whole-token match anywhere in the arguments demoted true receipts (a create sent with priority 1 answered with its
+ * new id 1); a narrower reading of statements and wrappers let echoes through as held (an id wrapped in input: {...}, a
+ * statement behind a leading comment).
  */
-/** A text argument that is a statement or a command: it starts with a statement or command verb. */
-const STATEMENT = /^\s*(select|insert|update|delete|upsert|merge|replace|create|alter|drop|with|call|exec|execute|set|get|put|post|patch|del|hset|incr)\b/i;
-/** An argument key that names a query, a statement or a command. */
-const STATEMENT_KEY = /(sql|query|statement|stmt|command|cmd|script)$/i;
-
-export function createdIdEcho(args: unknown, v: unknown, o: { marker?: string | null; keys?: readonly (string | null | undefined)[] }): boolean {
+export function createdIdEcho(args: unknown, v: unknown, o: { marker?: string | null; keys?: readonly (string | null | undefined)[]; others?: readonly string[] }): boolean {
   if (v === null || v === undefined || v === '') return false;
   if (o.marker && typeof v === 'string' && v.includes(o.marker)) return true;
   const keys = new Set(['id', 'uid', 'uuid', 'key', 'name', 'slug', ...(o.keys ?? []).filter((k): k is string => !!k)]);
-  const same = (y: unknown) => y !== null && y !== undefined && typeof y !== 'object' && String(y) === String(v);
-  // why: only the object's own identifier, at the top level of the arguments, is an echo by key; a parent reference nested under
-  // an id key (ticket: { id: 1 }) names another object.
-  if (isObj(args) && Object.entries(args).some(([k, y]) => keys.has(k) && same(y))) return true;
+  const others = new Set(o.others ?? []);
+  const needle = String(v);
+  const otherObject = (k: string) => !keys.has(k) && (others.has(k) || k === 'parent' || /(_ref|_id|Id|Ref)$/.test(k));
   let hit = false;
   const walk = (x: unknown, key: string | null): void => {
     if (hit || x === null || x === undefined) return;
     if (Array.isArray(x)) x.forEach((y) => walk(y, key));
-    else if (isObj(x)) for (const [k, y] of Object.entries(x)) walk(y, k);
-    else if (typeof x === 'string' && (STATEMENT.test(x) || (key !== null && STATEMENT_KEY.test(key))) && inRequest(x, v)) hit = true;
+    else if (isObj(x)) {
+      for (const [k, y] of Object.entries(x)) if (!otherObject(k)) walk(y, k);
+    } else if (key !== null && keys.has(key) && typeof x !== 'object' && String(x) === needle) hit = true;
+    else if (typeof x === 'string' && x !== needle && inRequest(x, v)) hit = true;
   };
   walk(args, null);
   return hit;
