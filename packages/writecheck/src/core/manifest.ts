@@ -47,15 +47,312 @@ export interface ToolTemplate {
  * outputSchema marks them. Absent unless declared (the outputSchema decides).
  */
 export type DecodeMode = 'json' | 'none';
-export type Decode = { decode?: DecodeMode };
+/**
+ * Read extraction (`decode: { extract: … }`): a tool whose answer carries its JSON inside markup or prose (the whole answer
+ * wrapped in `<insecure-content>…</insecure-content>`, say) has that JSON taken out of the answer's text before it is parsed.
+ * `between`: the text after the first `start` and before the first `end` that follows it; `regex`: the one capture group of
+ * the first match (dotAll). `refusals`: also extract from an error answer, and let the structured refusal signals read the
+ * extracted document; without it a refusal is classified on the answer as received.
+ */
+export type Extract = ({ between: [string, string] } | { regex: string }) & { refusals: boolean };
+export type Decode = { decode?: DecodeMode; extract?: Extract };
 
-const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it)';
+const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it); or an object { mode, extract }';
 
-/** Parse an optional `decode` member. */
+/** The longest extraction pattern accepted. */
+const EXTRACT_MAX = 512;
+
+/**
+ * Why a declared extraction regex is refused (null: accepted). It must compile, have exactly one capture group, and be bounded:
+ * the group is delimited by something on each side that is more than anchors or a match-anything run (a group that can reach
+ * either end of the answer could take the whole of it), and no quantified group holds a quantifier of its own (catastrophic
+ * backtracking on a long answer).
+ */
+export function extractRegexProblem(src: string): string | null {
+  if (src.length > EXTRACT_MAX) return `longer than ${EXTRACT_MAX} characters`;
+  try {
+    void new RegExp(src, 's');
+  } catch (e) {
+    return `not a valid regular expression: ${(e as Error).message}`;
+  }
+  const groups = (new RegExp(`${src}|`, 's').exec('') ?? []).length - 1;
+  if (groups !== 1) return `${groups} capture groups; exactly one is needed (use (?:…) for any other group)`;
+  // Locate the capture group: the first "(" that is not escaped, not in a class, and not followed by "?" (or is "(?<name>").
+  let open = -1;
+  let close = -1;
+  let depth = 0;
+  let inClass = false;
+  let capDepth = -1;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') inClass = true;
+    else if (c === '(') {
+      depth++;
+      const capturing = src[i + 1] !== '?' || (src[i + 2] === '<' && src[i + 3] !== '=' && src[i + 3] !== '!');
+      if (capturing && open < 0) {
+        open = i;
+        capDepth = depth;
+      }
+    } else if (c === ')') {
+      if (depth === capDepth && close < 0 && open >= 0) close = i;
+      depth--;
+    }
+  }
+  if (open < 0 || close < 0) return 'the capture group could not be located';
+  const before = required(src.slice(0, open));
+  const after = required(src.slice(close + 1).replace(/^(?:[*+?]|\{\d*,?\d*\})\??/, ''));
+  if (!before || !after) return 'unbounded: the capture group must be delimited on both sides by text the answer must contain (e.g. "<tag>(.*?)</tag>"), or it could take the whole answer; prefer between: [start, end]';
+  if (/\((?:[^()\\]|\\.)*[*+](?:[^()\\]|\\.)*\)[*+{]/.test(src)) return 'unbounded: a quantified group holds a quantifier (catastrophic backtracking)';
+  return null;
+}
+
+/**
+ * What a regex fragment requires the text to contain: anchors, optional atoms and groups (`x?`, `x*`, `x{0,n}`, `(?:…)?`), a group
+ * with an empty alternative (`(?:<t>|)`) and match-anything runs (`.+`, `[\s\S]+`, `\S+`) taken out. Empty: no delimiter.
+ */
+function required(s: string): string {
+  const G = String.raw`(?:[^()\\]|\\.)*`;
+  let x = s.replace(/\\[bBAzZ]|[\^$]/g, '');
+  const optGroup = new RegExp(String.raw`\((?:\?:)?${G}\)(?:[?*]|\{0(?:,\d*)?\})\??`, 'g');
+  const emptyAlt = new RegExp(String.raw`\((?:\?:)?(?:\|${G}|${G}\||${G}\|\|${G})\)`, 'g');
+  for (let prev = ''; prev !== x; ) {
+    prev = x;
+    x = x.replace(optGroup, '').replace(emptyAlt, '');
+  }
+  x = x.replace(/(?:\\.|\[(?:[^\]\\]|\\.)*\]|[^\\()|])(?:[?*]|\{0(?:,\d*)?\})\??/g, '');
+  x = x.replace(/(?:\.|\[\\s\\S\]|\[\\S\\s\]|\[\^\]\]|\\[sSwWdD])\+\??/g, '');
+  return x.replace(/\(\?:|[()|]/g, '').trim();
+}
+
+function extractOf(v: unknown, where: string): Extract {
+  const o = obj(v, where);
+  keys(o, ['between', 'regex', 'refusals'], where);
+  if ((o['between'] === undefined) === (o['regex'] === undefined)) throw fail(where, 'give exactly one of between: [start, end] or regex: "<pattern with one capture group>"');
+  if (o['refusals'] !== undefined && typeof o['refusals'] !== 'boolean') throw fail(`${where}.refusals`, 'true or false');
+  const refusals = o['refusals'] === true;
+  if (o['between'] !== undefined) {
+    const b = o['between'];
+    if (!Array.isArray(b) || b.length !== 2 || b.some((x) => typeof x !== 'string' || !x || x.length > EXTRACT_MAX)) throw fail(`${where}.between`, `[start, end]: two non-empty strings of at most ${EXTRACT_MAX} characters (unbounded otherwise)`);
+    return { between: [b[0] as string, b[1] as string], refusals };
+  }
+  const src = str(o['regex'], `${where}.regex`);
+  const why = extractRegexProblem(src);
+  if (why) throw fail(`${where}.regex`, why);
+  return { regex: src, refusals };
+}
+
+/** Parse an optional `decode` member: `json`, `none`, or `{ mode, extract }`. */
 function decodeOf(v: unknown, where: string): Decode {
   if (v === undefined) return {};
-  if (v !== 'json' && v !== 'none') throw fail(`${where}.decode`, DECODE_WHY);
-  return { decode: v };
+  if (v === 'json' || v === 'none') return { decode: v };
+  if (!isObj(v)) throw fail(`${where}.decode`, DECODE_WHY);
+  keys(v, ['mode', 'extract'], `${where}.decode`);
+  if (v['mode'] === undefined && v['extract'] === undefined) throw fail(`${where}.decode`, 'mode, extract or both');
+  if (v['mode'] !== undefined && v['mode'] !== 'json' && v['mode'] !== 'none') throw fail(`${where}.decode.mode`, 'json or none');
+  return { ...(v['mode'] !== undefined ? { decode: v['mode'] as DecodeMode } : {}), ...(v['extract'] !== undefined ? { extract: extractOf(v['extract'], `${where}.decode.extract`) } : {}) };
+}
+
+/**
+ * Every tool the declaration names an extraction for (server.decode, target.guard, each resource's read and list), one per tool;
+ * two different extractions for one tool are refused.
+ */
+export function declaredExtracts(m: Pick<Manifest, 'server' | 'target' | 'resources'>): Map<string, Extract> {
+  const out = new Map<string, Extract>();
+  const where = new Map<string, string>();
+  const add = (tool: string, x: Extract | undefined, at: string) => {
+    if (!x) return;
+    const had = out.get(tool);
+    if (had && JSON.stringify(had) !== JSON.stringify(x)) throw fail(at, `decode.extract for ${tool} differs from the one ${where.get(tool)} declares (one extraction per tool: it applies to every call of the tool)`);
+    out.set(tool, x);
+    where.set(tool, at);
+  };
+  for (const [tool, x] of Object.entries(m.server?.extract ?? {})) add(tool, x, `server.decode.${tool}.extract`);
+  if (m.target?.guard) add(m.target.guard.tool, m.target.guard.extract, 'target.guard.decode.extract');
+  (m.resources ?? []).forEach((r, i) => {
+    add(r.read.tool, r.read.extract, `resources[${i}].read.decode.extract`);
+    if (r.list) add(r.list.tool, r.list.extract, `resources[${i}].list.decode.extract`);
+  });
+  return out;
+}
+
+/**
+ * Feature: per-session init (`session.init`). Calls made on every MCP session the tester opens, after the handshake and before
+ * the session's first other tools/call, for a server that connects to its backend only when a call carries the connection
+ * settings. `args` may use `{{env.NAME}}` (the tester's environment; every such value is treated as a secret). `read_only: true`
+ * declares the call only reads; otherwise (and where tools/list does not mark it readOnlyHint: true) each call counts as a write.
+ */
+export interface SessionInit {
+  tool: string;
+  args: unknown;
+  read_only: boolean;
+  /** Every environment variable the arguments name (`{{env.NAME}}`). */
+  env: string[];
+  /** Those given under a secret-like name: their values are secrets however short (from three characters). */
+  secret_env: string[];
+}
+
+/** Name parts that mark a credential on their own. */
+const SECRET_PARTS = new Set(['password', 'passwd', 'passphrase', 'pass', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'credential', 'credentials', 'creds', 'cookie', 'cookies', 'dsn', 'auth', 'authorization', 'bearer', 'oauth', 'apikey', 'connstr']);
+/** The password-type parts: a numeric literal is refused only under these. */
+const PASSWORD_PARTS = new Set(['password', 'passwd', 'passphrase', 'pass', 'pwd', 'pin']);
+/** With `key`, these make it a credential (`api_key`, `privateKey`); `key` alone is one too. Any other `key` (primary, sort, cache) is not. */
+const KEY_QUALIFIERS = new Set(['api', 'private', 'access', 'secret', 'client', 'signing', 'encryption', 'master']);
+/** A last part that describes a setting rather than holding the credential (`token_type`, `auth_mode`, `secretName`, `password_policy`, `token_url`). */
+const DESCRIPTORS = new Set(['type', 'types', 'mode', 'scope', 'scopes', 'name', 'names', 'kind', 'policy', 'field', 'path', 'id', 'ids', 'length', 'len', 'size', 'format', 'url', 'uri', 'endpoint', 'host', 'file', 'dir', 'env', 'var', 'ttl', 'expiry', 'expires', 'lifetime', 'header', 'prefix', 'location', 'method', 'provider', 'version', 'enabled', 'required']);
+/** A first part that makes the name a limit or a count (`max_tokens`). */
+const COUNTERS = new Set(['max', 'min', 'num', 'count', 'n']);
+/** Lowercase compounds written as one word, split into their parts. */
+const COMPOUNDS: Record<string, string[]> = {
+  apikey: ['api', 'key'],
+  accesskey: ['access', 'key'],
+  privatekey: ['private', 'key'],
+  secretkey: ['secret', 'key'],
+  clientsecret: ['client', 'secret'],
+  accesstoken: ['access', 'token'],
+  authtoken: ['auth', 'token'],
+  refreshtoken: ['refresh', 'token'],
+  idtoken: ['id', 'token'],
+  connectionstring: ['connection', 'string'],
+};
+
+/** A name's parts: camelCase, `_`, `-`, `.`, digits; lowercased; known one-word compounds split. */
+export function nameParts(name: string): string[] {
+  return name
+    .replace(/^-+/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_.\-\d]+/)
+    .map((p) => p.toLowerCase())
+    .filter(Boolean)
+    .flatMap((p) => COMPOUNDS[p] ?? [p]);
+}
+
+/**
+ * Is an argument name (or a command-line flag's name) secret-like, a name whose value is a credential? Matched on whole name
+ * parts, case ignored, camelCase and compounds included: a part `password`, `passwd`, `passphrase`, `pass`, `pwd`, `secret`,
+ * `token`, `credential(s)`, `creds`, `cookie`, `dsn`, `auth`, `authorization`, `bearer`, `oauth`; `connection` or `conn` with `string` or `str`;
+ * `key` alone or with `api`, `private`, `access`, `secret`, `client`, `signing`, `encryption` or `master`. Not secret-like: a name
+ * whose last part describes the setting (`token_type`, `auth_mode`, `oauth_scope`, `secretName`, `cookie_name`,
+ * `password_policy`, `token_url`), one whose first part makes it a limit (`max_tokens`), and a part that merely contains a
+ * marker (`bypass`, `passport`, `tokenizer`, `author`, `keyboard`).
+ */
+export function secretLikeName(name: string): boolean {
+  const parts = nameParts(name);
+  if (!parts.length) return false;
+  if (parts.length > 1 && DESCRIPTORS.has(parts[parts.length - 1]!)) return false;
+  if (COUNTERS.has(parts[0]!) && parts.length > 1) return false;
+  if (parts.some((p) => SECRET_PARTS.has(p))) return true;
+  if ((parts.includes('connection') || parts.includes('conn')) && (parts.includes('string') || parts.includes('str'))) return true;
+  if (parts.includes('key')) return parts.length === 1 || parts.some((p) => KEY_QUALIFIERS.has(p));
+  return false;
+}
+
+/** A password-type name (`password`, `dbPass`, `pwd`): a numeric literal under it is refused too. */
+export const passwordLikeName = (name: string): boolean => secretLikeName(name) && nameParts(name).some((p) => PASSWORD_PARTS.has(p));
+
+/** A literal URL that carries a credential: a user-info password (`user:pass@`) or a query parameter with a secret-like name. */
+export function urlCarriesSecret(v: string): boolean {
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v.trim())) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/\s@?#]*:[^/\s@?#]*@/i.test(v.trim())) return true;
+  const q = /\?([^#]*)/.exec(v);
+  if (!q) return false;
+  return q[1]!.split('&').some((kv) => {
+    const k = decodeURIComponent(kv.split('=')[0] ?? '');
+    return !!k && secretLikeName(k) && (kv.split('=')[1] ?? '') !== '' && !/^\{\{/.test(decodeURIComponent(kv.split('=').slice(1).join('=')));
+  });
+}
+
+const envOnly = (x: string): string | null => /^\{\{\s*\??env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(x)?.[1] ?? null;
+
+function sessionOf(v: unknown): { init: SessionInit[] } | null {
+  if (v === undefined) return null;
+  const o = obj(v, 'session');
+  keys(o, ['init'], 'session');
+  if (!Array.isArray(o['init']) || o['init'].length === 0 || o['init'].length > 8) throw fail('session.init', 'a list of one to eight { tool, args, read_only } calls');
+  const init = (o['init'] as unknown[]).map((x, i) => {
+    const w = `session.init[${i}]`;
+    const t = tool(x, w, ['read_only']);
+    if (t['read_only'] !== undefined && typeof t['read_only'] !== 'boolean') throw fail(`${w}.read_only`, 'true or false');
+    if (!isObj(t.args)) throw fail(`${w}.args`, 'an object');
+    const roots = templateRoots(t.args);
+    for (const r of roots) if (r !== 'env') throw fail(`${w}.args`, `{{${r}}}: session.init arguments may use only {{env.NAME}} (they are sent before any object of the run exists)`);
+    const env = new Set<string>();
+    const walk = (s: unknown): void => {
+      if (typeof s === 'string') {
+        for (const m of s.matchAll(/\{\{\s*(?:json:|\?)?env(?:\.([^}\s]*))?\s*\}\}/g)) {
+          if (!m[1] || !ENV.test(m[1])) throw fail(`${w}.args`, `${m[0]}: write {{env.NAME}} with one environment variable name`);
+          env.add(m[1]);
+        }
+      } else if (Array.isArray(s)) s.forEach(walk);
+      else if (isObj(s)) for (const [k, x] of Object.entries(s)) (walk(k), walk(x));
+    };
+    walk(t.args);
+    // why: review of PR #14 (8) and its follow-up (B, re-review): a credential is never written in the manifest. Under a secret-like
+    // name (an object key, a `--flag` or `-p` in a list, `name=value` in a list, a `{ name, value }` header pair) the value must be
+    // exactly one {{env.NAME}}, whose value is then a secret however short (secret_env). A literal URL anywhere must not carry a
+    // credential (user-info or a secret-like query parameter). A number is refused only under a password-type name.
+    const secretEnv = new Set<string>();
+    const why = 'a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest';
+    const check = (x: unknown, at: string, name: string): void => {
+      if (x === null || x === undefined || x === '' || typeof x === 'boolean') return;
+      if (typeof x === 'number') {
+        if (passwordLikeName(name)) throw fail(`${w}.args${at}`, why);
+        return;
+      }
+      if (Array.isArray(x)) return x.forEach((y, j) => (typeof y === 'string' || typeof y === 'number' ? check(y, `${at}[${j}]`, name) : lit(y, `${at}[${j}]`)));
+      if (isObj(x)) return lit(x, at);
+      const n = typeof x === 'string' ? envOnly(x) : null;
+      if (!n) throw fail(`${w}.args${at}`, why);
+      secretEnv.add(n);
+    };
+    const urlOk = (x: unknown, at: string): void => {
+      if (typeof x === 'string' && urlCarriesSecret(x)) throw fail(`${w}.args${at}`, 'a literal URL that carries a credential (user-info or a secret-like query parameter) is given as {{env.NAME}}, never written in the manifest');
+    };
+    const lit = (v: unknown, at: string): void => {
+      if (Array.isArray(v)) {
+        v.forEach((x, j) => {
+          const here = `${at}[${j}]`;
+          if (typeof x !== 'string') return lit(x, here);
+          urlOk(x, here);
+          const kv = /^(-{0,2}[A-Za-z][\w.-]*)=(.*)$/s.exec(x);
+          if (kv && secretLikeName(kv[1]!)) return check(kv[2], here, kv[1]!);
+          const flag = /^-{1,2}([A-Za-z][\w.-]*)$/.exec(x);
+          const next = v[j + 1];
+          const isLit = j + 1 < v.length && (typeof next === 'string' || typeof next === 'number') && !/^-{1,2}[A-Za-z]/.test(String(next));
+          if (flag && isLit && (secretLikeName(flag[1]!) || (/^-[pP]$/.test(x) && typeof next === 'string' && !/^\d+$/.test(next)))) check(next, `${at}[${j + 1}] (after ${x})`, /^-[pP]$/.test(x) ? 'password' : flag[1]!);
+        });
+        return;
+      }
+      if (isObj(v)) {
+        // A header pair { name: "Authorization", value: "…" } (also key/header in place of name).
+        const pairName = ['name', 'key', 'header'].map((k) => v[k]).find((x): x is string => typeof x === 'string');
+        const pair = pairName !== undefined && Object.hasOwn(v, 'value');
+        if (pair && secretLikeName(pairName)) check(v['value'], `${at}.value`, pairName);
+        for (const [k, x] of Object.entries(v)) {
+          if (pair && (k === 'value' || ['name', 'key', 'header'].includes(k))) {
+            if (k === 'value' && !secretLikeName(pairName)) lit(x, `${at}.${k}`), urlOk(x, `${at}.${k}`);
+            continue;
+          }
+          if (secretLikeName(k)) check(x, `${at}.${k}`, k);
+          else {
+            urlOk(x, `${at}.${k}`);
+            lit(x, `${at}.${k}`);
+          }
+        }
+      }
+    };
+    lit(t.args, '');
+    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env], secret_env: [...secretEnv] };
+  });
+  return { init };
 }
 
 /**
@@ -296,6 +593,8 @@ export interface Manifest {
     restart: { stop: 'graceful' | 'kill' } | null;
     /** Per tool: how its wrapped results are read (`json` or `none`); absent unless declared. */
     decode?: Record<string, DecodeMode>;
+    /** Per tool: the read extraction declared under `server.decode.<tool>.extract`; absent unless declared. */
+    extract?: Record<string, Extract>;
   };
   target: {
     environment: string;
@@ -345,6 +644,8 @@ export interface Manifest {
    * own entry overrides the top level; `shape: null` there adopts none for that tool. See src/checks/shape.ts.
    */
   results: { shape: ShapeName | null; tools: Record<string, ShapeName | null> };
+  /** `session.init`: calls made on every MCP session before its first other tools/call; absent unless declared. */
+  session?: { init: SessionInit[] };
   source: { path: string; sha256: string };
 }
 
@@ -1031,16 +1332,20 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
 
 export function validateManifest(raw: unknown, source: { path: string; sha256: string }): Manifest {
   const o = obj(raw, '(top)');
-  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results'], '(top)');
+  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'session'], '(top)');
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
   keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart', 'decode'], 'server');
   let serverDecode: Record<string, DecodeMode> | null = null;
+  let serverExtract: Record<string, Extract> | null = null;
   if (s['decode'] !== undefined) {
     const d = obj(s['decode'], 'server.decode');
-    serverDecode = {};
-    for (const [tool, v] of Object.entries(d)) serverDecode[tool] = decodeOf(v, `server.decode.${tool}`).decode!;
+    for (const [tool, v] of Object.entries(d)) {
+      const dd = decodeOf(v, `server.decode.${tool}`);
+      if (dd.decode) (serverDecode ??= {})[tool] = dd.decode;
+      if (dd.extract) (serverExtract ??= {})[tool] = dd.extract;
+    }
   }
   const stdio = s['stdio'] === undefined ? null : strList(s['stdio'], 'server.stdio');
   const url = optStr(s['url'], 'server.url');
@@ -1156,7 +1461,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const m: Manifest = {
     mws,
     prefix,
-    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}) },
+    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}), ...(serverExtract ? { extract: serverExtract } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
       write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
@@ -1171,10 +1476,12 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     calls,
     resources,
     ...topLevel(o),
+    ...((sess) => (sess ? { session: sess } : {}))(sessionOf(o['session'])),
     source,
   };
-  // why: one decode mode per tool (refused here, before anything runs).
+  // why: one decode mode per tool, and one extraction per tool (refused here, before anything runs).
   declaredDecodes(m);
+  declaredExtracts(m);
   return m;
 }
 

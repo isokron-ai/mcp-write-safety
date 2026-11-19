@@ -21,7 +21,7 @@ export interface Signal {
 
 import { reservedCode, shapeOf, type ShapeCapture } from './shape.js';
 
-type Answer = { text: string | null; data?: unknown; rpc_error?: { code: number; message: string } | null; hay?: string; tool?: string; shape?: ShapeCapture | null };
+type Answer = { text: string | null; data?: unknown; rpc_error?: { code: number; message: string } | null; hay?: string; tool?: string; shape?: ShapeCapture | null; extracted?: { refusals: boolean } | null };
 /** Kept for the callers' signature; the reading is the same for a success and an error (structured content only). */
 type Mode = { success?: boolean };
 
@@ -33,6 +33,8 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
  */
 function objectsOf(a: Answer, _m: Mode = {}): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
+  // why: CLI feature A: a document the manifest's decode.extract took out of the text classifies a refusal only where declared (refusals: true).
+  if (a.extracted && !a.extracted.refusals) return out;
   if (isObj(a.data)) {
     out.push(a.data);
     if (isObj(a.data['error'])) out.push(a.data['error']);
