@@ -209,7 +209,7 @@ export class Driver {
   async controlPatch(field: FieldSpec, value: unknown, step: string, o: { paced?: boolean; counted?: boolean } = {}): Promise<HttpResult> {
     const t = this.res.control?.patch;
     if (!t) throw new WritecheckError(`${this.res.name}: no control.patch`);
-    // why: writesafe self-test T3: a platform API may name the field otherwise than the read path (Strapi: summary, not data.summary).
+    // why: writesafe self-test T3: a platform API may name the field otherwise than the read path (for example `summary`, not `data.summary`).
     return this.controlRequest(t, { field: field.control_key ?? field.path, value }, step, o);
   }
 

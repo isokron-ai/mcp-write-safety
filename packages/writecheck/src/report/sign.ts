@@ -14,6 +14,13 @@
  * of ours: any RFC 8785 implementation (the npm package canonicalize, which kronicle-lite uses) gives the canonical body, and
  * `openssl pkeyutl -verify -rawin` checks the signature.
  *
+ * Canonical form (p08): RFC 8785 exactly, restricted to the I-JSON values RFC 8785 is defined on. A document with a lone
+ * surrogate, nesting deeper than MAX_JSON_DEPTH or a non-finite number is refused when signing and is `invalid` when verifying.
+ * The readers (`parseResultsBytes`) also refuse a file whose text a parse-then-canonicalise step would hide: bytes that are not
+ * UTF-8, a repeated member name, and a number not written as RFC 8785 writes it (`1.0`, `9007199254740993`). So two files
+ * that verify under one signature differ only in white space, member order and string escapes. Every document the earlier
+ * code could sign that is not refused has the same canonical bytes as before, so its signature still verifies.
+ *
  * The key is read from a file (`--sign-key`) or MWSC_SIGN_KEY (a path, or the PEM itself in CI); it is never written anywhere.
  * A PKCS#8 PEM Ed25519 key and an unencrypted OpenSSH Ed25519 key are accepted. An embedded public key only says which key
  * signed: a verifier trusts a signature only against a key it pinned out of band (`verify-results --pubkey`).
@@ -22,7 +29,7 @@
 import { createHash, createPrivateKey, createPublicKey, sign as edSign, verify as edVerify, type KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 
-import { canonical, isObj, WritecheckError } from '../core/util.js';
+import { canonicalStrict, isObj, jsonTextProblem, WritecheckError } from '../core/util.js';
 
 export const RESULTS_SIGNATURE_FORMAT = 'mws-results-signature/1';
 export const RESULTS_SIGNATURE_DOMAIN = 'mcp-writecheck/results-signature/1\n';
@@ -187,69 +194,53 @@ export const BOUND_MEMBERS = ['format', 'alg', 'key_id', 'sums'] as const;
 
 /**
  * The canonical body a signature covers: the document with evidence.signature replaced by its bound members
- * ({ format, alg, key_id, sums }); `meta` gives them when signing, otherwise they are read from the document.
+ * ({ format, alg, key_id, sums }); `meta` gives them when signing, otherwise they are read from the document. A document
+ * RFC 8785 cannot canonicalise (a lone surrogate, nesting deeper than MAX_JSON_DEPTH, a non-finite number) is refused
+ * (WritecheckError, exit 3).
  */
 export function signedBody(doc: unknown, meta?: Pick<ResultsSignature, (typeof BOUND_MEMBERS)[number]>): string {
   if (!isObj(doc) || !isObj(doc['evidence'])) throw new WritecheckError('not a results document (no evidence block)', 2);
   const sig = doc['evidence']['signature'];
   const from = meta ?? (isObj(sig) ? sig : null);
   const bound = from ? Object.fromEntries(BOUND_MEMBERS.map((k) => [k, (from as Record<string, unknown>)[k] ?? null])) : null;
-  return canonical({ ...doc, evidence: { ...doc['evidence'], signature: bound } });
+  return canonicalStrict({ ...doc, evidence: { ...doc['evidence'], signature: bound } });
 }
 
 /** The first member name an object in this JSON text repeats (`$.a.b`), or null. JSON.parse keeps the last silently. */
 export function duplicateKey(text: string): string | null {
-  let i = 0;
-  const ws = () => {
-    while (i < text.length && ' \t\n\r'.includes(text[i]!)) i++;
-  };
-  const str = (): string => {
-    const start = i;
-    i++;
-    while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
-    i++;
-    return JSON.parse(text.slice(start, i)) as string;
-  };
-  const value = (path: string): string | null => {
-    ws();
-    const c = text[i];
-    if (c === '{') {
-      i++;
-      const seen = new Set<string>();
-      ws();
-      if (text[i] === '}') return (i++, null);
-      for (;;) {
-        ws();
-        const k = str();
-        if (seen.has(k)) return `${path}.${k}`;
-        seen.add(k);
-        ws();
-        i++; // :
-        const d = value(`${path}.${k}`);
-        if (d) return d;
-        ws();
-        if (text[i++] === '}') return null;
-      }
+  const p = jsonTextProblem(text);
+  return p?.kind === 'duplicate' ? p.path : null;
+}
+
+/**
+ * Read a signed or compared results file from its bytes, refusing (WritecheckError) what would let two different files share
+ * one signature, or what a verifier cannot read safely: bytes that are not UTF-8 (a lenient decoder maps different bytes to the
+ * same U+FFFD) and a byte order mark (exit 3), text that is not JSON (exit 2), and everything `jsonTextProblem` finds (exit 3):
+ * a repeated member name, a number not in RFC 8785 form, a lone surrogate, nesting deeper than MAX_JSON_DEPTH.
+ */
+export function parseResultsBytes(bytes: Uint8Array, where: string): unknown {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new WritecheckError(`${where}: not valid UTF-8; a signed or compared file is UTF-8 text`, 3);
+  }
+  if (text.charCodeAt(0) === 0xfeff) throw new WritecheckError(`${where}: starts with a byte order mark; a signed or compared file is JSON text without one`, 3);
+  const p = jsonTextProblem(text);
+  if (p?.kind === 'syntax') {
+    try {
+      JSON.parse(text);
+    } catch (e) {
+      throw new WritecheckError(`${where}: not JSON (${(e as Error).message})`, 2);
     }
-    if (c === '[') {
-      i++;
-      ws();
-      if (text[i] === ']') return (i++, null);
-      for (let n = 0; ; n++) {
-        const d = value(`${path}[${n}]`);
-        if (d) return d;
-        ws();
-        if (text[i++] === ']') return null;
-      }
-    }
-    if (c === '"') {
-      str();
-      return null;
-    }
-    while (i < text.length && !',}] \t\n\r'.includes(text[i]!)) i++;
-    return null;
-  };
-  return value('$');
+    throw new WritecheckError(`${where}: not JSON (${p.message})`, 2);
+  }
+  // why: review: JSON.parse keeps the last of two equal member names; another reader may keep the first. Such a file is refused.
+  if (p?.kind === 'duplicate') throw new WritecheckError(`${where}: the member ${p.message.replace(/: the member appears twice$/, '')} appears twice; a signed or compared file has each member once`, 3);
+  // why: p08: the signature covers the parsed document; number text that parses to the same double, a lone surrogate or a
+  // nesting no reader can follow would let two different files verify alike, or crash the reader. Refused, never "valid".
+  if (p) throw new WritecheckError(`${where}: ${p.message}; a signed or compared file holds RFC 8785 (I-JSON) values only, each number written as RFC 8785 writes it`, 3);
+  return JSON.parse(text) as unknown;
 }
 
 const digestOf = (body: string) => `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`;
@@ -283,9 +274,16 @@ export function verifyResults(doc: unknown, pinned: KeyObject | null): VerifyOut
   if (sig === null || sig === undefined) return { status: 'unsigned', detail: 'results.json is not signed (evidence.signature is null)', key_id: null, digest: null };
   if (typeof sig === 'string') return { status: 'ssh-only', detail: `results.json carries no results signature; ${sig} is an ssh signature of SHA256SUMS (check it with ssh-keygen -Y verify, see report.md)`, key_id: null, digest: null };
   if (!isObj(sig) || sig['format'] !== RESULTS_SIGNATURE_FORMAT || sig['alg'] !== 'ed25519' || typeof sig['value'] !== 'string' || typeof sig['key_id'] !== 'string') return { status: 'invalid', detail: `evidence.signature is not a ${RESULTS_SIGNATURE_FORMAT} Ed25519 signature`, key_id: null, digest: null };
-  const body = signedBody(doc);
-  const digest = digestOf(body);
   const kid = sig['key_id'];
+  let body: string;
+  try {
+    body = signedBody(doc);
+  } catch (e) {
+    // why: p08: a document RFC 8785 refuses (a lone surrogate, deep nesting) is never "valid", whatever was signed.
+    if (e instanceof WritecheckError) return { status: 'invalid', detail: `the document has no RFC 8785 canonical form, so no signature can cover it: ${e.message.replace(/^canonical JSON: /, '')}`, key_id: kid, digest: null };
+    throw e;
+  }
+  const digest = digestOf(body);
   if (sig['digest'] !== digest) return { status: 'invalid', detail: `the content changed after signing: digest ${digest}, signed ${String(sig['digest'])}`, key_id: kid, digest };
   let key: KeyObject;
   if (pinned) {

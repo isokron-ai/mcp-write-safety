@@ -359,18 +359,23 @@ const filterOff = (sent: unknown): boolean => requestHay(sent) === null;
 export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext): Result[] {
   const sc = { id: ID, version: VERSION };
   const out: Result[] = [];
+  // why: review M2 (before/after): this procedure makes several records on one write path (each create, the update, each declared
+  // failure, the delete); each carries its case, so compare joins them one to one.
+  let cur: string | undefined;
+  const push = (...rs: Result[]) => out.push(...rs.map((r) => (cur === undefined ? r : { ...r, case: cur })));
   const ign = res.read.ignore;
   for (const c of o.creates) {
+    cur = `create:${c.name}`;
     const w = wp(res.name, c.tool);
     // why: only an observed create has arguments to keep; a skipped create (no first call) in a version-2 run stays version 2.
     const scc = c.first && filterOff(c.sent_args) ? V1 : sc;
     // why: the identifier a create made is an echo only where the request holds it as the object's own id, or it contains the marker.
     const idEcho = (args: unknown) => (v: unknown) => createdIdEcho(args, v, { marker: c.marker ?? null, keys: [res.key?.arg, res.create?.id?.split('.').pop()?.replace(/\[.*$/, '')], others: ctx.manifest.resources.map((r) => r.name).filter((n) => n !== c.name) });
     // MWS-RES-3
-    if (c.skipped || !c.first || c.first.indeterminate) out.push(result('MWS-RES-3', w, scc, 'not tested', c.skipped ?? 'the create\'s outcome is unknown'));
-    else if (!c.first.ok) out.push(result('MWS-RES-3', w, scc, 'not tested', `the create did not succeed (${short(c.first.text ?? c.first.rpc_error?.message ?? '', 120)})`));
-    else if (c.found.length !== 1) out.push(result('MWS-RES-3', w, scc, 'not tested', `${c.found.length} objects carry the call's marker; the object the call made could not be identified${c.found.length === 0 && !c.consistency ? ' (for a list that shows a new object only after a while, declare list.consistency)' : ''}`, { notes: c.consistency ? [c.consistency] : [] }));
-    else if (!mentions(c.first, c.found[0])) out.push(result('MWS-RES-3', w, scc, 'violated', `${c.tool} created ${short(c.found[0], 40)} (found by its marker), and its answer does not carry that identifier.`, { steps: [c.first.step] }));
+    if (c.skipped || !c.first || c.first.indeterminate) push(result('MWS-RES-3', w, scc, 'not tested', c.skipped ?? 'the create\'s outcome is unknown'));
+    else if (!c.first.ok) push(result('MWS-RES-3', w, scc, 'not tested', `the create did not succeed (${short(c.first.text ?? c.first.rpc_error?.message ?? '', 120)})`));
+    else if (c.found.length !== 1) push(result('MWS-RES-3', w, scc, 'not tested', `${c.found.length} objects carry the call's marker; the object the call made could not be identified${c.found.length === 0 && !c.consistency ? ' (for a list that shows a new object only after a while, declare list.consistency)' : ''}`, { notes: c.consistency ? [c.consistency] : [] }));
+    else if (!mentions(c.first, c.found[0])) push(result('MWS-RES-3', w, scc, 'violated', `${c.tool} created ${short(c.found[0], 40)} (found by its marker), and its answer does not carry that identifier.`, { steps: [c.first.step] }));
     else {
       // why: corpus finding (lane F9): an answer that only echoes the request (a SQL tool returning its own statement) carries an
       // identifier the call itself named whether or not anything was made. A value that appears verbatim in the arguments counts
@@ -386,7 +391,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       if (lf && !lf.skipped && lf.call) {
         const made = lf.found;
         if (made.length && !lf.call.ok && !made.every((id) => mentions(lf.call!, id))) {
-          out.push(result('MWS-RES-3', w, scc, 'violated', `With its last backend write failed, ${c.tool} left ${made.map((v) => short(v, 30)).join(', ')} created, and its error does not carry the identifier.`, { steps: [lf.call.step] }));
+          push(result('MWS-RES-3', w, scc, 'violated', `With its last backend write failed, ${c.tool} left ${made.map((v) => short(v, 30)).join(', ')} created, and its error does not carry the identifier.`, { steps: [lf.call.step] }));
           continue;
         }
         if (made.length && !lf.call.ok) {
@@ -399,9 +404,9 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
         note = `With the last of ${lf.mutating} backend writes failed, ${made.length ? 'the error carried the identifier of the object that exists' : 'no object was left'}.`;
       }
       const n3 = t3.note();
-      if (t3.echoOnly.length) out.push(result('MWS-RES-3', w, scc, 'not tested', echoReason(c.tool, t3.echoOnly)));
-      else if (lateEcho) out.push(result('MWS-RES-3', w, scc, 'not tested', lateEcho));
-      else out.push(result('MWS-RES-3', w, scc, 'held', `The answer carries the identifier of the object the create made (${short(c.found[0], 40)}).`, { notes: [...(note ? [note] : []), ...(n3 ? [n3] : []), ...notes, ...(c.consistency ? [c.consistency] : [])] }));
+      if (t3.echoOnly.length) push(result('MWS-RES-3', w, scc, 'not tested', echoReason(c.tool, t3.echoOnly)));
+      else if (lateEcho) push(result('MWS-RES-3', w, scc, 'not tested', lateEcho));
+      else push(result('MWS-RES-3', w, scc, 'held', `The answer carries the identifier of the object the create made (${short(c.found[0], 40)}).`, { notes: [...(note ? [note] : []), ...(n3 ? [n3] : []), ...notes, ...(c.consistency ? [c.consistency] : [])] }));
     }
     // MWS-RES-4 for the create: identity, version where declared, no server-managed field the read omits.
     const csh = c.first?.ok && c.found.length === 1 ? shapeOf(c.first) : null;
@@ -422,9 +427,9 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       if (c.name === res.name && res.version && c.version !== null && !t4.any('the new version', [[csh.object?.version !== undefined ? sameValue(csh.object.version, c.version) : mentions(pc, c.version), c.version]])) miss.push(csh.object?.version !== undefined ? `the new version (${quoteField('object.version', csh.object.version)}; the object reads ${short(c.version, 20)})` : `the new version (${short(c.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
       // why: a nested create is judged on the identifier, and its parent's counts (as without the shape): B-9 v2's object.parent.
       const notes = [decidedByShape([['outcome', csh.outcome], ['object', csh.object ?? null]], c.first), ...(c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts, as mws.object.id or mws.object.parent.id).']), ...(t4.note() ? [t4.note()!] : [])];
-      if (miss.length) out.push(result('MWS-RES-4', w, scc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes }));
-      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, scc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes }));
-      else out.push(result('MWS-RES-4', w, scc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''} (${quoteField('object', csh.object ?? null)}).`, { notes }));
+      if (miss.length) push(result('MWS-RES-4', w, scc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes }));
+      else if (t4.echoOnly.length) push(result('MWS-RES-4', w, scc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes }));
+      else push(result('MWS-RES-4', w, scc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''} (${quoteField('object', csh.object ?? null)}).`, { notes }));
     } else if (c.first?.ok && c.found.length === 1) {
       const miss: string[] = [];
       const t4 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
@@ -435,34 +440,35 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       const measured = extra.length ? [`Measured, not judged (spec Annex A, A-3): server-managed field(s) the read tool omits: ${extra.join(', ')}.`] : [];
       const nested = c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts).'];
       const en = t4.note();
-      if (miss.length) out.push(result('MWS-RES-4', w, scc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes: [...measured, ...nested] }));
-      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, scc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes: [...measured, ...nested] }));
-      else out.push(result('MWS-RES-4', w, scc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''}.`, { notes: [...measured, ...nested, ...(en ? [en] : [])] }));
+      if (miss.length) push(result('MWS-RES-4', w, scc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes: [...measured, ...nested] }));
+      else if (t4.echoOnly.length) push(result('MWS-RES-4', w, scc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes: [...measured, ...nested] }));
+      else push(result('MWS-RES-4', w, scc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''}.`, { notes: [...measured, ...nested, ...(en ? [en] : [])] }));
     }
     // MWS-RETRY-1
     // why: a list that cannot see what the first call made (found != 1) cannot count a second object either.
     if (c.first?.ok && c.found.length === 1 && c.found_after_repeat !== null && c.repeat && !c.repeat.indeterminate) {
-      if (c.found_after_repeat < 2) out.push(result('MWS-RETRY-1', w, scc, 'not applicable', `Two calls with the same arguments did not make two objects (${c.found_after_repeat} found; the second call ${c.repeat.ok ? `was answered without isError${c.repeat.text ? `: ${JSON.stringify(short(c.repeat.text, 100))}` : ''}` : 'was refused'}).`, { notes: c.consistency ? [c.consistency] : [] }));
-      else if (!c.key) out.push(result('MWS-RETRY-1', w, scc, 'not tested', 'two identical calls made two objects; the key check did not run'));
+      if (c.found_after_repeat < 2) push(result('MWS-RETRY-1', w, scc, 'not applicable', `Two calls with the same arguments did not make two objects (${c.found_after_repeat} found; the second call ${c.repeat.ok ? `was answered without isError${c.repeat.text ? `: ${JSON.stringify(short(c.repeat.text, 100))}` : ''}` : 'was refused'}).`, { notes: c.consistency ? [c.consistency] : [] }));
+      else if (!c.key) push(result('MWS-RETRY-1', w, scc, 'not tested', 'two identical calls made two objects; the key check did not run'));
       else if (!c.key.declared) {
         // why: dogfood C4: a tool whose input schema offers a key the declaration does not name is a declaration gap, not a finding.
         const offered = offeredKeys(ctx.tools, c.tool);
-        if (offered.length) out.push(result('MWS-RETRY-1', w, scc, 'not tested', `two identical calls made two objects, and ${c.tool}'s input schema offers ${offered.join(', ')}, which the declaration does not name as the idempotency key; declare it (idempotency.key) so that the keyed call is tried`, { steps: [c.first.step, c.repeat.step] }));
-        else out.push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects, and the declaration names no idempotency key for ${c.tool} (its input schema offers none either).`, { steps: [c.first.step, c.repeat.step] }));
+        if (offered.length) push(result('MWS-RETRY-1', w, scc, 'not tested', `two identical calls made two objects, and ${c.tool}'s input schema offers ${offered.join(', ')}, which the declaration does not name as the idempotency key; declare it (idempotency.key) so that the keyed call is tried`, { steps: [c.first.step, c.repeat.step] }));
+        else push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects, and the declaration names no idempotency key for ${c.tool} (its input schema offers none either).`, { steps: [c.first.step, c.repeat.step] }));
       }
-      else if (!c.key.call || c.key.call.indeterminate) out.push(result('MWS-RETRY-1', w, scc, 'not tested', 'the call with the key has an unknown outcome'));
-      else if (!c.key.call.ok) out.push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects, and a call carrying the key in ${c.key.declared} was refused (${short(c.key.call.text ?? c.key.call.rpc_error?.message ?? '', 100)}).`, { steps: [c.key.call.step] }));
-      else if (c.key.carrier === 'arg' && c.key.in_schema === false && c.key.closed_schema) out.push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects; the call carrying ${c.key.declared} was answered, but ${c.tool}'s input schema does not declare that argument and allows no others, so the key was dropped, not accepted (see MWS-IN-2).`, { steps: [c.key.call.step] }));
-      else out.push(result('MWS-RETRY-1', w, scc, 'held', `${c.tool} accepts an idempotency key (${c.key.declared}); what it does with it is judged by MWS-RETRY-2.`));
+      else if (!c.key.call || c.key.call.indeterminate) push(result('MWS-RETRY-1', w, scc, 'not tested', 'the call with the key has an unknown outcome'));
+      else if (!c.key.call.ok) push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects, and a call carrying the key in ${c.key.declared} was refused (${short(c.key.call.text ?? c.key.call.rpc_error?.message ?? '', 100)}).`, { steps: [c.key.call.step] }));
+      else if (c.key.carrier === 'arg' && c.key.in_schema === false && c.key.closed_schema) push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects; the call carrying ${c.key.declared} was answered, but ${c.tool}'s input schema does not declare that argument and allows no others, so the key was dropped, not accepted (see MWS-IN-2).`, { steps: [c.key.call.step] }));
+      else push(result('MWS-RETRY-1', w, scc, 'held', `${c.tool} accepts an idempotency key (${c.key.declared}); what it does with it is judged by MWS-RETRY-2.`));
     }
   }
   // MWS-RES-4 for the update
+  cur = 'update';
   if (o.update_receipt?.call && !o.update_receipt.call.indeterminate && o.update_receipt.call.ok && res.update) {
     const u = o.update_receipt;
     const w = wp(res.name, res.update.tool);
     const scu = filterOff(u.sent_args) ? V1 : sc;
     const ush = shapeOf(u.call!);
-    if (ush) out.push(receiptByShape(ush, u, res, w, scu));
+    if (ush) push(receiptByShape(ush, u, res, w, scu));
     else {
     const fb = shapeFallbackNote(u.call!);
     const miss: string[] = [];
@@ -485,43 +491,45 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
     const extra = u.read_keys ? extraManaged(u.call!, ign, u.read_keys) : [];
     const measured = extra.length ? [`Measured, not judged (spec Annex A, A-3): server-managed field(s) the read tool omits: ${extra.join(', ')}.`] : [];
     const en = tu.note();
-    if (miss.length) out.push(result('MWS-RES-4', w, scu, 'violated', `${res.update.tool}'s answer lacks ${miss.join(', ')}.`, { steps: [u.call!.step], notes: [...(fb ? [fb] : []), ...measured] }));
-    else if (tu.echoOnly.length) out.push(result('MWS-RES-4', w, scu, 'not tested', echoReason(res.update.tool, tu.echoOnly), { notes: [...(fb ? [fb] : []), ...measured] }));
-    else out.push(result('MWS-RES-4', w, scu, 'held', `${res.update.tool}'s answer identifies the object, names ${u.changed ? `each field the call changed (${[...new Set(u.changed.map((c) => c.path.replace(/\[[^\]]*\]/g, '').split('.')[0]))].join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})` : 'the field set (the object did not read back around the call)'}${res.version ? ' and carries the new version' : ''}.`, { notes: [...(fb ? [fb] : []), ...measured, ...(en ? [en] : [])] }));
+    if (miss.length) push(result('MWS-RES-4', w, scu, 'violated', `${res.update.tool}'s answer lacks ${miss.join(', ')}.`, { steps: [u.call!.step], notes: [...(fb ? [fb] : []), ...measured] }));
+    else if (tu.echoOnly.length) push(result('MWS-RES-4', w, scu, 'not tested', echoReason(res.update.tool, tu.echoOnly), { notes: [...(fb ? [fb] : []), ...measured] }));
+    else push(result('MWS-RES-4', w, scu, 'held', `${res.update.tool}'s answer identifies the object, names ${u.changed ? `each field the call changed (${[...new Set(u.changed.map((c) => c.path.replace(/\[[^\]]*\]/g, '').split('.')[0]))].join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})` : 'the field set (the object did not read back around the call)'}${res.version ? ' and carries the new version' : ''}.`, { notes: [...(fb ? [fb] : []), ...measured, ...(en ? [en] : [])] }));
     }
   }
   // why: action dogfood SH-8: a write path whose update gave no receipt to read gets a record that says why, never no record.
   else if (res.update && res.fields && o.update_skipped !== undefined) {
     const c = o.update_receipt?.call ?? null;
     const why = c ? (c.indeterminate ? `the update whose answer is the receipt has an unknown outcome (a timeout or a broken connection)` : `the update whose answer is the receipt did not succeed (${c.rpc_error ? `a JSON-RPC error ${c.rpc_error.code}: ` : ''}${JSON.stringify(short(c.text ?? c.rpc_error?.message ?? '', 160))}), so there was no receipt to read`) : (o.update_skipped ?? 'the update whose answer is the receipt was not sent');
-    out.push(result('MWS-RES-4', wp(res.name, res.update.tool), sc, 'not tested', why));
+    push(result('MWS-RES-4', wp(res.name, res.update.tool), sc, 'not tested', why));
   }
   // MWS-RES-2, declared failures
   for (const f of o.failures) {
+    cur = `failure:${f.name}`;
     const w = wp(res.name, f.tool);
     if (f.skipped) {
-      out.push(result('MWS-RES-2', w, sc, 'not tested', f.skipped));
+      push(result('MWS-RES-2', w, sc, 'not tested', f.skipped));
       continue;
     }
     const jd = res2Judge(f.call, f.call.ok ? (f.changed ?? []) : f.changed, 'backend', `${f.name}: the backend refuses this call (the declaration says so)`, f.values ?? {}, { async: ctx.manifest.async_operations.includes(f.tool) });
-    out.push(result('MWS-RES-2', w, sc, jd.verdict, jd.reason, { steps: jd.verdict === 'violated' ? [f.call.step] : [], notes: jd.notes }));
+    push(result('MWS-RES-2', w, sc, jd.verdict, jd.reason, { steps: jd.verdict === 'violated' ? [f.call.step] : [], notes: jd.notes }));
   }
   // MWS-RES-1, delete case
   if (o.delete_case && res.delete) {
+    cur = 'delete';
     const w = wp(res.name, res.delete.tool);
     const dc = o.delete_case;
-    if (dc.skipped || !dc.call || dc.call.indeterminate || dc.gone === null) out.push(result('MWS-RES-1', w, sc, 'not tested', dc.skipped ?? 'the delete or the read back has an unknown outcome'));
+    if (dc.skipped || !dc.call || dc.call.indeterminate || dc.gone === null) push(result('MWS-RES-1', w, sc, 'not tested', dc.skipped ?? 'the delete or the read back has an unknown outcome'));
     // why: spec 8.2, rule 13: a refused delete reported no success, so it adds no verdict; held needs a success to check.
-    else if (!dc.call.ok) out.push(result('MWS-RES-1', w, sc, 'not tested', `the delete was refused (${short(dc.call.text ?? dc.call.rpc_error?.message ?? '', 120)}), so there was no report of success to check`));
+    else if (!dc.call.ok) push(result('MWS-RES-1', w, sc, 'not tested', `the delete was refused (${short(dc.call.text ?? dc.call.rpc_error?.message ?? '', 120)}), so there was no report of success to check`));
     // why: NF-19: for an operation the declaration lists as asynchronous, "accepted" or "pending" is not a report of success.
-    else if (!dc.gone && ctx.manifest.async_operations.includes(res.delete.tool) && says('accepted', dc.call.text ?? '')) out.push(result('MWS-RES-1', w, sc, 'not tested', `${res.delete.tool} said the delete was accepted or is pending, and the declaration lists it as completed asynchronously (NF-19); the object still reads back after the settle window`, { notes: [saidBy('accepted', dc.call.text ?? '')] }));
+    else if (!dc.gone && ctx.manifest.async_operations.includes(res.delete.tool) && says('accepted', dc.call.text ?? '')) push(result('MWS-RES-1', w, sc, 'not tested', `${res.delete.tool} said the delete was accepted or is pending, and the declaration lists it as completed asynchronously (NF-19); the object still reads back after the settle window`, { notes: [saidBy('accepted', dc.call.text ?? '')] }));
     // why: rule 11: a result without isError whose adopted shape says the delete was not applied, or not known, reports no success.
     // why: rule 11, point 13 (R14-5): a text that reports the delete done by a declared patterns.applied, while the object still
     // reads back, is a false report of success beside the shape.
-    else if (!dc.gone && shapeOf(dc.call)?.outcome && !reportsSuccess(shapeOf(dc.call)!, ctx.manifest.async_operations.includes(res.delete.tool)) && textStatement(dc.call, 'applied')) out.push(result('MWS-RES-1', w, sc, 'violated', `${res.delete.tool}'s text reports the delete as done (${textStatement(dc.call, 'applied')}) and the object still reads back (re-read within the settle window); its adopted result shape says ${quoteField('outcome', shapeOf(dc.call)!.outcome)}, which does not repair the text (rule 11, point 13).`, { steps: [dc.call.step], notes: [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] }));
-    else if (shapeOf(dc.call)?.outcome && !reportsSuccess(shapeOf(dc.call)!, ctx.manifest.async_operations.includes(res.delete.tool))) out.push(result('MWS-RES-1', w, sc, 'not tested', `the delete's result has no isError, and its adopted result shape says ${quoteField('outcome', shapeOf(dc.call)!.outcome)}: not a report of success, so there was none to check (what it says is judged under MWS-RES-2)`, { notes: [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] }));
-    else if (!dc.gone) out.push(result('MWS-RES-1', w, sc, 'violated', `${res.delete.tool} reported success${shapeOf(dc.call)?.outcome ? ` (no isError; its adopted result shape says ${quoteField('outcome', shapeOf(dc.call)!.outcome)})` : ''} and the object still reads back (re-read within the settle window).`, { steps: [dc.call.step], notes: shapeOf(dc.call)?.outcome ? [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] : [] }));
-    else out.push(result('MWS-RES-1', w, sc, 'held', 'The delete reported success and the object is gone.', { notes: shapeOf(dc.call)?.outcome ? [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] : [] }));
+    else if (!dc.gone && shapeOf(dc.call)?.outcome && !reportsSuccess(shapeOf(dc.call)!, ctx.manifest.async_operations.includes(res.delete.tool)) && textStatement(dc.call, 'applied')) push(result('MWS-RES-1', w, sc, 'violated', `${res.delete.tool}'s text reports the delete as done (${textStatement(dc.call, 'applied')}) and the object still reads back (re-read within the settle window); its adopted result shape says ${quoteField('outcome', shapeOf(dc.call)!.outcome)}, which does not repair the text (rule 11, point 13).`, { steps: [dc.call.step], notes: [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] }));
+    else if (shapeOf(dc.call)?.outcome && !reportsSuccess(shapeOf(dc.call)!, ctx.manifest.async_operations.includes(res.delete.tool))) push(result('MWS-RES-1', w, sc, 'not tested', `the delete's result has no isError, and its adopted result shape says ${quoteField('outcome', shapeOf(dc.call)!.outcome)}: not a report of success, so there was none to check (what it says is judged under MWS-RES-2)`, { notes: [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] }));
+    else if (!dc.gone) push(result('MWS-RES-1', w, sc, 'violated', `${res.delete.tool} reported success${shapeOf(dc.call)?.outcome ? ` (no isError; its adopted result shape says ${quoteField('outcome', shapeOf(dc.call)!.outcome)})` : ''} and the object still reads back (re-read within the settle window).`, { steps: [dc.call.step], notes: shapeOf(dc.call)?.outcome ? [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] : [] }));
+    else push(result('MWS-RES-1', w, sc, 'held', 'The delete reported success and the object is gone.', { notes: shapeOf(dc.call)?.outcome ? [decidedByShape([['outcome', shapeOf(dc.call)!.outcome]], dc.call)] : [] }));
     // why: validator on 59e3124 (rule 11, point 13, R14-5): a delete that took effect (the object is gone) and whose result,
     // without isError, says by its adopted shape that it was not applied (or not known, or in part), or by a declared
     // patterns.not_applied that it failed, is a trial of MWS-RES-2's third clause, as the update case is (readback.ts saysFailed).
@@ -531,7 +539,7 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       const dasync = ctx.manifest.async_operations.includes(res.delete.tool);
       if ((dsh?.outcome && !reportsSuccess(dsh, dasync)) || textStatement(dc.call, 'not_applied', { trial: true })) {
         const j = res2Judge(dc.call, ['(the object)'], 'unknown', `${res.delete.tool} deleted the object (it no longer reads back)`, {}, { async: dasync });
-        if (j.verdict !== 'held') out.push(result('MWS-RES-2', w, sc, j.verdict, j.reason, { steps: [dc.call.step], notes: j.notes }));
+        if (j.verdict !== 'held') push(result('MWS-RES-2', w, sc, j.verdict, j.reason, { steps: [dc.call.step], notes: j.notes }));
       }
     }
   }

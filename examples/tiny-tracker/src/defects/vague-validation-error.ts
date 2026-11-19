@@ -11,7 +11,7 @@
 //
 // Mirrors: Payload PAY-13 (the reason dropped) and GitHub GH-13 (a raw decode
 // error instead of a field and a reason).
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
 
 import type { Defect } from "./types.js";
 

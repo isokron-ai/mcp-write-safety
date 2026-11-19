@@ -110,7 +110,8 @@ test('F6: create records judged without kept arguments carry version 1, so a rec
   for (const r of old.filter((x) => /^MWS-(RES-3|RES-4)$/.test(x.requirement))) assert.equal(r.scenario.version, '1', r.requirement);
   const now = verdicts({ sent_args: { title: 'x' }, first: call({ data: { id: 'T-5' } }), found: ['T-5'] });
   for (const r of now.filter((x) => /^MWS-(RES-3|RES-4)$/.test(x.requirement))) assert.equal(r.scenario.version, '2', r.requirement);
-  const h = (version: string) => testHash(result('MWS-RES-3', { resource: 'ticket', tool: 'ticket_create', arm: 'mcp' }, { id: 'creates', version }, 'held', 'x'), { manifest: ctx.manifest, tools: [] });
+  // the record carries its case (create:<name>), which is part of the hash
+  const h = (version: string) => testHash({ ...result('MWS-RES-3', { resource: 'ticket', tool: 'ticket_create', arm: 'mcp' }, { id: 'creates', version }, 'held', 'x'), case: 'create:ticket' }, { manifest: ctx.manifest, tools: [] });
   const rechecked = get(old, 'MWS-RES-3');
   assert.equal(testHash(rechecked, { manifest: ctx.manifest, tools: [] }), h('1'), 'the hash a version-1 run stamped');
   // an update receipt without kept arguments too

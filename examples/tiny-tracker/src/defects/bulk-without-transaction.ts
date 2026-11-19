@@ -15,8 +15,8 @@
 // Mirrors: the rule-6 class in the Kubernetes audit (K8S-01: apply stops at
 // the first refusal with earlier items applied); Payload's "what held up"
 // shows the passing behavior (a server killed mid-write rolled back, 0 of 3).
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
-//   https://isokron.ai/research/payload-mcp-server-audit#what-held-up
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#what-held-up
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
