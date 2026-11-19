@@ -477,7 +477,10 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
     if (p.drop) delete args[p.prop];
     else args[p.prop] = p.value;
     const r = await send(args, `${p.prop}.${p.name}`);
-    const po: ProbeObs = { tool, role: 'write', prop: p.prop, name: p.name, requirement: p.requirement, value, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? null : short(r.text, 400), step: r.step, ...(unknownOutcome(r) ? { indeterminate: true } : {}) };
+    // why: as schema.ts (102bd8d): the verdicts read the whole result (spec 7.3, rule 11). A notice after a long answer ("Ignored
+    // argument x" after 400+ characters) cut off here would read as an argument dropped silently, a false MWS-IN-2 violated.
+    // Quotes are cut where they are made (short, around, saidBy, the review evidence).
+    const po: ProbeObs = { tool, role: 'write', prop: p.prop, name: p.name, requirement: p.requirement, value, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text, step: r.step, ...(unknownOutcome(r) ? { indeterminate: true } : {}) };
     if (p.requirement === 'MWS-IN-1') Object.assign(po, { sent: p.value, type: p.type, required: !!p.required });
     if (r.ok && !po.indeterminate) await accepted(p, po, st.before, st.marker);
     if (!r.ok && !po.indeterminate) await controls(p, po, r, cp, trigger && !viaBase, baseNote, viaBase);
@@ -495,14 +498,12 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
         po.meaning = path ? meaningOf(p.value, getPath(made, path), p.type ?? '', !!p.required, { known: false }) : null;
         po.meaning_steps = [po.step];
       }
-      if (po.text !== null) po.text = short(po.text, 1000);
       return;
     }
     const after = await readAll(`${p.prop}.${p.name}.readback`);
     if (p.requirement === 'MWS-IN-2') {
       const ch = changed(before, after);
       po.effect = [...ch].filter((x) => !baseChange.has(x));
-      if (po.text !== null) po.text = short(po.text, 1000);
       return;
     }
     const obj = after[0] ?? null;
