@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { catalogCommand, cleanupCommand, planCommand, recheckCommand, rerunCommand, reviewCommand } from './commands.js';
+import { compareCommand, IDENTITY_FLAGS, IDENTITY_USAGE, identityOptions, verifyResultsCommand } from './compare.js';
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
 import { runCommand, type RunOutcome } from './run.js';
@@ -108,9 +109,29 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     under in the manifest's review block. Answers are recorded as self-attested.`,
     flags: [],
   },
+  compare: {
+    usage: `mcp-writecheck compare <before results.json|folder> <after results.json|folder> [--out DIR] [--pubkey KEY]
+    Before/after per cell (requirement @ tool), joined only where the test hashes are equal; verdicts rolled up by MWS 8.2
+    rule 13. Labels each cell fixed, regressed, unchanged, changed (no claim) or not comparable, with the reason. Writes
+    compare.json and compare.md to --out (default .). Refuses different MWS versions. --pubkey: both files must be signed
+    by that key. Exit 1 when a cell regressed.`,
+    flags: ['--out', '-o', '--pubkey'],
+  },
+  'verify-results': {
+    usage: `mcp-writecheck verify-results <results.json|folder> [--pubkey KEY]
+    Check the results signature (--sign-key) against a pinned Ed25519 key (PEM, or an ssh-ed25519 line or .pub file).
+    Exit 0 signed by that key and unchanged; 1 unsigned, or not pinned (no --pubkey); 3 changed or signed by another key.`,
+    flags: ['--pubkey'],
+  },
   requirements: { usage: `mcp-writecheck requirements\n    List the requirement IDs this release knows, with their level.`, flags: [] },
   version: { usage: `mcp-writecheck version\n    Print the suite and requirements versions.`, flags: [] },
 };
+
+// why: F8: the run identity flags are added here, apart from the run and rerun entries, so other changes to those lines merge cleanly.
+for (const c of ['run', 'rerun'] as const) {
+  COMMANDS[c]!.flags.push(...IDENTITY_FLAGS);
+  COMMANDS[c]!.usage += `\n${IDENTITY_USAGE}`;
+}
 
 const USAGE = `${HEAD}
 
@@ -239,9 +260,19 @@ export async function main(argv: string[]): Promise<number> {
       return (await catalogCommand({ ...(m ? { manifest: m } : {}), ...(cat ? { catalog: cat } : {}), out: one(a, '--out', '-o') ?? 'mwsc-results', env: process.env, log })).exit;
     }
     case 'run':
-      return report(await runCommand(runOpts()));
+      return report(await runCommand({ ...runOpts(), identity: identityOptions((n) => one(a, n), (n) => a.flags.get(n) ?? []) }));
     case 'rerun':
-      return report(await rerunCommand({ ...runOpts(), dir: folder() }));
+      return report(await rerunCommand({ ...runOpts(), identity: identityOptions((n) => one(a, n), (n) => a.flags.get(n) ?? []), dir: folder() }));
+    case 'compare': {
+      const [before, after] = a.rest;
+      if (!before || !after) throw new WritecheckError('compare <before> <after> (see mcp-writecheck compare --help)', 2);
+      const pubkey = one(a, '--pubkey');
+      return compareCommand({ before, after, out: one(a, '--out', '-o') ?? '.', ...(pubkey ? { pubkey } : {}), log }).exit;
+    }
+    case 'verify-results': {
+      const pubkey = one(a, '--pubkey');
+      return verifyResultsCommand({ file: folder(), ...(pubkey ? { pubkey } : {}), log }).exit;
+    }
     case 'cleanup': {
       const run = one(a, '--run');
       const confirmTarget = one(a, '--confirm-target');

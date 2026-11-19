@@ -1,0 +1,595 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isokron.ai/mws/schema/mws-compare-1.schema.json",
+  "title": "mcp-writecheck compare (mws-compare/1)",
+  "description": "Before/after per cell from two mws-results/1 files of the same test on two server builds (mcp-writecheck compare). Cells are listed, never counted; there is no rating.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "tool",
+    "rating",
+    "spec",
+    "test_hash",
+    "before",
+    "after",
+    "same",
+    "warnings",
+    "cells"
+  ],
+  "properties": {
+    "format": {
+      "const": "mws-compare/1"
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "rating": {
+      "type": "null",
+      "description": "Letters are off: compare never rates."
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "test_hash": {
+      "const": "mws-test-hash/1"
+    },
+    "before": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256",
+        "run_id",
+        "status",
+        "stopped_reason",
+        "suite",
+        "tester_commit",
+        "spec",
+        "manifest_sha256",
+        "plan_hash",
+        "tools_fingerprint",
+        "server",
+        "backend",
+        "identity_gaps",
+        "signature"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stopped_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suite": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "name",
+                "version"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "tester_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tools_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "backend": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "identity_gaps": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "key_id",
+            "detail"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "valid",
+                "valid-unpinned",
+                "unsigned",
+                "ssh-only",
+                "invalid"
+              ]
+            },
+            "key_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "after": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256",
+        "run_id",
+        "status",
+        "stopped_reason",
+        "suite",
+        "tester_commit",
+        "spec",
+        "manifest_sha256",
+        "plan_hash",
+        "tools_fingerprint",
+        "server",
+        "backend",
+        "identity_gaps",
+        "signature"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stopped_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suite": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "name",
+                "version"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "tester_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tools_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "backend": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "identity_gaps": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "key_id",
+            "detail"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "valid",
+                "valid-unpinned",
+                "unsigned",
+                "ssh-only",
+                "invalid"
+              ]
+            },
+            "key_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "same": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest",
+        "plan",
+        "tools",
+        "tester"
+      ],
+      "properties": {
+        "manifest": {
+          "type": "boolean"
+        },
+        "plan": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": "boolean"
+        },
+        "tester": {
+          "type": "boolean"
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "requirement",
+          "tool",
+          "before",
+          "after",
+          "transition",
+          "label",
+          "why"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "before": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "verdict",
+                  "test_hash",
+                  "level",
+                  "run_cell",
+                  "reason",
+                  "records",
+                  "scenarios"
+                ],
+                "properties": {
+                  "verdict": {
+                    "enum": [
+                      "violated",
+                      "platform",
+                      "held",
+                      "violated?",
+                      "not observed",
+                      "self-attested",
+                      "not tested",
+                      "not applicable"
+                    ]
+                  },
+                  "test_hash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "sha256 over the cell's sorted distinct record test hashes (display only; the join is per slot)."
+                  },
+                  "level": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "run_cell": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "records": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "JSONPaths of the cell's records in that results.json."
+                  },
+                  "scenarios": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "after": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "verdict",
+                  "test_hash",
+                  "level",
+                  "run_cell",
+                  "reason",
+                  "records",
+                  "scenarios"
+                ],
+                "properties": {
+                  "verdict": {
+                    "enum": [
+                      "violated",
+                      "platform",
+                      "held",
+                      "violated?",
+                      "not observed",
+                      "self-attested",
+                      "not tested",
+                      "not applicable"
+                    ]
+                  },
+                  "test_hash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "sha256 over the cell's sorted distinct record test hashes (display only; the join is per slot)."
+                  },
+                  "level": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "run_cell": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "records": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "JSONPaths of the cell's records in that results.json."
+                  },
+                  "scenarios": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "transition": {
+            "enum": [
+              "fixed",
+              "regressed",
+              "still-violated",
+              "held-both",
+              "platform-both",
+              "same",
+              "→platform",
+              "platform→",
+              "not-seen-after",
+              "changed",
+              "coverage-change",
+              "test-changed",
+              "no-test-hash",
+              "unstable",
+              "rollup-mismatch",
+              "new-cell",
+              "removed-cell"
+            ]
+          },
+          "label": {
+            "enum": [
+              "fixed",
+              "regressed",
+              "unchanged",
+              "changed",
+              "not comparable"
+            ]
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

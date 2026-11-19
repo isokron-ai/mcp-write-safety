@@ -51,6 +51,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `guard` | `{ tool, args, path, pattern, read_only, decode }`: a read whose result at `path` must match `pattern`, or the run stops before any write. The tool must declare `readOnlyHint: true`; for a server that annotates no tool, `read_only: true` declares that it only reads (a tool that declares `readOnlyHint: false` or `destructiveHint: true` is refused either way). For a server whose only tool is a dispatcher (PostHog's `cli` mode, `exec`), `read_only_call: true` declares that this exact call (arguments written out in full, no templates) only reads: the guard then rests on the operator's declaration, which the results say; before any other write the same call is made three times and must answer identically, and the canaries and every declared list that needs no object must read the same before the first call and after the third; any error or difference refuses the run. Each of the three calls counts against `write_budget` and is recorded in the ledger and the results. Between checks the run asks `tools/list`, never the declared call. `plan` warns when the run would refuse the guard. `decode: json` or `none`: see [Wrapped results](#wrapped-results-decode) |
 | `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
 | `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
+| `provenance` | Optional. `{ repo, commit, tag, image, recipe, backend: [{ name, image, version }] }`: the server build under test and its backend images, copied into `results.identity` (see [Run identity](#run-identity)). `commit` must be a full 40- or 64-character git commit; an image is pinned only with `@sha256:<digest>`. Unknown keys are refused. It is part of the manifest bytes, so it changes `manifest.sha256` and the plan hash (never a test hash): for a before/after pair run one byte-identical manifest on both builds and give each build with `--server-commit`, `--server-image` or `--provenance` instead |
 
 Target hosts are listed on the plan's "Hosts reached or given to the server" line, and one that looks like production is refused unless listed in `allow_hosts`. They are the server URL, the control bases, any URL in the server's environment or command line, and a host given without a URL. Where in doubt a host is read: a false refusal is cleared with `allow_hosts`, a missed host is never checked.
 
@@ -247,3 +248,66 @@ Each resource is one kind of object. Only `name` and `read` are required; every 
 | `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5) |
 | `fixed_constraints` | A list of `{ arg, pattern, reason }` (R10-8): refusals of the update tool that rest on a fixed constraint; MWS-IN-5 is `violated` only for a refusal whose text matches one, otherwise each refusal is listed, "seen, not judged", and the verdict is `not observed` |
 | `server_managed` | A list of fields the server sets itself (a timestamp, a revision). A field that `read.ignore` or a list's `ignore` names and that the tool under test can set (from its input schema) is warned in the plan and the report, and refused for a selector tool in opt-in mode, unless it is listed here: an ignored field must not hide a bystander change |
+
+## Run identity
+
+Every `results.json` this release writes carries `identity` (`mws-identity/1`) and a `test_hash` on every record, so two runs of one test on two builds can be compared, and a published file can be checked. All of it is optional in `mws-results/1`; files written before it still validate.
+
+`identity` states:
+
+| Member | Source |
+|---|---|
+| `tester` | name, version, and the git `commit` and `dirty` flag stamped into `dist/src/build-info.json` by `npm run build` (`scripts/build-stamp.mjs`); `commit` is null for a build made outside a git checkout |
+| `spec`, `manifest_sha256`, `plan_hash` | as in `spec`, `manifest` and `plan` |
+| `tools_fingerprint` | sha256 over the canonical, name-sorted tools/list entries (tools only; `target.catalog_fingerprint` also covers prompts and resource templates) |
+| `test_hash` | the algorithm of the records' `test_hash`, `mws-test-hash/1` |
+| `server` | `repo`, `commit`, `tag`, `image`, `recipe` from the provenance below; `launch` (the server command or URL, redacted) and `transport` from the run |
+| `backend` | `[{ name, image, version }]` from the provenance below |
+| `runner` | OS, architecture, Node.js version, and the GitHub Actions run (id, attempt, URL, workflow) where the environment names one; never a host name |
+| `started`, `finished` | the run's start, and when the identity was written |
+| `provenance` | which sources stated the build, and any value a later source replaced |
+| `gaps` | every member not stated or not pinned, with why: an unstamped or dirty tester, no server repo, commit or image, an image or backend image without a digest, a replaced value. Empty only for a fully pinned run |
+
+The provenance comes, in this order, each replacing what the one before set: the manifest's `target.provenance`, a `--provenance FILE` (YAML or JSON, the same keys), and the flags `--server-repo`, `--server-commit`, `--server-tag`, `--server-image` and `--backend-image name=REF` (repeatable) on `run` and `rerun`. A bad commit or an unknown key refuses the run before anything is written. The tester never infers a build.
+
+### test_hash
+
+`test_hash` is `sha256:` and the sha256 of the RFC 8785 canonical JSON of exactly these members:
+
+| Member | What |
+|---|---|
+| `format` | `mws-test-hash/1` |
+| `tester` | `{ name, version, commit }` of the tester build |
+| `spec` | the MWS version |
+| `requirement`, `level` | the record's requirement and level |
+| `scenario` | the procedure id and version |
+| `write_path` | `{ resource, tool, arm }` |
+| `tools` | the tools/list entry, without `title`, `icons` and `_meta`, of the write path's tool and of every tool the record's resource block names (any `tool` member in it); null for a tool the catalog does not list |
+| `resource` | the record's resource block as loaded (argument templates, fields, version, control, clean-up …); null for `(server)`, `(catalog)` and `(declaration)` records. A path the loader made absolute against the manifest's folder enters relative to it |
+| `declaration` | every other top-level member of the manifest except `server`, `target`, `resources`, `limits` and `prefix` (backend, calls, settings, secrets, canaries, review, patterns, …) |
+| `limits` | every limit except `write_budget` and `writes_per_second` |
+
+Left out on purpose: the rest of the tool list (a patched build that adds tools keeps every other record's hash), the catalog fingerprint, `manifest.sha256` and the plan hash (they cover every tool and resource), `server` and `target` (the launch command, hosts and provenance name the build, not the test), the write budget and rate (they bound a run, they do not change one test), and anything measured. A change to anything included gives another hash: a tool whose schema, description or annotations changed (a patch that adds a `resourceVersion` argument), another tester build, another procedure version, another argument template or limit.
+
+### Signed results
+
+`--sign-key FILE` (or `MWSC_SIGN_KEY`, a path or the PEM itself) signs `results.json` with an Ed25519 key: a PKCS#8 PEM key, or an unencrypted OpenSSH `ed25519` key. The key is never written anywhere; keep it out of the repository. `evidence.signature` becomes `mws-results-signature/1`:
+
+- the body is the document with `evidence.signature` null, as RFC 8785 canonical JSON (UTF-8);
+- `digest` is `sha256:` and the sha256 of the body;
+- `value` is the standard base64 of the pure Ed25519 signature of `mcp-writecheck/results-signature/1` and a newline, followed by the body;
+- `key_id` is `ed25519-` and the first 16 hex characters of the sha256 of the public key's SPKI DER, and `public_key_pem` the public key;
+- `sums` names the ssh signature of `SHA256SUMS` where `--sign` made one too.
+
+This follows the kronicle-lite evidence-bundle conventions (canonical JSON, a domain line, pure Ed25519, the same key id), so one key can sign a results.json and the Evidence Pack that wraps it, and `openssl pkeyutl -verify -rawin` checks it with nothing of ours. `mcp-writecheck verify-results <file> --pubkey KEY` (a PEM public key, an `ssh-ed25519` line or a `.pub` file) exits 0 only for a file signed by that key and unchanged; 1 for an unsigned file, a file with only the ssh signature of `SHA256SUMS`, or no `--pubkey` (the key embedded in the file says which key signed, not who); 3 for a changed file or another key. Unsigned results stay allowed; `compare` and `verify-results` flag them. `recheck` writes new verdicts, so its copy no longer verifies.
+
+### compare
+
+`mcp-writecheck compare <before> <after> [--out DIR] [--pubkey KEY]` reads two results.json files (or run folders) and writes `compare.json` (`schema/mws-compare-1.schema.json`) and `compare.md`.
+
+- **Cells:** `<requirement>@<tool>` (a record's `cell` where the run stamped one). Each side's verdict is rolled up from the cell's records by MWS section 8.2 rule 13: violated, then platform, then held, then not observed, then not tested. A `violated` record whose validity does not count ranks below held and shows as `violated?`; `self-attested` ranks above not tested; not applicable is last. Where the run's own `cells` give another tested verdict than this roll-up, the cell is `rollup-mismatch` and not compared.
+- **Join:** a record's slot is its requirement, resource, tool and procedure id. A slot on both sides must have equal test hashes (else `test-changed`, naming the procedure versions where they differ). A slot on one side only joins when its record is `not tested` or `not applicable`, and is `coverage-change` when it carries a tested verdict (the other build has no evidence for it). A record without `test_hash` makes the cell `no-test-hash`.
+- **Labels:** `fixed` only for violated → held; `regressed` for held or not observed → violated; `unchanged` for the same verdict; `changed` for any other move between tested verdicts (violated → not observed, to or from platform, held → not observed), never a fix; `not comparable` for a changed test, a coverage change (to or from not tested or not applicable), a cell on one side only, an unstable `violated?`, or a roll-up mismatch. `transition` gives the finer class.
+- **Refused** (exit 2): a file that is not `mws-results/1`, different MWS versions, a test-hash algorithm other than `mws-test-hash/1`, or a file whose records carry no `test_hash`. Different tester builds are not refused, but every test hash then differs and nothing is compared.
+- **Flagged** in `warnings`: an unsigned or unpinned file, a run that is not `complete`, identity gaps, different manifests.
+- With `--pubkey`, both files must be signed by that key (exit 3). Exit 1 when a cell regressed, else 0. `rating` is always null, and cells are listed, never counted.
