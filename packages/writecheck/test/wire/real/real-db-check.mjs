@@ -9,8 +9,9 @@
  * Each check prints `ITEM <n> <name>: PASS|FAIL <detail>`; the exit code is the number of failures.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { connect as netConnect } from 'node:net';
 import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,9 @@ const { egressFor } = await import(join(dist, 'core', 'egress.js'));
 
 const req = createRequire(join(process.env.B1_DRV ?? process.cwd(), 'noop.js'));
 const pg = req('pg');
-const postgres = req('postgres');
+// why: postgres.js 3.4 exports the function itself from CJS; some builds put it on .default.
+const postgresMod = req('postgres');
+const postgres = typeof postgresMod === 'function' ? postgresMod : postgresMod.default;
 const { createClient } = req('redis');
 const IORedis = req('ioredis');
 const { MongoClient } = req('mongodb');
@@ -206,13 +209,28 @@ async function postgresChecks() {
     const py = env('B1_PY');
     const file = join(tmpdir(), 'b1-psy.py');
     writeFileSync(file, PSY);
-    const run = (u) => {
-      const r = spawnSync(py, [file, u, 'b1_psy_t'], { encoding: 'utf8', timeout: 60_000 });
-      if (r.status !== 0) throw new Error(`psycopg: ${r.stderr.slice(-500)}`);
-      return JSON.parse(r.stdout);
-    };
-    const a = run(scram);
-    const b = run(url);
+    // why: the gate runs in this process; a synchronous spawn would block its event loop, so libpq's SSLRequest would never be answered.
+    const run = (u, label) =>
+      new Promise((resolve, reject) => {
+        const p = spawn(py, [file, u, 'b1_psy_t'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        let err = '';
+        p.stdout.setEncoding('utf8').on('data', (x) => (out += x));
+        p.stderr.setEncoding('utf8').on('data', (x) => (err += x));
+        const t = setTimeout(() => p.kill('SIGKILL'), 60_000);
+        p.on('error', (e) => (clearTimeout(t), reject(new Error(`psycopg ${label}: ${e.message}`))));
+        p.on('close', (code, signal) => {
+          clearTimeout(t);
+          if (code !== 0) return reject(new Error(`psycopg ${label}: exit ${code} signal ${signal}; stderr: ${err.slice(-400) || '(empty)'}; stdout: ${out.slice(-200) || '(empty)'}`));
+          try {
+            resolve(JSON.parse(out));
+          } catch (e) {
+            reject(new Error(`psycopg ${label}: stdout is not JSON (${e.message}): ${out.slice(-200)}`));
+          }
+        });
+      });
+    const a = await run(scram, 'direct');
+    const b = await run(url, 'gated');
     // why: the direct connection may use TLS (sslmode=prefer) where the gate answers N; that one line may differ.
     const strip = (x) => x.slice(0, -1);
     return { ok: same(strip(a), strip(b)) && b[b.length - 1].ssl_in_use === false, detail: `${a.length} results ${same(strip(a), strip(b)) ? 'identical' : `DIFFER ${firstDiff(a, b)}`}; ssl direct ${a[a.length - 1].ssl_in_use}, gated ${b[b.length - 1].ssl_in_use}` };
@@ -294,17 +312,23 @@ async function postgresChecks() {
     const commitB = await cl.query('COMMIT').then((r) => r.command, (e) => e.code);
     cl.release();
     notes.push(`B: UPDATE -> ${eB}, COMMIT -> ${commitB}`);
-    // C: outside a transaction, then the pool goes on.
+    // C: outside a transaction, on a checked-out client released without an error, then the pool goes on.
+    // why: pool.query() releases its client with the query's error, and pg-pool then destroys that client
+    // (direct or gated alike), so a query error through pool.query() always costs the connection.
     g.fault({ method: 'UPDATE', path: 'b1_d6', nth: 1, kind: 'status' });
-    const eC = await pool.query("UPDATE b1_d6 SET n = 9 WHERE id = 'k'").then(() => 'ok', (e) => e.code);
+    cl = await pool.connect();
+    const eC = await cl.query("UPDATE b1_d6 SET n = 9 WHERE id = 'k'").then(() => 'ok', (e) => e.code);
+    cl.release();
     const after = await pool.query("SELECT count(*)::int AS c, pg_backend_pid() AS p, (SELECT n FROM b1_d6 WHERE id = 'k') AS n FROM b1_d6 WHERE id IN ('a', 'b')");
     const row = after.rows[0];
     const real = await d.query("SELECT count(*)::int AS c FROM b1_d6 WHERE id IN ('a', 'b')");
-    notes.push(`C: UPDATE -> ${eC}; afterwards the pool's query answers (rows a/b ${row.c}, n ${row.n}); one backend connection throughout: ${pid1 === pid2 && pid2 === row.p}`);
+    // The backend side: the gate kept the one upstream connection open through all three injected errors.
+    const alive = (await d.query('SELECT count(*)::int AS c FROM pg_stat_activity WHERE pid = $1', [pid1])).rows[0].c === 1;
+    notes.push(`C: UPDATE -> ${eC}; afterwards the pool's query answers (rows a/b ${row.c}, n ${row.n}); one backend connection throughout: ${pid1 === pid2 && pid2 === row.p} (pids ${pid1}/${pid2}/${row.p}, backend ${pid1} alive: ${alive})`);
     await pool.end();
     await d.query('DROP TABLE b1_d6');
     await d.end();
-    const ok = eA === 'XX000' && nextA === '25P02' && eB === 'XX000' && commitB === 'ROLLBACK' && eC === 'XX000' && row.c === 0 && row.n === 0 && real.rows[0].c === 0 && pid1 === pid2 && pid2 === row.p;
+    const ok = eA === 'XX000' && nextA === '25P02' && eB === 'XX000' && commitB === 'ROLLBACK' && eC === 'XX000' && row.c === 0 && row.n === 0 && real.rows[0].c === 0 && pid1 === pid2 && pid2 === row.p && alive;
     return { ok, detail: notes.join('; ') };
   });
 
@@ -409,8 +433,9 @@ async function redisChecks() {
       return c;
     };
     const d = await mk(u);
-    const v = await mk(url);
+    // why: node-redis sends HELLO 3 while connecting, so the mark is taken before the gated connect.
     const m0 = g.mark();
+    const v = await mk(url);
     const a = await redisOpsNode(d, 'b1');
     const b = await redisOpsNode(v, 'b1');
     const log = await g.since(m0);
@@ -442,12 +467,28 @@ async function redisChecks() {
       await (c.close ? c.close() : c.quit());
     }
     const bad = await gate('redis', u.replace(/:([^:@/]*)@/, ':wrong@'), redisCodec);
+    // why: ioredis disconnects itself after a failed AUTH, so connect() rejects with its own "Connection is closed.";
+    // the server's reply reaches only the 'error' event.
     const io = new IORedis(bad.url, { lazyConnect: true, retryStrategy: () => null, maxRetriesPerRequest: 0 });
-    io.on('error', () => {});
-    const err = await io.connect().then(() => 'connected', (e) => String(e.message).split(' ')[0]);
+    const ioErrs = [];
+    io.on('error', (e) => ioErrs.push(String(e.message).split(' ')[0]));
+    const closed = await io.connect().then(() => 'connected', (e) => String(e.message));
     io.disconnect();
-    out.push(`wrong password: ${err}`);
-    return { ok: out[0] === 'default=default' && out[1] === 'acl=b1u' && /WRONGPASS/.test(err), detail: out.join(', ') };
+    const err = ioErrs.find((x) => /WRONGPASS/.test(x)) ?? `none (connect: ${closed}; errors: ${ioErrs.join('|') || 'none'})`;
+    // The bytes themselves: AUTH with a wrong password answers -WRONGPASS and the connection stays open (PING then answers -NOAUTH).
+    const raw = await new Promise((resolve) => {
+      const s = netConnect(Number(new URL(bad.url).port), '127.0.0.1');
+      let got = '';
+      const t = setTimeout(() => (s.destroy(), resolve(`timeout after ${JSON.stringify(got)}`)), 3000);
+      s.on('connect', () => s.write('*2\r\n$4\r\nAUTH\r\n$5\r\nwrong\r\n*1\r\n$4\r\nPING\r\n'));
+      s.on('data', (x) => {
+        got += x.toString('latin1');
+        if (got.split('\r\n').length > 2) (clearTimeout(t), s.destroy(), resolve(got.split('\r\n').slice(0, 2).map((l) => l.split(' ')[0]).join(' ')));
+      });
+      s.on('close', () => (clearTimeout(t), resolve(`closed after ${JSON.stringify(got)}`)));
+    });
+    out.push(`wrong password: ${err}`, `raw AUTH+PING: ${raw}`);
+    return { ok: out[0] === 'default=default' && out[1] === 'acl=b1u' && /WRONGPASS/.test(err) && raw === '-WRONGPASS -NOAUTH', detail: out.join(', ') };
   });
   await check(7, 'redis latency: 2000 sequential GETs, direct vs gated', async () => {
     const t = async (x) => {

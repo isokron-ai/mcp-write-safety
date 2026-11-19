@@ -136,3 +136,34 @@ test('redis codec (review 3, 5): STORE past the 16th argument; HELLO, RESET and 
   step(['RESET'], '+RESET\r\n', 2);
   assert.equal(r.txn(), 'idle');
 });
+
+test('redis codec (real-db item 2): a wrong password is relayed as the backend answered it; the connection stays in step', () => {
+  // Bytes recorded from Redis 7.0.15 with requirepass: AUTH wrong, PING, HELLO 3 AUTH default wrong, HELLO 3 AUTH default <right>.
+  const replies = [
+    '-WRONGPASS invalid username-password pair or user is disabled.\r\n',
+    '-NOAUTH Authentication required.\r\n',
+    '-WRONGPASS invalid username-password pair or user is disabled.\r\n',
+    '%7\r\n$6\r\nserver\r\n$5\r\nredis\r\n$7\r\nversion\r\n$6\r\n7.0.15\r\n$5\r\nproto\r\n:3\r\n$2\r\nid\r\n:23\r\n$4\r\nmode\r\n$10\r\nstandalone\r\n$4\r\nrole\r\n$6\r\nmaster\r\n$7\r\nmodules\r\n*0\r\n',
+  ];
+  const stream = Buffer.from(RedisClient.cmd('AUTH', 'wrong') + RedisClient.cmd('PING') + RedisClient.cmd('HELLO', '3', 'AUTH', 'default', 'wrong') + RedisClient.cmd('HELLO', '3', 'AUTH', 'default', 'rpw') + RedisClient.cmd('SUBSCRIBE', 'c'));
+  const reply = Buffer.from(replies.join(''));
+  for (let i = 1; i < reply.length; i += 7) {
+    const s = new RedisSession('k');
+    const us = s.client(stream);
+    assert.deepEqual(us.map((u) => [u.req?.verb, u.req?.statement, u.req?.mutating]), [['AUTH', 'AUTH', false], ['PING', 'PING', false], ['HELLO', 'HELLO', false], ['HELLO', 'HELLO', false], ['SUBSCRIBE', 'SUBSCRIBE', false]], 'credentials are not recorded');
+    us.slice(0, 4).forEach((u, j) => s.sent(j + 1, u));
+    const ps = [...s.server(reply.subarray(0, i)), ...s.server(reply.subarray(i))];
+    assert.deepEqual(ps.map((p) => [p.unit, p.end?.reply, p.end?.status]), [[1, '-WRONGPASS', 400], [2, '-NOAUTH', 400], [3, '-WRONGPASS', 400], [4, '%7', 200]], `reply split at ${i}`);
+    assert.equal(Buffer.concat(ps.map((p) => p.bytes)).toString('latin1'), reply.toString('latin1'), 'the answers are forwarded byte for byte');
+  }
+  // A refused HELLO 3 leaves RESP2 in force; only the accepted one switches to RESP3 (SUBSCRIBE is then answered by a push, not passthrough).
+  const t = new RedisSession('k');
+  const [bad] = t.client(Buffer.from(RedisClient.cmd('HELLO', '3', 'AUTH', 'default', 'wrong')));
+  t.sent(1, bad!);
+  t.server(Buffer.from(replies[2]!));
+  const [good] = t.client(Buffer.from(RedisClient.cmd('HELLO', '3', 'AUTH', 'default', 'rpw')));
+  t.sent(2, good!);
+  t.server(Buffer.from(replies[3]!));
+  const [sub, after] = t.client(Buffer.from(RedisClient.cmd('SUBSCRIBE', 'c') + RedisClient.cmd('PING')));
+  assert.ok(sub?.req && after?.req, 'RESP3 after the accepted HELLO: commands after SUBSCRIBE are still read');
+});

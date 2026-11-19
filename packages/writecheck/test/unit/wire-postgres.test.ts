@@ -249,3 +249,19 @@ test('codec: standard_conforming_strings from ParameterStatus changes how later 
   const [u] = s.client(PgClient.q("SELECT 'a\\' x 'y; DELETE FROM t; --'"));
   assert.equal(u!.req!.mutating, true);
 });
+
+test('codec (real-db item 1, libpq): GSSENCRequest then SSLRequest are each answered N by the gate; the startup packet goes on in plaintext', () => {
+  // libpq with gssencmode=prefer and sslmode=prefer writes these 8-byte packets first, one at a time, waiting for one byte each.
+  const gss = Buffer.from([0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x30]);
+  const ssl = Buffer.from([0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f]);
+  const s = new PostgresSession('k');
+  const a = s.client(gss);
+  assert.deepEqual(a.map((u) => [u.req, u.localReply?.toString('latin1')]), [[null, 'N']]);
+  const b: ReturnType<PostgresSession['client']> = [];
+  for (const x of ssl) b.push(...s.client(Buffer.from([x])));
+  assert.deepEqual(b.map((u) => [u.req, u.localReply?.toString('latin1')]), [[null, 'N']], 'answered once the whole request is in');
+  const st = startup();
+  const c = s.client(st);
+  assert.deepEqual(c.map((u) => [u.req, u.localReply ?? null, u.bytes.length]), [[null, null, st.length]], 'the startup packet is forwarded, not answered');
+  assert.equal(s.debug().ready, false, 'not ready until the backend sends ReadyForQuery');
+});
