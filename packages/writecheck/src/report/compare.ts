@@ -283,6 +283,8 @@ function cmpShape(b: Shape, a: Shape, at: string, tol: string[], bad: string[]):
   for (const n of ar) if (!br.includes(n) && hasKey(bp, n)) bad.push(`${at}.${n}: a nested property became required`);
   for (const n of ar) if (!br.includes(n) && !hasKey(ap, n)) bad.push(`${at}: a new required name ${n}`);
   for (const n of br) if (!ar.includes(n)) (RELAXED_REQUIRED_IS_SAME_TEST ? tol.push(`${at}.${n}: relaxed from required to optional`) : bad.push(`${at}.${n}: relaxed from required to optional`));
+  if (b.i && a.i) cmpShape(b.i, a.i, `${at}[]`, tol, bad);
+  else if (b.i || a.i) bad.push(`${at}: its array items changed`);
 }
 
 /** Rule A on a tool: every argument the before test sent is there with equal constraints; the rest is tolerated or not (above). */
@@ -460,6 +462,47 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
     // why: review: a slot tested on one build and not on the other has no evidence to compare on the other.
     if (UNTESTED.includes(m.before) !== UNTESTED.includes(m.after)) coverage.push(`${name} ${m.before} → ${m.after}`);
     slots.push(m);
+  }
+  // why: rule A on the real pairs (set-up rule): a run whose set-up of a resource fails writes one `setup` record for the
+  // requirement in place of the records of the procedures it could not run (cli/run.ts). Where the other build set the same
+  // resource up (it has tested records for the same requirement, resource and tool, made under the same context, tools and
+  // tester), its set-up made the same writes and passed: the set-up slot is joined as held on that side, and the procedure
+  // slots the set-up record stood for are not a coverage change.
+  const handled = new Set<string>();
+  const setupJoin = (one: Map<string, Rec[]>, other: Map<string, Rec[]>, otherRecs: Rec[], side: 'before' | 'after') => {
+    for (const [k, x] of one) {
+      if (other.has(k) || x[0]!.scenario.id !== 'setup') continue;
+      const r0 = x[0]!;
+      const partners = otherRecs.filter((r) => r.requirement === r0.requirement && r.write_path.resource === r0.write_path.resource && r.write_path.tool === r0.write_path.tool && r.scenario.id !== 'setup' && !UNTESTED.includes(stateOf(r)));
+      const p0 = partners[0];
+      const [ib, ia] = side === 'before' ? [r0.test_inputs, p0?.test_inputs] : [p0?.test_inputs, r0.test_inputs];
+      if (!p0 || !ib || !ia || ib.scheme !== ia.scheme || !ib.context || ib.context !== ia.context || canonical(ib.tester) !== canonical(ia.tester)) continue;
+      const tol: string[] = [];
+      const bad: string[] = [];
+      for (const t of [...new Set([...Object.keys(ib.tools), ...Object.keys(ia.tools)])].sort()) {
+        const tb = ib.tools[t];
+        const ta = ia.tools[t];
+        if (!tb || !ta) {
+          if (tb !== ta) bad.push(t);
+        } else cmpTool(tb, ta, t, tol, bad, false);
+      }
+      if (bad.length) continue;
+      const name = slotName(r0).replace(/ v.*$/, '');
+      handled.add(k);
+      for (const p of partners) handled.add(slotOf(p));
+      tester ??= testerProblem(side === 'before' ? r0 : p0, side === 'before' ? p0 : r0);
+      const m: SlotMove = side === 'before' ? { slot: name, before: rollUp(x).verdict, after: 'held' } : { slot: name, before: 'held', after: rollUp(x).verdict };
+      tolerated.push(`${name}: the ${side === 'before' ? 'after' : 'before'} build set ${r0.write_path.resource} up with the same writes and passed (no set-up record; its records ${[...new Set(partners.map((p) => p.scenario.id))].join(', ')} stand where the set-up record stood)`, ...tol.map((t) => `${name}: ${t}`));
+      slots.push(m);
+    }
+  };
+  setupJoin(sb, sa, a, 'before');
+  setupJoin(sa, sb, b, 'after');
+  for (const k of handled) {
+    if (!sb.has(k) || !sa.has(k)) {
+      sb.delete(k);
+      sa.delete(k);
+    }
   }
   const base = { slots, subjectSlots, tolerated, tester };
   if (changed.length) return { problem: { transition: 'test-changed', why: `the test changed: ${changed.join('; ')}` }, ...base };

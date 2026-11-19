@@ -21,8 +21,9 @@
  *            MWS-IN-5, MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3
  *   extras   MWS-IN-5 only: the tester's reading (`in5_reading`) and the sha256 of each in5.docs document (`in5_docs`)
  *
- * A Shape is `h`, the hash of the argument's schema without `properties` and `required` (with every local `$ref` reachable
- * from it resolved), `p`, a Shape per nested property, and `r`, the nested required names. Annotation keywords (description,
+ * A Shape is `h`, the hash of the argument's schema without `properties`, `required` and a single-schema `items` (with every
+ * local `$ref` reachable from it resolved), `p`, a Shape per nested property, `r`, the nested required names, and `i`, the
+ * Shape of the array items. Annotation keywords (description,
  * title, examples, $comment, deprecated) are left out of every schema, except for MWS-IN-5, whose search reads descriptions.
  * A top-level `$ref` (the argument object behind a definition), `$anchor` references and draft-07 `dependencies` are followed.
  *
@@ -312,13 +313,16 @@ export interface Shape {
   h: string;
   p?: Record<string, Shape>;
   r?: string[];
+  /** The shape of an array's items, where `items` is one schema. */
+  i?: Shape;
 }
 
 export function shapeOf(schema: unknown, root: unknown, keep = false): Shape {
   if (!isObj(schema)) return { h: shortHash({ s: plain(schema) }) };
   const s = stripAnnotations(schema, keep) as Record<string, unknown>;
   const core = dict();
-  for (const k of Object.keys(s)) if (k !== 'properties' && k !== 'required') core[k] = s[k];
+  const items = isObj(schema['items']) ? schema['items'] : null;
+  for (const k of Object.keys(s)) if (k !== 'properties' && k !== 'required' && !(k === 'items' && items)) core[k] = s[k];
   const props = isObj(schema['properties']) ? schema['properties'] : null;
   const req = Array.isArray(schema['required']) ? [...new Set(schema['required'].filter((x): x is string => typeof x === 'string'))].sort() : null;
   const out: Shape = { h: shortHash({ s: core, refs: reachableRefs(core, root, keep) }) };
@@ -328,6 +332,7 @@ export function shapeOf(schema: unknown, root: unknown, keep = false): Shape {
     out.p = p;
   }
   if (req) out.r = req;
+  if (items) out.i = shapeOf(items, root, keep);
   return out;
 }
 
@@ -378,8 +383,10 @@ export function narrowSchema(schema: unknown, used: Set<string>, keep = false): 
 export interface TestInputs {
   scheme: string;
   tester: TesterId;
-  /** Hash of every input other than the tester, the tool shapes, the probed arguments and the subject. */
+  /** Hash of every input other than the tester, the tool shapes, the probed arguments, the subject and the extras. */
   rest: string;
+  /** Hash of the part of `rest` that is not the record itself: spec, resource block, declaration, guard and limits (compare's set-up rule reads it). */
+  context?: string;
   /** Per tool the record's resource block names (and the write path's tool): the arguments the test sends, or null for a tool the catalog does not list. */
   tools: Record<string, ToolShape | null>;
   /** Schema probes (MWS-IN-1 to IN-7): every argument of the write path's tool, or null where the catalog does not list it. */
@@ -441,6 +448,7 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     ...(shared.guard !== null ? { guard: shared.guard } : {}),
     limits,
   };
+  const contextInput = { spec: restInput.spec, resource: restInput.resource, declaration: restInput.declaration, guard: shared.guard, limits: shared.limits };
   const wt = ctx.tools.find((x) => x.name === r.write_path.tool);
   const facets = subjectFacets(r.requirement).filter((f) => f !== 'schema');
   const t = ctx.tester ?? { name: SUITE_NAME, version: SUITE_VERSION, commit: null };
@@ -448,6 +456,7 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     scheme: TEST_HASH_FORMAT,
     tester: { name: t.name, version: t.version, commit: t.commit, dirty: t.dirty ?? null },
     rest: `sha256:${sha256(canonical(restInput))}`,
+    context: `sha256:${sha256(canonical(contextInput))}`,
     tools,
     ...(isSchemaProbe(r.requirement) ? { probed: wt ? toolShape(wt['inputSchema'], null, keep) : null } : {}),
     ...(facets.length ? { subject: Object.fromEntries(facets.map((f) => [f, wt ? `sha256:${sha256(canonical(facetPart(ctx.tools, r.write_path.tool, f)))}` : null])) } : {}),
