@@ -620,7 +620,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       if (!stopped) await d.reset('MAIN').catch(() => false);
     }
     // why: research builds N3 (review): a reset that went through the declared control.patch is said in the resource's records.
-    for (const [name, d] of drivers) if (d.resetViaControl) for (const [i, r] of results.entries()) if (r.write_path.resource === name) results[i] = { ...r, notes: [...r.notes, `The tool under test refused to put this resource's object back ${d.resetViaControl} time(s); the tester reset it through the declared control.patch (research builds N3).`] };
+    for (const [name, d] of drivers) if (d.resetViaControl) for (const [i, r] of results.entries()) if (r.write_path.resource === name) results[i] = { ...r, notes: [...r.notes, `The tool under test refused to put this resource's object back ${d.resetViaControl} time(s); the tester reset it through the declared control.patch.`] };
     const noSetup = setupFailed.length && !setupDone ? `the set-up of every resource with an object under test failed (${setupFailed.join('; ')})` : null;
     // Server-wide checks: launch settings (they restart the server) and the credential scan (it reads everything before it).
     for (const g of GLOBAL_CHECKS) {

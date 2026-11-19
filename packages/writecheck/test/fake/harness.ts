@@ -1,5 +1,6 @@
 /** Test harness: start the fake backend, write a manifest for the fake server, run the CLI's commands in-process. */
 
+import { assertPublishable } from '../publish-lint.js';
 import { assertViolationsHaveSteps } from '../steps-lint.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -102,5 +103,7 @@ export async function runFake(f: Fake, o: { baseline?: string; sign?: string } =
   const r = await runCommand({ manifest: f.manifest, outRoot: join(f.dir, 'out'), stateDir: join(f.dir, 'state'), confirmTarget: 'fake-tracker', planHash: hash, interactive: false, env: f.env, log: quiet, noSignals: true, ...(o.baseline ? { baseline: o.baseline } : {}), ...(o.sign ? { sign: o.sign } : {}) });
   // why: review R2 (lane F1): no violated record without its trace steps, unless its evidence is not a call trace.
   assertViolationsHaveSteps(r.doc);
+  // why: what a run wrote matches the published schema member for member, and names no product and no review.
+  assertPublishable(r.outDir);
   return r;
 }
