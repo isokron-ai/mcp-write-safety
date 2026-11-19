@@ -15,14 +15,16 @@ import { fileURLToPath } from 'node:url';
 import { firstWriteOf, postEvaluate } from '../../src/checks/coverage.js';
 import { createsVerdicts } from '../../src/checks/creates.js';
 import { recheckCommand } from '../../src/cli/commands.js';
-import { compareCommand, finishRecheck } from '../../src/cli/compare.js';
+import { compareCommand, finishRecheck, originalSignature } from '../../src/cli/compare.js';
 import { TEST_HASH_FORMAT } from '../../src/core/identity.js';
 import { parseManifestText, type Manifest } from '../../src/core/manifest.js';
 import { Redactor } from '../../src/core/redact.js';
 import { canonical, WritecheckError } from '../../src/core/util.js';
 import { compareDocs, RELAXED_REQUIRED_IS_SAME_TEST, summarize, type CompareDoc } from '../../src/report/compare.js';
 import { signResults, verifyResults } from '../../src/report/sign.js';
-import { narrowSchema, stampTestHashes, testHash, testInputs, type TesterId } from '../../src/report/testhash.js';
+import { narrowSchema, stampTestHashes, testHash, testInputs, usedArgs, type TesterId } from '../../src/report/testhash.js';
+import { furtherProbes } from '../../src/checks/readback.js';
+import { probeCases } from '../../src/checks/schema.js';
 import { result, type Result } from '../../src/report/verdicts.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -437,6 +439,179 @@ test('S7 (p09b), S1 (p13c): recheck hashes with the run\'s --pair-budget, and fr
     assert.notEqual(out.results[0]!.test_hash, testHash(pairs, { manifest: plain, tools, tester: me }));
     assert.equal(out.results[1]!.test_inputs!.rest, kept.test_inputs!.rest, 'recorded inputs reused');
     assert.equal(out.results[1]!.test_hash, testHash(kept, { manifest: withBudget, tools, tester: me }), 'the same hash a run by this build would stamp');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- Independent review of 421ff0d (F1-F7), converted from its proof tests (zz-review-f10, R1-R7) ----
+
+const viol = (r: Result): Result => ({ ...r, verdict: 'violated', validity: { class: 'valid', counts: true, failed: [], synthetic_fault: false, evidence: {} } });
+const notesFirst = (extra: Record<string, unknown>) => onTool('update_ticket', (s) => ({ ...s, properties: { notes: { type: 'string', ...extra }, ...(s['properties'] as object) } }));
+
+test('review F1 (R1): MWS-UPD-1 further probes chosen from the update tool schema enter the hash: a tightening that changes their calls is never fixed', () => {
+  const m = load();
+  const res = m.resources.find((r) => r.name === 'ticket')!;
+  const before = toolsFor(m, notesFirst({}));
+  const after = toolsFor(m, notesFirst({ minLength: 1 }));
+  const probes = (ts: Tool[]) => furtherProbes(ts.find((t) => t.name === 'update_ticket')!['inputSchema'], res).map((p) => `${p.name}:${p.prop}`);
+  assert.notDeepEqual(probes(before), probes(after), 'the further probes send other calls');
+  for (const req of ['MWS-UPD-1', 'MWS-RES-1', 'MWS-RES-2']) {
+    const r0 = rec(req, 'held', { scenario: { id: 'read-after-write', version: '1' } });
+    assert.notEqual(testHash(r0, { manifest: m, tools: before, tester }), testHash(r0, { manifest: m, tools: after, tester }), req);
+    const x = cellOf(cmp(doc(stamped([viol(r0)], m, before)), doc(stamped([r0], m, after))), `${req}@update_ticket`);
+    assert.equal(x.label, 'not comparable', req);
+    assert.equal(x.transition, 'test-changed', req);
+  }
+  // rule A still holds: an optional argument the probes would not send (an integer, not nullable) keeps the test
+  const r0 = rec('MWS-UPD-1', 'held', { scenario: { id: 'read-after-write', version: '1' } });
+  const plus = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { weight: { type: 'integer' } })));
+  assert.deepEqual(probes(plus), probes(toolsFor(m)));
+  assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, toolsFor(m))), doc(stamped([r0], m, plus))), 'MWS-UPD-1@update_ticket').label, 'fixed');
+  // and one the probes would send is another test
+  const sent = toolsFor(m, notesFirst({}));
+  assert.notDeepEqual(probes(sent), probes(toolsFor(m)));
+  assert.notEqual(cellOf(cmp(doc(stamped([viol(r0)], m, toolsFor(m))), doc(stamped([r0], m, sent))), 'MWS-UPD-1@update_ticket').label, 'fixed');
+});
+
+test('review F2 (R7): MWS-UPD-2 list-edit address arguments enter the hash: a build that drops by_id (addressing flips to position) is never fixed', () => {
+  const m = load(ttManifest.replace(/^  remove_label: \{ resource: ticket.*\n/m, ''));
+  const res = m.resources.find((r) => r.list_edit)!;
+  const le = res.list_edit!;
+  const before = toolsFor(m, onTool(le.tool, (s) => withProps(s, { label_id: { type: 'string' }, position: { type: 'integer' } })));
+  const after = toolsFor(m, onTool(le.tool, (s) => without(withProps(s, { position: { type: 'integer' } }), 'label_id')));
+  const r0 = rec('MWS-UPD-2', 'held', { scenario: { id: 'list-edit', version: '1' }, resource: res.name, tool: le.tool });
+  assert.notEqual(testHash(r0, { manifest: m, tools: before, tester }), testHash(r0, { manifest: m, tools: after, tester }));
+  assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, before)), doc(stamped([r0], m, after))), `MWS-UPD-2@${le.tool}`).label, 'not comparable');
+  // the reverse (by_id newly declared, an optional argument added): the call changes from position to id, so another test
+  const x = cellOf(cmp(doc(stamped([viol(r0)], m, after)), doc(stamped([r0], m, before))), `MWS-UPD-2@${le.tool}`);
+  assert.equal(x.label, 'not comparable');
+  assert.match(x.why, /chose other calls/);
+});
+
+test('review F3 (R2): selector.narrow arguments enter the hash: a tightened narrowing argument is another MWS-TGT-1 test', () => {
+  const m = load(ttManifest.replace('narrow: { title_prefix: "{{marker}}" }', 'narrow: { name_prefix: "{{marker}}" }'));
+  const res = m.resources.find((r) => r.selector)!;
+  assert.ok(usedArgs('delete_tickets', JSON.parse(JSON.stringify(res)), true).has('name_prefix'));
+  const before = toolsFor(m, onTool('delete_tickets', (s) => withProps(s, { name_prefix: { type: 'string' } })));
+  const after = toolsFor(m, onTool('delete_tickets', (s) => withProps(s, { name_prefix: { type: 'string', pattern: '^zz' } })));
+  const r0 = rec('MWS-TGT-1', 'held', { scenario: { id: 'targeting', version: '1' }, resource: res.name, tool: 'delete_tickets' });
+  assert.notEqual(testHash(r0, { manifest: m, tools: before, tester }), testHash(r0, { manifest: m, tools: after, tester }));
+  assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, before)), doc(stamped([r0], m, after))), 'MWS-TGT-1@delete_tickets').label, 'not comparable');
+});
+
+test('review F4 (R3): MWS-IN-1 acts on required (it compares a probe with the call without the argument only when optional): relaxing a probed argument is another test', () => {
+  const m = load();
+  const sc = { id: 'schema-probes', version: '1' };
+  const before = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, required: ['id', 'priority'] })));
+  const after = toolsFor(m);
+  const cases = (ts: Tool[]) => probeCases(ts.find((t) => t.name === 'update_ticket')!['inputSchema'], new Set()).filter((c) => c.prop === 'priority' && c.requirement === 'MWS-IN-1').map((c) => `${c.name}:${!!c.required}`);
+  assert.notDeepEqual(cases(before), cases(after), 'the probes differ in required');
+  const x = cellOf(cmp(doc(stamped([rec('MWS-IN-1', 'violated', { scenario: sc })], m, before)), doc(stamped([rec('MWS-IN-1', 'held', { scenario: sc })], m, after))), 'MWS-IN-1@update_ticket');
+  assert.equal(x.label, 'not comparable');
+  assert.match(x.why, /acts on required/);
+});
+
+test('review F4 (R4): MWS-CONC-2 adds a version-left-out run only for an optional version: relaxing it is another test, never regressed; elsewhere the relaxation stays rule A', () => {
+  const m = load();
+  const sc = { id: 'stale-write', version: '1' };
+  const before = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, required: ['id', 'expected_version'] })));
+  const after = toolsFor(m);
+  const x = cellOf(cmp(doc(stamped([rec('MWS-CONC-2', 'held', { scenario: sc })], m, before)), doc(stamped([viol(rec('MWS-CONC-2', 'held', { scenario: sc }))], m, after))), 'MWS-CONC-2@update_ticket');
+  assert.equal(x.label, 'not comparable');
+  assert.equal(x.transition, 'test-changed');
+  const y = cellOf(cmp(doc(stamped([viol(rec('MWS-CONC-1', 'held', { scenario: sc }))], m, before)), doc(stamped([rec('MWS-CONC-1', 'held', { scenario: sc })], m, after))), 'MWS-CONC-1@update_ticket');
+  assert.equal(y.label, 'fixed', 'MWS-CONC-1 sends the same call: RELAXED_REQUIRED_IS_SAME_TEST');
+  assert.ok(y.same_test_because?.some((t) => /relaxed from required to optional/.test(t)));
+});
+
+test('review F4: a required argument the test does not send, no longer required, and an argument newly declared under additionalProperties false, are other tests', () => {
+  const m = load();
+  const r0 = rec('MWS-CONC-1', 'held');
+  const before = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { tenant: { type: 'string' } }, ['id', 'tenant'])));
+  const after = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { tenant: { type: 'string' } })));
+  assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, before)), doc(stamped([r0], m, after))), 'MWS-CONC-1@update_ticket').transition, 'test-changed');
+  // the test sends expected_version (the version arg); closed schemas that declare it only after
+  const closedB = toolsFor(m, onTool('update_ticket', (s) => ({ ...without(s, 'expected_version'), additionalProperties: false })));
+  const closedA = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, additionalProperties: false })));
+  const x = cellOf(cmp(doc(stamped([viol(r0)], m, closedB)), doc(stamped([r0], m, closedA))), 'MWS-CONC-1@update_ticket');
+  assert.equal(x.transition, 'test-changed');
+  assert.match(x.why, /allows no undeclared argument/);
+  // open schemas: still rule A (an optional argument the test sends, added)
+  const openB = toolsFor(m, onTool('update_ticket', (s) => without(s, 'expected_version')));
+  assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, openB)), doc(stamped([r0], m, toolsFor(m)))), 'MWS-CONC-1@update_ticket').label, 'fixed');
+});
+
+test('review F6 (R5): an unstamped or dirty tester build claims no regression either, nor a slot regression', () => {
+  const m = load();
+  const tools = toolsFor(m);
+  for (const t of [{ ...tester, commit: null as unknown as string }, { ...tester, dirty: true }]) {
+    const c = cmp(doc(stamped([rec('MWS-CONC-1', 'held')], m, tools, t)), doc(stamped([viol(rec('MWS-CONC-1', 'held'))], m, tools, t)));
+    const x = cellOf(c, 'MWS-CONC-1@update_ticket');
+    assert.equal(x.label, 'not comparable');
+    assert.equal(x.transition, 'tester-unpinned');
+    assert.ok(c.warnings.some((w) => /not claimed as regressed/.test(w)));
+    // a slot regression beside a still-violated slot
+    const two = (v1: Result['verdict'], v2: Result['verdict']) => [rec('MWS-CONC-1', v1, { case: 'a' }), rec('MWS-CONC-1', v2, { case: 'b' })].map((r) => (r.verdict === 'violated' ? viol(r) : r));
+    const c2 = cmp(doc(stamped(two('violated', 'held'), m, tools, t)), doc(stamped(two('violated', 'violated'), m, tools, t)));
+    assert.equal(cellOf(c2, 'MWS-CONC-1@update_ticket').slot_regressions, undefined);
+    assert.ok(c2.warnings.some((w) => /slot regressions not claimed/.test(w)));
+  }
+  // a clean, stamped build still claims both
+  const c = cmp(doc(stamped([rec('MWS-CONC-1', 'held')], m, tools)), doc(stamped([viol(rec('MWS-CONC-1', 'held'))], m, tools)));
+  assert.equal(cellOf(c, 'MWS-CONC-1@update_ticket').label, 'regressed');
+});
+
+test('review F7 (R6): a stored test_hash that does not follow from the record\'s test_inputs is refused before the equal-hash join', () => {
+  const m = load();
+  const before = toolsFor(m);
+  const after = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { expected_version: { type: 'string' } })));
+  const b = stamped([viol(rec('MWS-CONC-1', 'held'))], m, before);
+  const a = stamped([rec('MWS-CONC-1', 'held')], m, after);
+  (a[0] as Result & { test_hash: string }).test_hash = (b[0] as Result & { test_hash: string }).test_hash;
+  const c = cmp(doc(b), doc(a));
+  const x = cellOf(c, 'MWS-CONC-1@update_ticket');
+  assert.equal(x.label, 'not comparable');
+  assert.equal(x.transition, 'hash-mismatch');
+  assert.ok(c.warnings.some((w) => /does not follow from its test_inputs/.test(w)));
+});
+
+test('review F5: recheck signs its copy only for an original signed by a pinned key (or --allow-unsigned, recorded); compare warns on a recheck of an unpinned original', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    const m = load();
+    const tools = toolsFor(m);
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const original = doc(stamped([rec('MWS-CONC-1', 'held')], m, tools), { scope: 's', target: { confirm: 'x', environment: 'test', server: 's', catalog_fingerprint: 'sha256:c', guard: null }, cells: [], not_built: [], measurements: null, leftovers: [], cleanup: null, observations: [], safety: { canaries: [], fixtures_restored: [], gate: null, protocol: null, rerun_of: null }, identity: { ...(doc([])['identity'] as object), spec: { version: '0.9' }, manifest_sha256: 'm1', plan_hash: 'p1', started: 's', finished: 'f', provenance: { sources: [], overridden: [] }, runner: { os: 'x', arch: 'x', node: 'x', ci: null }, server: { repo: null, commit: null, tag: null, image: null, recipe: null, launch: 'x', transport: null } } });
+    writeFileSync(join(dir, 'manifest.yaml'), ttManifest);
+    writeFileSync(join(dir, 'catalog.json'), JSON.stringify({ tools, prompts: [], resourceTemplates: [] }));
+    const write = (d: Record<string, unknown>) => {
+      writeFileSync(join(dir, 'results.json'), JSON.stringify(d));
+      mkdirSync(join(dir, 'recheck'), { recursive: true });
+      writeFileSync(join(dir, 'recheck', 'results.json'), JSON.stringify(d));
+    };
+    // unsigned original: --sign-key is refused
+    write(original);
+    assert.throws(() => originalSignature(dir, { key: privateKey }), (e: unknown) => e instanceof WritecheckError && e.code === 2 && /pinned key/.test(e.message));
+    await assert.rejects(finishRecheck(dir, { key: privateKey, log: () => {} }), (e: unknown) => e instanceof WritecheckError && e.code === 2);
+    // --allow-unsigned: signed, and recorded
+    const forced = await finishRecheck(dir, { key: privateKey, allowUnsigned: true, log: () => {} });
+    assert.deepEqual(forced.identity!.rechecked_by!.original_signature, { status: 'unsigned', key_id: null, pinned: false, allow_unsigned: true });
+    // an unsigned copy records the status too
+    write(original);
+    const plain = await finishRecheck(dir, { key: null, log: () => {} });
+    assert.equal(plain.identity!.rechecked_by!.original_signature!.status, 'unsigned');
+    // a signed original, pinned: allowed
+    const signed = JSON.parse(JSON.stringify(original)) as Record<string, unknown>;
+    (signed['evidence'] as Record<string, unknown>)['signature'] = signResults(signed, privateKey);
+    write(signed);
+    assert.throws(() => originalSignature(dir, { key: privateKey }), /not pinned/);
+    const ok = await finishRecheck(dir, { key: privateKey, pubkey: publicKey, log: () => {} });
+    assert.equal(ok.identity!.rechecked_by!.original_signature!.pinned, true);
+    // compare says which copy vouches only for the recheck
+    const c = cmp(forced as unknown as Record<string, unknown>, ok as unknown as Record<string, unknown>);
+    assert.ok(c.warnings.some((w) => /^before: a rechecked copy of an original that was not signed by a pinned key \(unsigned, signed with --allow-unsigned\)/.test(w)));
+    assert.ok(!c.warnings.some((w) => /^after: a rechecked copy/.test(w)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
