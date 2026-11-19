@@ -328,7 +328,8 @@ export function sameTest(rb: Rec, ra: Rec): SameTest {
     if (facets.length && typeof rb.test_hash_core === 'string' && rb.test_hash_core === ra.test_hash_core) return { kind: 'subject', why: '', tolerated: [], facets };
     return { kind: 'changed', why: procedure || ' (a used argument, the resource block, the declaration, a limit or the tester differs)', tolerated: [] };
   }
-  if (canonical(ib.tester) !== canonical(ia.tester)) return { kind: 'changed', why: ` (another tester build judged it: ${testerName(ib.tester)} before, ${testerName(ia.tester)} after)`, tolerated: [] };
+  // why: the dirty flag is not part of the build's name; a dirty build is refused a fix by testerProblem, an unknown flag is not.
+  if (canonical(testerKey(ib.tester)) !== canonical(testerKey(ia.tester))) return { kind: 'changed', why: ` (another tester build judged it: ${testerName(ib.tester)} before, ${testerName(ia.tester)} after)`, tolerated: [] };
   if (ib.rest !== ia.rest) return { kind: 'changed', why: procedure || ' (the procedure, its case, the resource block, the declaration, a limit or a setting differs)', tolerated: [] };
   if (canonical(ib.extras ?? null) !== canonical(ia.extras ?? null)) return { kind: 'changed', why: ` (a setting of the tester or a document it read differs: ${canonical(ib.extras ?? null)} before, ${canonical(ia.extras ?? null)} after)`, tolerated: [] };
   const tol: string[] = [];
@@ -363,6 +364,8 @@ export function sameTest(rb: Rec, ra: Rec): SameTest {
   if (facets.size) return { kind: 'subject', why: '', tolerated: tol, facets: [...facets] };
   return { kind: 'rule-a', why: '', tolerated: tol };
 }
+
+const testerKey = (t: { name?: string; version?: string; commit?: string | null }) => ({ name: t.name ?? null, version: t.version ?? null, commit: t.commit ?? null });
 
 const testerName = (t: { name?: string; version?: string; commit?: string | null; dirty?: boolean | null } | null | undefined): string => (t ? `${t.version ?? '?'} @ ${t.commit ? t.commit.slice(0, 12) : 'unstamped'}${t.dirty ? ' (dirty)' : ''}` : 'not stated');
 
@@ -476,7 +479,7 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
       const partners = otherRecs.filter((r) => r.requirement === r0.requirement && r.write_path.resource === r0.write_path.resource && r.write_path.tool === r0.write_path.tool && r.scenario.id !== 'setup' && !UNTESTED.includes(stateOf(r)));
       const p0 = partners[0];
       const [ib, ia] = side === 'before' ? [r0.test_inputs, p0?.test_inputs] : [p0?.test_inputs, r0.test_inputs];
-      if (!p0 || !ib || !ia || ib.scheme !== ia.scheme || !ib.context || ib.context !== ia.context || canonical(ib.tester) !== canonical(ia.tester)) continue;
+      if (!p0 || !ib || !ia || ib.scheme !== ia.scheme || !ib.context || ib.context !== ia.context || canonical(testerKey(ib.tester)) !== canonical(testerKey(ia.tester))) continue;
       const tol: string[] = [];
       const bad: string[] = [];
       for (const t of [...new Set([...Object.keys(ib.tools), ...Object.keys(ia.tools)])].sort()) {
@@ -647,7 +650,7 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
   else if (before.run_id && before.run_id === after.run_id) warnings.push(`both files come from the same run (${before.run_id}): no build changed`);
   if (before.started && after.started && after.started < before.started) warnings.push(`the after run started (${after.started}) before the before run (${before.started}): check that the files are not swapped (a swap reads every regression as a fix)`);
   const sc = (x: RunSummary) => (typeof x.server?.['commit'] === 'string' ? (x.server['commit'] as string) : null);
-  if (sc(before) && sc(before) === sc(after)) warnings.push(`both runs state the same server build (commit ${sc(before)}): a move between them is not a change of the build (a flaky check, or a changed test environment)`);
+  if (sc(before) && sc(before) === sc(after)) warnings.push(`both runs state the same build of the server (commit ${sc(before)}): a move between them is not a change of the build (a flaky check, or a changed test environment)`);
   for (const [s, n] of [[before, 'before'], [after, 'after']] as const) {
     if (s.status !== 'complete') warnings.push(`${n}: the run is ${s.status ?? 'of unknown status'}${s.stopped_reason ? ` (${s.stopped_reason})` : ''}`);
     if (s.signature.status !== 'valid') warnings.push(`${n}: signature ${s.signature.status}: ${s.signature.detail}${s.signature.accepted === 'allow-unsigned' ? ' (accepted with --allow-unsigned)' : ''}`);
@@ -699,7 +702,7 @@ export function renderCompareMarkdown(c: CompareDoc): string {
     const sv = s.server ?? {};
     const parts = [sv['repo'], sv['tag'], sv['commit'] ? `@ ${String(sv['commit'])}` : null, sv['image']].filter(Boolean).join(' ');
     const sig = `signature ${s.signature.status}${s.signature.key_id ? ` ${s.signature.key_id}` : ''}${s.signature.accepted === 'allow-unsigned' ? ', NOT PINNED: accepted with --allow-unsigned' : ''}`;
-    const judged = s.judged_by?.length ? `; records judged by tester ${s.judged_by.join(', ')}` : '';
+    const judged = `; tester ${s.suite?.version ?? '?'} @ ${s.tester_commit ?? 'unstamped'}${s.tester_dirty ? ' (dirty)' : ''}${s.rechecked_by ? `, rechecked by ${s.rechecked_by.version ?? '?'} @ ${s.rechecked_by.commit ?? 'unstamped'}` : ''}${s.judged_by?.length ? `; records judged by ${s.judged_by.join(', ')}` : ''}`;
     return `${parts || 'build not stated'} (run ${s.run_id ?? '?'}, ${s.status ?? '?'}; results.json sha256 ${s.sha256.slice(0, 16)}…; ${sig}${judged})`;
   };
   L.push(`# Before/after: ${c.before.suite?.name ?? 'mcp-writecheck'} ${c.before.suite?.version ?? '?'}, MWS ${c.spec.version}`);

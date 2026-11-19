@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { firstWriteOf, postEvaluate } from '../../src/checks/coverage.js';
 import { createsVerdicts } from '../../src/checks/creates.js';
 import { recheckCommand } from '../../src/cli/commands.js';
-import { compareCommand } from '../../src/cli/compare.js';
+import { compareCommand, finishRecheck } from '../../src/cli/compare.js';
 import { TEST_HASH_FORMAT } from '../../src/core/identity.js';
 import { parseManifestText, type Manifest } from '../../src/core/manifest.js';
 import { Redactor } from '../../src/core/redact.js';
@@ -307,7 +307,7 @@ test('S5 (p18): swapped files, one file twice, one server commit twice and newly
   const a = doc(stamped([rec('MWS-CONC-1', 'held'), rec('MWS-CONC-3', 'violated', { scenario: { id: 'barrier-pairs', version: '1' } })], m, tools), { run: { id: 'r2', status: 'complete', started: '2026-11-18T09:00:00Z' }, identity: { ...(doc([])['identity'] as object), server: { commit: 'c'.repeat(40) } } });
   const c = cmp(b, a);
   assert.ok(c.warnings.some((w) => /started .* before the before run/.test(w)));
-  assert.ok(c.warnings.some((w) => /same server build/.test(w)));
+  assert.ok(c.warnings.some((w) => /same build of the server/.test(w)));
   assert.equal(cellOf(c, 'MWS-CONC-3@update_ticket').newly_found, true);
   const same = cmp(b, b);
   assert.ok(same.warnings.some((w) => /same file|same run/.test(w)));
@@ -356,4 +356,39 @@ test('scheme: records hashed under mws-test-hash/1 and /2 are never joined, and 
   const s = stamped([rec('MWS-CONC-1', 'held')], m, tools)[0]!;
   assert.equal(s.test_inputs?.scheme, 'mws-test-hash/2');
   assert.equal(canonical(s.test_inputs), canonical(JSON.parse(JSON.stringify(testInputs(rec('MWS-CONC-1', 'held'), { manifest: m, tools, tester })))));
+});
+
+test('S7 (p09b), S1 (p13c): recheck hashes with the run\'s --pair-budget, and from recorded test inputs naming the rechecking build', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    const mf = join(dir, 'manifest.yaml');
+    writeFileSync(mf, ttManifest);
+    const budget = { repeats: 2, pairs: 1500 };
+    const withBudget = parseManifestText(ttManifest, mf, { pairBudget: budget });
+    const plain = parseManifestText(ttManifest, mf);
+    const tools = toolsFor(plain);
+    writeFileSync(join(dir, 'catalog.json'), JSON.stringify({ tools, prompts: [], resourceTemplates: [] }));
+    const pairs = rec('MWS-CONC-3', 'not observed', { scenario: { id: 'barrier-pairs', version: '1' } });
+    const kept = stamped([rec('MWS-RES-1', 'held', { scenario: { id: 'read-after-write', version: '1' } })], withBudget, tools)[0]!;
+    const original = doc([...stamped([pairs], withBudget, tools), kept], { scope: 's', target: { confirm: 'x', environment: 'test', server: 's', catalog_fingerprint: 'sha256:c', guard: null }, cells: [], not_built: [], measurements: null, leftovers: [], cleanup: null, observations: [], safety: { canaries: [], fixtures_restored: [], gate: null, protocol: null, rerun_of: null }, identity: { ...(doc([])['identity'] as object), spec: { version: '0.9' }, manifest_sha256: 'm1', plan_hash: 'p1', started: 's', finished: 'f', provenance: { sources: [], overridden: [] }, runner: { os: 'x', arch: 'x', node: 'x', ci: null }, server: { repo: null, commit: null, tag: null, image: null, recipe: null, launch: 'x', transport: null }, hash_inputs: { pair_budget: budget } } });
+    writeFileSync(join(dir, 'results.json'), JSON.stringify(original));
+    mkdirSync(join(dir, 'recheck'));
+    const fresh = JSON.parse(JSON.stringify(original)) as { results: Result[] };
+    for (const r of fresh.results) {
+      delete r.test_hash;
+      delete r.test_inputs;
+    }
+    // the first record has no recorded inputs to reuse: hashed from the copies, with the budget
+    (original['results'] as Result[])[0]!.test_inputs = undefined as never;
+    writeFileSync(join(dir, 'results.json'), JSON.stringify(original));
+    writeFileSync(join(dir, 'recheck', 'results.json'), JSON.stringify(fresh));
+    const out = await finishRecheck(dir, { key: null, log: () => {} });
+    const me = out.results[0]!.test_inputs!.tester;
+    assert.equal(out.results[0]!.test_hash, testHash(pairs, { manifest: withBudget, tools, tester: me }), 'hashed with the budget the run was given');
+    assert.notEqual(out.results[0]!.test_hash, testHash(pairs, { manifest: plain, tools, tester: me }));
+    assert.equal(out.results[1]!.test_inputs!.rest, kept.test_inputs!.rest, 'recorded inputs reused');
+    assert.equal(out.results[1]!.test_hash, testHash(kept, { manifest: withBudget, tools, tester: me }), 'the same hash a run by this build would stamp');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
