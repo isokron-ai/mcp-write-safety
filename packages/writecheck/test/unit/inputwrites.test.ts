@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { inputWritesCheck, inputWritesVerdicts, writeCallFor, writeCallGate, writeToolsOf, type WriteToolObs } from '../../src/checks/inputwrites.js';
-import type { ProbeObs } from '../../src/checks/schema.js';
+import { counterpartArgsAllowed, declaredAnswers, inputWritesCheck, inputWritesVerdicts, inventoryCovers, writeCallFor, writeCallGate, writeToolsOf, type WriteKind, type WriteToolObs } from '../../src/checks/inputwrites.js';
+import { INTERMEDIATE, type ProbeObs } from '../../src/checks/schema.js';
 import type { PlanContext, Tool } from '../../src/checks/types.js';
 import { parseManifestText } from '../../src/core/manifest.js';
 import { TT_MANIFEST } from '../tiny-tracker/harness.js';
@@ -48,7 +48,8 @@ test('plan: each tool is probed, or not tested with the reason; nothing is left 
   assert.equal(p.calls.length, 9);
   assert.ok(p.writes > 0 && p.creates > 0);
   // a selector tool without the operator's disposable-backend declaration is never sent
-  const noDisposable = parseManifestText(text.replace('send_empty_forms: true', 'send_empty_forms: false'), TT_MANIFEST);
+  // (without the disposable-backend declaration the manifest may not list counterpart_args on a delete or bulk tool, so those go too)
+  const noDisposable = parseManifestText(text.replace('send_empty_forms: true', 'send_empty_forms: false').replace(/^  (delete_ticket|delete_tickets|bulk_update_tickets): \{ counterpart_args: .*\n/gm, ''), TT_MANIFEST);
   const r = noDisposable.resources.find((x) => x.name === 'ticket')!;
   const why = writeCallGate({ manifest: noDisposable, tools }, r, writeCallFor(noDisposable, r, 'delete_tickets'), 'delete_tickets');
   assert.match(why ?? '', /disposable \(spec 7\.3, rule 1; selector\.send_empty_forms\)/);
@@ -118,4 +119,89 @@ test('the tenant guard and the canary tools are never probed, even where they ar
   const canary = parseManifestText(text.replace('- { name: projects, tool: list_projects', '- { name: projects, tool: set_labels'), TT_MANIFEST);
   const r2 = canary.resources.find((x) => x.name === 'ticket')!;
   assert.match(writeCallGate({ manifest: canary, tools }, r2, writeCallFor(canary, r2, 'set_labels'), 'set_labels') ?? '', /canary/);
+});
+
+// --- an input_required answer is intermediate, not final ---------------------------------------------------------------------
+
+test('input_required: the declared answers are used for a retry only where they answer every input request the answer makes', () => {
+  const r = res('ticket');
+  const ir = r.input_required.find((x) => x.tool === 'close_ticket')!;
+  assert.deepEqual(declaredAnswers(r, 'close_ticket', { confirm: { method: 'elicitation/create' } }), ir.answers);
+  assert.deepEqual(declaredAnswers(r, 'close_ticket', null), ir.answers, 'an answer that does not list its requests is retried with the declared answers');
+  assert.equal(declaredAnswers(r, 'close_ticket', { confirm: {}, reason: {} }), null, 'a request the declaration does not answer: no retry');
+  assert.equal(declaredAnswers(r, 'add_label', { confirm: {} }), null, 'no input_required entry for the tool: no retry');
+  const none = { ...r, input_required: r.input_required.map((x) => ({ ...x, answers: {} })) };
+  assert.equal(declaredAnswers(none, 'close_ticket', { confirm: {} }), null, 'empty answers: no retry');
+});
+
+test('plan: a confirmation tool whose input_required answer is retried with the declared answers counts the retries as writes', () => {
+  const p = inputWritesCheck.plan(ctx, res('ticket'));
+  assert.ok(p.calls.some((x) => x.startsWith('close_ticket (confirm') && /retried with the declared answers/.test(x)));
+  assert.ok(!p.calls.some((x) => x.startsWith('add_label') && /retried/.test(x)));
+});
+
+const ct = (o: Partial<WriteToolObs> = {}) => obs({ tool: 'close_ticket', kind: 'confirm', source: 'ticket.input_required (close_ticket)', ...o });
+const extra = (o: Partial<ProbeObs> = {}) => probe({ tool: 'close_ticket', requirement: 'MWS-IN-2', prop: 'mwsc_undefined_argument', name: 'undefined_argument', value: 'mwsc', type: undefined, refused_by: undefined, ...o });
+
+test('verdicts: an extra argument answered only with input_required leaves MWS-IN-2 and MWS-IN-7 not judged, never violated', () => {
+  // as the check records it: taken (ok), no notice in the intermediate answer, no final result
+  const interim = extra({ ok: true, isError: false, text: '', intermediate: true, control: INTERMEDIATE, step: 's-ir' });
+  const refusedType = probe({ tool: 'close_ticket', prop: 'id', text: 'id: expected string, got integer' });
+  const rs = inputWritesVerdicts([refusedType, interim], [ct()], res('ticket'), ctx);
+  const v = by(rs);
+  assert.equal(v['MWS-IN-2'], 'not tested');
+  assert.equal(v['MWS-IN-7'], 'not tested');
+  for (const id of ['MWS-IN-2', 'MWS-IN-7']) assert.ok(rs.find((x) => x.requirement === id)!.reason.startsWith(INTERMEDIATE), id);
+  // a refusal is final: MWS-IN-1, IN-4 and IN-6 judge the refused type probe as before
+  assert.equal(v['MWS-IN-1'], 'held');
+  assert.equal(v['MWS-IN-6'], 'held');
+  assert.equal(v['MWS-IN-4'], 'held');
+  // the same answer judged as final (the old reading) would have been an argument dropped silently
+  const asFinal = by(inputWritesVerdicts([refusedType, extra({ ok: true, isError: false, text: '', effect: [] })], [ct()], res('ticket'), ctx));
+  assert.equal(asFinal['MWS-IN-2'], 'violated');
+});
+
+test('verdicts: the final result after the retry is judged (a notice there that the argument was not used is not a silent drop)', () => {
+  const final = extra({ ok: true, isError: false, text: 'Closed. Ignored argument mwsc_undefined_argument.', effect: [] });
+  const rs = by(inputWritesVerdicts([final], [ct()], res('ticket'), ctx));
+  assert.notEqual(rs['MWS-IN-2'], 'violated');
+  assert.equal(rs['MWS-IN-7'], 'violated', 'accepted, not rejected: MWS-IN-7 (SHOULD) is violated');
+});
+
+test('verdicts: one extra argument with only an intermediate answer keeps MWS-IN-2 and MWS-IN-7 from held; a violation by another stands', () => {
+  const refused = extra({ prop: 'nmae', name: 'misspelled_argument', text: 'nmae: is not an argument of this tool' });
+  const interim = extra({ ok: true, isError: false, text: '', intermediate: true });
+  const rs = inputWritesVerdicts([refused, interim], [ct()], res('ticket'), ctx);
+  assert.deepEqual([by(rs)['MWS-IN-2'], by(rs)['MWS-IN-7']], ['not tested', 'not tested']);
+  assert.ok(rs.filter((x) => x.requirement === 'MWS-IN-2' || x.requirement === 'MWS-IN-7').every((x) => x.reason.startsWith(INTERMEDIATE)));
+  const silent = extra({ prop: 'nmae', name: 'misspelled_argument', ok: true, isError: false, text: 'Closed.', effect: [] });
+  const rs2 = inputWritesVerdicts([silent, interim], [ct()], res('ticket'), ctx);
+  assert.equal(by(rs2)['MWS-IN-2'], 'violated');
+  assert.ok(rs2.find((x) => x.requirement === 'MWS-IN-2')!.notes.some((n) => n.startsWith(INTERMEDIATE)));
+});
+
+// --- delete and bulk tools: every call after the base call is bracketed; counterpart_args only on a disposable backend -----
+
+test('the bystander inventory brackets every non-base call of a delete or bulk tool, whatever argument it changes', () => {
+  for (const k of ['delete', 'multi'] as WriteKind[]) {
+    assert.equal(inventoryCovers(k, false), true, `${k}: a probe, control or counterpart base call`);
+    assert.equal(inventoryCovers(k, true), false, `${k}: the declared base call`);
+  }
+  assert.equal(inventoryCovers('selector', true), true);
+  assert.equal(inventoryCovers('selector', false), true);
+  for (const k of ['create', 'append', 'object', 'confirm'] as WriteKind[]) assert.equal(inventoryCovers(k, false), false, k);
+});
+
+test('counterpart_args on a delete or bulk tool: refused at load unless the backend is declared disposable', () => {
+  assert.equal(counterpartArgsAllowed(man, 'delete'), true, 'the shipped manifest declares the backend disposable');
+  const off = text.replace('send_empty_forms: true', 'send_empty_forms: false');
+  assert.throws(() => parseManifestText(off, TT_MANIFEST), /inputs\.(delete_ticket|bulk_update_tickets)\.counterpart_args: .*disposable/);
+  assert.throws(() => parseManifestText(off.replace(/^  delete_ticket: \{ counterpart_args: .*\n/m, ''), TT_MANIFEST), /inputs\.bulk_update_tickets\.counterpart_args/);
+  const ok = parseManifestText(off.replace(/^  (delete_ticket|delete_tickets|bulk_update_tickets): \{ counterpart_args: .*\n/gm, ''), TT_MANIFEST);
+  assert.deepEqual(ok.inputs['add_label'], { counterpart_args: ['name'] }, 'a tool that writes one object keeps its counterpart_args');
+  assert.equal(counterpartArgsAllowed(ok, 'delete'), false);
+  assert.equal(counterpartArgsAllowed(ok, 'multi'), false);
+  assert.equal(counterpartArgsAllowed(ok, 'object'), true);
+  // an empty list declares nothing and is not refused
+  assert.doesNotThrow(() => parseManifestText(off.replace(/counterpart_args: \[(force|assignee|all)\]/g, 'counterpart_args: []'), TT_MANIFEST));
 });

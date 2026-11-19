@@ -10,7 +10,9 @@
  *   create      a fresh name or key for every call; an accepted probe's object is read back by the id its result gives
  *   append      a scratch parent object; the created element is found by the call's marker (`creates[].find`)
  *   object      a scratch object; after any call that may have written it, the next call gets a fresh scratch object
- *   confirm     as object; an input_required answer is the tool's answer to a call it accepted (nothing is retried here)
+ *   confirm     as object; an input_required answer is intermediate: where the declaration gives answers for every input
+ *               request it makes (input_required[].answers), the call is retried with them and the final result is judged;
+ *               otherwise the answer is read as the tool taking the call, and MWS-IN-2 and MWS-IN-7 are not judged on it
  *   delete      a scratch object, made again whenever a call removed it
  *   multi       items of the tester's own in a container the tester created (multiGate decides whether the tool may be sent)
  *   selector    only under the operator's disposable-backend declaration (selector.send_empty_forms), with selector.narrow, and
@@ -19,13 +21,15 @@
  * Arguments never probed: the scope argument (spec 7.3, rule 1: a probe that replaces, removes or misspells it is sent only where
  * the default scope is the tester's own container), and the version argument (as on the update tool). An identifier, an element
  * id or a selector (a property whose declared value names the fixture: {{id}}, {{ids}}, {{object…}}, {{batch}}, or an id-like
- * name) is probed only under the disposable-backend declaration; on a tool that deletes or acts on several objects each such
- * call is bracketed by the bystander inventory (spec 7.3, rule 1), and a loss keeps every record of the tool from `held`.
+ * name) is probed only under the disposable-backend declaration. On a tool that deletes or acts on several objects every call
+ * after the base call (each probe, each control, each base call with a counterpart's value) is bracketed by the bystander
+ * inventory, whatever argument it changes (spec 7.3, rule 1), and a loss keeps every record of the tool from `held`.
  *
  * The counterpart control of MWS-IN-4 (spec R15-4): on a create or an append it is sent (it writes no object that existed). On a
  * tool that writes an existing object it is sent only where it equals the base call, which the declaration allows by listing the
  * argument under `inputs.<tool>.counterpart_args`: the tester then makes its base call with the counterpart's value, so the
- * counterpart control is that base call. Otherwise the probe is not judged, and the record says why.
+ * counterpart control is that base call. Otherwise the probe is not judged, and the record says why. On a tool that deletes or
+ * acts on several objects `counterpart_args` is refused (at load, and here) unless the backend is declared disposable.
  */
 
 import { baseVars, Driver } from '../core/driver.js';
@@ -40,7 +44,7 @@ import { result, type Result } from '../report/verdicts.js';
 import { compare, inventory, type Loss } from './bystanders.js';
 import { declaredWriteTools } from './coverage.js';
 import { multiGate } from './multi.js';
-import { carries, counterpart, ID_LIKE, in4NoCounterpart, meaningOf, probeCases, refusedBy, sameAnswer, schemaVerdicts, sendableProbe, type ProbeCase, type ProbeObs } from './schema.js';
+import { carries, counterpart, ID_LIKE, in4NoCounterpart, INTERMEDIATE, meaningOf, probeCases, refusedBy, sameAnswer, schemaVerdicts, sendableProbe, type ProbeCase, type ProbeObs } from './schema.js';
 import { listScope, newScope, scratch } from './scratch.js';
 import { tgt1HeldFor, withLoss } from './targeting.js';
 import { toolByName, wp, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext, type Tool } from './types.js';
@@ -71,6 +75,27 @@ export const deletesOrBulk = (k: WriteKind): boolean => k === 'delete' || k === 
 
 /** Spec 7.3, rule 1 and Annex E: the operator's statement that every object the server's identity can change is disposable. */
 export const disposableDeclared = (m: Manifest): boolean => m.resources.some((r) => !!r.selector?.send_empty_forms);
+
+/**
+ * Whether a call of this kind is bracketed by the bystander inventory (spec 7.3, rule 1). On a selector tool every call is; on a
+ * tool that deletes or acts on several objects every call after the declared base call is, whatever argument the call changes
+ * (an argument that names no target, such as one that widens the call to every object or forces it, can reach bystanders too).
+ */
+export const inventoryCovers = (k: WriteKind, declaredBase: boolean): boolean => k === 'selector' || (deletesOrBulk(k) && !declaredBase);
+
+/** Whether `inputs.<tool>.counterpart_args` may be used on a tool of this kind: on a delete or bulk tool, only on a disposable backend. */
+export const counterpartArgsAllowed = (m: Manifest, k: WriteKind): boolean => !deletesOrBulk(k) || disposableDeclared(m);
+
+/**
+ * The declared answers to retry an input_required answer of `tool` with (resource.input_required[].answers), or null where the
+ * declaration gives none, or none for one of the input requests the answer makes.
+ */
+export function declaredAnswers(res: ResourceSpec, tool: string, inputRequests: unknown): Record<string, unknown> | null {
+  const ir = res.input_required.find((x) => x.tool === tool);
+  if (!ir || !isObj(ir.answers) || !Object.keys(ir.answers).length) return null;
+  const asked = isObj(inputRequests) ? Object.keys(inputRequests) : [];
+  return asked.every((k) => Object.hasOwn(ir.answers, k)) ? ir.answers : null;
+}
 
 /** The tools schema.ts probes already: each resource's read and update tools. */
 function probedBySchema(m: Manifest): Set<string> {
@@ -195,9 +220,11 @@ export const inputWritesCheck: CheckModule = {
       }
       const t = toolByName(ctx.tools, tool)!;
       const n = Math.min(probeCases(t.inputSchema, new Set()).length, ctx.manifest.limits.max_fuzz_cases);
-      calls.push(`${tool} (${c!.kind}, from ${c!.source}): the base call, then up to ${n} probe call(s), each with its controls`);
+      const retried = c!.kind === 'confirm' && !!declaredAnswers(res, tool, null);
+      calls.push(`${tool} (${c!.kind}, from ${c!.source}): the base call, then up to ${n} probe call(s), each with its controls${retried ? '; an input_required answer is retried with the declared answers' : ''}`);
       // the base call; per probe: a base call with the counterpart's value, the probe, the base again, the probe again, the counterpart; fixtures.
-      writes += 4 + n * 7;
+      // A confirmation tool's call may be retried once with the declared answers.
+      writes += (4 + n * 7) * (retried ? 2 : 1);
       creates += 2 + n * 3;
     }
     return { ...base, runs: calls.length > 0, calls, writes, creates, notRun: nr };
@@ -261,7 +288,9 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   const schema = t.inputSchema;
   const propsSchema = isObj(schema) && isObj(schema['properties']) ? (schema['properties'] as Obj) : {};
   const disposable = disposableDeclared(ctx.manifest);
-  const declaredCp = new Set(ctx.manifest.inputs?.[tool]?.counterpart_args ?? []);
+  // why: spec 7.3, rule 1: a base call with a counterpart's value on a tool that deletes or acts on several objects is another
+  // call of that tool, so it is sent only on a disposable backend (the manifest refuses the declaration otherwise; this is the guard).
+  const declaredCp = new Set(counterpartArgsAllowed(ctx.manifest, c.kind) ? (ctx.manifest.inputs?.[tool]?.counterpart_args ?? []) : []);
   const ign = [...res.read.ignore, ...res.server_managed, ...(res.version ? [res.version.read] : [])];
   const reader = (id: unknown): Driver => {
     const d = new Driver(ctx.session, ctx.manifest, res, ctx.prefix, ctx.env);
@@ -344,6 +373,8 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   // --- one call ---------------------------------------------------------------------------------------------------------
   const unknownOutcome = (r: CallResult) => r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete');
   let lastCreated: unknown = null;
+  /** The last send ended on an input_required answer (not retried, or asked again on the retry): intermediate, not final. */
+  let lastIntermediate = false;
   /** Whether the next send is covered by spec 7.3, rule 1 (bracketed by the bystander inventory). */
   let covered = false;
   const send = async (args: Obj, tag: string, o2: { base?: boolean } = {}): Promise<CallResult> => {
@@ -356,9 +387,22 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
       r = cr.call ?? ({ ok: false, isError: false, rpc_error: null, text: cr.reason, timed_out: false, transport_error: 'not sent', step } as unknown as CallResult);
       lastCreated = cr.id ?? (r.ok ? idFromResult(res, r) : null);
     } else r = await ctx.session.call(label, tool, args, { step, write: true, ...(c.meta ? { meta: c.meta } : {}) });
-    // why: a tool that asks for a confirmation before it writes answers a call it accepted with input_required; that answer is
-    // known (nothing is retried here, so nothing is written), and is the tool's acceptance of the arguments.
-    if (c.kind === 'confirm' && r.result_type === 'input_required') r = { ...r, ok: true, result_type: null };
+    // why: an input_required answer is intermediate, not final: what the tool says about the arguments (a notice that one was not
+    // used, say) may come only in the completed result. Where the declaration answers every input request, the call is retried
+    // with those answers and the final result is judged. Otherwise the answer is read as the tool taking the call (a refusal
+    // would have been final), and the probe is marked so MWS-IN-2 and MWS-IN-7 are not judged on it.
+    lastIntermediate = false;
+    if (c.kind === 'confirm' && r.result_type === 'input_required') {
+      const answers = declaredAnswers(res, tool, r.input_required?.inputRequests ?? null);
+      if (answers) {
+        const params: Record<string, unknown> = { inputResponses: answers, ...(r.input_required?.requestState ? { requestState: r.input_required.requestState } : {}) };
+        r = await ctx.session.call(label, tool, args, { step: ctx.session.stepId(`inw.${tool}.${tag}.answered`), write: true, ...(c.meta ? { meta: c.meta } : {}), params });
+      }
+      if (r.result_type === 'input_required') {
+        lastIntermediate = true;
+        r = { ...r, ok: true, result_type: null };
+      }
+    }
     if (inv0) {
       o.inventory_calls++;
       o.losses.push(await compare(ctx, res, label, inv0, await inventory(ctx, res, label, { readById: true }), { selector: c.kind === 'selector' }));
@@ -400,7 +444,7 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   const never = neverProbed(c, res);
   for (const [arg, why] of never) if (Object.hasOwn(propsSchema, arg)) o.unprobed.push({ arg, why });
   if (!disposable) for (const k of targets) if (!never.has(k) && Object.hasOwn(propsSchema, k)) o.unprobed.push({ arg: k, why: 'it names the objects the call acts on (an identifier or a selector), and such a probe is sent only under the operator\'s declaration that every object is disposable (spec 7.3, rule 1)' });
-  covered = c.kind === 'selector';
+  covered = inventoryCovers(c.kind, true);
   const st0 = await ensure();
   if (!st0.ok) return void (o.not_probed = st0.why);
   const r0 = await send({ ...st0.base }, 'base_call', { base: true });
@@ -433,9 +477,10 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
   for (const p of all.slice(0, max)) {
     const value = p.drop ? '(missing)' : short(p.value, 60);
     const blank = (why: string, extra: Partial<ProbeObs> = {}): ProbeObs => ({ tool, role: 'write', prop: p.prop, name: p.name, requirement: p.requirement, value, ok: false, isError: false, rpc_error: null, text: null, step: '', not_sent: why, ...extra });
-    // spec 7.3, rule 1: on a tool that deletes or acts on several objects, a probe that replaces, removes or misspells an identifier
-    // or a selector is covered by the rule on a disposable backend (bracketed); on a selector tool every call is.
-    covered = c.kind === 'selector' || (deletesOrBulk(c.kind) && targets.has(p.prop));
+    // spec 7.3, rule 1: on a tool that deletes or acts on several objects every call after the declared base call is bracketed
+    // (the probe, its controls, a base call with the counterpart's value), not only one that changes an identifier or a selector:
+    // an argument that names no target (one that widens the call to every object, or forces it) can reach bystanders too.
+    covered = inventoryCovers(c.kind, false);
     let st = await ensure();
     if (!st.ok) {
       out.push(blank(`not sent: ${st.why}`));
@@ -482,7 +527,9 @@ async function probeTool(ctx: RunContext, res: ResourceSpec, c: WriteCall, label
     // Quotes are cut where they are made (short, around, saidBy, the review evidence).
     const po: ProbeObs = { tool, role: 'write', prop: p.prop, name: p.name, requirement: p.requirement, value, ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text, step: r.step, ...(unknownOutcome(r) ? { indeterminate: true } : {}) };
     if (p.requirement === 'MWS-IN-1') Object.assign(po, { sent: p.value, type: p.type, required: !!p.required });
-    if (r.ok && !po.indeterminate) await accepted(p, po, st.before, st.marker);
+    // why: an extra argument's fate (used, refused, said not to be used) is known only from a final result.
+    if (lastIntermediate && p.requirement === 'MWS-IN-2') Object.assign(po, { intermediate: true, control: INTERMEDIATE });
+    if (r.ok && !po.indeterminate && !po.intermediate) await accepted(p, po, st.before, st.marker);
     if (!r.ok && !po.indeterminate) await controls(p, po, r, cp, trigger && !viaBase, baseNote, viaBase);
     out.push(po);
   }

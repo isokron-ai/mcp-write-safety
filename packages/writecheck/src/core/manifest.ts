@@ -1521,6 +1521,15 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   if (!/^[a-z][a-z0-9]{1,7}$/.test(prefix)) throw fail('prefix', 'two to eight lowercase letters or digits, starting with a letter (default mwsc)');
   if (!Array.isArray(o['resources']) || o['resources'].length === 0) throw fail('resources', 'at least one resource');
   const resources = (o['resources'] as unknown[]).map(resource);
+  // why: spec 7.3, rule 1: on a tool that deletes or acts on several objects, a base call with a counterpart's value is one more
+  // call of that tool that the run's checks do not otherwise make; it is allowed only where every object is declared disposable.
+  if (!resources.some((r) => !!r.selector?.send_empty_forms)) {
+    for (const [name, x] of Object.entries(inputs)) {
+      if (!x.counterpart_args.length || resources.some((r) => r.read.tool === name || r.update?.tool === name)) continue;
+      const r = resources.find((rr) => rr.create?.tool !== name && !rr.creates.some((cr) => cr.tool === name) && (rr.delete?.tool === name || rr.multi.some((mu) => mu.tool === name)));
+      if (r) throw fail(`inputs.${name}.counterpart_args`, `${name} deletes or acts on several objects (resource ${r.name}), so a base call with a counterpart's value is allowed only where the backend is declared disposable (selector.send_empty_forms: true; spec 7.3, rule 1)`);
+    }
+  }
   // why: spec R15-4, review of 3283a69 (5): restorable applies only to a tool that updates one object named by its identifier.
   for (const [i, r] of resources.entries()) {
     if (!r.restorable.length || !r.update) continue;
