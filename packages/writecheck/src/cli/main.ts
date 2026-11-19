@@ -25,8 +25,8 @@ import { join } from 'node:path';
 
 import { IN5_READING } from '../checks/in5search.js';
 import { catalogCommand, cleanupCommand, planCommand, recheckCommand, rerunCommand, reviewCommand } from './commands.js';
-import { loadSigningKey } from '../report/sign.js';
-import { compareCommand, finishRecheck, IDENTITY_FLAGS, IDENTITY_USAGE, identityOptions, verifyResultsCommand } from './compare.js';
+import { loadSigningKey, publicKeyFrom } from '../report/sign.js';
+import { compareCommand, finishRecheck, originalSignature, IDENTITY_FLAGS, IDENTITY_USAGE, identityOptions, verifyResultsCommand } from './compare.js';
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
 import { runCommand, type RunOutcome } from './run.js';
@@ -142,8 +142,9 @@ for (const c of ['run', 'rerun'] as const) {
   COMMANDS[c]!.flags.push(...IDENTITY_FLAGS);
   COMMANDS[c]!.usage += `\n${IDENTITY_USAGE}`;
 }
-COMMANDS['recheck']!.flags.push('--sign-key');
-COMMANDS['recheck']!.usage += '\n    The rechecked copy is unsigned (the original signature does not cover new verdicts), or signed with --sign-key FILE.';
+COMMANDS['recheck']!.flags.push('--sign-key', '--pubkey');
+(COMMANDS['recheck']!.bools ??= []).push('--allow-unsigned');
+COMMANDS['recheck']!.usage += '\n    The rechecked copy is unsigned (the original signature does not cover new verdicts), or signed with --sign-key FILE,\n    only where the original is signed by the key given with --pubkey KEY (--allow-unsigned: sign anyway; recorded).';
 
 const USAGE = `${HEAD}
 
@@ -310,8 +311,13 @@ export async function main(argv: string[]): Promise<number> {
       // read before recheck writes anything, so a bad key leaves no half-finished copy.
       const sk = one(a, '--sign-key');
       const key = loadSigningKey(sk, sk ? {} : process.env);
+      const pk = one(a, '--pubkey');
+      const pubkey = pk ? publicKeyFrom(pk) : null;
+      const allowUnsigned = a.flags.has('--allow-unsigned');
+      // why: review F5: refused before anything is written.
+      originalSignature(folder(), { key, pubkey, allowUnsigned });
       recheckCommand({ dir: folder(), ...(review ? { review } : {}), log });
-      await finishRecheck(folder(), { key, ...(review ? { review } : {}), log });
+      await finishRecheck(folder(), { key, pubkey, allowUnsigned, ...(review ? { review } : {}), log });
       return 0;
     }
     case 'review':

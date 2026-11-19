@@ -149,12 +149,26 @@ export function compareCommand(o: { before: string; after: string; out: string; 
  * depend on the redacted copies of the manifest and the catalog in the run folder. Otherwise (a file written before
  * mws-test-hash/2, or a `--review` file given) they are computed from those copies.
  */
-export async function finishRecheck(runDir: string, o: { key: KeyObject | null; review?: string; log: (s: string) => void }): Promise<ResultsDoc> {
+/**
+ * Whether recheck may sign its copy (review F5): only where the original's results signature verifies under a pinned key, or with
+ * --allow-unsigned (recorded). Otherwise a signature would make an unsigned or unpinned file look vouched for. Throws (exit 2).
+ */
+export function originalSignature(runDir: string, o: { key: KeyObject | null; pubkey?: KeyObject | null; allowUnsigned?: boolean }): NonNullable<NonNullable<ResultsDoc['identity']>['rechecked_by']>['original_signature'] {
+  const original = JSON.parse(readFileSync(join(runDir, 'results.json'), 'utf8')) as ResultsDoc;
+  const v = verifyResults(original, o.pubkey ?? null);
+  const pinned = !!o.pubkey && v.status === 'valid';
+  if (o.key && !pinned && !o.allowUnsigned)
+    throw new WritecheckError(`${runDir}: recheck --sign-key signs only a copy of a file signed by a pinned key; the original is ${v.status === 'valid-unpinned' ? 'signed by a key that is not pinned (give --pubkey KEY)' : v.status}. Give --pubkey KEY, or --allow-unsigned to sign it anyway (recorded in identity.rechecked_by)`, 2);
+  return { status: v.status, key_id: v.key_id, pinned, ...(o.key && !pinned && o.allowUnsigned ? { allow_unsigned: true } : {}) };
+}
+
+export async function finishRecheck(runDir: string, o: { key: KeyObject | null; pubkey?: KeyObject | null; allowUnsigned?: boolean; review?: string; log: (s: string) => void }): Promise<ResultsDoc> {
   const dir = join(runDir, 'recheck');
   const file = join(dir, 'results.json');
   const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
   const original = JSON.parse(readFileSync(join(runDir, 'results.json'), 'utf8')) as ResultsDoc;
   const key = o.key;
+  const origSig = originalSignature(runDir, o);
   const manifestFile = join(runDir, doc.manifest.path);
   // why: review S7: a run made with --pair-budget is hashed with the budget it ran under.
   const pb = original.identity?.hash_inputs?.pair_budget ?? null;
@@ -183,7 +197,7 @@ export async function finishRecheck(runDir: string, o: { key: KeyObject | null; 
   }
   stampTestHashes(computed, { manifest, tools, tester, extras: { ...extras, ...(original.identity?.hash_inputs?.in5_docs ? { in5_docs: original.identity.hash_inputs.in5_docs } : {}) }, review: reviewOf(manifest, o.review) ?? null });
   if (computed.length && fresh.length) o.log(`recheck: ${reused} re-evaluated record(s) hashed from their recorded test inputs, ${computed.length} from the run folder's manifest and catalog copies`);
-  if (doc.identity) doc.identity.rechecked_by = { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit, dirty: stamp.dirty, at: new Date().toISOString(), records_rehashed: fresh.length };
+  if (doc.identity) doc.identity.rechecked_by = { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit, dirty: stamp.dirty, at: new Date().toISOString(), records_rehashed: fresh.length, original_signature: origSig };
   doc.evidence.signature = null;
   if (key) doc.evidence.signature = signResults(doc, key, null);
   writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
