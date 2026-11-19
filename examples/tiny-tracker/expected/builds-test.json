@@ -1,0 +1,26 @@
+{
+  "release": "0.1.0",
+  "note": "Test list: builds that start on this version.",
+  "builds": [
+    {
+      "label": "evidence only",
+      "args": [
+        "--features",
+        "evidence"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "evidence, defect idempotency-key-dropped",
+      "args": [
+        "--features",
+        "evidence",
+        "--defect",
+        "idempotency-key-dropped"
+      ],
+      "contract": true,
+      "fixture": true
+    }
+  ]
+}
