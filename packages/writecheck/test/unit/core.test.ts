@@ -118,7 +118,10 @@ test('capture: redacted blobs, and the closing hash detects an edited file', () 
 
 test('manifest: the minimum loads; guessed markers, unknown keys and unsafe choices are refused', () => {
   const m = parseManifestText(MIN, 'm.yaml');
+  // why: review S2: the pair budget is opt-in; a manifest with no limits keeps the defaults (and its plan hash).
   assert.equal(m.limits.write_budget, 500);
+  assert.equal(m.limits.pair_repeats, undefined);
+  assert.equal(m.limits.pair_budget, undefined);
   assert.equal(m.limits.writes_per_second, 5);
   assert.equal(m.limits.pairs, 40, 'enough runs to reach 30 overlapped pairs');
   assert.equal(m.resources[0]!.update!.mode, 'field_patch');

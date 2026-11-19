@@ -19,6 +19,8 @@
 import { anyLoss, compare, inventory, withEarlier, type Inventory, type Loss } from '../checks/bystanders.js';
 import { withLaterLoss, withLoss, type LaterLoss } from '../checks/targeting.js';
 import { everyRequirement } from '../checks/coverage.js';
+import { cutShortOf } from '../report/validity.js';
+import { cellPass, inputRequiredTools } from '../checks/cells.js';
 import { randomBytes } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -59,6 +61,8 @@ import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 
 export interface RunOptions {
   manifest: string;
+  /** `--pair-budget`: as limits.pair_budget (it enters the plan hash, so plan must be given the same). */
+  pairBudget?: { repeats: number; pairs: number } | null;
   outRoot: string;
   stateDir: string;
   confirmTarget?: string;
@@ -122,7 +126,7 @@ export function reviewOf(m: Manifest, file: string | undefined): ReviewSpec | nu
 }
 
 export async function runCommand(o: RunOptions): Promise<RunOutcome> {
-  const manifest = loadManifest(o.manifest);
+  const manifest = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   usePatterns(manifest);
   useShapes(manifest);
   checkTarget(manifest, o.env);
@@ -155,6 +159,15 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   let ledger: Ledger | null = null;
   let cleanupDone: CleanupReport | null = null;
   let stopped: string | null = null;
+  /** Review R1: the index of the first record made after the run was cut short (write budget, rate limit, interrupt); only records from there on fail V-RUN. */
+  let cutAt: number | null = null;
+  /** The index of the first observation made after the cut (persisted as run.cut_at, so recheck knows which re-evaluated records are late). */
+  let cutObs: number | null = null;
+  const markCut = (record: number, observation: number) => {
+    if (cutAt !== null) return;
+    cutAt = record;
+    cutObs = observation;
+  };
   const results: Result[] = [];
   const firstWrite = new Map<string, string[]>();
   const observations: Observation[] = [];
@@ -232,6 +245,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     interrupted = true;
     o.log(`\n${sig}: stopping; cleaning up this run's objects before exit…`);
     stopped = `interrupted by ${sig}`;
+    markCut(results.length, observations.length);
     session.abort(stopped);
     setTimeout(() => {
       if (finished) return;
@@ -400,7 +414,11 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         const dead = await targetStopped(manifest, session, 'MAIN', { onCall: onGuardCall });
         if (dead && !stopped) stopped = dead;
       } catch (e) {
-        if ((e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) && !stopped) stopped = e.message;
+        // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+        if ((e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) && !stopped) {
+          stopped = e.message;
+          if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
+        }
       }
     };
     const runChecks = async (res: (typeof manifest.resources)[number], d: Driver) => {
@@ -448,9 +466,18 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           }
           results.push(...got.filter((r) => !c.notRun.some((n) => n.requirement === r.requirement && n.write_path.tool === r.write_path.tool)));
           const stop = (obs.data as { stopped?: string | null })?.stopped;
-          if (stop && /stopped:/.test(stop)) stopped = stop;
+          if (stop && /stopped:/.test(stop)) {
+            stopped = stop;
+            // why: review R1: the records of the check that was cut short (write budget, rate limit) come after the cut; a stop for
+            // another reason (a session.init that failed, PR #14) stops the run without voiding them.
+            if (cutShortOf(stop)) markCut(start, observations.length - 1);
+          }
         } catch (e) {
-          if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) stopped = e.message;
+          // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+          if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) {
+            stopped = e.message;
+            if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
+          }
           // the losses after a check that failed are compared at the next bracket (gapLoss), and named there
           results.push(...notRun(mod, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
         }
@@ -559,7 +586,11 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           throw new WritecheckError('the baseline values did not read back');
         }
       } catch (e) {
-        if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) stopped = e.message;
+        // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+        if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) {
+          stopped = e.message;
+          if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
+        }
         allNotRun(`setup failed: ${(e as Error).message}`);
         setupFailed.push(`${res.name}: ${short((e as Error).message, 120)}`);
         await alive();
@@ -607,7 +638,11 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         }
         results.push(...got);
       } catch (e) {
-        if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) stopped = e.message;
+        // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+        if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) {
+          stopped = e.message;
+          if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
+        }
         results.push(...notRun(g, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
       }
       blockEarlier(losses, `server: ${g.id}`, start);
@@ -672,8 +707,13 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     }
     await session.close();
     await gate?.stop().catch(() => undefined);
-    for (const [ev, h] of handlers) process.off(ev as NodeJS.Signals, h);
-    if (!o.noSignals) for (const st of [process.stdout, process.stderr]) st.off('error', onPipeError);
+    // why: CI flake of review S4 (run 44452412733): after a signal the run ends in an exit with 130. A SIGTERM that comes after this
+    // point, before the process exits, would meet no handler and kill it by the signal (no exit code), so the handlers stay
+    // installed on an interrupted run; a later signal then exits with 130 at once, as onSignal says.
+    if (!interrupted) {
+      for (const [ev, h] of handlers) process.off(ev as NodeJS.Signals, h);
+      if (!o.noSignals) for (const st of [process.stdout, process.stderr]) st.off('error', onPipeError);
+    }
   }
   if (refusal) {
     // A refusal (target, confirmation, guard, usage): no report is written; the ledger says whether anything exists.
@@ -703,16 +743,20 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   annotateInputs(results, mcp);
   // why: writesafe self-test T5 (spec 5.3): every requirement has a record, if only `not tested` with the reason.
   results.push(...everyRequirement(results, plan?.not_built ?? [], stopped ?? null));
+  // why: F1/F6 (docs/CELLS.md): every MUST cell gets a record, duplicates go, records are stamped with their cell and validity.
+  const celled = cellPass(manifest, tools, results, { stopped: stopped ?? null, late: (_r, i) => cutAt !== null && i >= cutAt, input_required_tools: inputRequiredTools(mcp) });
+  results.splice(0, results.length, ...celled.results);
   const doc: ResultsDoc = {
     format: RESULTS_FORMAT,
     scope: scopeSentence({ server: serverLabel(manifest), catalog: fingerprint || 'sha256:unknown', resources: manifest.resources.map((r) => ({ name: r.name, tool: r.update?.tool ?? r.create?.tool ?? r.read.tool, fields: r.fields?.map((f) => f.path) ?? [] })), notBuiltCount: plan?.not_built.length ?? 0 }),
     suite: { name: SUITE_NAME, version: SUITE_VERSION },
     spec: { version: SPEC_VERSION },
-    run: { id: runId, prefix, started: iso(started), ended: iso(Date.now()), status: stopped ? 'stopped' : 'complete', stopped_reason: stopped, writes: session.writes, processes_started: session.started.length },
+    run: { id: runId, prefix, started: iso(started), ended: iso(Date.now()), status: stopped ? 'stopped' : 'complete', stopped_reason: stopped, writes: session.writes, processes_started: session.started.length, ...(cutAt !== null && celled.late_from !== null ? { cut_at: { record: celled.late_from, observation: cutObs ?? observations.length } } : {}) },
     target: { confirm: manifest.target.confirm, environment: manifest.target.environment, server: serverLabel(manifest), catalog_fingerprint: fingerprint, guard: guardRecord(), mcp },
     manifest: { path: 'manifest' + (o.manifest.endsWith('.json') ? '.json' : '.yaml'), sha256: manifest.source.sha256 },
     plan: { hash },
     results,
+    cells: celled.cells,
     not_built: plan?.not_built ?? [],
     measurements,
     leftovers,

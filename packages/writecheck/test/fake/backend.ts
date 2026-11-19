@@ -32,6 +32,10 @@ export class TrackerBackend {
   requests = 0;
   /** review B2: how many times the tenant read was asked for. */
   whoamiCalls = 0;
+  /** Tests: while set, every DELETE waits for this promise before it is applied (a clean-up held mid-way). */
+  holdDeletes: Promise<void> | null = null;
+  /** DELETE requests that have reached the backend (held or not). */
+  deletesSeen = 0;
 
   constructor(readonly o: { lostUpdate?: boolean; tenant?: string } = {}) {}
 
@@ -129,6 +133,8 @@ export class TrackerBackend {
         return this.send(res, 200, next, { etag: `"${next.version}"` });
       }
       case 'DELETE':
+        this.deletesSeen++;
+        if (this.holdDeletes) await this.holdDeletes;
         this.tickets.delete(t.id);
         res.writeHead(204).end();
         return;
