@@ -28,7 +28,7 @@ test('postgres gate: forwards faithfully, rewrites only host and port, logs each
   const { db, g, port, done } = await setup();
   try {
     assert.match(g.serverEnv()['DATABASE_URL']!, /^postgres:\/\/mws:secret@127\.0\.0\.1:\d+\/mwsc$/);
-    assert.match(g.describe(), /DATABASE_URL .*loopback wire gate 127\.0\.0\.1:\d+.*forwards every connection to 127\.0\.0\.1:\d+ and reads the Postgres v3 protocol/);
+    assert.match(g.describe(), /DATABASE_URL .*loopback wire gate at 127\.0\.0\.1:\d+.*forwards every connection to 127\.0\.0\.1:\d+ and reads the Postgres v3 protocol/);
     const c = await PgClient.connect(port, { ssl: true });
     assert.equal(c.sslAnswer, 'N', 'the gate answers the SSLRequest itself');
     const m0 = g.mark();

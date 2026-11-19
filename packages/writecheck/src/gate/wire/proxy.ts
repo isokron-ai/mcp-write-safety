@@ -125,7 +125,7 @@ export class WireGate implements Gate {
 
   describe(): string {
     const name = { postgres: 'the Postgres v3 protocol', redis: 'RESP', mongodb: 'OP_MSG' }[this.protocol];
-    return `${this.envName} is set, for the server, to the loopback wire gate 127.0.0.1:${this.port || '(not started)'} (the same URL with only the host and port replaced${this.protocol === 'mongodb' ? ', and directConnection=true' : ''}), which forwards every connection to ${this.upstreamHost}:${this.upstreamPort} and reads ${name} to name, hold and fail requests; the tester's own value of ${this.envName} is the upstream`;
+    return `${this.envName} is set, for the server, to the loopback wire gate at 127.0.0.1:${this.port || '(not started)'} (the same URL with only the host and port replaced${this.protocol === 'mongodb' ? ', and directConnection=true' : ''}), which forwards every connection to ${this.upstreamHost}:${this.upstreamPort} and reads ${name} to name, hold and fail requests; the tester's own value of ${this.envName} is the upstream`;
   }
 
   serverEnv(): Record<string, string> {
