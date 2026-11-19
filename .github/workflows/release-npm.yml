@@ -31,6 +31,8 @@ jobs:
     outputs:
       dir: ${{ steps.pkg.outputs.dir }}
       name: ${{ steps.pkg.outputs.name }}
+    env:
+      TT_GATE: "1"   # as in ci.yml: a missing python3 or jsonschema fails tiny-tracker's tests instead of skipping them
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,6 +57,11 @@ jobs:
           if npm view "$name@$version" version >/dev/null 2>&1; then echo "::error::$name@$version is already on npm"; exit 1; fi
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: python3 with jsonschema (the schema and digest checks)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/py"
+          "$RUNNER_TEMP/py/bin/pip" install --disable-pip-version-check --quiet jsonschema==4.26.0 referencing==0.37.0
+          echo "$RUNNER_TEMP/py/bin" >> "$GITHUB_PATH"
       - name: Build tiny-tracker (the CLI's self-test runs against it)
         working-directory: examples/tiny-tracker
         run: npm ci --ignore-scripts --no-audit --no-fund && npm run build

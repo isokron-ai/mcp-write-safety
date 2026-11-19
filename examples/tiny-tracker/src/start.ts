@@ -2,7 +2,7 @@
 
 import { createBuild } from "./mcp/build.js";
 import { ConfigError, loadConfig, type ServerConfig } from "./mcp/config.js";
-import { startMcpServer, type RunningMcpServer } from "./mcp/server.js";
+import { startMcpServer, type RunningMcpServer, type ServerExtras } from "./mcp/server.js";
 import type { Build } from "./mcp/types.js";
 import { applyVariants } from "./variants/index.js";
 
@@ -19,6 +19,15 @@ export interface StartServerOptions {
   /** Defect names, requirement IDs or "all". Empty for the correct build. */
   defects?: string[];
   port?: number;
+  /** Active features; "all" and a requirement ID take only the defects valid for them. */
+  features?: readonly string[];
+  /** What the fixture layer adds (attribution, the build descriptor mirror). */
+  extras?: ServerExtras;
+  /**
+   * The backend's key retention in ms (feature retention; --key-retention), stated in the tools. Default: 7 days.
+   * null: not known (a `tiny-tracker server` whose backend states none); the tools say so instead of a number.
+   */
+  retentionMs?: number | null;
 }
 
 export interface StartedServer extends RunningMcpServer {
@@ -44,7 +53,7 @@ function isLoopbackUrl(raw: string): boolean {
 export async function startServer(options: StartServerOptions): Promise<StartedServer> {
   let build: Build;
   try {
-    build = createBuild(options.defects ?? []);
+    build = createBuild(options.defects ?? [], options.features ?? [], options.retentionMs);
   } catch (e) {
     throw new ConfigError((e as Error).message);
   }
@@ -53,6 +62,6 @@ export async function startServer(options: StartServerOptions): Promise<StartedS
   if (build.defects.length > 0 && !isLoopbackUrl(config.backendUrl)) {
     throw new ConfigError("A build with defects only talks to a backend on 127.0.0.1 or localhost. Not starting.");
   }
-  const running = await startMcpServer(build, config, options.port ?? 0);
+  const running = await startMcpServer(build, config, options.port ?? 0, options.extras ?? {});
   return { ...running, build, config, variants };
 }

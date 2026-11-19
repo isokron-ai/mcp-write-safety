@@ -15,7 +15,7 @@ import { verifyCapture } from '../../src/core/capture.js';
 import { openRuns } from '../../src/core/ledger.js';
 import { verifyChecksums } from '../../src/report/evidence.js';
 import { requirement } from '../../src/requirements.js';
-import { RESULTS_KEYS } from '../../src/report/results.js';
+import { RESULTS_KEYS_WRITTEN } from '../../src/report/results.js';
 import { writePathKey, type Result } from '../../src/report/verdicts.js';
 import { fakeManifest, runFake, startFake } from '../fake/harness.js';
 
@@ -55,7 +55,7 @@ test('correct build, 40 pairs: no violation, the forced cases held, pairs only "
     assert.ok(verifyChecksums(r.outDir).ok);
     assert.ok(verifyCapture(join(r.outDir, 'capture')).ok);
     const json = JSON.parse(readFileSync(join(r.outDir, 'results.json'), 'utf8')) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(json), [...RESULTS_KEYS]);
+    assert.deepEqual(Object.keys(json), [...RESULTS_KEYS_WRITTEN]);
     assert.equal(readFileSync(join(r.outDir, 'report.md'), 'utf8').split('\n')[0]!.startsWith('Scope:'), true);
     assert.ok(r.doc.measurements && r.doc.measurements['A-2'].tools === 7 && r.doc.measurements['A-4'].order_stable_across_two_lists === true);
     // History: every invoke has an outcome.

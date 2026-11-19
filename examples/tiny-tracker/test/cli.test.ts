@@ -39,12 +39,12 @@ function run(args: string[], env: Record<string, string> = {}, whileUp?: (out: a
 }
 
 describe("tiny-tracker command line", () => {
-  it("all: starts backend and server on loopback, serves 16 tools, stops on SIGTERM", async () => {
+  it("all: starts backend and server on loopback, serves 18 tools (the 16 of 0.1.0 and, from 0.2.0, the two lookup tools), stops on SIGTERM", async () => {
     const r = await run(["all"], {}, async (out) => {
       assert.match(out.mcp, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
       assert.match(out.backend, /^http:\/\/127\.0\.0\.1:\d+$/);
       const mcp = await connectClient(out.mcp, "2026-07-28");
-      assert.equal((await mcp.tools()).length, 16);
+      assert.equal((await mcp.tools()).length, 18);
       await mcp.close();
     });
     assert.equal(r.code, 0);
@@ -81,13 +81,60 @@ describe("tiny-tracker command line", () => {
   it("a variant is named in the output; an unknown one stops the server", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tt-variant-"));
     try {
-      await run(["all"], { TRACKER_VARIANTS: "key-store-honest", TRACKER_KEY_JOURNAL: join(dir, "keys") }, async (out) => {
+      const honest = await run(["all"], { TRACKER_VARIANTS: "key-store-honest", TRACKER_KEY_JOURNAL: join(dir, "keys") }, async (out) => {
         assert.deepEqual(out.variants, ["key-store-honest"]);
         assert.deepEqual(out.defects, []);
+        // Owner decision (CMP-5 option b): the default's lookup is off for this build, and the state line says so.
+        assert.deepEqual(out.features_off, ["lookup off: key-store-honest keeps keys in the MCP server"]);
       });
+      assert.equal(honest.code, 0, honest.stderr);
+      assert.match(honest.stderr, /lookup off: key-store-honest keeps keys in the MCP server/);
       const bad = await run(["all"], { TRACKER_VARIANTS: "nope" });
       assert.equal(bad.code, 2);
       assert.match(bad.stderr, /unknown variant/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("key-store-honest with the default profile (CMP-5 option b): lookup off and visible; a named lookup exits 2; profile 0.1 unchanged", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-variant-"));
+    const ev = "evidence-token-cli-cmp5-000000000";
+    const base = { TRACKER_BACKEND_TOKEN: "backend-token-cli-cmp5-0000000000", TRACKER_EVIDENCE_TOKEN: ev, TRACKER_VARIANTS: "key-store-honest" };
+    const builds: any[] = [];
+    try {
+      const r = await run(["all", "--features", "evidence"], { ...base, TRACKER_KEY_JOURNAL: join(dir, "k1") }, async (out) => {
+        assert.deepEqual(out.features, ["execution-records", "principals", "inflight", "retention", "evidence"], "the state line lists the effective features");
+        assert.deepEqual(out.features_off, ["lookup off: key-store-honest keeps keys in the MCP server"]);
+        const build = await (await fetch(`${out.backend}/build`, { headers: { authorization: `Bearer ${ev}` } })).json() as any;
+        assert.ok(!build.features.includes("lookup"), "the descriptor lists the features the build runs");
+        builds.push(build);
+        const mcp = await connectClient(out.mcp, "2026-07-28");
+        try {
+          const tools = (await mcp.client.listTools()).tools.map((t) => t.name);
+          assert.ok(!tools.includes("get_operation") && !tools.includes("get_execution"));
+        } finally {
+          await mcp.close();
+        }
+      });
+      assert.equal(r.code, 0, r.stderr);
+      // build_hash follows the effective features: the same build named explicitly without lookup has the same hash.
+      const same = await run(["all", "--features", "evidence"], { ...base, TRACKER_KEY_JOURNAL: join(dir, "k2") }, async (out) => {
+        builds.push(await (await fetch(`${out.backend}/build`, { headers: { authorization: `Bearer ${ev}` } })).json());
+      });
+      assert.equal(same.code, 0);
+      assert.equal(builds[0].build_hash, builds[1].build_hash);
+      const named = await run(["all", "--features", "evidence,lookup"], { ...base, TRACKER_KEY_JOURNAL: join(dir, "k3") });
+      assert.equal(named.code, 2);
+      assert.match(named.stderr, /key-store-honest variant keeps keys in the MCP server/);
+      const named2 = await run(["all"], { ...base, TRACKER_FEATURES: "lookup", TRACKER_KEY_JOURNAL: join(dir, "k4") });
+      assert.equal(named2.code, 2, "TRACKER_FEATURES names it too");
+      const old = await run(["all", "--profile", "0.1"], { ...base, TRACKER_KEY_JOURNAL: join(dir, "k5") }, async (out) => {
+        assert.equal(out.features_off, undefined, "profile 0.1 turns nothing on, so nothing is turned off");
+        assert.equal(out.features, undefined);
+      });
+      assert.equal(old.code, 0, old.stderr);
+      assert.doesNotMatch(old.stderr, /lookup off/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -105,7 +152,8 @@ it("package name: @mcp-write-safety/tiny-tracker, command tiny-tracker, publishe
   const { readFileSync } = await import("node:fs");
   const pj = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { name: string; bin: Record<string, string>; private?: boolean; publishConfig?: { access?: string }; files?: string[] };
   assert.equal(pj.name, "@mcp-write-safety/tiny-tracker");
-  assert.deepEqual(Object.keys(pj.bin), ["tiny-tracker"]);
+  // 0.2.0 adds fx-check, the FX- property checker (stream C).
+  assert.deepEqual(pj.bin, { "tiny-tracker": "dist/src/cli.js", "fx-check": "dist/src/fx-check.js" });
   assert.equal(pj.private, undefined);
   assert.equal(pj.publishConfig?.access, "public");
   assert.ok(pj.files?.includes("dist/src") && pj.files.includes("writecheck.yaml"));

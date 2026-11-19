@@ -1,0 +1,160 @@
+{
+  "vectors": "digest-vectors/1",
+  "rule": "digest = lower-case hex SHA-256 over UTF-8(domain) || 0x0A || UTF-8(canonical); canonical = RFC 8785 (JCS) of the value input_json parses to",
+  "cases": [
+    {
+      "name": "empty object",
+      "input_json": "{}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{}",
+      "digest": "5c64de910db756682c725b9eaadefd76a3623d7e746e51238d1e01ca98170f6b",
+      "note": "The smallest object."
+    },
+    {
+      "name": "execution result",
+      "input_json": "{\"ticket\":{\"id\":\"T-1\",\"project\":\"inbox\",\"title\":\"First\",\"status\":\"open\",\"assignee\":null,\"priority\":2,\"description\":\"\",\"details\":{\"component\":null,\"severity\":null},\"labels\":[{\"id\":\"L-1\",\"name\":\"a\"}],\"comments\":[],\"version\":1,\"created_at\":\"2026-11-16T20:00:00.000Z\",\"updated_at\":\"2026-11-16T20:00:00.000Z\"},\"changed\":[\"created\"]}",
+      "domain": "dev.writesafety.tiny-tracker/execution-result/1",
+      "canonical": "{\"changed\":[\"created\"],\"ticket\":{\"assignee\":null,\"comments\":[],\"created_at\":\"2026-11-16T20:00:00.000Z\",\"description\":\"\",\"details\":{\"component\":null,\"severity\":null},\"id\":\"T-1\",\"labels\":[{\"id\":\"L-1\",\"name\":\"a\"}],\"priority\":2,\"project\":\"inbox\",\"status\":\"open\",\"title\":\"First\",\"updated_at\":\"2026-11-16T20:00:00.000Z\",\"version\":1}}",
+      "digest": "072012dfd3ce49bbd9ac8c8371df4dae6a25e2af5faed5a6796cd4bba09a77f9",
+      "note": "A committed create_ticket result, under the execution-result domain."
+    },
+    {
+      "name": "RFC 8785 member order",
+      "input_json": "{\"\\u20ac\":\"Euro Sign\",\"\\r\":\"Carriage Return\",\"\\ufb33\":\"Hebrew Letter Dalet With Dagesh\",\"1\":\"One\",\"\\ud83d\\ude00\":\"Emoji: Grinning Face\",\"\\u0080\":\"Control\",\"\\u00f6\":\"Latin Small Letter O With Diaeresis\"}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"דּ\":\"Hebrew Letter Dalet With Dagesh\"}",
+      "digest": "e1af760fdac8040423e8e8412be09e8d482f240cfb6997bef3fdd3efe2f9f201",
+      "note": "The member-sorting example of RFC 8785 section 3.2.3: names sort by UTF-16 code units."
+    },
+    {
+      "name": "astral key before high BMP key",
+      "input_json": "{\"\\ufb33\":1,\"\\ud83d\\ude00\":2,\"z\":3}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"z\":3,\"😀\":2,\"דּ\":1}",
+      "digest": "b0c6828bd51da694e1003af7dfb89bfee414e1d49cc2767018937aece1dbe9a8",
+      "note": "U+1F600 (UTF-16 D83D DE00) sorts before U+FB33. Sorting by code point puts it after: a naive canonicalizer differs here."
+    },
+    {
+      "name": "astral keys among themselves",
+      "input_json": "{\"\\ud83d\\ude01\":1,\"\\ud800\\udc00\":2,\"\\uffff\":3,\"\\ud83d\\ude00\":4}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"𐀀\":2,\"😀\":4,\"😁\":1,\"￿\":3}",
+      "digest": "d7558b0d1bf63b15fb5b7898112c484e3a9beb26fe6e3621728a518dc5b1cd9a",
+      "note": "Surrogate pairs compare by their code units."
+    },
+    {
+      "name": "floats",
+      "input_json": "[1.0,-0.0,0.0,1e-7,1e-07,0.000001,1e21,1e20,123.456,5e-324,1.7976931348623157e308,9007199254740993,0.1,100,1.5e300,2e-7,-1.5,1E2,4.35,0.30000000000000004]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "[1,0,0,1e-7,1e-7,0.000001,1e+21,100000000000000000000,123.456,5e-324,1.7976931348623157e+308,9007199254740992,0.1,100,1.5e+300,2e-7,-1.5,100,4.35,0.30000000000000004]",
+      "digest": "e921b739965f80ee86d22d99692570191e518957a672bf2da65753630823d6a8",
+      "note": "ECMAScript number serialization: 1.0 is 1, -0.0 is 0, 1e-7 stays exponential, 0.000001 does not, 1e21 is 1e+21, 2^53+1 rounds to 2^53."
+    },
+    {
+      "name": "float members",
+      "input_json": "{\"a\":1.0,\"b\":-0.0,\"c\":1e-07,\"d\":10000000000000000000000}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"a\":1,\"b\":0,\"c\":1e-7,\"d\":1e+22}",
+      "digest": "1f7afb369053a7ec25221b3c4666ae4a63fd67d6dc70de1ae421e55ff0ac0eb6",
+      "note": "Floats as member values."
+    },
+    {
+      "name": "integers",
+      "input_json": "[0,-1,9007199254740991,-9007199254740991,123456789012]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "[0,-1,9007199254740991,-9007199254740991,123456789012]",
+      "digest": "98530dd4bccc1209fa02a5e3e877c7851966247b4639fd779f69eb2b4e97edbb",
+      "note": "Integers in the safe range are written as integers."
+    },
+    {
+      "name": "string escapes",
+      "input_json": "{\"s\":\"quote \\\" backslash \\\\ slash / tab \\t newline \\n cr \\r bs \\b ff \\f nul \\u0000 us \\u001f del  ls   ps   e-acute é emoji 😀\"}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"s\":\"quote \\\" backslash \\\\ slash / tab \\t newline \\n cr \\r bs \\b ff \\f nul \\u0000 us \\u001f del  ls   ps   e-acute é emoji 😀\"}",
+      "digest": "14ff0abcb0b77b7d541f30124dcc2ed8f486e97a9a4a032eda00a7a0d63a617f",
+      "note": "Short escapes for \\b \\t \\n \\f \\r, \\u00xx for other controls; DEL, U+2028 and U+2029 and non-ASCII are written as they are."
+    },
+    {
+      "name": "no Unicode normalization",
+      "input_json": "{\"e\\u0301\":1,\"\\u00e9\":2}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"é\":1,\"é\":2}",
+      "digest": "8ef8617f5fa6c9455bea6f44127d4612c7560fbb0108758398bde9b49166e012",
+      "note": "e + combining acute and precomposed e-acute are different names, kept apart."
+    },
+    {
+      "name": "nested order",
+      "input_json": "{\"b\":{\"z\":[{\"y\":1,\"x\":2}],\"a\":true},\"a\":[null,false,{\"d\":\"\",\"c\":[]}]}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"a\":[null,false,{\"c\":[],\"d\":\"\"}],\"b\":{\"a\":true,\"z\":[{\"x\":2,\"y\":1}]}}",
+      "digest": "590c6425bcfee75c7160806e77ee90db4c506d606b31be083d184bba177baf9a",
+      "note": "Members are sorted at every depth; arrays keep their order."
+    },
+    {
+      "name": "literals",
+      "input_json": "[true,false,null]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "[true,false,null]",
+      "digest": "169fc1796e081f1a5bb26b3a0c03c0e898adc2bdfdb01cdd24fd3f3adbae55bb",
+      "note": "Literals."
+    },
+    {
+      "name": "whitespace in input",
+      "input_json": " { \"b\" : [ 1 , 2 ] ,\n \"a\" : \"x\" } ",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "canonical": "{\"a\":\"x\",\"b\":[1,2]}",
+      "digest": "cec62afa963106f328e692faa316dd8b69f5d888f30d44aee0b5ec786bd6df2e",
+      "note": "Whitespace in the input is not part of the canonical bytes."
+    },
+    {
+      "name": "request fingerprint",
+      "input_json": "{\"body\":{\"project\":\"inbox\",\"title\":\"First\",\"priority\":2},\"method\":\"POST\",\"path\":\"/tickets\",\"principal\":\"p-default\"}",
+      "domain": "dev.writesafety.tiny-tracker/request-fingerprint/1",
+      "canonical": "{\"body\":{\"priority\":2,\"project\":\"inbox\",\"title\":\"First\"},\"method\":\"POST\",\"path\":\"/tickets\",\"principal\":\"p-default\"}",
+      "digest": "8ce2634fdf294777e7f088577d8cff8050ad46286b6422d329f1952ee8a867b3",
+      "note": "fingerprint_hash: the request-fingerprint/1 domain over {body, method, path, principal}."
+    },
+    {
+      "name": "lone high surrogate in a value",
+      "input_json": "{\"title\":\"\\ud800\"}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "A lone surrogate cannot be encoded as UTF-8. Refused, never hashed."
+    },
+    {
+      "name": "lone low surrogate in a member name",
+      "input_json": "{\"\\udc00\":1}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "Also refused in a member name."
+    },
+    {
+      "name": "reversed surrogate pair",
+      "input_json": "[\"\\ude00\\ud83d\"]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "Low then high is two lone surrogates."
+    },
+    {
+      "name": "number out of range",
+      "input_json": "[1e400]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "Parses to an infinity, which JSON cannot carry. Refused."
+    },
+    {
+      "name": "duplicate member name",
+      "input_json": "{\"a\":1,\"b\":2,\"a\":3}",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "A name twice in one object is refused, not resolved to the last value."
+    },
+    {
+      "name": "integer out of the double range",
+      "input_json": "[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+      "domain": "dev.writesafety.tiny-tracker/test-vector/1",
+      "expect": "reject",
+      "note": "An integer literal above the largest double is refused, as an infinity is."
+    }
+  ]
+}

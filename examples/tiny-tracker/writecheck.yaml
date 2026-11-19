@@ -1,8 +1,9 @@
 # mcp-writecheck manifest for tiny-tracker, the MWS sample server.
 #
 # It covers every tool tiny-tracker offers: tickets (create, get, list, update, replace, delete,
-# delete by filter, bulk update), comments, labels (add, remove, replace) and projects (create,
-# list, delete). The tester starts the MCP server itself (`server`, below) and points it at a
+# delete by filter, bulk update), comments, labels (add, remove, replace), projects (create,
+# list, delete) and, from 0.2.0, the read-only lookup get_operation (get_execution needs an
+# execution id, which no manifest template gives, so it is checked from the catalog only). The tester starts the MCP server itself (`server`, below) and points it at a
 # loopback gate in front of the backend, so concurrency and failures can be forced.
 #
 # Before a run, start the backend and set two variables (the demo does all of this for you):
@@ -89,6 +90,8 @@ calls:
   add_label: { resource: ticket, args: { id: "{{id}}", name: added } }
   remove_label: { resource: ticket, args: { id: "{{id}}", label_id: "{{object.labels[0].id}}" } }
   set_labels: { resource: ticket, args: { id: "{{id}}", labels: [z], expected_version: "{{object.version}}" } }
+  # tiny-tracker 0.2.0 (feature lookup): the read-only lookup tool, called with a key of this run that no write used.
+  get_operation: { resource: ticket, args: { idempotency_key: "{{marker}}" } }
 
 # MWS-IN probes on every write tool (spec MWS-IN-4, R15-4): the arguments to which the tester may give, in a base call on its own
 # objects, the value a refused probe means (its counterpart), so that the counterpart control is that base call. Each acts on the

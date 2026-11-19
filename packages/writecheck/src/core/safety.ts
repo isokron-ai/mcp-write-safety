@@ -354,6 +354,9 @@ async function stateSnapshot(m: Manifest, s: Session, label: string, step: strin
   return out;
 }
 
+/** An answer that says the server has no connection yet (the hint toward session.init). */
+const NOT_CONNECTED = /\bnot connected\b|\bno (?:active |open )?connection\b|\bconnect first\b|\bcall (?:the )?connect\b|\bnot (?:yet )?(?:logged in|authenticated|initiali[sz]ed)\b|\bconnection (?:is )?(?:not|required)\b/i;
+
 export async function tenantGuard(m: Manifest, s: Session, label: string, o: GuardHooks = {}): Promise<{ matched: string; step: string; basis?: 'operator'; calls: GuardCall[]; state?: string }> {
   const g = m.target.guard;
   if (!g) throw new WritecheckError('target.guard is required: a read-only tool call whose result must match a pattern (for example the tenant or workspace name) before any write', 2);
@@ -373,7 +376,12 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
     o.onCall?.(c);
     calls.push(c);
     const r = await s.call(label, g.tool, render(g.args, {}), { step: st, write: false });
-    if (!r.ok) throw new WritecheckError(`target.guard: ${g.tool} failed (${short(r.text ?? r.rpc_error?.message ?? r.transport_error ?? 'error', 160)}); ${sentText(g, calls)}`, 3);
+    if (!r.ok) {
+      const said = r.text ?? r.rpc_error?.message ?? r.transport_error ?? 'error';
+      // why: review of PR #14 (minor): a server that answers "not connected" before a connect call needs session.init.
+      const hint = !m.session?.init.length && NOT_CONNECTED.test(said) ? ' (the server says it is not connected: if it connects only after a tool call that carries connection settings, declare that call under session.init; MANIFEST.md, session)' : '';
+      throw new WritecheckError(`target.guard: ${g.tool} failed (${short(said, 160)})${hint}; ${sentText(g, calls)}`, 3);
+    }
     const v = g.path ? getPath(r.data, g.path) : r.text;
     const text = typeof v === 'string' ? v : JSON.stringify(v ?? null);
     if (!new RegExp(g.pattern).test(text)) throw new WritecheckError(`target.guard: ${g.tool}${g.path ? ` at ${g.path}` : ''} returned ${short(text, 80)}, which does not match ${g.pattern}; ${sentText(g, calls)}`, 3);
@@ -429,7 +437,7 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
         await s.listTools(label);
         return null;
       } catch (e) {
-        if (['RateLimited', 'BudgetExhausted', 'Interrupted'].includes((e as Error).constructor?.name ?? '')) throw e;
+        if (['RateLimited', 'BudgetExhausted', 'Interrupted', 'SessionInitFailed'].includes((e as Error).constructor?.name ?? '')) throw e;
         why = `tools/list did not answer (${short((e as Error).message, 160)})`;
       }
       continue;
@@ -447,7 +455,7 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
       } else why = `${g.tool} failed (${short(r.text ?? r.rpc_error?.message ?? r.transport_error ?? (r.timed_out ? 'timed out' : 'error'), 160)})`;
     } catch (e) {
       // why: review: a rate limit, the budget or an interruption is its own stop; the caller handles it, and no second request goes out.
-      if (['RateLimited', 'BudgetExhausted', 'Interrupted'].includes((e as Error).constructor?.name ?? '')) throw e;
+      if (['RateLimited', 'BudgetExhausted', 'Interrupted', 'SessionInitFailed'].includes((e as Error).constructor?.name ?? '')) throw e;
       why = `${g.tool} could not be called (${short((e as Error).message, 160)})`;
     }
   }

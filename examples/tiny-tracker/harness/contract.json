@@ -1,0 +1,21 @@
+{
+  "contract": {
+    "repo": "zambodotdev/lost-response-test-contract",
+    "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+    "status": "draft, under joint review; runs before it freezes are historical baselines and are repeated after the freeze"
+  },
+  "adapter": {
+    "file": "adapters/tiny_tracker.py",
+    "version": "0.2.0",
+    "target_path_in_contract_repo": "fixtures/harness/adapters/tiny_tracker.py",
+    "replaces": {
+      "repo": "rafe-walker/lost-response-test-contract",
+      "branch": "add-tiny-tracker-adapter",
+      "commit": "b1519f7",
+      "version": "0.1.0"
+    }
+  },
+  "self_attested": {
+    "LRT-A3": "until the driver compares the recovered digest on a found K-only attempt (driver ask (b)), the A3 K-only verdict rests on the adapter's classification"
+  }
+}

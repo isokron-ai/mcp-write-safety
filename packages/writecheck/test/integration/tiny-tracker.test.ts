@@ -106,6 +106,12 @@ const EXPECT: Record<string, string[]> = {
   'read-only-by-annotation': ['MWS-CFG-3'],
   'unknown-tools-ignored': ['MWS-CFG-4'],
   'comment-marked-read-only': ['MWS-ANN-1'],
+  // tiny-tracker 0.2.0 (default profile, feature lookup): get_operation is annotated readOnlyHint: true and, on a key
+  // with no record, creates a ticket (its requirement is MWS-ANN-1, which tiny-tracker's own self-test shows). The
+  // manifest calls get_operation on a scratch ticket with a key no write used (calls.get_operation), twice: the ticket
+  // it creates is a new object in the default project, not the object the check watches, and MWS-ANN-1's method
+  // watches only that object (spec 8.2, rule 8). So the record is `not observed`, never `violated`, under this method.
+  'lookup-reexecutes': [],
   'add-label-replaces-list': ['MWS-ANN-2', 'MWS-ANN-5'],
   'create-marked-idempotent': ['MWS-ANN-3'],
   'missing-annotations': ['MWS-ANN-4'],
@@ -143,9 +149,20 @@ const SAID_NO: Record<string, string[]> = {
   'skip-limits': ['MWS-IN-4 ticket:add_comment'],
 };
 
-test('the expectations cover every tiny-tracker defect', { skip }, async () => {
-  const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string }[] };
-  assert.deepEqual(DEFECTS.map((d) => d.name).sort(), Object.keys(EXPECT).sort());
+test('the expectations cover every tiny-tracker defect the default profile runs', { skip }, async () => {
+  const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string; requires?: readonly string[] }[] };
+  // Coverage gap, stated (G2 fold-in 12): the two inflight-gated MCP-layer defects below have NO expectation row, so
+  // writecheck's per-defect runs say nothing about them; tiny-tracker's own tests show them (test/keyed.test.ts). From
+  // tiny-tracker 0.3.0 the default profile turns inflight on, so they run here, and `--defect all` below includes them.
+  // Listed for 0.4.0: expectation rows for both, measured with a same-key call while the first is in flight.
+  const NO_ROW_UNTIL_040 = ['in-progress-reported-not-applied', 'settle-miss-reported-not-applied'];
+  const profile = (await import(join(dir!, 'dist', 'src', 'profile.js'))) as { PROFILE_FEATURES: Record<string, readonly string[]> };
+  const runs = DEFECTS.filter((d) => (d.requires ?? []).every((f) => profile.PROFILE_FEATURES['default']!.includes(f)));
+  assert.deepEqual(runs.filter((d) => !NO_ROW_UNTIL_040.includes(d.name)).map((d) => d.name).sort(), Object.keys(EXPECT).sort());
+  // Every defect runs under the default profile, and the gap is exactly the named list: a new defect fails here until
+  // it has a row or is named.
+  assert.deepEqual(DEFECTS.filter((d) => !runs.includes(d)).map((d) => d.name), [], 'every MCP-layer defect runs under the default profile');
+  assert.deepEqual(runs.filter((d) => !Object.keys(EXPECT).includes(d.name)).map((d) => d.name).sort(), NO_ROW_UNTIL_040.sort());
 });
 
 for (const protocol of [undefined, '2025-11-25']) {

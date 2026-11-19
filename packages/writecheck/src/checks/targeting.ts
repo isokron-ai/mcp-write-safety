@@ -369,7 +369,8 @@ export function tgt3Class(res: ResourceSpec, tools: { name: string; description?
   return { verdict: null, why: '', note: `The declaration puts ${tool} among the creates, on the words ${JSON.stringify(c.quote)} (R10-1).` };
 }
 
-export function withLoss(r: Result, losses: (Loss | undefined)[], canViolate: boolean, blocking: (Loss | undefined)[] = []): Result {
+/** `callSteps`: the steps of the calls the losses are around; a record turned into violated without steps of its own gets them (review R2). */
+export function withLoss(r: Result, losses: (Loss | undefined)[], canViolate: boolean, blocking: (Loss | undefined)[] = [], callSteps: string[] = []): Result {
   const own = losses.filter((l): l is Loss => !!l);
   const ls = [...own, ...blocking.filter((l): l is Loss => !!l)];
   if (!ls.length) return r;
@@ -397,7 +398,7 @@ export function withLoss(r: Result, losses: (Loss | undefined)[], canViolate: bo
   if (unavailable) out.notes.push(`The objects outside the tester's own could not all be listed (${unavailable}); a loss cannot be ruled out.`);
   else if (covered) out.notes.push(`Bystander inventory: ${coverageText(covered, partial)}.`);
   if (volatile.length) out.notes.push(`Fields set aside as changing by themselves (a time, an age, or a value that differed between two listings with no call in between): ${volatile.slice(0, 8).join(', ')}.`);
-  if (ownGone.length && canViolate && r.verdict !== 'violated') return { ...out, verdict: 'violated', reason: `The call removed objects the tester did not create (${ownGone.join(', ')}), outside what it named. ${r.reason}` };
+  if (ownGone.length && canViolate && r.verdict !== 'violated') return { ...out, verdict: 'violated', steps: out.steps.length ? out.steps : [...callSteps], reason: `The call removed objects the tester did not create (${ownGone.join(', ')}), outside what it named. ${r.reason}` };
   if (gone.length && r.verdict === 'violated') return { ...out, reason: `${r.reason} Objects the tester did not create were also lost: ${gone.join(', ')}.` };
   if (r.verdict !== 'held') return out;
   if (lost) return { ...out, verdict: 'not tested', reason: `Objects the tester did not create were lost or changed around the call (${text}), so this record is not held. ${r.reason}` };
@@ -460,8 +461,8 @@ export function withLaterLoss(r: Result, later: LaterLoss[]): Result {
 export function targetingVerdicts(o: TargetObs, res: ResourceSpec): Result[] {
   const sc = { id: ID, version: VERSION };
   const out: Result[] = [];
-  const lossOn = (from: number, losses: (Loss | undefined)[], canViolate: boolean, blocking: (Loss | undefined)[] = []) => {
-    for (let i = from; i < out.length; i++) out[i] = withLoss(out[i]!, losses, canViolate, blocking);
+  const lossOn = (from: number, losses: (Loss | undefined)[], canViolate: boolean, blocking: (Loss | undefined)[] = [], callSteps: string[] = []) => {
+    for (let i = from; i < out.length; i++) out[i] = withLoss(out[i]!, losses, canViolate, blocking, callSteps);
   };
   if (o.tgt1) {
     const t = o.tgt1;
@@ -484,10 +485,10 @@ export function targetingVerdicts(o: TargetObs, res: ResourceSpec): Result[] {
     else if (outside.length) out.push(result('MWS-TGT-1', w, sc, 'violated', `${res.selector!.tool} was told to act in scope ${short(t.scopes.named, 40)} on the objects named with the run's marker, and it removed the object of that name in the ${outside.join(' and ')} scope${(t.after['named'] ?? 1) < (t.before['named'] ?? 0) ? ' as well' : ''}${t.call?.ok ? '; the call reported success' : ''}.`, { steps: t.call ? [t.call.step] : [], notes }));
     else if (!t.call || t.call.indeterminate || Object.values(t.after).some((v) => v === null)) out.push(result('MWS-TGT-1', w, sc, 'not tested', 'the call\'s outcome is unknown, or a scope could not be listed afterwards', { notes }));
     else if (!t.call.ok && t.after['named'] === t.before['named']) out.push(result('MWS-TGT-1', w, sc, 'held', `${res.selector!.tool} refused the call; nothing was removed in any scope.`, { steps: [t.call.step], notes: [...notes, 'A refusal holds MWS-TGT-1; the selector forms of MWS-TGT-2 are sent only where the call took effect in the named scope.'] }));
-    else if ((t.after['named'] ?? 1) < (t.before['named'] ?? 0)) out.push(result('MWS-TGT-1', w, sc, 'held', `${res.selector!.tool} acted in the named scope only (an object of the same name in the other${t.scopes.default ? ' and the default' : ''} scope was left).`, { notes }));
+    else if ((t.after['named'] ?? 1) < (t.before['named'] ?? 0)) out.push(result('MWS-TGT-1', w, sc, 'held', `${res.selector!.tool} acted in the named scope only (an object of the same name in the other${t.scopes.default ? ' and the default' : ''} scope was left).`, { steps: [t.call.step], notes }));
     else out.push(result('MWS-TGT-1', w, sc, 'not tested', `${res.selector!.tool} removed nothing in the named scope either, so where it acts could not be established (check selector.narrow)`, { notes }));
   }
-  if (o.tgt1sel) lossOn(out.length - 1, [o.tgt1sel.loss], true, [o.tgt1sel.fixture_loss]);
+  if (o.tgt1sel) lossOn(out.length - 1, [o.tgt1sel.loss], true, [o.tgt1sel.fixture_loss], o.tgt1sel.call ? [o.tgt1sel.call.step] : []);
   if (o.tgt2) {
     const t = o.tgt2;
     const w = wp(res.name, res.selector!.tool);
@@ -497,10 +498,10 @@ export function targetingVerdicts(o: TargetObs, res: ResourceSpec): Result[] {
       const notes = t.forms.map((f) => `${f.name}: ${f.call.ok ? 'success' : 'refused'}, ${f.remaining ?? '?'} of ${t.before} left`);
       if (bad.length) out.push(result('MWS-TGT-2', w, sc, 'violated', `With the selector ${bad[0]!.name} and no opt-in argument, ${res.selector!.tool} removed ${t.before - (bad[0]!.remaining ?? 0)} of ${t.before} objects in the tester's container.`, { steps: bad.map((f) => f.call.step), notes }));
       else if (t.forms.some((f) => f.call.indeterminate || f.remaining === null)) out.push(result('MWS-TGT-2', w, sc, 'not tested', 'a selector call had an unknown outcome, or the container could not be counted', { notes }));
-      else out.push(result('MWS-TGT-2', w, sc, 'held', `No declared selector form (${t.forms.map((f) => f.name).join(', ')}) without the opt-in removed anything in the tester's container (${t.before} of ${t.before} left each time).`, { notes: [...notes, `Only the forms the declaration names were tried; ${['empty', 'omitted', 'match-all', 'container path'].filter((n) => !t.forms.some((f) => f.name.includes(n.split(' ')[0]!))).join(', ') || 'none'} of the spec's forms were not declared.`] }));
+      else out.push(result('MWS-TGT-2', w, sc, 'held', `No declared selector form (${t.forms.map((f) => f.name).join(', ')}) without the opt-in removed anything in the tester's container (${t.before} of ${t.before} left each time).`, { steps: t.forms.map((f) => f.call.step), notes: [...notes, `Only the forms the declaration names were tried; ${['empty', 'omitted', 'match-all', 'container path'].filter((n) => !t.forms.some((f) => f.name.includes(n.split(' ')[0]!))).join(', ') || 'none'} of the spec's forms were not declared.`] }));
     }
   }
-  if (o.tgt2 && (!o.tgt2.skipped || o.tgt2.fixture_loss)) lossOn(out.length - 1, (o.tgt2.forms ?? []).map((f) => f.loss), true, [o.tgt2.fixture_loss]);
+  if (o.tgt2 && (!o.tgt2.skipped || o.tgt2.fixture_loss)) lossOn(out.length - 1, (o.tgt2.forms ?? []).map((f) => f.loss), true, [o.tgt2.fixture_loss], (o.tgt2.forms ?? []).map((f) => f.call.step));
   if (o.tgt3) {
     const t = o.tgt3;
     const w = wp(res.name, res.create!.tool);

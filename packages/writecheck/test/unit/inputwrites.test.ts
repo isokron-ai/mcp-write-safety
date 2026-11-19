@@ -16,7 +16,7 @@ import { TT_MANIFEST } from '../tiny-tracker/harness.js';
 
 const text = readFileSync(TT_MANIFEST, 'utf8');
 const man = parseManifestText(text, TT_MANIFEST);
-const READ = ['get_ticket', 'list_tickets', 'list_projects'];
+const READ = ['get_ticket', 'list_tickets', 'list_projects', 'get_operation'];
 const WRITE = ['create_ticket', 'update_ticket', 'replace_ticket', 'delete_ticket', 'delete_tickets', 'bulk_update_tickets', 'add_comment', 'add_label', 'remove_label', 'set_labels', 'close_ticket', 'create_project', 'delete_project'];
 const schema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, additionalProperties: false };
 const tools: Tool[] = [...READ.map((name) => ({ name, inputSchema: schema, annotations: { readOnlyHint: true } })), ...WRITE.map((name) => ({ name, inputSchema: schema, annotations: { readOnlyHint: false } }))] as Tool[];
