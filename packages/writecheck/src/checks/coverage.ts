@@ -97,7 +97,7 @@ export function coverageRows(m: Manifest, tools: Tool[], results: Result[]): Res
 
 /**
  * Adjustments that need the whole run: a declared explicit override in the update arguments takes MWS-CONC-1's default-arguments
- * arm away (NF-7; gate-2 Grafana item 4); an apply with field ownership leaves MWS-CONC-2 open (gate-2 K8s B7); and a `held`
+ * arm away (NF-7; gate-2 item 4); an apply with field ownership leaves MWS-CONC-2 open (gate-2 B7); and a `held`
  * beside a `violated` for the same requirement and write path says that the other trial decides.
  */
 export function adjustResults(m: Manifest, results: Result[]): Result[] {
