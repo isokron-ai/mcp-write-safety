@@ -38,7 +38,7 @@ Durability: a journal (`durable`, opt-in with `--data-dir`), in-flight key recor
 - `tiny-tracker server` refuses `--key-expiry` and `TRACKER_KEY_EXPIRY` (exit 2): the expiry policy is the backend's, and `server` would have ignored it. Give it where the backend runs.
 - `key-store-durable` and `settle-by-client-reference` turn a default-only `inflight` off as well as `lookup` (CMP-53); the state line names both in `features_off`. `settle-by-lookup` runs with the default's `inflight`, without naming it.
 
-## 0.2.0 (unreleased) for MWS 0.9
+## 0.2.0 (18 Nov 2026) for MWS 0.9
 
 The first shared-fixture release: evidence, execution records, lookup, principals, the execution ledger and server-side faults. `--profile 0.1` keeps the surface of the published 0.1.0, checked call for call against a transcript captured from its tarball; the default profile's changes are listed below.
 
