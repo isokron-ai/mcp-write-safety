@@ -34,7 +34,7 @@ import { createHash } from 'node:crypto';
 
 import { canonical, isObj, sha256 } from '../core/util.js';
 import { TEST_HASH_FORMAT, TEST_HASH_FORMATS_READ } from '../core/identity.js';
-import { isSchemaProbe, subjectFacets, type Facet, type Shape, type TestInputs, type ToolShape } from './testhash.js';
+import { hashOfInputs, isSchemaProbe, subjectFacets, type Facet, type Shape, type TestInputs, type ToolShape } from './testhash.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import type { VerifyOutcome } from './sign.js';
 
@@ -68,6 +68,7 @@ export type Transition =
   | 'subject-changed'
   | 'schema-fixed'
   | 'scheme-changed'
+  | 'hash-mismatch'
   | 'tester-unpinned';
 
 interface Rec {
@@ -272,7 +273,7 @@ const keysOf = (o: Record<string, unknown> | undefined): string[] => (o ? Object
 const hasKey = (o: Record<string, unknown> | undefined, k: string): boolean => !!o && Object.prototype.hasOwnProperty.call(o, k);
 
 /** Rule A on one argument's shape: `bad` gets every change that makes another test, `tol` every change that is tolerated. */
-function cmpShape(b: Shape, a: Shape, at: string, tol: string[], bad: string[]): void {
+function cmpShape(b: Shape, a: Shape, at: string, tol: string[], bad: string[], relax = RELAXED_REQUIRED_IS_SAME_TEST): void {
   if (b.h !== a.h) {
     bad.push(`${at}: its type or constraints changed`);
     return;
@@ -283,33 +284,43 @@ function cmpShape(b: Shape, a: Shape, at: string, tol: string[], bad: string[]):
   const ar = a.r ?? [];
   for (const n of keysOf(bp)) {
     if (!hasKey(ap, n)) bad.push(`${at}.${n}: a nested property was removed`);
-    else cmpShape(bp![n]!, ap![n]!, `${at}.${n}`, tol, bad);
+    else cmpShape(bp![n]!, ap![n]!, `${at}.${n}`, tol, bad, relax);
   }
   for (const n of keysOf(ap)) if (!hasKey(bp, n)) (ar.includes(n) ? bad.push(`${at}.${n}: a new required nested property`) : tol.push(`${at}.${n}: an optional nested property added`));
   for (const n of ar) if (!br.includes(n) && hasKey(bp, n)) bad.push(`${at}.${n}: a nested property became required`);
   for (const n of ar) if (!br.includes(n) && !hasKey(ap, n)) bad.push(`${at}: a new required name ${n}`);
-  for (const n of br) if (!ar.includes(n)) (RELAXED_REQUIRED_IS_SAME_TEST ? tol.push(`${at}.${n}: relaxed from required to optional`) : bad.push(`${at}.${n}: relaxed from required to optional`));
-  if (b.i && a.i) cmpShape(b.i, a.i, `${at}[]`, tol, bad);
+  for (const n of br) if (!ar.includes(n)) (relax ? tol.push(`${at}.${n}: relaxed from required to optional`) : bad.push(`${at}.${n}: relaxed from required to optional (this check acts on required)`));
+  if (b.i && a.i) cmpShape(b.i, a.i, `${at}[]`, tol, bad, relax);
   else if (b.i || a.i) bad.push(`${at}: its array items changed`);
 }
 
 /** Rule A on a tool: every argument the before test sent is there with equal constraints; the rest is tolerated or not (above). */
-function cmpTool(b: ToolShape, a: ToolShape, tool: string, tol: string[], bad: string[], probed: boolean, removed: string[] = bad): void {
+function cmpTool(b: ToolShape, a: ToolShape, tool: string, tol: string[], bad: string[], probed: boolean, removed: string[] = bad, relax = RELAXED_REQUIRED_IS_SAME_TEST): void {
   if (b.h !== a.h) bad.push(`${tool}: a keyword that constrains the arguments together changed`);
   for (const n of keysOf(b.p)) {
     if (!hasKey(a.p, n)) removed.push(`${tool}.${n}: ${probed ? 'a probed argument' : 'an argument the test sends'} was removed`);
-    else cmpShape(b.p[n]!, a.p[n]!, `${tool}.${n}`, tol, bad);
+    else cmpShape(b.p[n]!, a.p[n]!, `${tool}.${n}`, tol, bad, relax);
   }
   for (const n of keysOf(a.p)) {
     if (hasKey(b.p, n)) continue;
     if (a.r.includes(n)) bad.push(`${tool}.${n}: ${probed ? 'a new required argument' : 'an argument the test sends is now declared and required'}`);
+    // why: review F4: under additionalProperties false an undeclared argument the test sends is refused: the before call differed.
+    else if (!probed && (a.x || b.x)) bad.push(`${tool}.${n}: an argument the test sends is now declared, in a schema that allows no undeclared argument (the before build refused the call)`);
     else tol.push(`${tool}.${n}: an optional argument added${probed ? '' : ' (the test sends it)'}`);
   }
   for (const n of a.r) if (!b.r.includes(n) && hasKey(b.p, n)) bad.push(`${tool}.${n}: became required`);
-  for (const n of b.r) if (!a.r.includes(n) && hasKey(a.p, n)) (RELAXED_REQUIRED_IS_SAME_TEST ? tol.push(`${tool}.${n}: relaxed from required to optional (the test sends it both times)`) : bad.push(`${tool}.${n}: relaxed from required to optional`));
+  for (const n of b.r) if (!a.r.includes(n) && hasKey(a.p, n)) (relax ? tol.push(`${tool}.${n}: relaxed from required to optional (the test sends it both times)`) : bad.push(`${tool}.${n}: relaxed from required to optional (this check acts on required, so its calls change)`));
   for (const n of a.ro) if (!b.ro.includes(n)) bad.push(`${tool}.${n}: a new required argument the test does not send`);
-  for (const n of b.ro) if (!a.ro.includes(n) && !hasKey(a.p, n)) (RELAXED_REQUIRED_IS_SAME_TEST ? tol.push(`${tool}.${n}: a required argument the test does not send is no longer required`) : bad.push(`${tool}.${n}: no longer required`));
+  // why: review F4: a required argument the test does not send made the before call incomplete; after, the same call is accepted.
+  for (const n of b.ro) if (!a.ro.includes(n) && !hasKey(a.p, n)) bad.push(`${tool}.${n}: a required argument the test does not send is no longer required (the before build refused the call)`);
 }
+
+/**
+ * Requirements whose procedure acts on `required` itself, so that relaxing an argument to optional changes the calls the test
+ * sends (review F4): MWS-IN-1 compares a probe with the call without the argument only for an optional one (checks/schema.ts),
+ * and MWS-CONC-2 adds a run that leaves an optional version argument out (checks/stale.ts).
+ */
+export const REQUIRED_DRIVES_CALLS = ['MWS-IN-1', 'MWS-CONC-2'] as const;
 
 interface SameTest {
   kind: 'equal' | 'rule-a' | 'subject' | 'changed' | 'scheme';
@@ -340,14 +351,16 @@ export function sameTest(rb: Rec, ra: Rec): SameTest {
   if (canonical(ib.extras ?? null) !== canonical(ia.extras ?? null)) return { kind: 'changed', why: ` (a setting of the tester or a document it read differs: ${canonical(ib.extras ?? null)} before, ${canonical(ia.extras ?? null)} after)`, tolerated: [] };
   const tol: string[] = [];
   const bad: string[] = [];
+  const relax = RELAXED_REQUIRED_IS_SAME_TEST && !(REQUIRED_DRIVES_CALLS as readonly string[]).includes(rb.requirement);
   for (const t of [...new Set([...Object.keys(ib.tools), ...Object.keys(ia.tools)])].sort()) {
     const x = ib.tools[t];
     const y = ia.tools[t];
     if (x === undefined || y === undefined) bad.push(`${t}: named by the test on one build only`);
     else if (x === null || y === null) {
       if (x !== y) bad.push(`${t}: in the tool list of one build only`);
-    } else cmpTool(x, y, t, tol, bad, false);
+    } else cmpTool(x, y, t, tol, bad, false, bad, relax);
   }
+  if (canonical(ib.chosen ?? null) !== canonical(ia.chosen ?? null)) bad.push(`the procedure chose other calls from the schema (${canonical(ib.chosen ?? null)} before, ${canonical(ia.chosen ?? null)} after)`);
   const facets = new Set<Facet>();
   if (isSchemaProbe(rb.requirement)) {
     const x = ib.probed ?? null;
@@ -358,7 +371,7 @@ export function sameTest(rb: Rec, ra: Rec): SameTest {
     } else {
       // why: review M4: a probed argument that is gone means the probe that failed was not sent again: never a fix.
       const changedArgs: string[] = [];
-      cmpTool(x, y, rb.write_path.tool, tol, judged ? changedArgs : bad, true, bad);
+      cmpTool(x, y, rb.write_path.tool, tol, judged ? changedArgs : bad, true, bad, relax);
       if (changedArgs.length) {
         facets.add('schema');
         tol.push(...changedArgs.map((c) => `judged schema changed: ${c}`));
@@ -391,6 +404,15 @@ function testerProblem(rb: Rec, ra: Rec): string | null {
   return null;
 }
 
+/** Why a record's stored hashes do not follow from its test inputs (mws-test-hash/2), or null. */
+export function inputsMismatch(r: Rec): string | null {
+  const i = r.test_inputs;
+  if (!i || i.scheme !== TEST_HASH_FORMAT) return null;
+  if (hashOfInputs(r.requirement, i) !== r.test_hash) return 'its test_hash does not follow from its test_inputs (the file was edited, or written by another scheme)';
+  if (typeof r.test_hash_core === 'string' && hashOfInputs(r.requirement, i, true) !== r.test_hash_core) return 'its test_hash_core does not follow from its test_inputs';
+  return null;
+}
+
 export interface SlotMove {
   slot: string;
   before: CellState;
@@ -419,6 +441,9 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
   const empty = { slots: [], subjectSlots: [], tolerated: [], tester: null };
   const noHash = [...b.map((r) => ['before', r] as const), ...a.map((r) => ['after', r] as const)].find(([, r]) => typeof r.test_hash !== 'string');
   if (noHash) return { problem: { transition: 'no-test-hash', why: `${noHash[0]}: the record ${slotName(noHash[1])} carries no test_hash` }, ...empty };
+  // why: review F7: a stored test_hash must follow from the record's own test inputs before an equal hash is trusted.
+  const forged = [...b.map((r) => ['before', r] as const), ...a.map((r) => ['after', r] as const)].find(([, r]) => inputsMismatch(r));
+  if (forged) return { problem: { transition: 'hash-mismatch', why: `${forged[0]}: the record ${slotName(forged[1])}: ${inputsMismatch(forged[1])}` }, ...empty };
   const group = (rs: Rec[]) => {
     const m = new Map<string, Rec[]>();
     for (const r of rs) m.set(slotOf(r), [...(m.get(slotOf(r)) ?? []), r]);
@@ -542,9 +567,10 @@ export function classify(b: Side, a: Side): Classified {
   const withSlots = (c: Classified): Classified => {
     const moved = slots.filter((m) => m.before !== m.after);
     const regs = moved.filter(isRegression).map((m) => `${m.slot} ${m.before} → violated`);
-    // why: review S3: a fix is claimed only between two records judged by one stated, clean tester build.
-    const gated = tester && (c.label === 'fixed' || c.label === 'schema-fixed') ? { transition: 'tester-unpinned' as Transition, label: 'not comparable' as Label, why: `${c.why}; not claimed: ${tester}` } : c;
-    return { ...gated, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && gated.label !== 'regressed' ? { slot_regressions: regs } : {}), ...(tolerated.length ? { same_test_because: tolerated } : {}) };
+    // why: review S3, F6: a fix or a regression is claimed only between two records judged by one stated, clean tester build.
+    const gated = tester && (c.label === 'fixed' || c.label === 'schema-fixed' || c.label === 'regressed') ? { transition: 'tester-unpinned' as Transition, label: 'not comparable' as Label, why: `${c.why}; not claimed: ${tester}` } : c;
+    const regsWhy = tester && regs.length ? { why: `${gated.why}; slot regressions not claimed (${regs.join(', ')}): ${tester}` } : {};
+    return { ...gated, ...regsWhy, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && !tester && gated.label !== 'regressed' ? { slot_regressions: regs } : {}), ...(tolerated.length ? { same_test_because: tolerated } : {}) };
   };
   if (b.recs && a.recs) {
     const j = joinCell(b.recs, a.recs);
@@ -655,6 +681,15 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
     // why: review S3: two files that state no tester build, or a dirty one, are not "the same tester build" (null === null is not).
     tester: tb !== null && tb === ta,
   };
+  // why: review F5: a rechecked copy vouches for no more than the original did.
+  for (const [n, d] of [['before', b], ['after', a]] as const) {
+    const id = isObj(d['identity']) ? d['identity'] : null;
+    const rb = id && isObj(id['rechecked_by']) ? id['rechecked_by'] : null;
+    if (!rb) continue;
+    const os = isObj(rb['original_signature']) ? rb['original_signature'] : null;
+    if (!os) warnings.push(`${n}: a rechecked copy that does not say how the original was signed: its signature (if any) vouches only for the recheck`);
+    else if (os['status'] !== 'valid' || os['pinned'] !== true) warnings.push(`${n}: a rechecked copy of an original that was not signed by a pinned key (${String(os['status'])}${os['allow_unsigned'] ? ', signed with --allow-unsigned' : ''}): its signature vouches only for the recheck`);
+  }
   if (!same.tester) warnings.push(`the two files do not state one clean, stamped tester build (before ${testerName(isObj(b['identity']) ? (b['identity']['tester'] as never) : null)}${before.rechecked_by ? `, rechecked by ${before.rechecked_by.version ?? '?'} @ ${before.rechecked_by.commit ?? 'unstamped'}` : ''}; after ${testerName(isObj(a['identity']) ? (a['identity']['tester'] as never) : null)}${after.rechecked_by ? `, rechecked by ${after.rechecked_by.version ?? '?'} @ ${after.rechecked_by.commit ?? 'unstamped'}` : ''}): records are joined only where the tester build that judged them is stated on the record and the same`);
   if ((before.judged_by?.length ?? 0) > 1 || (after.judged_by?.length ?? 0) > 1) warnings.push(`records of one file were judged by more than one tester build (before: ${before.judged_by?.join(', ') || 'none stated'}; after: ${after.judged_by?.join(', ') || 'none stated'}); only records judged by one build on both sides are compared`);
   if (!same.manifest) warnings.push('the manifests differ (manifest sha256): cells are joined only where their test hashes are equal or rule A says the test is the same');
@@ -693,6 +728,9 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
     // why: review: a slot that regressed inside a cell whose roll-up did not move is said, never hidden by the roll-up.
     for (const r of c.slot_regressions ?? []) warnings.push(`${c.key}: slot regressed inside a cell labelled ${c.label}: ${r}`);
     if (c.transition === 'tester-unpinned' && c.before?.verdict === 'violated' && c.after?.verdict === 'held') warnings.push(`${c.key}: violated → held, not claimed as fixed: ${c.why.replace(/^.*not claimed: /, '')}`);
+    if (c.transition === 'tester-unpinned' && c.after?.verdict === 'violated' && c.before && c.before.verdict !== 'violated') warnings.push(`${c.key}: ${c.before.verdict} → violated, not claimed as regressed: ${c.why.replace(/^.*not claimed: /, '')}`);
+    if (/slot regressions not claimed/.test(c.why)) warnings.push(`${c.key}: ${c.why.replace(/^.*slot regressions not claimed /, 'slot regressions not claimed ')}`);
+    if (c.transition === 'hash-mismatch') warnings.push(`${c.key}: ${c.why}`);
   }
   cells.sort((p, q) => LABEL_ORDER.indexOf(p.label) - LABEL_ORDER.indexOf(q.label) || (p.key < q.key ? -1 : p.key > q.key ? 1 : 0));
   return { format: COMPARE_FORMAT, tool: { name: SUITE_NAME, version: SUITE_VERSION }, rating: null, spec: { version: before.spec ?? '' }, test_hash: TEST_HASH_FORMAT, before, after, same, warnings, cells };

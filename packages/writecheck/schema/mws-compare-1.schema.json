@@ -671,7 +671,8 @@
               "subject-changed",
               "schema-fixed",
               "scheme-changed",
-              "tester-unpinned"
+              "tester-unpinned",
+              "hash-mismatch"
             ]
           },
           "label": {
