@@ -65,7 +65,7 @@ export function decide(v: Experiment['verdict'], counts: Record<string, Record<s
 }
 
 function callEnv(r: CallResult) {
-  return { indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ok: r.ok, isError: r.isError, error: r.rpc_error, text: readText(r), data: r.data, tool: r.tool, shape: r.shape ?? null, ...(r.decoded ? { decoded: r.decoded, raw_structured: r.raw_structured } : {}), timed_out: r.timed_out, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
+  return { indeterminate: r.timed_out || r.transport_error !== null || (!!r.result_type && r.result_type !== 'complete'), ok: r.ok, isError: r.isError, error: r.rpc_error, text: readText(r), data: r.data, tool: r.tool, shape: r.shape ?? null, ...(r.decoded ? { decoded: r.decoded, raw_structured: r.raw_structured } : {}), ...(r.extracted ? { extracted: r.extracted } : {}), timed_out: r.timed_out, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
 }
 function httpEnv(r: HttpResult) {
   return { indeterminate: r.status === null, ok: r.ok, status: r.status, body: r.body, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };

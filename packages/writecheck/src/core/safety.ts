@@ -429,7 +429,7 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
         await s.listTools(label);
         return null;
       } catch (e) {
-        if (['RateLimited', 'BudgetExhausted', 'Interrupted'].includes((e as Error).constructor?.name ?? '')) throw e;
+        if (['RateLimited', 'BudgetExhausted', 'Interrupted', 'SessionInitFailed'].includes((e as Error).constructor?.name ?? '')) throw e;
         why = `tools/list did not answer (${short((e as Error).message, 160)})`;
       }
       continue;
@@ -447,7 +447,7 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
       } else why = `${g.tool} failed (${short(r.text ?? r.rpc_error?.message ?? r.transport_error ?? (r.timed_out ? 'timed out' : 'error'), 160)})`;
     } catch (e) {
       // why: review: a rate limit, the budget or an interruption is its own stop; the caller handles it, and no second request goes out.
-      if (['RateLimited', 'BudgetExhausted', 'Interrupted'].includes((e as Error).constructor?.name ?? '')) throw e;
+      if (['RateLimited', 'BudgetExhausted', 'Interrupted', 'SessionInitFailed'].includes((e as Error).constructor?.name ?? '')) throw e;
       why = `${g.tool} could not be called (${short((e as Error).message, 160)})`;
     }
   }
