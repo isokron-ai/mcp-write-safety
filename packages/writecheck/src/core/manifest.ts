@@ -27,6 +27,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { parsePath, isObj, parseConfigText, sha256, WritecheckError, type Obj } from './util.js';
 import { templateRoots } from './template.js';
 import { RESULT_SHAPES, type ShapeName } from '../checks/shape.js';
+import { parseProvenance } from './identity.js';
 
 export const MANIFEST_VERSIONS = ['0.9'] as const;
 export const UPDATE_MODES = ['field_patch', 'full_replace', 'command', 'composite'] as const;
@@ -1434,7 +1435,9 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   for (const n of envPublic) if (!ENV.test(n)) throw fail('server.env_public', `${n} is not an environment variable name`);
 
   const t = obj(o['target'], 'target');
-  keys(t, ['environment', 'confirm', 'allow_hosts', 'guard', 'refuse_fingerprints'], 'target');
+  keys(t, ['environment', 'confirm', 'allow_hosts', 'guard', 'refuse_fingerprints', 'provenance'], 'target');
+  // why: F8: the build under test, for results.identity (core/identity.ts); validated here so plan refuses a bad one too.
+  if (t['provenance'] !== undefined) parseProvenance(t['provenance'], 'manifest target.provenance');
   const environment = str(t['environment'], 'target.environment');
   let guard: Manifest['target']['guard'] = null;
   if (t['guard'] !== undefined) {
