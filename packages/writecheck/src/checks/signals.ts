@@ -81,7 +81,8 @@ export function conflictSignal(a: Answer, m: Mode = {}): Signal | null {
   for (const o of objectsOf(a, m)) {
     for (const [k, v] of Object.entries(o)) {
       if (k === 'conflict' && v === true) return { source: 'the field conflict: true', kind: 'structured', quote: '"conflict": true' };
-      if (k === 'reason' && v === 'Conflict' && (o['kind'] === 'Status' || o['code'] === 409)) return { source: 'a Kubernetes Status with reason Conflict', kind: 'structured', quote: '"reason": "Conflict"' };
+      // why: the form of a Kubernetes Status; any backend may answer in it, so the source names the form and no product.
+      if (k === 'reason' && v === 'Conflict' && (o['kind'] === 'Status' || o['code'] === 409)) return { source: 'a status object with reason Conflict', kind: 'structured', quote: '"reason": "Conflict"' };
     }
   }
   return statusField(a, [409, 412], m) ?? codeField(a, CONFLICT_CODES, 'a conflict', m);
