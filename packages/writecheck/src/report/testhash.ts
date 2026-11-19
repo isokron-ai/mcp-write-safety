@@ -36,8 +36,9 @@
 import { readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 
-import type { Manifest } from '../core/manifest.js';
-import { canonical, isObj, sha256 } from '../core/util.js';
+import type { Manifest, ResourceSpec } from '../core/manifest.js';
+import { furtherProbes } from '../checks/readback.js';
+import { canonical, isObj, parsePath, sha256 } from '../core/util.js';
 import { TEST_HASH_FORMAT } from '../core/identity.js';
 import { SPEC_VERSION } from '../requirements.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
@@ -158,7 +159,8 @@ export function usedArgs(t: string, res: unknown, underTest: boolean): Set<strin
     else if (isObj(v)) {
       const mine = typeof v['tool'] === 'string' ? v['tool'] === t : own;
       for (const [k, x] of Object.entries(v)) {
-        if (mine && k === 'args' && isObj(x)) for (const a of Object.keys(x)) if (!a.includes('{{')) out.add(a);
+        // why: review F3: selector.narrow is merged into the selector's args (checks/targeting.ts).
+        if (mine && (k === 'args' || k === 'narrow') && isObj(x)) for (const a of Object.keys(x)) if (!a.includes('{{')) out.add(a);
         argsKeys(x, mine);
       }
     }
@@ -342,6 +344,8 @@ export interface ToolShape {
   p: Record<string, Shape>;
   r: string[];
   ro: string[];
+  /** true where the schema allows no undeclared argument (additionalProperties: false). */
+  x?: true;
 }
 
 /** `used`: the arguments the test sends (null: every declared argument, for the schema probes, which probe each of them). */
@@ -357,7 +361,7 @@ export function toolShape(schema: unknown, used: Set<string> | null, keep = fals
   const p = dict<Shape>();
   for (const a of args) p[a] = shapeOf(props[a], schema, keep);
   const inArgs = new Set(args);
-  return { h: shortHash({ s: whole, refs: reachableRefs(whole, schema, keep) }), p, r: req.filter((x) => inArgs.has(x)), ro: req.filter((x) => !inArgs.has(x)) };
+  return { h: shortHash({ s: whole, refs: reachableRefs(whole, schema, keep) }), p, r: req.filter((x) => inArgs.has(x)), ro: req.filter((x) => !inArgs.has(x)), ...(eff['additionalProperties'] === false ? { x: true as const } : {}) };
 }
 
 /**
@@ -391,6 +395,12 @@ export interface TestInputs {
   tools: Record<string, ToolShape | null>;
   /** Schema probes (MWS-IN-1 to IN-7): every argument of the write path's tool, or null where the catalog does not list it. */
   probed?: ToolShape | null;
+  /**
+   * What the procedure chose from the schemas, where that choice changes the calls it sends (review F1, F2): `further`, the
+   * MWS-UPD-1 further probes of the update tool (case, argument, value, the alternatives); `address`, per list-edit tool,
+   * whether it declares the by-id and by-position address arguments. Equal on both builds or another test.
+   */
+  chosen?: Record<string, unknown>;
   /** Hashes of the judged parts of the entry other than the schema (annotations, description). */
   subject?: Record<string, string | null>;
   /** Settings of the tester build and inputs read from outside the manifest that change a verdict (MWS-IN-5: the reading, the documents' sha256). In clear, so a recheck can say its own. */
@@ -419,6 +429,23 @@ type RecordKey = Pick<Result, 'requirement' | 'level' | 'scenario' | 'write_path
 /** Requirements whose verdict depends on the pace of writes: the concurrency checks and MWS-RETRY-2's simultaneous pairs. */
 const paced = (req: string): boolean => /^MWS-CONC-/.test(req) || req === 'MWS-RETRY-2';
 
+/** The records of the read-after-write procedure that rest on its further probes (checks/readback.ts, the same conditions). */
+const furtherProbed = (r: RecordKey, res: ResourceSpec): boolean =>
+  ['MWS-UPD-1', 'MWS-RES-1', 'MWS-RES-2'].includes(r.requirement) && r.scenario.id === 'read-after-write' && !!res.update && r.write_path.tool === res.update.tool && res.update.mode !== 'full_replace' && !!res.create && !!res.cleanup && res.cleanup !== 'leave';
+
+/** The first segment of an argument path (`a.b` → `a`, `a[0]` → `a`). */
+const topName = (path: string): string => {
+  try {
+    const first = parsePath(path)[0];
+    return typeof first === 'string' ? first : path;
+  } catch {
+    return path;
+  }
+};
+
+/** The declared top-level properties of an input schema. */
+const declaredProps = (schema: unknown): Record<string, unknown> => (isObj(schema) && isObj(schema['properties']) ? schema['properties'] : {});
+
 /** Requirements whose records name no resource block but whose procedure acts on every resource (the launch checks). */
 export const acrossResources = (req: string): boolean => /^MWS-CFG-/.test(req);
 
@@ -433,6 +460,7 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
   const calls = (ctx.manifest.calls ?? {}) as Record<string, { args?: unknown } | undefined>;
   const names = new Set<string>([r.write_path.tool, ...blocks.flatMap((b) => [...toolsNamedIn(b)]), ...(all ? Object.keys(calls) : [])]);
   const keep = r.requirement === 'MWS-IN-5';
+  const further = res && furtherProbed(r, res) ? furtherProbes(ctx.tools.find((x) => x.name === res.update!.tool)?.['inputSchema'], res) : null;
   const tools: Record<string, ToolShape | null> = {};
   for (const n of [...names].sort()) {
     const t = ctx.tools.find((x) => x.name === n);
@@ -447,8 +475,22 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     }
     const declared = Object.prototype.hasOwnProperty.call(calls, n) ? calls[n]?.args : undefined;
     if (isObj(declared)) for (const a of Object.keys(declared)) if (!a.includes('{{')) used.add(a);
+    // why: review F2: a list-edit tool is addressed by whichever address argument its schema declares.
+    for (const b of blocks) if (b.list_edit?.tool === n) for (const a of [b.list_edit.address.by_id, b.list_edit.address.by_position]) if (a) used.add(topName(a));
+    // why: review F1: the further probes send arguments of the update tool that the schema, not the manifest, picks.
+    if (further && n === res!.update!.tool) for (const q of further) for (const a of [q.prop, ...q.alts.map((x) => x.prop)]) used.add(a);
     tools[n] = toolShape(t['inputSchema'], used, keep);
   }
+  const chosen: Record<string, unknown> = {};
+  if (further) chosen['further'] = further.map((q) => ({ case: q.name, arg: q.prop, value: plain(q.value), named: q.named, alts: q.alts.map((x) => x.prop) }));
+  const address: Record<string, unknown> = {};
+  for (const b of blocks) {
+    const le = b.list_edit;
+    if (!le || !names.has(le.tool)) continue;
+    const props = declaredProps(ctx.tools.find((x) => x.name === le.tool)?.['inputSchema']);
+    address[le.tool] = { by_id: !!le.address.by_id && Object.hasOwn(props, topName(le.address.by_id)), by_position: !!le.address.by_position && Object.hasOwn(props, topName(le.address.by_position)) };
+  }
+  if (Object.keys(address).length) chosen['address'] = address;
   const limits = paced(r.requirement) ? { ...(shared.limits as Record<string, unknown>), writes_per_second: shared.rate } : shared.limits;
   const extras: Record<string, unknown> = {};
   if (r.requirement === 'MWS-IN-5') {
@@ -478,6 +520,7 @@ export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedIn
     context: `sha256:${sha256(canonical(contextInput))}`,
     tools,
     ...(isSchemaProbe(r.requirement) ? { probed: wt ? toolShape(wt['inputSchema'], null, keep) : null } : {}),
+    ...(Object.keys(chosen).length ? { chosen: plain(chosen) as Record<string, unknown> } : {}),
     ...(facets.length ? { subject: Object.fromEntries(facets.map((f) => [f, wt ? `sha256:${sha256(canonical(facetPart(ctx.tools, r.write_path.tool, f)))}` : null])) } : {}),
     ...(Object.keys(extras).length ? { extras: plain(extras) as Record<string, unknown> } : {}),
   };
@@ -494,6 +537,7 @@ export function hashBody(requirement: string, i: TestInputs, core = false): Reco
     rest: i.rest,
     tools: i.tools,
     ...(i.probed !== undefined && !(core && subjectIsProbed(requirement)) ? { probed: i.probed } : {}),
+    ...(i.chosen !== undefined ? { chosen: i.chosen } : {}),
     ...(i.subject !== undefined && !core ? { subject: i.subject } : {}),
     ...(i.extras !== undefined ? { extras: i.extras } : {}),
   };

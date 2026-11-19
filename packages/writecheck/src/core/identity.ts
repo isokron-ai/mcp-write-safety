@@ -260,7 +260,16 @@ export interface RunIdentity {
   /** Inputs of the test hashes that are not in the manifest copy the run keeps (so a recheck can hash with them): the `--pair-budget` given, and the sha256 of each document MWS-IN-5 read. */
   hash_inputs?: { pair_budget?: { repeats: number; pairs: number } | null; in5_docs?: Record<string, string | null> };
   /** Set by `recheck` on its copy: the tester build that re-applied the rules, when, and how many records it hashed anew. */
-  rechecked_by?: { name: string; version: string; commit: string | null; dirty?: boolean | null; at: string; records_rehashed: number };
+  rechecked_by?: {
+    name: string;
+    version: string;
+    commit: string | null;
+    dirty?: boolean | null;
+    at: string;
+    records_rehashed: number;
+    /** The rechecked file's results signature as recheck verified it (review F5). */
+    original_signature?: { status: 'valid' | 'valid-unpinned' | 'unsigned' | 'ssh-only' | 'invalid'; key_id: string | null; pinned: boolean; allow_unsigned?: boolean };
+  };
 }
 
 export function identityGaps(i: Omit<RunIdentity, 'gaps'>): string[] {

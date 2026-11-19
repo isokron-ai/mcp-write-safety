@@ -418,6 +418,10 @@
               },
               "extras": {
                 "type": "object"
+              },
+              "chosen": {
+                "type": "object",
+                "description": "What the procedure chose from the schemas where that choice changes its calls: further (the MWS-UPD-1 further probes), address (per list-edit tool, which address arguments it declares)."
               }
             }
           },
@@ -1129,6 +1133,40 @@
             "records_rehashed": {
               "type": "integer",
               "minimum": 0
+            },
+            "original_signature": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "key_id",
+                "pinned"
+              ],
+              "description": "The results signature of the file that was rechecked, as recheck verified it.",
+              "properties": {
+                "status": {
+                  "enum": [
+                    "valid",
+                    "valid-unpinned",
+                    "unsigned",
+                    "ssh-only",
+                    "invalid"
+                  ]
+                },
+                "key_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pinned": {
+                  "type": "boolean"
+                },
+                "allow_unsigned": {
+                  "type": "boolean",
+                  "description": "The copy was signed with --allow-unsigned although the original was not signed by a pinned key."
+                }
+              }
             }
           }
         }
@@ -1240,6 +1278,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "x": {
+          "const": true,
+          "description": "The schema allows no undeclared argument (additionalProperties: false)."
         }
       }
     }
