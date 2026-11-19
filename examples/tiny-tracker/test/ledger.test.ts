@@ -380,7 +380,7 @@ describe("faults (R7, B7, G9): armed on the control listener, recorded in the le
     const err = (body: unknown) => { try { parseArming(body); return "armed"; } catch (e) { return `${(e as FaultError).status} ${(e as FaultError).code}`; } };
     assert.equal(err({ point: "mcp/after-backend-reply/nope" }), "400 unknown_point");
     assert.equal(err({ point: "mcp/before-commit/error" }), "400 not_planned");
-    assert.equal(err({ point: "backend/after-commit/crash" }), "501 not_built");
+    assert.equal(err({ point: "mcp/after-backend-reply/close" }), "501 not_built");
     assert.equal(err({ point: DROP, selector: { key: "k" } }), "400 bad_selector", "a key selector would depend on what the code under test sends");
     assert.equal(err({ point: DROP, selector: { hold_ms: FAULT_CAPS.maxHoldMs + 1 } }), "400 bad_selector");
     assert.equal(err({ point: DROP, selector: { count: 0 } }), "400 bad_selector");
@@ -482,6 +482,34 @@ describe("faults (R7, B7, G9): armed on the control listener, recorded in the le
       const results = await Promise.all(calls);
       assert.equal(results.length, FAULT_CAPS.maxHeld + 1, "every held answer was sent on close");
       assert.equal(CONTROL_MAX_CONNECTIONS, 32);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("0.3.0 integration: a crash point in one process is refused 409 needs_supervise; a crash point takes no selector but once", async () => {
+    const s = await stack({ features: ALL });
+    try {
+      const r = await s.arm("backend/after-commit/crash");
+      assert.deepEqual([r.status, r.body.error], [409, "needs_supervise"]);
+      assert.match(r.body.message, /--supervise/);
+      const sel = await call("POST", `${s.control}/_fixture/faults`, CONTROL, { point: "backend/after-commit/crash", selector: { run: "run-x" } });
+      assert.deepEqual([sel.status, sel.body.error], [400, "bad_selector"]);
+      assert.deepEqual((await call("GET", `${s.control}/_fixture/faults`, CONTROL)).body.armed, [], "nothing armed");
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("G2 round 2, item 6: backend/after-effect-before-key/crash without durable is refused 400 needs_feature on the control listener", async () => {
+    const point = "backend/after-effect-before-key/crash";
+    assert.throws(() => parseArming({ point }, FAULT_ACTIONS, ALL), (e: FaultError) => e.status === 400 && e.code === "needs_feature");
+    assert.equal(parseArming({ point }, FAULT_ACTIONS, [...ALL, "durable"]).point, point);
+    const s = await stack({ features: ALL });
+    try {
+      const r = await s.arm(point);
+      assert.deepEqual([r.status, r.body.error, r.body.feature], [400, "needs_feature", "durable"]);
+      assert.deepEqual((await call("GET", `${s.control}/_fixture/faults`, CONTROL)).body.armed, [], "nothing armed");
     } finally {
       await s.close();
     }
@@ -651,7 +679,7 @@ describe("the compatibility rules of stream B (CMP-30 to CMP-33) and the command
     // CMP-7, narrowed: a fault armed at start (stream E's --fault) needs the faults feature and a built point.
     assert.deepEqual(checkCompat({ ...base, features: ALL, faults: [DROP] }), []);
     assert.match(checkCompat({ ...base, faults: [DROP] }).join(), /a fault armed at start needs the faults feature/);
-    assert.match(checkCompat({ ...base, features: ALL, faults: ["backend/after-commit/crash"] }).join(), /arrives in 0\.3\.0; this build cannot arm it/);
+    assert.match(checkCompat({ ...base, features: ALL, faults: ["mcp/after-backend-reply/close"] }).join(), /arrives in 0\.3\.0; this build cannot arm it/);
     assert.match(checkCompat({ ...base, features: ALL, faults: ["mcp/before-commit/error"] }).join(), /not planned/);
     assert.match(checkCompat({ ...base, features: ALL, layout: "backend" }).join(), /--fixture-control runs with `tiny-tracker all` only/);
     assert.match(checkCompat({ ...base, profile: "0.1", features: ["ledger"] }).join(), /profile 0.1/);

@@ -13,8 +13,11 @@ import { executionId } from "../records.js";
 import type { Clock } from "../clock.js";
 import { defaultPrincipals, principalFor, type Principal } from "../principals.js";
 import { HEADERS, TAG_PATTERN } from "../fixture-properties.js";
-import { applyBackendDefects } from "./defects/index.js";
+import { applyBackendDefects, BACKEND_DEFECTS } from "./defects/index.js";
 import { correctInputRules, type InputRules } from "./input.js";
+// ---- stream D: durability (import) ----
+import { DURABILITY_DEFECTS, openDurability, type Durability, type DurabilityOptions } from "./durability.js";
+// ---- end stream D ----
 
 export interface BackendOptions {
   /** Bearer token the MCP layer must send. */
@@ -52,6 +55,13 @@ export interface BackendOptions {
    * Needs an `extension` (the evidence namespace); every other path answers 404 there.
    */
   evidenceListen?: { host: string; port: number };
+  // ---- stream D: durability (option) ----
+  /**
+   * The 0.3.0 features durable, inflight and retention (src/backend/durability.ts). When absent, inflight and
+   * retention named in `features` switch on with their defaults; durable needs this option (its data dir).
+   */
+  durability?: DurabilityOptions;
+  // ---- end stream D ----
 }
 
 /** What a backend fault hook is told about the write. */
@@ -95,6 +105,9 @@ export interface RunningBackend {
   /** The run reset (Store.dropRun through the commit path, with the key-record seam in use). */
   dropRun(scope: KeyScope, run: string): ReturnType<Store["dropRun"]>;
   close(): Promise<void>;
+  // ---- stream D: durability (handle) ----
+  durability?: Durability;
+  // ---- end stream D ----
 }
 
 /**
@@ -199,9 +212,10 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   const lookupOn = features.includes("lookup");
   if (lookupOn && !executionRecords) throw new Error("the lookup feature needs the execution-records feature (an operation record names its execution record)");
   applyBackendDefects(options.defects ?? [], ops, features);
+  let executions: ExecutionLog | undefined;
   if (executionRecords) {
     // An observer: told after the ledger, before any observer a backend defect adds.
-    const executions = new ExecutionLog(() => ops.digest);
+    executions = new ExecutionLog(() => ops.digest);
     store.addSink(executions);
     store.evidence = evidenceSource({ executions, lookup: () => ops.lookup, digest: () => ops.digest, lookupOn, principals: principals.map((p) => p.id) });
   }
@@ -209,6 +223,30 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     if (o.role !== "observer") throw new Error(`a backend defect's commit sink must have role "observer" (${o.name})`);
     store.addSink(o);
   }
+  // ---- stream D: durability (open) ----
+  // Opens the journal (replaying it into the store) and puts the key-record seam with the pending, tombstone and fence
+  // states in place. Any of durable, inflight or retention switches it on.
+  const dOptions: DurabilityOptions | undefined = options.durability ?? (features.some((f) => f === "inflight" || f === "retention") ? { features } : undefined);
+  const durable: Durability | undefined = dOptions && dOptions.features.some((f) => f === "durable" || f === "inflight" || f === "retention")
+    ? openDurability(store, {
+      ...dOptions, defects: [...(dOptions.defects ?? []), ...(options.defects ?? [])],
+      // A restart keeps the execution records: the journal tells the log each commit it replays (G2).
+      replayObservers: executions ? [(tx) => executions!.onCommit(tx)] : [],
+    }) : undefined;
+  if (durable) ops.keyRecord = durable.seam;
+  // 0.4.0 integration (found by the known-answer matrix): the durable seam above replaced the keyRecord seam after the
+  // backend defects were applied, so a defect that replaces keyRecord (replay-digest-mismatch) was silently gone under
+  // durable, inflight or retention. It is applied again, over the durable seam. The seam is a class instance under
+  // inflight: its methods are bound into a plain object first, so a defect's spread keeps begin and abort.
+  if (durable) {
+    const keyDefects = (options.defects ?? []).filter((name) => !(DURABILITY_DEFECTS as readonly string[]).includes(name)
+      && BACKEND_DEFECTS.find((d) => d.name === name)?.seams.includes("keyRecord"));
+    if (keyDefects.length) {
+      ops.keyRecord = bindSeam(durable.seam);
+      applyBackendDefects(keyDefects, ops, features);
+    }
+  }
+  // ---- end stream D ----
   store.keyRecords = ops.keyRecord;
   store.runOwner = options.runOwner;
   const faults = options.faults ?? {};
@@ -346,6 +384,10 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         // An execution record serves canonical bytes of the request and the result: every string in them must encode.
         ops.inputRules.checkStrings(body);
       }
+      // ---- stream D: the fence route (settle-by-lookup) ----
+      const dReply = durable?.route(method, url.pathname.split("/").filter(Boolean).map(decodeURIComponent), principal, tag(req.headers[HEADERS.run.toLowerCase()]), body ?? null);
+      if (dReply) return send(dReply.status, dReply.body, dReply.headers);
+      // ---- end stream D ----
       if (!MUTATING.has(method)) {
         const reply = await route(method, url, req, body, undefined, principal);
         return send(reply.status, reply.body, reply.headers);
@@ -447,7 +489,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
             store.refuse(meta, 409, "in_progress");
             throw new ApiError(409, "in_progress", "a request with this Idempotency-Key is still in progress; repeat it later with the same key", { since: found.since });
           }
-          if (found.state === "fenced") throw fenced(found.run);
+          if (found.state === "fenced") throw fenced(found.run, found.by);
           const t = found.tombstone;
           if (t.fingerprintHash !== meta.request.fingerprintHash) {
             store.refuse(meta, 422, "idempotency_key_reused");
@@ -456,13 +498,17 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
           const expired = {
             error: "key_expired", message: "this key's write was applied; its stored answer has expired: read the object",
             execution_id: t.executionId, result_digest: t.resultDigest, committed_at: t.committedAt,
+            // stream D (additive): the objects the write named, when the tombstone keeps them, so the MCP layer can say
+            // which object to read.
+            ...("objects" in t && Array.isArray((t as { objects?: unknown }).objects) ? { objects: (t as { objects: unknown[] }).objects } : {}),
           };
           store.replay(meta, 410, expired, Number(t.executionId.slice(2)));
           send(410, expired, { ...executionHeader(Number(t.executionId.slice(2))), "idempotent-replayed": "true" });
           return true;
         };
-        const fenced = (run: string) => {
+        const fenced = (run: string, by?: "reset" | "lookup") => {
           store.refuse(meta, 409, "key_fenced");
+          if (by === "lookup") return new ApiError(409, "key_fenced", "this Idempotency-Key was closed by a lookup that found no write with it; nothing was applied, and the key cannot be used again");
           return new ApiError(409, "key_fenced", `run ${run} was reset while a request with this Idempotency-Key was in progress; nothing was applied, and the key cannot be used again`);
         };
         const inflight = isInflight(ops.keyRecord) ? ops.keyRecord : undefined;
@@ -600,6 +646,9 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     ...(evidenceUrl ? { evidenceUrl } : {}),
     bootId: store.bootId,
     dropRun: (scope, run) => store.dropRun(scope, run),
+    // ---- stream D: durability (handle) ----
+    durability: durable,
+    // ---- end stream D ----
     close: async () => {
       if (evidenceServer) {
         evidenceServer.closeAllConnections();
@@ -609,6 +658,20 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
         server.closeAllConnections();
         server.close(() => resolve());
       });
+      durable?.close(); // stream D
     },
   };
+}
+
+/** A seam's methods (own and inherited), bound to it, in a plain object a defect can spread without losing any. */
+function bindSeam<T extends object>(seam: T): T {
+  const out: Record<string, unknown> = {};
+  for (let o: object | null = seam; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const name of Object.getOwnPropertyNames(o)) {
+      if (name === "constructor" || name in out) continue;
+      const v = (seam as Record<string, unknown>)[name];
+      out[name] = typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(seam) : v;
+    }
+  }
+  return out as T;
 }

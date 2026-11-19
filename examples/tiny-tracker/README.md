@@ -177,6 +177,8 @@ Defects that need a feature (`requires`). A defect listed here runs only with th
 | Flag | Requirement | Requires | What goes wrong | What the self-test sees |
 |---|---|---|---|---|
 | `lookup-reexecutes` | MWS-ANN-1 | execution-records, lookup | `get_operation` (declared read-only) sends a create with the key when the backend has no record of it, so a lookup writes (fixture property FX-LOOK-2) | MWS-ANN-1: calling the read-only lookup tool changed the state. Detected by fx-check (FX-LOOK-2, with --mcp); writecheck does not observe it yet: the re-executed write creates a new object outside the one MWS-ANN-1 watches. |
+| `in-progress-reported-not-applied` | MWS-RES-2 | inflight | A same-key call while the first is still being applied is reported as not applied (nothing written), though the keyed write is about to apply | the second call's result says `not_applied` while the first call's ticket appears |
+| `settle-miss-reported-not-applied` | MWS-RES-1 | inflight | After a lost backend answer, a lookup with no fence finds no record and reports not applied; the held request lands afterwards | the call reports `not_applied`, then the ticket exists |
 
 Backend defect:
 
@@ -239,7 +241,8 @@ Shared-fixture groundwork ([FIXTURE.md](FIXTURE.md)): `test/surface.test.ts` (th
 
 tiny-tracker is also becoming a shared fixture for write-safety harnesses: a lookup by idempotency key, committed digests you can verify yourself, server-side fault points, and evidence that names the build it came from. The design, the parts built so far and their limits are in [FIXTURE.md](FIXTURE.md), with the larger choices in [docs/decisions](docs/decisions/README.md).
 
-- `--profile 0.1` runs exactly the surface of the published 0.1.0 (its tools, texts and structured results, checked against a transcript of the 0.1.0 tarball). Until 0.2.0 the default build is the same.
+- `--profile 0.1` runs exactly the surface of the published 0.1.0 (its tools, texts and structured results, checked against a transcript of the 0.1.0 tarball). Until 0.2.0 the default build was the same.
+- The default profile turns on each feature a release ships once its gate is met: `execution-records`, `lookup` and `principals` from 0.2.0, and `inflight` and `retention` from 0.3.0 (every key-accepting tool states the retention, 7 days unless `--key-retention` says otherwise; a separate `tiny-tracker server` states its backend's). `durable` stays named, since it needs `--data-dir`.
 - New behaviour is switched on with `--features` (`TRACKER_FEATURES`). A name this version does not build yet stops the process and says which release builds it.
 
 Feedback is welcome: open an issue or a discussion on [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety).

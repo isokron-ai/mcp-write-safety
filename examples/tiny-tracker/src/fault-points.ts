@@ -8,7 +8,7 @@
 // fault does not re-arm when a child restarts.
 
 export const FAULT_PROCESSES = ["mcp", "backend"] as const;
-export const FAULT_POSITIONS = ["before-commit", "after-commit", "after-backend-reply"] as const;
+export const FAULT_POSITIONS = ["before-commit", "after-commit", "after-backend-reply", "after-effect-before-key"] as const;
 export const FAULT_ACTIONS = ["drop", "close", "crash", "delay", "error"] as const;
 
 export type FaultProcess = (typeof FAULT_PROCESSES)[number];
@@ -26,6 +26,10 @@ export type FaultAction = (typeof FAULT_ACTIONS)[number];
  *   backend before-commit  after the pending record, before the section: nothing validated or written (delay fits here);
  *   backend after-commit   after the section (journalled, applied, in the ledger), before the reply: unanswered;
  *   mcp after-backend-reply  in the MCP process, after the backend's reply arrived, before the MCP answer.
+ *   backend after-effect-before-key  inside the section, keyed writes only: the write is journalled and applied, and its
+ *             key record is not yet kept (G2 fold-in 11). The correct durable build keeps the key record in the
+ *             commit line, so it is already durable there; under key-record-after-effect (or key-record-not-durable)
+ *             it is not, and the process dies with the effect kept and the key lost.
  */
 export const COMMIT_STEPS = ["pending", "validate", "journal", "apply", "ledger", "reply"] as const;
 
@@ -64,6 +68,7 @@ export const FAULT_POINTS: readonly FaultPoint[] = [
   point("backend", "after-commit", "crash", "0.3.0", "The backend exits after the commit, before it answers: the MCP layer sees a reset connection."),
   point("backend", "after-commit", "error", "0.3.0", "The backend commits, then answers 500: an indeterminate answer."),
   point("backend", "after-commit", "drop", "0.3.0", "The backend commits and never answers (capped hold)."),
+  point("backend", "after-effect-before-key", "crash", "0.3.0", "Keyed writes, with durable: the backend exits after the write is journalled and applied, before its key record is kept apart from it. The correct build keeps it in the commit line, so the retry replays; under key-record-after-effect the retry applies a second time. Needs --supervise."),
 ];
 
 // ---- stream B ----
@@ -71,7 +76,13 @@ export const FAULT_POINTS: readonly FaultPoint[] = [
  * The points this version can arm (on the control listener, or at start once stream E's --fault lands). Each needs an
  * action in src/fixture/faults.ts (FAULT_ACTIONS). Stream E appends the 0.3.0 points.
  */
-export const BUILT_FAULT_POINTS: readonly string[] = ["mcp/after-backend-reply/drop"];
+export const BUILT_FAULT_POINTS: readonly string[] = [
+  "mcp/after-backend-reply/drop",
+  // ---- 0.3.0 integration (stream E): the crash points, under `tiny-tracker all --supervise` only (CMP-63) ----
+  "backend/before-commit/crash", "backend/after-commit/crash", "mcp/after-backend-reply/crash",
+  // ---- G2 fold-in 11: the point between the effect and the key record, so key-record-after-effect shows from outside ----
+  "backend/after-effect-before-key/crash",
+];
 // ---- end stream B ----
 
 export function faultPoint(id: string): FaultPoint | undefined {
@@ -98,7 +109,7 @@ export const FAULT_DEMOS: Record<string, { since: string; needsOneOf: string[]; 
   "crash-between-effect-and-record": {
     since: "0.3.0",
     needsOneOf: ["defect:key-record-after-effect", "variant:key-store-honest"],
-    note: "The correct durable build writes the effect and the key record in one journal line, so it has no point between them.",
+    note: "Built as the point backend/after-effect-before-key/crash (G2 fold-in 11). The correct durable build writes the effect and the key record in one journal line, so a crash there loses nothing.",
   },
   "power-cut": {
     since: "0.3.0",

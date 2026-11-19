@@ -21,6 +21,8 @@ Options:
   --no-build            do not read GET /build (no expected_build_hash)
   --delay-hours N       a5_delay_hours (default 24)
   --start TEXT          the command line that started the build, recorded as build.start_command (no tokens)
+  --principal ID        the principal the MCP server writes as (adapter_config.principal); needed with more than one
+                        principal and no control listener (the adapter refuses to guess)
 """
 
 import json
@@ -56,12 +58,12 @@ def get_build(backend, token):
 
 
 def parse_args(argv):
-    opts = {"state": "-", "label": None, "fault": None, "build": True, "delay": 24, "start": None}
+    opts = {"state": "-", "label": None, "fault": None, "build": True, "delay": 24, "start": None, "principal": None}
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in ("--state", "--label", "--fault", "--delay-hours", "--start") and i + 1 < len(argv):
-            key = {"--state": "state", "--label": "label", "--fault": "fault", "--delay-hours": "delay", "--start": "start"}[a]
+        if a in ("--state", "--label", "--fault", "--delay-hours", "--start", "--principal") and i + 1 < len(argv):
+            key = {"--state": "state", "--label": "label", "--fault": "fault", "--delay-hours": "delay", "--start": "start", "--principal": "principal"}[a]
             opts[key] = argv[i + 1]
             i += 2
         elif a == "--no-build":
@@ -119,6 +121,8 @@ def config_for(state, opts, env_ok=True):
         adapter_config["token_dir"] = token_dir
     if descriptor:
         adapter_config["expected_build_hash"] = descriptor["build_hash"]
+    if opts.get("principal"):
+        adapter_config["principal"] = opts["principal"]
     return {"adapter": "tiny_tracker", "system_name": label, "a5_delay_hours": int(opts["delay"]), "adapter_config": adapter_config}
 
 

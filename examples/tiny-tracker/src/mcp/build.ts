@@ -11,6 +11,9 @@ import { addComment } from "./tools/comments.js";
 import { bulkUpdateTickets } from "./tools/bulk.js";
 import { getExecution, getOperation } from "./tools/operations.js";
 import { resolveDefects } from "../defects/index.js";
+// ---- stream D ----
+import { applyRetentionStatement } from "./keyed-states.js";
+// ---- end stream D ----
 
 export const CORRECT_TOOLS: ToolDef[] = [
   listProjects, createProject, deleteProject,
@@ -26,13 +29,21 @@ export function correctTools(features: readonly string[] = []): ToolDef[] {
   return [...CORRECT_TOOLS, ...(features.includes("lookup") ? LOOKUP_TOOLS : [])];
 }
 
-export function createBuild(defectNames: string[] = [], features: readonly string[] = []): Build {
+/**
+ * `retentionMs`: the key retention the backend was configured with (--key-retention), stated by every key-accepting
+ * tool; null when it is not known (the tools then say so).
+ */
+export function createBuild(defectNames: string[] = [], features: readonly string[] = [], retentionMs?: number | null): Build {
   const build: Build = {
     tools: new Map(correctTools(features).map((t) => [t.name, { ...t }])),
     validation: { ...correctValidation },
     configRules: { ...correctConfigRules },
     defects: [],
   };
+  // ---- stream D: the stated key retention (feature retention) ----
+  // G2 fold-in 4: the configured retention, not always the default.
+  applyRetentionStatement(build, features, retentionMs);
+  // ---- end stream D ----
   const defects = resolveDefects(defectNames, features);
   // Replacing defects first, wrapping ones after, so that none hides another.
   for (const defect of [...defects.filter((d) => !d.wraps), ...defects.filter((d) => d.wraps)]) {

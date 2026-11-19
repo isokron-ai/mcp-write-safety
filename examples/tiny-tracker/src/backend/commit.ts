@@ -311,7 +311,24 @@ export interface JournalCommitLine {
   checksum: string;
 }
 
-export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine;
+/**
+ * Additive (0.3.0, settle-by-lookup, review B9): a key a lookup closed because it found no record of it. No pending
+ * line or reset made it, so it is not a `fence` line. At load it restores { state: "fenced", by: "lookup" }; like every
+ * fence it never expires. Written before the lookup answers, so a late original cannot land after a restart.
+ */
+export interface JournalLookupFenceLine {
+  jseq: number;
+  line: "lookup-fence";
+  principal: string;
+  key: string;
+  /** The lookup caller's run tag, if any. */
+  run: string | null;
+  /** Record clock. */
+  fenced_at: string;
+  checksum: string;
+}
+
+export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine | JournalLookupFenceLine;
 
 export class CommitSinkError extends Error {
   constructor(readonly sink: string, cause: unknown) {

@@ -123,7 +123,13 @@ Adapter config keys (the config's adapter_config object):
                        (?principal=<id>), needed when more than one is
                        configured. Default: the principal the adapter's run
                        was allocated for; without a control listener, the
-                       first principal the evidence namespace lists.
+                       only principal the evidence namespace lists. With
+                       more than one principal and none recorded the
+                       adapter refuses (PrincipalUnknown) rather than
+                       guess: TRACKER_BACKEND_TOKEN may be any of them.
+                       initialize records the principal it settled on here,
+                       so the driver's A5 plant (which keeps this config)
+                       carries it to the delayed leg.
   expected_build_hash  Optional: the build_hash the run must be against;
                        initialize records whether GET /build matches.
   build                Informational: what was started, recorded with the
@@ -529,6 +535,26 @@ def ledger_entries(served_json):
     return None
 
 
+class PrincipalUnknown(RuntimeError):
+    """More than one principal is configured and the adapter has none recorded: it does not guess."""
+
+
+def only_principal(body):
+    """The principal a 400 principal_required answer leaves no doubt about (exactly one listed), else None."""
+    listed = body.get("principals") if isinstance(body, dict) else None
+    if isinstance(listed, list) and len(listed) == 1 and isinstance(listed[0], str):
+        return listed[0]
+    return None
+
+
+def refuse_to_guess(body, where):
+    listed = body.get("principals") if isinstance(body, dict) else None
+    return PrincipalUnknown(
+        "%s: the backend lists %s principals (%s) and this adapter has none recorded; set adapter_config.principal "
+        "(harness/adapter_config.py --principal ID) to the principal the MCP server writes as. Not guessing: the "
+        "wrong principal reads an applied write as missing." % (where, len(listed or []), ", ".join(map(str, listed or []))))
+
+
 class Adapter(SystemAdapter):
     """The tiny-tracker 0.2.0 adapter. See the module docstring."""
 
@@ -553,10 +579,31 @@ class Adapter(SystemAdapter):
         self.principal = c.get("principal")
 
     def _ev(self, path):
-        """GET on the evidence namespace, naming the principal when one is set (INTERFACES §1.4)."""
-        if self.principal:
-            path += ("&" if "?" in path else "?") + "principal=" + quote(self.principal, safe="")
-        return self.evidence.call("GET", path)
+        """GET on the evidence namespace, naming the principal when one is set (INTERFACES §1.4).
+
+        The principal comes from the config (the delayed leg's plant carries the one initialize settled on). Without
+        one, a 400 principal_required that lists exactly one principal is answered by naming it and the read is
+        repeated once; with more than one listed the adapter raises PrincipalUnknown (G2 fold-in 6): the MCP server
+        may write as any of them, and a read under the wrong one reports an applied write as missing.
+        """
+        def call(p):
+            if self.principal:
+                p += ("&" if "?" in p else "?") + "principal=" + quote(self.principal, safe="")
+            return self.evidence.call("GET", p)
+        served, raw = call(path)
+        body = served.get("body_json") if isinstance(served.get("body_json"), dict) else {}
+        if not self.principal and served.get("http_status") == 400 and body.get("error") == "principal_required":
+            only = only_principal(body)
+            if only is None:
+                raise refuse_to_guess(body, path)
+            self._settle_principal(only)
+            served, raw = call(path)
+        return served, raw
+
+    def _settle_principal(self, principal):
+        """Records the principal, in the config too: the driver's A5 plant keeps this config for the delayed leg."""
+        self.principal = principal
+        self.config["principal"] = principal
 
     def _args(self, session_id, operation_key, mismatched):
         template = dict(self.config["args_template"])
@@ -585,12 +632,17 @@ class Adapter(SystemAdapter):
             if run.get("http_status") == 201 and isinstance(run.get("body_json"), dict):
                 self.run_id = run["body_json"].get("run_id")
                 if not self.principal and isinstance(run["body_json"].get("principal"), str):
-                    self.principal = run["body_json"]["principal"]
+                    self._settle_principal(run["body_json"]["principal"])
         if not self.principal:
             probe, _ = self.evidence.call("GET", "/executions/X-0")
             body = probe.get("body_json") if isinstance(probe.get("body_json"), dict) else {}
-            if probe.get("http_status") == 400 and body.get("error") == "principal_required" and body.get("principals"):
-                self.principal = body["principals"][0]
+            if probe.get("http_status") == 400 and body.get("error") == "principal_required":
+                only = only_principal(body)
+                if only is None:
+                    raise refuse_to_guess(body, "initialize")
+                self._settle_principal(only)
+        elif self.config.get("principal") != self.principal:
+            self.config["principal"] = self.principal
         evidence["evidence_principal"] = self.principal
         init_body = evidence["initialize"]["body"] or {}
         result = init_body.get("result") or {}

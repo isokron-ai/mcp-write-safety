@@ -6,13 +6,15 @@
 // gains a feature. `default` is what runs when no profile is named; from 0.2.0
 // it turns on the features each release ships once they meet that release's
 // gate. In 0.2.0 that is execution-records, lookup and principals: the 0.1
-// surface plus the two read-only lookup tools (test/surface.test.ts).
+// surface plus the two read-only lookup tools. In 0.3.0 inflight and
+// retention join them; durable stays named, since it needs --data-dir
+// (test/surface.test.ts).
 //
 // A feature is named with --features or TRACKER_FEATURES (comma-separated).
 // An unknown name, or a name for a feature this version does not build yet,
 // stops the process with exit 2, like every other setting.
 
-export const PACKAGE_VERSION = "0.2.0";
+export const PACKAGE_VERSION = "0.3.0";
 
 export const PROFILES = ["0.1", "default"] as const;
 export type ProfileName = (typeof PROFILES)[number];
@@ -45,14 +47,14 @@ export const FEATURES = [
     summary: "An append-only execution ledger below every MCP-layer defect, with attribution from request _meta: every write attempt, fault arming and firing, run allocation and run reset; GET /ledger and the export (evidence token). Needs evidence and strict-input." },
   { name: "faults", since: "0.2.0", built: true, layer: "fixture",
     summary: "Server-side fault points, armed through the control listener; this version arms mcp/after-backend-reply/drop. Needs the ledger and --fixture-control." },
-  { name: "durable", since: "0.3.0", built: false, layer: "core",
+  { name: "durable", since: "0.3.0", built: true, layer: "core",
     summary: "A JSONL journal of committed post-state in --data-dir, so data and key records survive a restart." },
-  { name: "inflight", since: "0.3.0", built: false, layer: "core",
+  { name: "inflight", since: "0.3.0", built: true, layer: "core",
     summary: "A pending key record before the effect; a same-key call meanwhile answers in_progress." },
-  { name: "retention", since: "0.3.0", built: false, layer: "core",
+  { name: "retention", since: "0.3.0", built: true, layer: "core",
     summary: "A stated key retention (7 days), with tombstones for expired keys." },
-  { name: "clock", since: "0.3.0", built: false, layer: "fixture",
-    summary: "A fixture clock for retention rehearsals, moved only through the control listener." },
+  { name: "clock", since: "0.3.0", built: true, layer: "fixture",
+    summary: "A fixture clock for retention rehearsals (domain \"fixture\": wall time plus an offset), moved forward only through the control listener (POST /_fixture/clock); needs --fixture-control." },
 ] as const satisfies readonly FeatureInfo[];
 
 export type FeatureName = (typeof FEATURES)[number]["name"];
@@ -65,7 +67,9 @@ export const PROFILE_FEATURES: Record<ProfileName, readonly FeatureName[]> = {
   // 0.2.0 (owner decision 1): the core features 0.2.0 ships. The fixture-layer features (evidence, ledger, faults) stay
   // named, since they need tokens the operator gives, and strict-input stays named so the backend keeps accepting what
   // 0.1.0 accepted unless asked.
-  default: ["execution-records", "lookup", "principals"],
+  // 0.3.0 (owner decision 1, after the G2 gate): inflight and retention, both backend features with no setting of their
+  // own to give. durable stays named: it needs --data-dir. clock is a fixture-layer feature and needs --fixture-control.
+  default: ["execution-records", "lookup", "principals", "inflight", "retention"],
 };
 
 export function featureInfo(name: string): FeatureInfo | undefined {
@@ -100,6 +104,13 @@ export function parseFeatures(raw: string | undefined): FeatureName[] {
  */
 export const VARIANT_TURNS_OFF: ReadonlyArray<{ variant: string; feature: FeatureName; reason: string }> = [
   { variant: "key-store-honest", feature: "lookup", reason: "key-store-honest keeps keys in the MCP server" },
+  // 0.3.0 (stream D): these variants stand for a backend with no idempotency key (CMP-53), so the default lookup is off.
+  { variant: "key-store-durable", feature: "lookup", reason: "key-store-durable keeps keys in the MCP server's own journal" },
+  { variant: "settle-by-client-reference", feature: "lookup", reason: "settle-by-client-reference stands for a backend with no idempotency key" },
+  // 0.3.0 default flip: the same two variants refuse the backend's in-flight key states too (CMP-53), so a default-only
+  // inflight is off with them, as lookup is.
+  { variant: "key-store-durable", feature: "inflight", reason: "key-store-durable keeps keys in the MCP server's own journal" },
+  { variant: "settle-by-client-reference", feature: "inflight", reason: "settle-by-client-reference stands for a backend with no idempotency key" },
 ];
 
 export interface FeatureOff {

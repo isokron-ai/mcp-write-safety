@@ -116,5 +116,87 @@ class ConfigPrinter(unittest.TestCase):
             config.config_for({"backend": "x"}, opts)
 
 
+class EvidencePrincipal(unittest.TestCase):
+    """G2 fold-in 6: the delayed leg reads under the principal initialize settled on; with several and none, refuse."""
+
+    @staticmethod
+    def bare(principal=None, listed=("p-default", "p-second")):
+        a = adapter.Adapter.__new__(adapter.Adapter)
+        a.config = {} if principal is None else {"principal": principal}
+        a.principal = principal
+        seen = []
+
+        class Ev:
+            def call(self, method, path):
+                seen.append(path)
+                if "principal=" not in path:
+                    return {"http_status": 400, "body_json": {"error": "principal_required", "principals": list(listed)}}, b""
+                return {"http_status": 200, "body_json": {"ok": True}}, b""
+        a.evidence = Ev()
+        return a, seen
+
+    def test_with_several_principals_and_none_recorded_the_adapter_refuses_rather_than_guess(self):
+        a, seen = self.bare()
+        with self.assertRaises(adapter.PrincipalUnknown) as e:
+            a._ev("/operations/K-1")
+        self.assertIn("p-default, p-second", str(e.exception))
+        self.assertIsNone(a.principal, "nothing guessed")
+        self.assertEqual(seen, ["/operations/K-1"], "no read under a guessed principal")
+
+    def test_a_single_listed_principal_is_named_and_recorded_in_the_config(self):
+        a, seen = self.bare(listed=("p-only",))
+        served, _ = a._ev("/operations/K-1")
+        self.assertEqual(served["http_status"], 200)
+        self.assertEqual(seen, ["/operations/K-1", "/operations/K-1?principal=p-only"])
+        self.assertEqual(a.config["principal"], "p-only")
+
+    def test_the_principal_in_the_config_is_used_from_the_first_read(self):
+        # The plant carries adapter_config; a fresh adapter on it reads under the recorded principal, here not the
+        # first listed one (TRACKER_BACKEND_TOKEN belonged to the second).
+        a, seen = self.bare(principal="p-second")
+        a._ev("/executions/X-1")
+        self.assertEqual(seen, ["/executions/X-1?principal=p-second"])
+
+    def test_initialize_records_the_run_principal_in_the_config_and_refuses_an_ambiguous_probe(self):
+        class Client:
+            def initialize(self):
+                return {"initialize": {"body": {"result": {}}, "transport": {"http_status": 200}}}
+
+            def request(self, method, params):
+                return {}, {"http_status": 200}, {"result": {"tools": []}}
+
+        class Http:
+            def __init__(self, answers):
+                self.answers, self.base, self.token = answers, "http://127.0.0.1:0", "t"
+
+            def call(self, method, path, body=None):
+                return self.answers(method, path), b""
+
+        def ev(method, path):
+            if path == "/build":
+                return {"http_status": 200, "body_json": {}}
+            return {"http_status": 400, "body_json": {"error": "principal_required", "principals": ["p-default", "p-second"]}}
+
+        cfg = {"mcp_url": "http://127.0.0.1:0/mcp", "backend_url": "http://127.0.0.1:0"}
+        a = adapter.Adapter.__new__(adapter.Adapter)
+        a.config, a.principal, a.run_id, a.endpoint, a.fault_mode, a.tool_name = cfg, None, None, cfg["mcp_url"], "client", "create_ticket"
+        a.client, a.evidence = Client(), Http(ev)
+        a.control = Http(lambda m, p: {"http_status": 201, "body_json": {"run_id": "run-1", "principal": "p-second"}})
+        _, summary = a.initialize()
+        self.assertEqual(summary["evidence_principal"], "p-second")
+        self.assertEqual(cfg["principal"], "p-second", "the plant (this config) carries it to the delayed leg")
+        b = adapter.Adapter.__new__(adapter.Adapter)
+        b.config, b.principal, b.run_id, b.endpoint, b.fault_mode, b.tool_name = {}, None, None, cfg["mcp_url"], "client", "create_ticket"
+        b.client, b.evidence, b.control = Client(), Http(ev), None
+        with self.assertRaises(adapter.PrincipalUnknown):
+            b.initialize()
+
+    def test_adapter_config_takes_a_principal(self):
+        state = {"mcp": "http://127.0.0.1:1/mcp", "backend": "http://127.0.0.1:2"}
+        opts = dict(config.parse_args(["--no-build", "--principal", "p-second"]))
+        self.assertEqual(config.config_for(state, opts)["adapter_config"]["principal"], "p-second")
+        self.assertNotIn("principal", config.config_for(state, config.parse_args(["--no-build"]))["adapter_config"])
+
+
 if __name__ == "__main__":
     unittest.main()

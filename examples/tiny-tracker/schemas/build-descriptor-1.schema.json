@@ -205,6 +205,80 @@
       ],
       "additionalProperties": false
     },
+    "supervision": {
+      "description": "Present only under `tiny-tracker all --supervise` (0.3.0): the supervisor's boot id, which child serves this descriptor, and each child's boot id and restart count, read live from the supervisor's state folder. Not part of build_hash; it is part of descriptor_hash.",
+      "type": "object",
+      "required": [
+        "supervisor_boot_id",
+        "role",
+        "children"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "supervisor_boot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "role": {
+          "enum": [
+            "backend",
+            "mcp"
+          ]
+        },
+        "children": {
+          "type": "object",
+          "required": [
+            "backend",
+            "mcp"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "backend": {
+              "type": "object",
+              "required": [
+                "boot_id",
+                "restart_count"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "boot_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{16}$"
+                },
+                "restart_count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "mcp": {
+              "type": "object",
+              "required": [
+                "boot_id",
+                "restart_count"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "boot_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{16}$"
+                },
+                "restart_count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "journal": {
       "type": "object",
       "properties": {

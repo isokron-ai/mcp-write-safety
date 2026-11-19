@@ -120,9 +120,20 @@ const SAID_NO: Record<string, string[]> = {
   'conflict-as-generic-error': ['MWS-CONC-6 ticket:set_labels'],
 };
 
-test('the expectations cover every tiny-tracker defect', { skip }, async () => {
-  const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string }[] };
-  assert.deepEqual(DEFECTS.map((d) => d.name).sort(), Object.keys(EXPECT).sort());
+test('the expectations cover every tiny-tracker defect the default profile runs', { skip }, async () => {
+  const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string; requires?: readonly string[] }[] };
+  // Coverage gap, stated (G2 fold-in 12): the two inflight-gated MCP-layer defects below have NO expectation row, so
+  // writecheck's per-defect runs say nothing about them; tiny-tracker's own tests show them (test/keyed.test.ts). From
+  // tiny-tracker 0.3.0 the default profile turns inflight on, so they run here, and `--defect all` below includes them.
+  // Listed for 0.4.0: expectation rows for both, measured with a same-key call while the first is in flight.
+  const NO_ROW_UNTIL_040 = ['in-progress-reported-not-applied', 'settle-miss-reported-not-applied'];
+  const profile = (await import(join(dir!, 'dist', 'src', 'profile.js'))) as { PROFILE_FEATURES: Record<string, readonly string[]> };
+  const runs = DEFECTS.filter((d) => (d.requires ?? []).every((f) => profile.PROFILE_FEATURES['default']!.includes(f)));
+  assert.deepEqual(runs.filter((d) => !NO_ROW_UNTIL_040.includes(d.name)).map((d) => d.name).sort(), Object.keys(EXPECT).sort());
+  // Every defect runs under the default profile, and the gap is exactly the named list: a new defect fails here until
+  // it has a row or is named.
+  assert.deepEqual(DEFECTS.filter((d) => !runs.includes(d)).map((d) => d.name), [], 'every MCP-layer defect runs under the default profile');
+  assert.deepEqual(runs.filter((d) => !Object.keys(EXPECT).includes(d.name)).map((d) => d.name).sort(), NO_ROW_UNTIL_040.sort());
 });
 
 for (const protocol of [undefined, '2025-11-25']) {
