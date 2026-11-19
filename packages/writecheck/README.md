@@ -107,7 +107,7 @@ MWS-CONC-6   SHOULD held
 MWS-TGT-1    MUST   not tested, held, not applicable
 MWS-TGT-2    MUST   held, not applicable
 MWS-TGT-3    MUST   held, not applicable
-MWS-RES-1    MUST   held, not tested
+MWS-RES-1    MUST   held
 MWS-RES-2    MUST   held, not tested
 MWS-RES-3    MUST   held, not tested, not applicable
 MWS-RES-4    SHOULD held
