@@ -1,6 +1,6 @@
 {
   "name": "@mcp-write-safety/tiny-tracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Teaching MCP server for the MCP Write-Safety Requirements: a correct build and a build with one named defect per requirement.",
   "keywords": [
     "mcp",
@@ -30,14 +30,30 @@
     "node": ">=22.12"
   },
   "bin": {
-    "tiny-tracker": "dist/src/cli.js"
+    "tiny-tracker": "dist/src/cli.js",
+    "fx-check": "dist/src/fx-check.js"
   },
   "files": [
     "dist/src",
     "writecheck.yaml",
     "README.md",
+    "FIXTURE.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "schemas",
+    "vectors",
+    "verify/python/tt_digest.py",
+    "verify/python/check_schemas.py",
+    "docs/decisions",
+    "verify/python/tt_recount.py",
+    "harness/adapters/__init__.py",
+    "harness/adapters/tiny_tracker.py",
+    "harness/adapter_config.py",
+    "harness/selfcheck.py",
+    "harness/contract.json",
+    "expected/builds-0.2.0.json",
+    "expected/0.2.0.json",
+    "expected/0.2.0.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

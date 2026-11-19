@@ -1,0 +1,56 @@
+{
+  "descriptor": "build-descriptor/1",
+  "package": {
+    "name": "@mcp-write-safety/tiny-tracker",
+    "version": "0.1.0"
+  },
+  "fixture_api": "fixture-api/1",
+  "profile": "default",
+  "features": [
+    "evidence",
+    "execution-records",
+    "lookup",
+    "principals"
+  ],
+  "defects": {
+    "mcp": [],
+    "backend": []
+  },
+  "variants": [],
+  "control": {
+    "enabled": false
+  },
+  "config": {
+    "read_only": false,
+    "tools": null,
+    "deny_tools": null,
+    "default_project": "inbox",
+    "key_journal": false
+  },
+  "durability": {
+    "mode": "memory",
+    "journal_format": null
+  },
+  "contract": {
+    "repo": "zambodotdev/lost-response-test-contract",
+    "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d"
+  },
+  "process": {
+    "layout": "all",
+    "boot_id": "df45c3835b0cf85e",
+    "restart_count": 0,
+    "started_at": "2026-11-17T06:30:54.645Z"
+  },
+  "journal": {
+    "head": null
+  },
+  "faults": {
+    "armed": []
+  },
+  "clock": {
+    "domain": "wall",
+    "offset_ms": 0
+  },
+  "build_hash": "bf36346f902ed0c29eeba5d0a4d6d890400f8027d0fe535c345ce78fcc107940",
+  "descriptor_hash": "d5346432a77269ef182de5ffeb923e162c5ab1631a4ffa214b92980ad1206193"
+}

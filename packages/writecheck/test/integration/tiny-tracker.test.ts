@@ -101,6 +101,12 @@ const EXPECT: Record<string, string[]> = {
   'read-only-by-annotation': ['MWS-CFG-3'],
   'unknown-tools-ignored': ['MWS-CFG-4'],
   'comment-marked-read-only': ['MWS-ANN-1'],
+  // tiny-tracker 0.2.0 (default profile, feature lookup): get_operation is annotated readOnlyHint: true and, on a key
+  // with no record, creates a ticket (its requirement is MWS-ANN-1, which tiny-tracker's own self-test shows). The
+  // manifest calls get_operation on a scratch ticket with a key no write used (calls.get_operation), twice: the ticket
+  // it creates is a new object in the default project, not the object the check watches, and MWS-ANN-1's method
+  // watches only that object (spec 8.2, rule 8). So the record is `not observed`, never `violated`, under this method.
+  'lookup-reexecutes': [],
   'add-label-replaces-list': ['MWS-ANN-2', 'MWS-ANN-5'],
   'create-marked-idempotent': ['MWS-ANN-3'],
   'missing-annotations': ['MWS-ANN-4'],

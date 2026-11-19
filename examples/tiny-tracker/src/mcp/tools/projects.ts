@@ -34,7 +34,9 @@ export const createProject: ToolDef = {
       return fail("This idempotency_key was already used with different arguments; nothing was written. "
         + "If you are retrying the same create, send exactly the same arguments as the first call.", { error: "idempotency_key_reused" }, notApplied(w, "idempotency_key_reused", { argument: "/idempotency_key" }));
     }
-    if (res.status === 409) {
+    // Only the backend's duplicate check means "already exists"; any other 409 (in_progress, key_fenced, run_reset) is
+    // answered by its own code through fromBackend (G1 review, fold-in 3).
+    if (res.status === 409 && res.body?.error === "exists") {
       return fail(`Project ${key} already exists; nothing was changed. Choose another key.`, { exists: true, key }, notApplied(w, "already_exists", { argument: "/key" }));
     }
     if (!res.ok) return fromBackend(res, `project ${key}`, w);

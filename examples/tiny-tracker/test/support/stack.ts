@@ -132,6 +132,8 @@ export interface StackOptions {
   backendDefects?: string[];
   env?: Record<string, string>;
   era?: Era;
+  /** Features for both layers (a defect with a `requires` list runs with them on). */
+  features?: string[];
 }
 
 export async function connectClient(url: string, era: Era): Promise<Mcp> {
@@ -146,13 +148,13 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
   const token = `mwscanary-${randomBytes(12).toString("hex")}`;
   const run = randomBytes(3).toString("hex");
   const era = options.era ?? "2026-07-28";
-  const backend = await startBackend({ token, defects: options.backendDefects });
+  const backend = await startBackend({ token, defects: options.backendDefects, features: options.features });
   const gate = await startGate(backend.url);
   let server: StartedServer;
   try {
     server = await startServer({
       env: { TRACKER_BACKEND_URL: gate.url, TRACKER_BACKEND_TOKEN: token, ...options.env },
-      defects: options.defects,
+      defects: options.defects, features: options.features,
     });
   } catch (e) {
     await gate.close();

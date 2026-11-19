@@ -9,6 +9,7 @@ import { listTickets, getTicket, createTicket, updateTicket, replaceTicket, dele
 import { addLabel, removeLabel, setLabels } from "./tools/labels.js";
 import { addComment } from "./tools/comments.js";
 import { bulkUpdateTickets } from "./tools/bulk.js";
+import { getExecution, getOperation } from "./tools/operations.js";
 import { resolveDefects } from "../defects/index.js";
 
 export const CORRECT_TOOLS: ToolDef[] = [
@@ -17,14 +18,22 @@ export const CORRECT_TOOLS: ToolDef[] = [
   addComment, addLabel, removeLabel, setLabels,
 ];
 
-export function createBuild(defectNames: string[] = []): Build {
+/** The read-only lookup tools, listed only with the lookup feature (0.2.0), so the 0.1 surface keeps its 16 tools. */
+export const LOOKUP_TOOLS: ToolDef[] = [getOperation, getExecution];
+
+/** The correct tools for a feature set. */
+export function correctTools(features: readonly string[] = []): ToolDef[] {
+  return [...CORRECT_TOOLS, ...(features.includes("lookup") ? LOOKUP_TOOLS : [])];
+}
+
+export function createBuild(defectNames: string[] = [], features: readonly string[] = []): Build {
   const build: Build = {
-    tools: new Map(CORRECT_TOOLS.map((t) => [t.name, { ...t }])),
+    tools: new Map(correctTools(features).map((t) => [t.name, { ...t }])),
     validation: { ...correctValidation },
     configRules: { ...correctConfigRules },
     defects: [],
   };
-  const defects = resolveDefects(defectNames);
+  const defects = resolveDefects(defectNames, features);
   // Replacing defects first, wrapping ones after, so that none hides another.
   for (const defect of [...defects.filter((d) => !d.wraps), ...defects.filter((d) => d.wraps)]) {
     defect.apply(build);
