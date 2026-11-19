@@ -179,7 +179,7 @@ test('a refusal is classified on the answer as received unless refusals: true is
 const INIT = `session:
   init:
     - { tool: connect, args: { host: "{{env.DB_HOST}}", user: "{{env.DB_USER}}", password: "{{env.DB_PASSWORD}}", port: 5432 } }
-    - { tool: use_db, args: { name: "postgres://u:hunter2-secret@db/x", schema: "{{env.DB_SCHEMA}}" }, read_only: true }`;
+    - { tool: use_db, args: { name: "postgres://db.test/x?sslmode=require", schema: "{{env.DB_SCHEMA}}" }, read_only: true }`;
 
 test('session.init: loads with {{env.NAME}} arguments; anything else is refused', () => {
   const m = load(base({ top: INIT }));
@@ -200,7 +200,7 @@ test('session.init: loads with {{env.NAME}} arguments; anything else is refused'
     ['session: { init: [ { tool: connect, args: { password: hunter2 } } ] }', /password: a value under a secret-like name is given as \{\{env\.NAME\}\}/],
     ['session: { init: [ { tool: connect, args: { opts: { api_key: "k-{{env.K}}" } } } ] }', /opts\.api_key: a value under a secret-like name/],
     ['session: { init: [ { tool: connect, args: { dsn: "postgres://u:p@h/db" } } ] }', /dsn: a value under a secret-like name/],
-    ['session: { init: [ { tool: connect, args: { token: 12345 } } ] }', /token: a value under a secret-like name/],
+    ['session: { init: [ { tool: connect, args: { password: 12345 } } ] }', /password: a value under a secret-like name/],
   ];
   for (const [t, why] of bad) assert.throws(() => load(base({ top: t })), why, t);
 });
@@ -216,28 +216,57 @@ test('session.init: env values are secrets; from three characters only under a s
   assert.equal(red.text('login to db.internal.test as sa with pw1, schema tst'), 'login to [REDACTED] as sa with [REDACTED], schema tst');
 });
 
-test('secret-like names: name parts, camelCase and compounds, case ignored', () => {
-  for (const n of ['password', 'PASSWORD', 'passwd2', 'dbPassword', 'accessToken', 'authToken', 'clientSecret', 'privateKey', 'api_key', 'x-api-key', 'apiKey', 'AUTH', 'Authorization', 'credentials', 'awsCreds', 'session_cookie', 'dsn', 'DATABASE_URL', 'connectionString', 'conn_str', 'pwd', '--db-password', 'key'])
-    assert.ok(secretLikeName(n), n);
-  for (const n of ['host', 'user', 'username', 'port', 'database', 'schema', 'monkey', 'keyboard', 'author', 'name', 'timeout'])
-    assert.ok(!secretLikeName(n), n);
+// Every example from the reviews of PR #16: names that are secret-like, and names that are not.
+const SECRET_NAMES = ['password', 'PASSWORD', 'passwd', 'passwd2', 'passphrase', 'pass', 'db_pass', 'dbPassword', 'pwd', 'secret', 'clientSecret', 'client_secret', 'token', 'accessToken', 'accesstoken', 'authToken', 'refresh_token', 'privateKey', 'privatekey', 'api_key', 'apiKey', 'apikey', 'x-api-key', 'access_key', 'secret_key', 'client_key', 'signing_key', 'encryption_key', 'master_key', 'key', 'auth', 'Authorization', 'bearer', 'credentials', 'awsCreds', 'session_cookie', 'dsn', 'connectionString', 'connection_string', 'conn_str', '--db-password'];
+const PLAIN_NAMES = ['bypass', 'passive', 'compass', 'passthrough', 'passport', 'password_policy', 'max_tokens', 'primary_key', 'partition_key', 'sort_key', 'cache_key', 'foreign_key', 'key_field', 'keyPath', 'auth_mode', 'auth_type', 'token_type', 'oauth_scope', 'tokenizer', 'cookie_name', 'secretName', 'token_url', 'base_url', 'DATABASE_URL', 'url', 'uri', 'host', 'user', 'username', 'port', 'database', 'schema', 'monkey', 'keyboard', 'author', 'name', 'timeout'];
+
+test('secret-like names: whole name parts, camelCase and compounds, descriptors and key qualifiers', () => {
+  for (const n of SECRET_NAMES) assert.equal(secretLikeName(n), true, `${n} is secret-like`);
+  for (const n of PLAIN_NAMES) assert.equal(secretLikeName(n), false, `${n} is not secret-like`);
 });
 
-test('session.init: a literal under a secret-like name is refused in objects and in argument lists', () => {
-  const bad: [string, RegExp][] = [
+const initWith = (args: string) => load(base({ top: `session: { init: [ { tool: connect, args: ${args} } ] }` }));
+
+test('session.init literals: refused where they carry a credential, accepted elsewhere (table from the review)', () => {
+  const refused: [string, RegExp][] = [
     ['{ accessToken: abc }', /args\.accessToken: a value under a secret-like name/],
     ['{ conn: { dbPassword: hunter2 } }', /args\.conn\.dbPassword/],
     ['{ PASSWD2: hunter2 }', /args\.PASSWD2/],
+    ['{ password: 1234 }', /args\.password/],
+    ['{ pwd: 99 }', /args\.pwd/],
+    ['{ api_key: k-1 }', /args\.api_key/],
+    ['{ signing_key: k }', /args\.signing_key/],
+    ['{ key: k }', /args\.key/],
+    ['{ tokens: ["a", "{{env.T}}"] }', /args\.tokens\[0\]/],
     ['{ argv: ["--password", "lit"] }', /args\.argv\[1\] \(after --password\)/],
     ['{ argv: ["--host", "h", "--authToken", "lit"] }', /args\.argv\[3\] \(after --authToken\)/],
+    ['{ argv: ["-p", "hunter2"] }', /args\.argv\[1\] \(after -p\)/],
     ['{ argv: ["--client-secret=lit"] }', /args\.argv\[0\]/],
     ['{ argv: ["PASSWORD=lit"] }', /args\.argv\[0\]/],
     ['{ list: [ { privateKey: lit } ] }', /args\.list\[0\]\.privateKey/],
+    ['{ headers: [ { name: Authorization, value: "Bearer abc" } ] }', /args\.headers\[0\]\.value/],
+    ['{ headers: [ { key: x-api-key, value: abc } ] }', /args\.headers\[0\]\.value/],
+    ['{ url: "postgres://u:p@db/x" }', /args\.url: a literal URL that carries a credential/],
+    ['{ endpoint: "https://h/api?access_token=abc" }', /args\.endpoint: a literal URL/],
+    ['{ argv: ["--url", "https://h/x?api_key=abc"] }', /args\.argv\[1\]: a literal URL/],
+    ['{ dsn: "postgres://h/db" }', /args\.dsn: a value under a secret-like name/],
   ];
-  for (const [a, why] of bad) assert.throws(() => load(base({ top: `session: { init: [ { tool: connect, args: ${a} } ] }` })), why, a);
-  const ok = load(base({ top: 'session: { init: [ { tool: connect, args: { argv: ["--host", "h", "--password", "{{env.P}}", "--api-key={{env.K}}", "--verbose"], dbPassword: "{{env.Q}}", user: plain } } ] }' }));
-  assert.deepEqual(ok.session!.init[0]!.secret_env.sort(), ['K', 'P', 'Q']);
-  assert.deepEqual(ok.session!.init[0]!.env.sort(), ['K', 'P', 'Q']);
+  for (const [a, why] of refused) assert.throws(() => initWith(a), why, a);
+  const accepted = [
+    '{ max_tokens: 100 }',
+    '{ token_type: bearer, auth_mode: basic, auth_type: password, oauth_scope: read, cookie_name: sid, secretName: db-creds, password_policy: strict, tokenizer: cl100k }',
+    '{ primary_key: id, partition_key: pk, sort_key: sk, cache_key: c, foreign_key: fk, key_field: id, keyPath: a.b }',
+    '{ bypass: yes, passive: true, compass: n, passthrough: all, passport: x }',
+    '{ url: "https://db.test.internal:5432/app?sslmode=require" }',
+    '{ DATABASE_URL: "postgres://db/x" }',
+    '{ argv: ["-p", "5432", "--host", "h"] }',
+    '{ argv: ["--token-type", "bearer", "--sort-key=sk"] }',
+    '{ headers: [ { name: Accept, value: application/json } ] }',
+    '{ token: 42 }',
+  ];
+  for (const a of accepted) assert.doesNotThrow(() => initWith(a), a);
+  const ok = initWith('{ argv: ["--host", "h", "--password", "{{env.P}}", "--api-key={{env.K}}", "--verbose"], dbPassword: "{{env.Q}}", headers: [ { name: Authorization, value: "{{env.A}}" } ], user: plain }');
+  assert.deepEqual(ok.session!.init[0]!.secret_env.sort(), ['A', 'K', 'P', 'Q']);
 });
 
 const TOOLS = [
@@ -258,12 +287,11 @@ test('plan: session.init is listed (templates as written, credentials in literal
     ],
   );
   assert.equal(getPath(p.session_init![0]!.args, 'password'), '{{env.DB_PASSWORD}}', 'a template is shown as written');
-  assert.equal(getPath(p.session_init![1]!.args, 'name'), 'postgres://u:[REDACTED]@db/x', 'a credential in a literal URL is masked');
+  assert.equal(getPath(p.session_init![1]!.args, 'name'), 'postgres://db.test/x?sslmode=require', 'a literal without a credential is shown as written');
   const text = renderPlan(p, planHash(p));
   assert.match(text, /Session init: on every MCP session/);
   assert.match(text, /- connect .* \(counted as a write\)/);
   assert.match(text, /- use_db .* \(declared read-only, not counted\)/);
-  assert.ok(!text.includes('hunter2-secret'));
   assert.ok(p.warnings.some((w) => /session\.init: connect is not declared read-only/.test(w)));
   // a server's readOnlyHint does not exempt an init call: only the operator's read_only does
   const ro = buildPlan(m, TOOLS.map((t) => ((t as { name: string }).name === 'connect' ? { ...(t as object), annotations: { readOnlyHint: true } } : t)) as never[]);
