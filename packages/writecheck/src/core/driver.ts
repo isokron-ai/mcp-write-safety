@@ -125,8 +125,11 @@ export class Driver {
       const last = differ[differ.length - 1]!;
       const obj = differ.slice(0, -1).reduce((o, i) => setPath(o, this.fields[i]!.path, baseline[i]), cur.obj);
       const r = await this.update(label, this.fields[last]!, baseline[last], { step: this.session.stepId(`reset.${this.res.name}.all`), base: { obj, version: cur.version } });
-      if (r.ok) return (await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase)).settled;
-      // the one write was refused: fall back to one field at a time, so a field the tool refuses can go back through the control
+      // why: only a refusal falls back to one field at a time (so a field the tool refuses can go back through the control). A
+      // success, or an unknown outcome (timed out, transport error, a result that is not complete), is judged by the settled read:
+      // the write may have landed, and sending more writes after it could undo it.
+      const refused = !r.ok && !r.timed_out && r.transport_error === null && (!r.result_type || r.result_type === 'complete');
+      if (!refused) return (await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase)).settled;
       cur = await this.readSettled(label, `reset.${this.res.name}.reread`);
       if (!cur.ok) return false;
     }
@@ -145,7 +148,7 @@ export class Driver {
       // waits, within the settle window, until this field shows its baseline value. The check below covers the last field.
       if (i === this.fields.length - 1) break;
       cur = await this.readSettled(label, `reset.${this.res.name}.${i}.after`, (o) => atBase(o, i));
-      if (!cur.ok) return false;
+      if (!cur.ok || !cur.settled) return false;
     }
     const after = await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase);
     return after.settled;
