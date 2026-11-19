@@ -76,7 +76,7 @@ export async function planCommand(o: { manifest: string; catalog?: string; pairB
   if (!manifest.target.guard) warning = `${warning ? `${warning}; ` : ''}run would refuse: target.guard is missing (a read-only call whose result must match before any write)`;
   // why: a guard the run would refuse is reported here, before anyone confirms the plan (CLI-BUGS item 1).
   if (manifest.target.guard && tools.length) {
-    const gp = guardProblem(manifest.target.guard, tools.find((t) => t.name === manifest.target.guard!.tool) as { annotations?: Record<string, unknown> } | undefined, { writeTools: new Set(declaredWriteTools(manifest, tools).keys()), anyAnnotated: tools.some((t) => !!t.annotations && Object.keys(t.annotations).length > 0), readOnlyTools: readOnlyToolsOf(tools as never) });
+    const gp = guardProblem(manifest.target.guard, tools.find((t) => t.name === manifest.target.guard!.tool) as { annotations?: Record<string, unknown> } | undefined, { writeTools: new Set(declaredWriteTools(manifest, tools).keys()), anyAnnotated: tools.some((t) => !!t.annotations && Object.keys(t.annotations).length > 0), readOnlyTools: readOnlyToolsOf(tools as never), manifest, tools: tools as never });
     if (gp) warning = `${warning ? `${warning}; ` : ''}run would refuse: ${gp}`;
   }
   if (manifest.target.guard && !/^\^/.test(manifest.target.guard.pattern)) o.log('\nnote: target.guard.pattern is not anchored (^…$); it matches anywhere in the value.');
@@ -119,6 +119,10 @@ export async function cleanupCommand(o: { manifest: string; stateDir: string; ru
         onCall: (c) => {
           for (const l of guardLedgers) l.append({ kind: 'guard_call', step: c.step, tool: c.tool, phase: c.phase, basis: c.basis, context: 'cleanup' });
           if (c.basis === 'operator') o.log(`tenant guard: sending the declared call ${c.tool} (${c.phase}); it rests on the operator's declaration and is recorded in the ledger`);
+        },
+        onStateRead: (r) => {
+          for (const l of guardLedgers) l.append({ kind: 'guard_state_read', step: r.step, tool: r.tool, phase: r.phase, what: r.what, context: 'cleanup' });
+          o.log(`tenant guard: reading ${r.what} through ${r.tool} (${r.phase} the declared calls; the tenant check has not matched yet)`);
         },
       });
     for (const r of runs) {
