@@ -672,8 +672,13 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     }
     await session.close();
     await gate?.stop().catch(() => undefined);
-    for (const [ev, h] of handlers) process.off(ev as NodeJS.Signals, h);
-    if (!o.noSignals) for (const st of [process.stdout, process.stderr]) st.off('error', onPipeError);
+    // why: CI flake of review S4 (run 44452412733): after a signal the run ends in an exit with 130. A SIGTERM that comes after this
+    // point, before the process exits, would meet no handler and kill it by the signal (no exit code), so the handlers stay
+    // installed on an interrupted run; a later signal then exits with 130 at once, as onSignal says.
+    if (!interrupted) {
+      for (const [ev, h] of handlers) process.off(ev as NodeJS.Signals, h);
+      if (!o.noSignals) for (const st of [process.stdout, process.stderr]) st.off('error', onPipeError);
+    }
   }
   if (refusal) {
     // A refusal (target, confirmation, guard, usage): no report is written; the ledger says whether anything exists.
