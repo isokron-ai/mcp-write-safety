@@ -272,7 +272,8 @@ export const RELAXED_REQUIRED_IS_SAME_TEST = true;
 /**
  * An argument the test sends, undeclared before in a schema with additionalProperties false and declared (optional) after: the
  * same call. Owner rule A (18 Nov) names it the same test (an added optional returnDocument the common manifest already sends);
- * the review of 19 Nov asked for another test. Kept true pending the owner's call; compare says it under the cell.
+ * the call is unchanged, and whether the before server accepted it shows in the before verdicts. Decided under rule A (owner
+ * decision, 18 Nov 2026); compare says it under the cell.
  */
 export const UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST = true;
 
@@ -311,9 +312,8 @@ function cmpTool(b: ToolShape, a: ToolShape, tool: string, tol: string[], bad: s
   for (const n of keysOf(a.p)) {
     if (hasKey(b.p, n)) continue;
     if (a.r.includes(n)) bad.push(`${tool}.${n}: ${probed ? 'a new required argument' : 'an argument the test sends is now declared and required'}`);
-    // why: review F4 asked for this to be another test; the owner's rule A names this very case (an optional returnDocument the
-    // common manifest already sends, added by the fix) as the same test. The call is the same; whether the before build refused it
-    // shows in its verdicts. Kept as the owner decided, said under the cell, and switchable (UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST).
+    // why: rule A (owner decision, 18 Nov 2026) names this case (an optional returnDocument the common manifest already sends,
+    // added by the fix) the same test: the call is the same; whether the before build refused it shows in its verdicts.
     else if (!probed && (a.x || b.x)) (UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST ? tol.push(`${tool}.${n}: an optional argument added (the test sends it); the before schema allowed no undeclared argument: check that the before build accepted the call`) : bad.push(`${tool}.${n}: an argument the test sends is now declared, in a schema that allows no undeclared argument`));
     else tol.push(`${tool}.${n}: an optional argument added${probed ? '' : ' (the test sends it)'}`);
   }
