@@ -626,3 +626,21 @@ test('review F5: recheck signs its copy only for an original signed by a pinned 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('review F5 with p08: recheck --pubkey reads the original through the strict parser (a repeated member or number text not in RFC 8785 form is refused, exit 3)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const d = doc([rec('MWS-CONC-1', 'held')]);
+    (d['evidence'] as Record<string, unknown>)['signature'] = signResults(d, privateKey);
+    const text = JSON.stringify(d, null, 2);
+    writeFileSync(join(dir, 'results.json'), text);
+    assert.equal(originalSignature(dir, { key: privateKey, pubkey: publicKey })!.status, 'valid');
+    for (const bad of [text.replace('{\n', '{\n  "format": "mws-results/1",\n'), text.replace('"run": {', '"n": 1.0e0,\n  "run": {')]) {
+      writeFileSync(join(dir, 'results.json'), bad);
+      assert.throws(() => originalSignature(dir, { key: privateKey, pubkey: publicKey }), (e: unknown) => e instanceof WritecheckError && e.code === 3);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
