@@ -125,6 +125,13 @@ export function compareCommand(o: { before: string; after: string; out: string; 
   for (const w of doc.warnings) o.log(`warning: ${w}`);
   for (const label of ['regressed', 'fixed'] as const) for (const c of doc.cells.filter((x) => x.label === label)) o.log(`${label}: ${c.key} (${c.before?.verdict} → ${c.after?.verdict})${c.same_test_because?.length ? `; same test by rule A: ${c.same_test_because.join('; ')}` : ''}`);
   o.log(`compare: ${join(o.out, 'compare.md')} (also compare.json); cells are listed there, not counted`);
+  // why: a record whose stored hash does not follow from its inputs was edited or forged: never a silent pass in CI.
+  const forged = doc.cells.filter((c) => c.transition === 'hash-mismatch');
+  if (forged.length) {
+    for (const c of forged) o.log(`error: ${c.key}: ${c.why}`);
+    o.log(`error: ${forged.length} cell(s) carry a test hash that does not follow from the record's test inputs; exit 3`);
+    return { exit: 3, doc };
+  }
   const slotRegressed = doc.cells.some((c) => c.slot_regressions?.length);
   const newly = doc.cells.some((c) => c.newly_found);
   return { exit: doc.cells.some((c) => c.label === 'regressed') || (slotRegressed && o.failOnSlotRegression !== false) || (newly && o.failOnNewViolation === true) ? 1 : 0, doc };
@@ -159,7 +166,7 @@ export function originalSignature(runDir: string, o: { key: KeyObject | null; pu
 export async function finishRecheck(runDir: string, o: { key: KeyObject | null; pubkey?: KeyObject | null; allowUnsigned?: boolean; review?: string; log: (s: string) => void }): Promise<ResultsDoc> {
   const dir = join(runDir, 'recheck');
   const file = join(dir, 'results.json');
-  const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
+  const doc = parseResultsBytes(readFileSync(file), file) as ResultsDoc;
   const original = parseResultsBytes(readFileSync(join(runDir, 'results.json')), join(runDir, 'results.json')) as ResultsDoc;
   const key = o.key;
   const origSig = originalSignature(runDir, o);

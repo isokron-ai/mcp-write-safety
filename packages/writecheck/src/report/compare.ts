@@ -316,11 +316,11 @@ function cmpTool(b: ToolShape, a: ToolShape, tool: string, tol: string[], bad: s
     if (a.r.includes(n)) bad.push(`${tool}.${n}: ${probed ? 'a new required argument' : 'an argument the test sends is now declared and required'}`);
     // why: rule A (owner decision, 18 Nov 2026) names this case (an optional returnDocument the common manifest already sends,
     // added by the fix) the same test: the call is the same; whether the before build refused it shows in its verdicts.
-    else if (!probed && (a.x || b.x)) (UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST ? tol.push(`${tool}.${n}: an optional argument added (the test sends it); the before schema allowed no undeclared argument: check that the before build accepted the call`) : bad.push(`${tool}.${n}: an argument the test sends is now declared, in a schema that allows no undeclared argument`));
+    else if (!probed && (a.x || b.x)) (UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST ? tol.push(`${tool}.${n}: an optional argument added (the test sends it); the ${b.x && a.x ? 'before and after schemas allow' : b.x ? 'before schema allows' : 'after schema allows'} no undeclared argument${b.x ? ': check that the before build accepted the call' : ''}`) : bad.push(`${tool}.${n}: an argument the test sends is now declared, in a schema that allows no undeclared argument`));
     else tol.push(`${tool}.${n}: an optional argument added${probed ? '' : ' (the test sends it)'}`);
   }
   for (const n of a.r) if (!b.r.includes(n) && hasKey(b.p, n)) bad.push(`${tool}.${n}: became required`);
-  for (const n of b.r) if (!a.r.includes(n) && hasKey(a.p, n)) (relax ? tol.push(`${tool}.${n}: relaxed from required to optional (the test sends it both times)`) : bad.push(`${tool}.${n}: relaxed from required to optional (this check acts on required, so its calls change)`));
+  for (const n of b.r) if (!a.r.includes(n) && hasKey(a.p, n)) (relax ? tol.push(`${tool}.${n}: relaxed from required to optional${probed ? ' (a probed argument)' : ' (the test sends it both times)'}`) : bad.push(`${tool}.${n}: relaxed from required to optional (this check acts on required, so its calls change)`));
   for (const n of a.ro) if (!b.ro.includes(n)) bad.push(`${tool}.${n}: a new required argument the test does not send`);
   // why: review F4: a required argument the test does not send made the before call incomplete; after, the same call is accepted.
   // (only for a tool the test calls with arguments: a record that reads the catalog or scans answers sends none)
@@ -329,11 +329,16 @@ function cmpTool(b: ToolShape, a: ToolShape, tool: string, tol: string[], bad: s
 
 /**
  * Requirements whose procedure acts on the `required` of the arguments it probes, so that relaxing a probed argument to optional
- * changes the calls the test sends (review F4): MWS-IN-1 compares a probe with the call without the argument only for an
- * optional one (checks/schema.ts). MWS-CONC-2's run that leaves an optional version argument out is in `chosen`
- * (version_left_out), since only the version argument's `required` decides it.
+ * changes the calls the test sends (checks/schema.ts): MWS-IN-1 and MWS-IN-6 compare a null probe with the call without the
+ * argument only for an optional one (meaningOf; a null treated as not sent counts against MWS-IN-6); MWS-IN-3 sends its
+ * `missing_required` probe for each required argument only; MWS-IN-4 sends the call without the argument as the counterpart of a
+ * null probe only for an optional one (counterpart). For MWS-IN-3 and MWS-IN-6, which judge the schema, the relaxation is a change
+ * of the judged schema, as any other loosening of a probed argument is (schema-fixed where every violated slot is held after); for
+ * MWS-IN-1 and MWS-IN-4 it is another test. MWS-CONC-2's run that leaves an optional version argument out is in `chosen`
+ * (version_left_out), since only the version argument's `required` decides it; the further probes of read-after-write, which read a
+ * nested `required`, are in `chosen.further`.
  */
-export const REQUIRED_DRIVES_CALLS = ['MWS-IN-1'] as const;
+export const REQUIRED_DRIVES_CALLS = ['MWS-IN-1', 'MWS-IN-3', 'MWS-IN-4', 'MWS-IN-6'] as const;
 
 interface SameTest {
   kind: 'equal' | 'rule-a' | 'subject' | 'changed' | 'scheme';
@@ -421,6 +426,10 @@ function testerProblem(rb: Rec, ra: Rec): string | null {
 /** Why a record's stored hashes do not follow from its test inputs (mws-test-hash/2), or null. */
 export function inputsMismatch(r: Rec): string | null {
   const i = r.test_inputs;
+  // why: a record of a file hashed under this scheme must carry its inputs under this scheme, or the recompute below is skipped.
+  if (r._scheme === TEST_HASH_FORMAT && !i) return `it carries no test_inputs in a file hashed under ${TEST_HASH_FORMAT}`;
+  if (i && !(TEST_HASH_FORMATS_READ as readonly string[]).includes(i.scheme)) return `its test_inputs name the scheme ${JSON.stringify(i.scheme)}, which this release does not read`;
+  if (i && r._scheme === TEST_HASH_FORMAT && i.scheme !== TEST_HASH_FORMAT) return `its test_inputs name the scheme ${i.scheme} in a file hashed under ${TEST_HASH_FORMAT}`;
   if (!i || i.scheme !== TEST_HASH_FORMAT) return null;
   if (hashOfInputs(r.requirement, i) !== r.test_hash) return 'its test_hash does not follow from its test_inputs (the file was edited, or written by another scheme)';
   if (typeof r.test_hash_core === 'string' && hashOfInputs(r.requirement, i, true) !== r.test_hash_core) return 'its test_hash_core does not follow from its test_inputs';
@@ -595,7 +604,7 @@ export function classify(b: Side, a: Side): Classified {
       // why: re-review 2: schema-fixed needs every slot violated before (judged-part slots and the others) held after.
       const open = openSlots(slots);
       if (j.problem.facets?.includes('schema') && b.verdict === 'violated' && a.verdict === 'held' && !open.length)
-        return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` });
+        return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: relaxedIn(tolerated).length ? `${j.problem.why}: every slot violated before is held after, where the after build's schema no longer requires an argument it required before (${relaxedIn(tolerated).join(', ')}): the constraint the before run found was taken out of the schema, not enforced; check that this is the fix meant` : `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` });
       // why: review M4: held → violated across a change of the judged schema, every other input the same, is a regression.
       if ((b.verdict === 'held' || b.verdict === 'not observed') && a.verdict === 'violated') return withSlots({ transition: 'regressed', label: 'regressed', why: `${b.verdict} on the before build; violated on the after build, where ${j.problem.why.replace(/^the tool's/, 'only the tool\'s')}` });
       // why: the cell says which judged part changed (facets), so a reader need not parse `why`; the schema allows it on this transition only.
@@ -608,6 +617,9 @@ export function classify(b: Side, a: Side): Classified {
   }
   return withSlots(verdictMove(b, a, slots));
 }
+
+/** The probed arguments a judged-schema change relaxed from required to optional (from the tolerated list). */
+const relaxedIn = (tolerated: string[]): string[] => [...new Set(tolerated.flatMap((t) => [...t.matchAll(/judged schema changed: ([^\s:]+): relaxed from required to optional/g)].map((m) => m[1]!)))];
 
 /** Slots that keep a fix from being claimed: violated (or violated?) before and not held after, violated? after, or several records without case ids that cannot be paired (review M2). */
 function openSlots(slots: SlotMove[]): SlotMove[] {
