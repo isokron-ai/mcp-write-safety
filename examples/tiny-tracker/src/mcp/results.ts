@@ -5,6 +5,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { ApiResponse } from "./api.js";
 import { renderText } from "./text.js";
+// ---- stream D ----
+import { keyedStateResult } from "./keyed-states.js";
+// ---- end stream D ----
 
 export type Structured = Record<string, unknown>;
 
@@ -135,6 +138,10 @@ export function quotedNames(names: string[]): string {
 
 /** Maps a backend refusal to a tool error. Never includes the request (it holds the bearer token). */
 export function fromBackend(res: ApiResponse, what: string, w?: WriteContext): CallToolResult {
+  // ---- stream D: keyed states (in_progress, key_expired, key_fenced; decision 0004) ----
+  const keyed = keyedStateResult(res, what, w);
+  if (keyed) return keyed;
+  // ---- end stream D ----
   const body = (res.body ?? {}) as { error?: string; message?: string; field?: string; reason?: string; current?: { version: number } };
   // A read tool's error carries no shape; a write tool's always does: a refusal is not_applied, no answer or a 5xx unknown.
   const no = (code: string, extra: Omit<WriteResult, "shape" | "outcome"> = {}) => (w ? notApplied(w, code, { ...(body.message ? { message: body.message } : {}), ...extra }) : undefined);
@@ -142,6 +149,12 @@ export function fromBackend(res: ApiResponse, what: string, w?: WriteContext): C
     case 404:
       return fail(`Not found: ${what}${body.message && body.message !== what ? ` (${body.message})` : ""}. Nothing was written.`, { not_found: true }, no("not_found"));
     case 409:
+      // Seams v2.1: in_progress means another request with this key is still running and may yet apply (rule 4, outcome
+      // unknown: repeat with the same key later). key_fenced, like every other 409, applied nothing and never will.
+      if (body.error === "in_progress") {
+        return fail(`${what}: a request with this idempotency_key is still in progress. It is not known yet whether it `
+          + `will be applied; repeat later with the same idempotency_key.`, { written: "unknown", error: "in_progress" }, w ? unknownOutcome(w, "in_progress") : undefined);
+      }
       return fail(`${what}: ${body.message ?? "conflict"}. Nothing was written.`, { error: body.error }, no(body.error ?? "already_exists"));
     case 412:
       return conflict(what, body.current, w);

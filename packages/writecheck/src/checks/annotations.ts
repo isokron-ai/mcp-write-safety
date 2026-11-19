@@ -323,14 +323,14 @@ export function annotationVerdicts(tools: ToolObs[], createdWith: string[], res:
     else if (!t.ann2) add('MWS-ANN-2', t.tool, 'not tested', `${t.tool} has no role in the manifest that lets the tester exercise it`);
     else if (t.ann2.skipped) add('MWS-ANN-2', t.tool, 'not tested', t.ann2.skipped);
     else if (t.ann2.unnamed?.length) add('MWS-ANN-2', t.tool, 'violated', `${t.tool} declares destructiveHint: false, but it ${t.ann2.unnamed.includes('(the object was deleted)') ? 'deleted the object' : `removed or replaced data its arguments did not name: ${t.ann2.unnamed.slice(0, 5).join(', ')}`}.`, { steps: t.ann2.steps });
-    else add('MWS-ANN-2', t.tool, 'not observed', `${t.tool} deleted nothing and removed or replaced no data its arguments did not name, in the forced call. ${watched}`);
+    else add('MWS-ANN-2', t.tool, 'not observed', `${t.tool} deleted nothing and removed or replaced no data its arguments did not name, in the forced call. ${watched}`, { numbers: { calls: 1 } });
     // MWS-ANN-5 (SHOULD, "at risk"): additive updates only, the schema's own reading.
     if (a['readOnlyHint'] === true || a['destructiveHint'] !== false) {
       if (a['readOnlyHint'] !== true) add('MWS-ANN-5', t.tool, 'not applicable', `${t.tool} does not declare destructiveHint: false`);
     } else if (!t.ann2) add('MWS-ANN-5', t.tool, 'not tested', `${t.tool} has no role in the manifest that lets the tester exercise it`);
     else if (t.ann2.skipped) add('MWS-ANN-5', t.tool, 'not tested', t.ann2.skipped);
     else if (t.ann2.replaced) add('MWS-ANN-5', t.tool, 'violated', `${t.tool} declares destructiveHint: false ("only additive updates"), but ${t.ann2.detail}.`, { steps: t.ann2.steps });
-    else add('MWS-ANN-5', t.tool, 'not observed', `${t.tool} changed or removed nothing that was watched in the forced call. ${watched}`);
+    else add('MWS-ANN-5', t.tool, 'not observed', `${t.tool} changed or removed nothing that was watched in the forced call. ${watched}`, { numbers: { calls: 1 } });
     // MWS-ANN-3
     if (a['readOnlyHint'] === true) {
       /* judged by MWS-ANN-1 */
@@ -339,12 +339,12 @@ export function annotationVerdicts(tools: ToolObs[], createdWith: string[], res:
     else if (t.ann3.skipped) add('MWS-ANN-3', t.tool, 'not tested', t.ann3.skipped);
     else if (t.role === 'create') {
       const [i1, i2] = t.ann3.ids ?? [];
-      if (!t.ann3.first_ok || !t.ann3.second_ok) add('MWS-ANN-3', t.tool, 'not observed', `The repeated create ${t.ann3.first_ok ? 'was refused the second time' : 'did not succeed'}; no second object was seen. ${watched}`);
+      if (!t.ann3.first_ok || !t.ann3.second_ok) add('MWS-ANN-3', t.tool, 'not observed', `The repeated create ${t.ann3.first_ok ? 'was refused the second time' : 'did not succeed'}; no second object was seen. ${watched}`, { numbers: { calls: 2 } });
       else if (!deepEqual(i1, i2)) add('MWS-ANN-3', t.tool, 'violated', `${t.tool} declares idempotentHint: true, but the same call made two objects (${short(i1, 30)}, ${short(i2, 30)}).`, { steps: t.ann3.steps });
-      else add('MWS-ANN-3', t.tool, 'not observed', `The same create, called twice, returned the same object. ${watched}`);
+      else add('MWS-ANN-3', t.tool, 'not observed', `The same create, called twice, returned the same object. ${watched}`, { numbers: { calls: 2 } });
     } else if (!t.ann3.first_ok) add('MWS-ANN-3', t.tool, 'not tested', 'the first call did not succeed');
     else if (t.ann3.changed.length) add('MWS-ANN-3', t.tool, 'violated', `${t.tool} declares idempotentHint: true, but calling it again with the same arguments changed ${t.ann3.changed.map((e) => e.path).join(', ')}.`, { steps: t.ann3.steps });
-    else add('MWS-ANN-3', t.tool, 'not observed', `Calling ${t.tool} again with the same arguments changed nothing watched (ignored: ${ignoredPaths(res).join(', ') || 'none'}). ${watched}`, { notes: t.ann3.second_ok ? [] : ['The second call was refused; refusing is no further effect.'] });
+    else add('MWS-ANN-3', t.tool, 'not observed', `Calling ${t.tool} again with the same arguments changed nothing watched (ignored: ${ignoredPaths(res).join(', ') || 'none'}). ${watched}`, { numbers: { calls: 2 }, notes: t.ann3.second_ok ? [] : ['The second call was refused; refusing is no further effect.'] });
   }
   return out;
 }

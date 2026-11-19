@@ -1,0 +1,15 @@
+{
+  "record": "operation-record/1",
+  "key": "lrt-example-key-0001",
+  "principal": "p-default",
+  "run": "run-3f9a01c2-8e41b07d29a6",
+  "state": "completed",
+  "fingerprint_hash": "8ce2634fdf294777e7f088577d8cff8050ad46286b6422d329f1952ee8a867b3",
+  "created_at": "2026-11-16T20:00:00.000Z",
+  "completed_at": "2026-11-16T20:00:00.000Z",
+  "expires_at": "2026-11-23T20:00:00.000Z",
+  "clock_offset_ms": 0,
+  "execution_id": "X-1",
+  "result_digest": "ae8193fe86ff6b989c15c28131188bf836d13b2ee7bc7f59c10738db294a4da7",
+  "status": 201
+}

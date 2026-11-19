@@ -1,0 +1,113 @@
+{
+  "release": "0.2.0",
+  "note": "The builds expected/0.2.0.json covers. Generated after streams A and B merge (the features below are refused before that). Defect names are the planned names in FIXTURE.md; a name stream A changes is changed here. The full pairwise matrix is 0.4.0.",
+  "builds": [
+    {
+      "label": "correct build",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults"
+      ],
+      "contract": true,
+      "fixture": true,
+      "writecheck": true,
+      "mcpDefects": []
+    },
+    {
+      "label": "defect idempotency-key-dropped",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "idempotency-key-dropped"
+      ],
+      "contract": true,
+      "fixture": true,
+      "writecheck": true,
+      "mcpDefects": [
+        "idempotency-key-dropped"
+      ]
+    },
+    {
+      "label": "defect idempotency-key-ignores-args",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "idempotency-key-ignores-args"
+      ],
+      "contract": true,
+      "fixture": true,
+      "writecheck": true,
+      "mcpDefects": [
+        "idempotency-key-ignores-args"
+      ]
+    },
+    {
+      "label": "defect lookup-reexecutes",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "lookup-reexecutes"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect digest-of-current-state",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect replay-digest-mismatch",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect digest-not-canonical",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect lookup-wrong-record",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "contract": true,
+      "fixture": true
+    },
+    {
+      "label": "backend defect lookup-unscoped",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--backend-defect",
+        "lookup-unscoped"
+      ],
+      "contract": true,
+      "fixture": true
+    }
+  ]
+}

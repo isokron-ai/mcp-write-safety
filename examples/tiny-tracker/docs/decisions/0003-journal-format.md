@@ -1,0 +1,37 @@
+# 0003. The durable store is a JSONL journal of committed post-state (`journal-format/1`)
+
+- Status: accepted (16 Nov 2026; owner decision 2)
+- Applies from: 0.3.0 (feature `durable`, needs `--data-dir`)
+
+## Context
+
+A delayed-recovery check (24 hours) should not depend on one process staying up. The store has to survive a restart, and a restart must not change anything a digest covers. Node's built-in SQLite module is still experimental on the Node 22 line, and tiny-tracker supports Node 22.12 and later with one runtime dependency.
+
+## Decision
+
+1. **One JSONL journal** in the data dir. The first line is a header: `{"jseq":0,"line":"header","journal":"journal-format/1","writer":"<package version>","boot_id":…,"seed":{…}}`. The seed (the seeded projects as created, and the id counters) lives in the header, so a restart keeps the seed's `created_at`.
+2. **Post-state only, never commands.** A line records what a transaction committed: ids, versions, timestamps and the id counters as committed, the operation record and the execution record. Replaying a journal never calls the clock or re-runs an operation, so a restart cannot change a digest.
+3. **One line per transaction.** The effect, its key record and its execution record are in the same line, so the "same transaction" of the idempotency pattern is literal and readable. Each line carries its own line number `jseq` (0 for the header, contiguous) and a checksum; a commit line also carries `commit_seq`, the store's commit sequence (the execution record's `seq`), which is not derived from the line's position. Line shapes: `docs/INTERFACES.md` 1.9. The answer is sent only after the line is flushed (`fsync`). On macOS, Node's `fsync` is not `F_FULLFSYNC`, so a flushed line survives a process crash but not necessarily a power cut; the backend logs this at start there (G2 fold-in 13).
+4. **Commits stay synchronous.** Where a write has a pending state, the pending line is written first; the commit is one synchronous section after it. Conditional writes and batches are one section each.
+5. **Recovery:** only a torn **last** line is tolerated: an unterminated last line that does not decode (it is dropped and the drop is logged). A bad line anywhere else, or a last line that has its newline or decodes with a problem, stops the start with an error and the file is not touched (G2 fold-in 3). A pending line with no commit becomes `aborted` (an `aborted` line naming it by `pending_jseq`, reason `orphan_at_start`): nothing was applied. A pending line whose run a later commit line reset, with no fence line for it, is fenced at start instead (its fence line written then; G2 fold-in 5).
+   - **No torn line mid-file (seams v2.1).** After a journal failure the write is refused 503 and the store carries on, so a failed partial append must not stay in the file under later good lines. After a failed append the writer truncates the file back to the end of the last good line (`ftruncate`, then `fsync`) before any later append; if it cannot, it fails stop (every later append throws and every write answers 503). It never appends after a partial line, so the only torn line a reader can meet is the last one.
+   - Aborted lines carry a reason: `refused`, `journal_unavailable`, `fault`, `internal_error` or `orphan_at_start`.
+6. **Fences and runs are journalled (seams v2.1).**
+   - A run reset that fences a pending key record writes a `fence` line (`principal`, `key`, `run`, `pending_jseq`, `reset_seq`) after the reset's commit line. It ends that pending line (no `aborted` line), and at load it restores the fence, so the key stays refused (409 `key_fenced`) after a restart.
+   - **Fenced keys never expire** (owner decision, 16 Nov 2026). A fence lasts for the life of the data dir, like a tombstone: key retention (decision 0004) does not remove it, and a fenced key is never reusable. A write in flight when its run was reset can therefore never land later under that key, across any restart.
+   - Allocating a run writes a `run-alloc` line (`run_id`, `principal`, `created_at`, `label`) before the run is answered; at load the run registry is rebuilt from these lines, so run-ownership checks (403 `run_not_owned`, `run_not_allocated`) hold after a `--supervise` restart.
+   - A settle-by-lookup fence (a lookup that found no record closed the key) writes an additive `lookup-fence` line before it answers, so a late original cannot land after a restart (0.3.0 integration). The format stays `journal-format/1`: this version's reader knows the kind, and an older reader refuses a journal with a kind it does not know rather than skipping a fence.
+   - None of them takes a commit sequence.
+7. **`durable` requires `strict-input`** (compat rule CMP-50): every line is checksummed over RFC 8785 bytes, which a string with a lone surrogate does not have, so such input is refused at the door instead of failing the journal append.
+8. **One process per data dir.** A pid lock refuses a second writer, including a stale child next to its supervisor. More than one server instance is a non-goal.
+9. The data dir is created `0700`; a directory that is not empty and was not created by tiny-tracker is refused.
+
+## Consequences
+
+- A whole-stack restart keeps data, key records and digests; delayed recovery no longer needs a pinned process.
+- The journal is readable with standard tools, and a third party can recount effects from it.
+- The journal format has its own version, separate from the package version and from `fixture-api`.
+
+## The data-dir lock (G2 round 3)
+
+The lock is best-effort, as G13 allows ("one instance, enforced best-effort"): Node core has no OS-held lock. A stale lock is taken over by rename-aside, compare (same inode and text) and link-back, and a takeover never deletes a moved lock it has not proven stale; a live lock can still be moved, or, in the three-starter window below, deleted (a clean close that has checked its lock, then a move-aside and a third start's link before its unlink). Two residual cases are stated, not fixed: a starter that crashes or stalls between the move and the link-back can leave the holder without a lock file; and three simultaneous starts can leave two running (the second refuses and keeps the moved lock). The mitigation is one starter per data dir (`--supervise` serializes its children). 0.4.0 adopts an OS-held lock: a native helper, mkdir leases with heartbeats, or the supervisor as the only starter.

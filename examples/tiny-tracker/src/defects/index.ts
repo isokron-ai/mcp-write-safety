@@ -50,6 +50,11 @@ import { defect as shapeTextInvitesRetry } from "./shape-text-invites-retry.js";
 import { defect as shapeWrongVersion } from "./shape-wrong-version.js";
 import { defect as shapeMissingFailed } from "./shape-missing-failed.js";
 import { defect as shapeTextSaysAllSaved } from "./shape-text-says-all-saved.js";
+import { defect as lookupReexecutes } from "./lookup-reexecutes.js";
+// ---- stream D: defects that need the inflight feature ----
+import { defect as inProgressReportedNotApplied } from "./in-progress-reported-not-applied.js";
+import { defect as settleMissReportedNotApplied } from "./settle-miss-reported-not-applied.js";
+// ---- end stream D ----
 
 export type { Defect } from "./types.js";
 
@@ -102,19 +107,40 @@ export const DEFECTS: Defect[] = [
   missingAnnotations,
   setLabelsNonDestructive,
   tokenInError,
+  lookupReexecutes,
+  // ---- stream D (requires inflight) ----
+  inProgressReportedNotApplied,
+  settleMissReportedNotApplied,
 ];
+
+/** The defects that need no feature: the 0.1 set (47), the whole of `--defect all` under profile 0.1. */
+export function ungatedDefects(): Defect[] {
+  return DEFECTS.filter((d) => !(d.requires ?? []).length);
+}
+
+/** True when every feature the defect needs is active. */
+export function defectAvailable(d: Defect, features: readonly string[]): boolean {
+  return (d.requires ?? []).every((f) => features.includes(f));
+}
 
 /**
  * Resolves --defect values: a defect name, a requirement ID (all defects for
  * it), or "all". Unknown names are an error (fail closed, as MWS-CFG-2 asks).
+ * "all" and a requirement ID mean every such defect valid for the active
+ * features; a defect named on its own whose features are not active is an
+ * error, never silently skipped.
  */
-export function resolveDefects(names: string[]): Defect[] {
+export function resolveDefects(names: string[], features: readonly string[] = []): Defect[] {
   const out: Defect[] = [];
   for (const name of names) {
     let found: Defect[];
-    if (name === "all") found = DEFECTS;
-    else if (name in REQUIREMENTS) found = DEFECTS.filter((d) => d.requirement === (name as RequirementId));
-    else found = DEFECTS.filter((d) => d.name === name);
+    if (name === "all") found = DEFECTS.filter((d) => defectAvailable(d, features));
+    else if (name in REQUIREMENTS) found = DEFECTS.filter((d) => d.requirement === (name as RequirementId) && defectAvailable(d, features));
+    else {
+      found = DEFECTS.filter((d) => d.name === name);
+      const missing = found.flatMap((d) => (d.requires ?? []).filter((f) => !features.includes(f)));
+      if (missing.length > 0) throw new Error(`defect "${name}" needs the feature(s) ${missing.join(", ")}; name them with --features`);
+    }
     if (found.length === 0) {
       throw new Error(`unknown defect "${name}"; use a name from the README's defect table, a requirement ID, or "all"`);
     }

@@ -190,6 +190,9 @@ mcp-writecheck review  mwsc-results/<run>                                       
 mcp-writecheck recheck mwsc-results/<run> [--review answers.yaml]                  # re-apply the rules offline
 mcp-writecheck rerun   mwsc-results/<run> -m manifest.yaml                         # run the same plan again
 mcp-writecheck cleanup -m manifest.yaml                                             # what an interrupted run left
+mcp-writecheck run  -m manifest.yaml --server-commit <sha> --server-image <ref@sha256:…> --sign-key key.pem   # a pinned, signed run
+mcp-writecheck verify-results mwsc-results/<run> --pubkey signer.pub                # signed by that key, and unchanged
+mcp-writecheck compare before/<run> after/<run> --out cmp                           # before/after per cell, joined on test hashes
 ```
 
 `mcp-writecheck <command> --help` describes each command and its options. An unknown option or command is refused with a pointer to that help.
@@ -276,6 +279,8 @@ A learning pass runs each write alone and records its backend requests; a schedu
 Per write path (resource and tool, or a setting), never per server: `violated`, `platform` (the platform's own API does the same), `held` (the situation was forced and the server did the right thing), `not observed` (attempted, not forced; with the numbers; not evidence of safety), `not tested` (with the reason), `not applicable`, `self-attested` (a review-only clause, with the answer and who gave it). No total, no score, no badge.
 
 Each run writes `report.md` (first line: the scope), `results.json` (`schema/mws-results-1.schema.json`), `junit.xml` (only `held` passes, only `violated` fails, the rest is skipped), `capture/`, `history.jsonl`, `ledger.jsonl`, `SHA256SUMS`, and with `--sign <ssh key>` an `ssh-keygen -Y sign` signature. Exit status 1 only for a violated MUST not in the `--baseline` file, or for a baseline entry that came out definitely not violated. Exit status 4 for an incomplete run, whatever its verdicts: the target or its backend stopped answering (the tenant guard's read is made again between checks), or clean-up could not finish (a delete failed, a create's outcome is unknown, clean-up stopped); the report says why in its first lines, and such a run is never `complete`. Exit 4 takes precedence over 1, so a target that leaves objects behind on every run (a soft delete, a list with more pages and no `list.next`) exits 4 until that is fixed or declared. Neither the exit status nor `junit.xml` is a verdict on the server: exit 0 means no new violated MUST was found in what was tested, and the `not tested` rows say what was not.
+
+Every `results.json` names what it came from: `identity` (the tester build and commit, the MWS version, the manifest, plan and tool-list hashes, the server build and backend images you state with `--server-commit`, `--server-image`, `--backend-image` or `--provenance`, the runner, and `gaps`, each member not stated or not pinned) and a `test_hash` on every record, a hash of exactly what defines that test and not the rest of the tool list. With `--sign-key` (an Ed25519 key, never written anywhere) results.json is signed in `evidence.signature`; `verify-results --pubkey` checks it against a key you pinned. `compare` joins two runs per cell on equal test hashes, rolls verdicts up by MWS 8.2 rule 13, and labels each cell `fixed` (violated → held only), `regressed`, `unchanged`, `changed` (never a fix) or `not comparable`, with the reason. [MANIFEST.md, Run identity](MANIFEST.md#run-identity) gives the exact hash inputs, the signature format and the compare rules.
 
 ## Review-only clauses
 

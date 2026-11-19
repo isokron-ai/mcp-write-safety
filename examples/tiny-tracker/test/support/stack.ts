@@ -113,6 +113,10 @@ export class Mcp {
 }
 
 export interface Stack {
+  // ---- stream D: the active features, and a backend/before-commit hook a check can set (only with inflight) ----
+  features: readonly string[];
+  beforeCommit?: (path: string) => Promise<void>;
+  // ---- end stream D ----
   token: string;
   backend: RunningBackend;
   gate: Gate;
@@ -132,6 +136,8 @@ export interface StackOptions {
   backendDefects?: string[];
   env?: Record<string, string>;
   era?: Era;
+  /** Features for both layers (a defect with a `requires` list runs with them on). */
+  features?: string[];
 }
 
 export async function connectClient(url: string, era: Era): Promise<Mcp> {
@@ -146,13 +152,18 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
   const token = `mwscanary-${randomBytes(12).toString("hex")}`;
   const run = randomBytes(3).toString("hex");
   const era = options.era ?? "2026-07-28";
-  const backend = await startBackend({ token, defects: options.backendDefects });
+  // ---- stream D: with inflight, a check may hold a keyed write at backend/before-commit (after its pending record) ----
+  let stack: Stack;
+  const faults = options.features?.includes("inflight")
+    ? { beforeCommit: async ({ meta }: { meta: { request: { path: string } } }) => { await stack.beforeCommit?.(meta.request.path); } } : undefined;
+  const backend = await startBackend({ token, defects: options.backendDefects, features: options.features, faults });
+  // ---- end stream D ----
   const gate = await startGate(backend.url);
   let server: StartedServer;
   try {
     server = await startServer({
       env: { TRACKER_BACKEND_URL: gate.url, TRACKER_BACKEND_TOKEN: token, ...options.env },
-      defects: options.defects,
+      defects: options.defects, features: options.features,
     });
   } catch (e) {
     await gate.close();
@@ -160,7 +171,8 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     throw e;
   }
   const clients: Mcp[] = [];
-  const stack: Stack = {
+  stack = {
+    features: options.features ?? [],
     token, backend, gate, server, era,
     rest: new Rest(backend.url, token),
     prefix: (tag) => `mwsc-${run}-${tag}`,
