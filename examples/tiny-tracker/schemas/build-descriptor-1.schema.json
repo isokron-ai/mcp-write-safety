@@ -1,0 +1,362 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://writesafety.dev/schemas/tiny-tracker/build-descriptor-1.schema.json",
+  "title": "Build descriptor",
+  "description": "What a tiny-tracker process runs: served read-only at GET /build (evidence token), mirrored in the MCP instructions and, as its hashes, in every tool result's _meta under dev.writesafety.tiny-tracker/build. build_hash covers the configuration and keys known-answer files; descriptor_hash covers every field. Version 1 allows additional top-level members: a later release may add one without a new version; a consumer ignores members it does not know.",
+  "type": "object",
+  "properties": {
+    "descriptor": {
+      "const": "build-descriptor/1"
+    },
+    "package": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "const": "@mcp-write-safety/tiny-tracker"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "fixture_api": {
+      "type": "string",
+      "pattern": "^fixture-api/[0-9]+$"
+    },
+    "profile": {
+      "enum": [
+        "0.1",
+        "default"
+      ]
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "defects": {
+      "type": "object",
+      "description": "Active defects by layer; null where the layer runs in another process.",
+      "properties": {
+        "mcp": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "backend": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "mcp",
+        "backend"
+      ],
+      "additionalProperties": false
+    },
+    "variants": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "control": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "config": {
+      "description": "The MCP-layer settings that change what a run sees; null until the MCP server has started. Part of build_hash.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "read_only": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny_tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_project": {
+          "type": "string"
+        },
+        "key_journal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "read_only",
+        "tools",
+        "deny_tools",
+        "default_project",
+        "key_journal"
+      ],
+      "additionalProperties": false
+    },
+    "durability": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "memory",
+            "journal"
+          ]
+        },
+        "journal_format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "journal_format"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        }
+      },
+      "required": [
+        "repo",
+        "commit"
+      ],
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "properties": {
+        "layout": {
+          "enum": [
+            "all",
+            "backend",
+            "server"
+          ]
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "restart_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "layout",
+        "boot_id",
+        "restart_count",
+        "started_at"
+      ],
+      "additionalProperties": false
+    },
+    "supervision": {
+      "description": "Present only under `tiny-tracker all --supervise` (0.3.0): the supervisor's boot id, which child serves this descriptor, and each child's boot id and restart count, read live from the supervisor's state folder. Not part of build_hash; it is part of descriptor_hash.",
+      "type": "object",
+      "required": [
+        "supervisor_boot_id",
+        "role",
+        "children"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "supervisor_boot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "role": {
+          "enum": [
+            "backend",
+            "mcp"
+          ]
+        },
+        "children": {
+          "type": "object",
+          "required": [
+            "backend",
+            "mcp"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "backend": {
+              "type": "object",
+              "required": [
+                "boot_id",
+                "restart_count"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "boot_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{16}$"
+                },
+                "restart_count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "mcp": {
+              "type": "object",
+              "required": [
+                "boot_id",
+                "restart_count"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "boot_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{16}$"
+                },
+                "restart_count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "properties": {
+        "head": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "head"
+      ],
+      "additionalProperties": false
+    },
+    "faults": {
+      "type": "object",
+      "properties": {
+        "armed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "armed"
+      ],
+      "additionalProperties": false
+    },
+    "clock": {
+      "type": "object",
+      "description": "wall: offset 0, the process clock. fixture: moved through the control listener; never in a run whose evidence is published as a delayed-recovery result.",
+      "properties": {
+        "domain": {
+          "enum": [
+            "wall",
+            "fixture"
+          ]
+        },
+        "offset_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain",
+        "offset_ms"
+      ],
+      "additionalProperties": false
+    },
+    "build_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 under dev.writesafety.tiny-tracker/build/1 over the canonical configuration: descriptor, package, fixture_api, profile, features, defects, variants, control, config, durability, contract and process.layout."
+    },
+    "descriptor_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 under dev.writesafety.tiny-tracker/build-descriptor/1 over the canonical descriptor without this member."
+    }
+  },
+  "required": [
+    "descriptor",
+    "package",
+    "fixture_api",
+    "profile",
+    "features",
+    "defects",
+    "variants",
+    "control",
+    "config",
+    "durability",
+    "contract",
+    "process",
+    "journal",
+    "faults",
+    "clock",
+    "build_hash",
+    "descriptor_hash"
+  ]
+}

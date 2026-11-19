@@ -19,6 +19,7 @@
 import { anyLoss, compare, inventory, withEarlier, type Inventory, type Loss } from '../checks/bystanders.js';
 import { withLaterLoss, withLoss, type LaterLoss } from '../checks/targeting.js';
 import { everyRequirement } from '../checks/coverage.js';
+import { cutShortOf } from '../report/validity.js';
 import { cellPass, inputRequiredTools } from '../checks/cells.js';
 import { randomBytes } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -44,7 +45,7 @@ import { createVerified } from '../core/objects.js';
 import { buildPlan, planHash, renderPlan } from '../core/plan.js';
 import { Redactor, type ScrubPath } from '../core/redact.js';
 import { checkFingerprint, checkTarget, confirm, guardBasis, targetHosts, targetStopped, tenantGuard, type GuardCall } from '../core/safety.js';
-import { BudgetExhausted, RateLimited, Session } from '../core/session.js';
+import { BudgetExhausted, RateLimited, Session, SessionInitFailed } from '../core/session.js';
 import { render } from '../core/template.js';
 import { canonical, diff, getPath, iso, parseConfigText, short, unsetPath, withoutIgnored, WritecheckError } from '../core/util.js';
 import { createGate, type Gate } from '../gate/gate.js';
@@ -94,9 +95,14 @@ export function secretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
   return [...names].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v.length >= 6);
 }
 
+/** Every value a session.init call takes from the environment: secrets however short (connection settings, a password). */
+export function initSecretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
+  return [...new Set((m.session?.init ?? []).flatMap((c) => c.env))].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v !== '');
+}
+
 export function redactorFor(m: Manifest, env: NodeJS.ProcessEnv): Redactor {
   const paths: ScrubPath[] = [{ prefix: resolve(process.cwd()), role: 'WORKSPACE' }, { prefix: homedir(), role: 'HOME' }];
-  return new Redactor(secretsOf(m, env), { paths });
+  return new Redactor(secretsOf(m, env), { paths, short: initSecretsOf(m, env) });
 }
 
 export function egressOf(m: Manifest, env: NodeJS.ProcessEnv) {
@@ -267,6 +273,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     hash = planHash(plan);
     o.log(renderPlan(plan, hash));
     await confirm(manifest, hash, { ...(o.confirmTarget !== undefined ? { confirmTarget: o.confirmTarget } : {}), ...(o.planHash !== undefined ? { planHash: o.planHash } : {}), interactive: o.interactive, ...(o.ask ? { ask: o.ask } : {}) });
+    // why: CLI feature B: from the confirmed plan on, every new connection runs session.init at once (none before: plan makes no tool call).
+    session.armInit();
     ledger = new Ledger(join(o.stateDir, runId), runId, (s) => red.text(s));
     ledger.append({ kind: 'run_start', run_id: runId, prefix, manifest_sha256: manifest.source.sha256, hosts: plan.target.hosts });
     const g = await tenantGuard(manifest, session, 'MAIN', { onCall: onGuardCall });
@@ -399,9 +407,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         const dead = await targetStopped(manifest, session, 'MAIN', { onCall: onGuardCall });
         if (dead && !stopped) stopped = dead;
       } catch (e) {
-        if ((e instanceof RateLimited || e instanceof BudgetExhausted) && !stopped) {
+        // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+        if ((e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) && !stopped) {
           stopped = e.message;
-          markCut(results.length, observations.length);
+          if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
         }
       }
     };
@@ -452,13 +461,15 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           const stop = (obs.data as { stopped?: string | null })?.stopped;
           if (stop && /stopped:/.test(stop)) {
             stopped = stop;
-            // why: review R1: the records of the check that was cut short come after the cut.
-            markCut(start, observations.length - 1);
+            // why: review R1: the records of the check that was cut short (write budget, rate limit) come after the cut; a stop for
+            // another reason (a session.init that failed, PR #14) stops the run without voiding them.
+            if (cutShortOf(stop)) markCut(start, observations.length - 1);
           }
         } catch (e) {
-          if (e instanceof RateLimited || e instanceof BudgetExhausted) {
+          // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+          if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) {
             stopped = e.message;
-            markCut(results.length, observations.length);
+            if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
           }
           // the losses after a check that failed are compared at the next bracket (gapLoss), and named there
           results.push(...notRun(mod, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
@@ -568,9 +579,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           throw new WritecheckError('the baseline values did not read back');
         }
       } catch (e) {
-        if (e instanceof RateLimited || e instanceof BudgetExhausted) {
+        // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+        if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) {
           stopped = e.message;
-          markCut(results.length, observations.length);
+          if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
         }
         allNotRun(`setup failed: ${(e as Error).message}`);
         setupFailed.push(`${res.name}: ${short((e as Error).message, 120)}`);
@@ -619,9 +631,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         }
         results.push(...got);
       } catch (e) {
-        if (e instanceof RateLimited || e instanceof BudgetExhausted) {
+        // why: a session.init that failed stops the run too (PR #14); only the write budget and a rate limit cut it short (V-RUN).
+        if (e instanceof RateLimited || e instanceof BudgetExhausted || e instanceof SessionInitFailed) {
           stopped = e.message;
-          markCut(results.length, observations.length);
+          if (!(e instanceof SessionInitFailed)) markCut(results.length, observations.length);
         }
         results.push(...notRun(g, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
       }
@@ -665,6 +678,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     if (e instanceof WritecheckError && (e.code === 2 || e.code === 3)) refusal = e;
     else stopped = stopped ?? (e as Error).message;
   } finally {
+    // why: CLI feature B: a failed session.init stops the run, wherever it was caught; its reason is the run's.
+    if (session.initFailure && !(stopped ?? '').includes(session.initFailure)) stopped = stopped ? `${stopped}; stopped: ${session.initFailure}` : `stopped: ${session.initFailure}`;
     protocol = session.protocolOf('MAIN') ?? null;
     await doCleanup();
     if (!refusal && finalInventory) await finalInventory().catch(() => undefined);

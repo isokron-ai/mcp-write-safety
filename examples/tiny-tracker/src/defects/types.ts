@@ -1,5 +1,6 @@
 import type { RequirementId } from "../requirements.js";
 import type { Build, ToolDef } from "../mcp/types.js";
+import type { FeatureName } from "../profile.js";
 
 /**
  * One deliberate defect. Each lives in its own file, replaces one correct
@@ -21,6 +22,12 @@ export interface Defect {
    * with --defect all no defect hides another.
    */
   wraps?: boolean;
+  /**
+   * The features the defect needs (empty or absent: none). `--defect all` and a requirement ID take only the
+   * defects whose features are all active; a defect named on its own whose features are not active stops the
+   * process (exit 2).
+   */
+  requires?: readonly FeatureName[];
   apply(build: Build): void;
 }
 

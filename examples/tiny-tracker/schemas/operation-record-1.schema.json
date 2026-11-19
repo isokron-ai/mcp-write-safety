@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://writesafety.dev/schemas/tiny-tracker/operation-record-1.schema.json",
+  "title": "Operation record (draft for 0.2.0, states from 0.3.0)",
+  "description": "The record of one idempotency key, scoped to its principal (the run is recorded, never part of the lookup): served at GET /operations/:key (evidence token) and by the get_operation tool. A key with no record answers 404 \"no record of this key now\", which never means nothing was written. Version 1 allows additional top-level members: a later release may add one without a new version; a consumer ignores members it does not know.",
+  "type": "object",
+  "properties": {
+    "record": {
+      "const": "operation-record/1"
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+    },
+    "principal": {
+      "type": "string"
+    },
+    "run": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "enum": [
+        "pending",
+        "completed",
+        "aborted",
+        "expired"
+      ],
+      "description": "pending: the effect is being committed (a same-key call answers in_progress, outcome unknown). completed: applied once. aborted: a pending record found at start with no commit; nothing was applied. expired: a tombstone past the stated retention; a same-key call with the same fingerprint answers applied, replayed, repeat read_first."
+    },
+    "fingerprint_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lower-case hex SHA-256 under the domain dev.writesafety.tiny-tracker/request-fingerprint/1 over the RFC 8785 bytes of {\"body\": <request body or null>, \"method\", \"path\", \"principal\"} (src/digest.ts fingerprintHash)."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "In the fixture clock's domain; see clock_offset_ms."
+    },
+    "clock_offset_ms": {
+      "type": "integer"
+    },
+    "execution_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^X-[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "result_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "record",
+    "key",
+    "principal",
+    "run",
+    "state",
+    "fingerprint_hash",
+    "created_at",
+    "completed_at",
+    "expires_at",
+    "clock_offset_ms",
+    "execution_id",
+    "result_digest",
+    "status"
+  ]
+}

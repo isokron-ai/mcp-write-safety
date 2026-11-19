@@ -220,9 +220,10 @@ export class Redactor {
   /** The path prefixes this redactor records by role. */
   readonly scrubPaths: readonly ScrubPath[];
 
-  constructor(secrets: Iterable<string> = [], o: { paths?: ScrubPath[] } = {}) {
-    // why: longest first, so a secret that contains another is replaced whole.
-    this.secrets = [...new Set([...secrets].filter((s) => s.length >= 6))].sort((a, b) => b.length - a.length);
+  constructor(secrets: Iterable<string> = [], o: { paths?: ScrubPath[]; short?: Iterable<string> } = {}) {
+    // why: longest first, so a secret that contains another is replaced whole. `short`: values that are secrets however short
+    // (session.init's connection settings), kept from three characters (a shorter one would mask parts of every word).
+    this.secrets = [...new Set([...[...secrets].filter((s) => s.length >= 6), ...[...(o.short ?? [])].filter((s) => s.length >= 3)])].sort((a, b) => b.length - a.length);
     this.scrubPaths = (o.paths ?? []).map((p) => ({ ...p }));
     this.scrub = scrubPattern(this.scrubPaths);
   }

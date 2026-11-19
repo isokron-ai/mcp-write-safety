@@ -23,6 +23,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `patterns` | no | How the tester decides what a result says (spec 7.3, rule 11); below |
 | `outcome_field` | no | A structured outcome field in the result: `{ path, applied, not_applied, unknown }` (below) |
 | `results` | no | `{ shape, tools: { <tool>: { shape } } }`: a result shape adopted by name and version (spec 7.3, rule 11; draft Annex B-9). Known: `write-result/0.1`. A tool's own entry overrides the top level; `shape: null` adopts none for it. An unknown name or version is refused at load. See [results](#results) |
+| `session` | no | `{ init: [{ tool, args, read_only }] }`: calls made on every MCP session before its first other tools/call; see [session](#session) |
 | `async_operations` | no | Tools whose operation the backend completes asynchronously (spec NF-19, Annex E): a result that says "accepted" or "pending" is then not read as a report of success. For any other tool it is |
 
 ## server
@@ -40,7 +41,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `cwd` | Working directory of a started server, relative to the manifest |
 | `processes` | `separate` or `shared`: whether the second connection of a concurrency test is a second server process |
 | `restart` | `{ stop: graceful \| kill }` (Annex E): the declaration's means to stop and start the server, for MWS-RETRY-2 step (e) and its crash form. The tester stops a server process it started for the step (`graceful`: closing stdin first for stdio, then SIGTERM; `kill`: SIGKILL) and starts it again with its own command and the same environment; a graceful stop after which the process did not exit by itself, and was killed, is recorded as a kill. Needs `stdio` or `launch`. Without it, both steps are `not tested` |
-| `decode` | `{ <tool>: json \| none }`: how each named tool's wrapped results (structuredContent `{"result": "<JSON as a string>"}`) are read; see [Wrapped results](#wrapped-results-decode) |
+| `decode` | `{ <tool>: json \| none \| { mode, extract } }`: how each named tool's wrapped results (structuredContent `{"result": "<JSON as a string>"}`) are read, and any [read extraction](#read-extraction-decodeextract) for it; see [Wrapped results](#wrapped-results-decode) |
 
 ## target
 
@@ -209,9 +210,62 @@ The decode happens when both hold:
 
 Anything else is read as before: a string that is not JSON (or is a JSON number, string or null), structuredContent with any other member, or a tool that is neither marked nor declared.
 
-`decode` is declared on `read`, `list` or `target.guard` (for the tool they name), or per tool under `server.decode: { <tool>: json | none }` (for any tool, a write tool included). `none` never decodes the tool's results, even where its `outputSchema` marks them: use it for a tool whose sole `result` property is a string meant to stay a string (a message that happens to be JSON). A mode applies to every call of that tool in the run; two different modes for one tool are refused.
+`decode` is declared on `read`, `list` or `target.guard` (for the tool they name), or per tool under `server.decode: { <tool>: json | none | { mode, extract } }` (for any tool, a write tool included). `none` never decodes the tool's results, even where its `outputSchema` marks them: use it for a tool whose sole `result` property is a string meant to stay a string (a message that happens to be JSON). A mode applies to every call of that tool in the run; two different modes for one tool are refused.
 
 The record says what was decoded: each call record in `results.json` (the observations' call briefs and the experiments' call records) carries `decoded: { from: "structuredContent.result", basis: "outputSchema" | "manifest" }` and, beside the decoded `data`, `raw_structured`: structuredContent as received (clipped like `data`). `target.mcp.notes` says, once per tool, that its results were decoded and why, or that `decode: none` kept a marked tool's results as they are. The capture keeps every answer as received. Adding `decode` changes the manifest's bytes, so the plan hash changes; a manifest without it keeps its hash.
+
+### Read extraction (decode.extract)
+
+Some servers answer their JSON inside markup or prose, with no structuredContent: the whole answer wrapped in `<insecure-content>…</insecure-content>` tags, or a sentence before the document. For such a tool the declaration may say where the JSON is:
+
+```yaml
+read: { tool: query, args: { id: "{{id}}" }, decode: { extract: { between: ["<insecure-content>", "</insecure-content>"] } } }
+list: { tool: list_rows, args: {}, items: rows, decode: { extract: { regex: "<insecure-content>(.*?)</insecure-content>" } } }
+server: { decode: { run_sql: { mode: none, extract: { between: ["<data>", "</data>"], refusals: true } } } }
+```
+
+| Key | Meaning |
+|---|---|
+| `between` | `[start, end]`: the text after the first `start`, up to an `end` that follows it. Each following `end` is tried in turn (up to 64) until the text between parses, so a document that itself contains the end marker is read whole. Both markers non-empty, at most 512 characters. Prefer `between`: it is a plain substring search, linear in the answer |
+| `regex` | A regular expression (JavaScript syntax, applied with the `s` flag so `.` crosses lines) with exactly one capture group; the group's text in the first match. It runs under a hard limit of 100 ms per answer; past it the extraction fails for that answer |
+| `refusals` | `true`: also extract from an error answer, and let the structured refusal signals and the declared `outcome_field` read the extracted document. Default `false` |
+
+Exactly one of `between` and `regex`. The extracted text, trimmed, must parse as a JSON object or array (no Python-repr or YAML parsing). Only the first 256 KiB of the answer's text (all its text blocks, joined) is searched; the record says when an answer was longer.
+
+- **Where it applies:** only to an answer with no structuredContent (a tool that returns structuredContent is read from it, decoded as above where marked), for every call of the tool in the run. `decode` is declared on `read`, `list` or `target.guard`, or under `server.decode.<tool>`; the object form `{ mode, extract }` carries both the wrapped-result mode (`json` or `none`, optional) and the extraction. One extraction per tool: two different ones are refused.
+- **What reads it:** the paths (`read.object`, `read.items`, `list.items`, `target.guard.path`, a create's `id` …) read the extracted document, as they read structuredContent. The patterns and `mentions` read the answer's text as received (the wrapper and all), and, as for any answer, the string values of its data, never field names. An adopted result shape (`mws`) is not read from an extracted document.
+- **Refusals and outcomes:** without `refusals: true`, an error answer (isError, or a JSON-RPC error) is never extracted, and neither the structured refusal signals (a conflict, version-required or validation code at the top level or in `error`) nor the declared `outcome_field` read an extracted document: a refusal, and what an answer says about the outcome, are read from the answer as received. Declare `refusals: true` only where the server puts its refusals and outcomes inside the same wrapper.
+- **Nothing found:** where an answer is one to extract from and the markers or the regex find no document (a marker missing, text that is not a JSON object or array, the regex's time limit reached), the answer has no data (paths find nothing; the text is not parsed some other way), and its call record carries `extract_failed: { by, reason }`.
+- **Refused at load** (so `plan` refuses the manifest): a regex that does not compile, that has no capture group or more than one (use `(?:…)` for other groups), that is longer than 512 characters, whose group is not delimited on both sides by text the answer must contain (`(.*)`, `^(.*)$`, `<a>(.*)`, `\s*(.*?)\s*$`, an optional delimiter such as `x?(.*)y?` or `(?:<t>|)(.*)`), or with a quantified group that holds a quantifier of its own (`((?:x+)+)`). This check is a lint, not a guarantee: a regex that passes it can still backtrack badly on hostile text (`<t>(.*?)</t>` is quadratic on `<t>` repeated), which is why every regex extraction runs under the time and input limits above. A `between` whose markers are empty is refused too.
+- **Evidence:** each call record whose data was extracted carries `extracted: { from: "text", by: "between" | "regex", basis: "manifest", refusals }` in `results.json`, and each one where nothing was found carries `extract_failed`; `target.mcp.notes` says once per tool that its answers were extracted and how refusals are read, and once that an answer gave no document and why. The capture keeps every answer as received.
+- **Plan hash:** adding `decode.extract` changes the manifest's bytes, so the plan hash changes; a manifest without it keeps its hash.
+
+## session
+
+`session.init` is for a server that connects to its backend only after a tool call that carries the connection settings, at the start of each MCP session (`connect(host, user, password)`).
+
+```yaml
+session:
+  init:
+    - { tool: connect, args: { host: "{{env.DB_HOST}}", user: "{{env.DB_USER}}", password: "{{env.DB_PASSWORD}}" } }
+```
+
+| Key | Meaning |
+|---|---|
+| `init` | One to eight calls `{ tool, args, read_only }`, made in order |
+| `init[].args` | An object; its templates may use only `{{env.NAME}}`, a variable of the tester's environment (the run stops if it is not set). A value under a secret-like name (`password`, `pwd`, `secret`, `token`, `auth`, `key`, `api_key`, `dsn`, `connection_string`, `url`, `uri`, `credentials`, `cookie`, and `*_secret`, `*_token`, `*_key`) must be exactly one `{{env.NAME}}`: a literal there is refused at load |
+| `init[].read_only` | `true`: the operator declares the call only reads, so it is not counted as a write |
+
+- **When:** on every MCP session the run opens (each stdio server process, each HTTP session; the concurrency pairs' connections, a restarted server, a launch check's server and the clean-up's session included), once, before the session's first other `tools/call`. From the moment the run's plan is confirmed, it runs at the end of the handshake of every new connection, so a barrier that opens its connections first (simultaneous pairs) has no init call inside it. Before that, `tools/list` does not trigger it: the catalog and `plan` make no tool call.
+- **Secrets:** every value an init call takes from the environment is treated as a secret, however short from three characters on (a shorter value is not masked: it would mask parts of every word), and redacted wherever it appears in the capture, the history, the ledger and the reports; arguments with a secret name are masked whatever their value. The plan lists each init call with its arguments as written: a `{{env.NAME}}` template as is, a credential inside a literal (a URL's password, a known key shape) masked.
+- **Write budget:** an init call counts as a write (reserved against `write_budget`, paced by `writes_per_second`) unless the operator declares it `read_only: true`; a server's `readOnlyHint` does not exempt it. A connect call usually changes no data, but the tester cannot know that from the call. The number of sessions depends on the run (pairs, restarts, launch checks, clean-up), so counted init calls are not in the plan's "at most" figure: the plan warns about them, and the run stops if they would exceed the budget. The clean-up's own init is counted but never refused, so the clean-up can run after the budget is spent.
+- **Failure:** an init call that fails (an error answer, a JSON-RPC error, no answer before the timeout, an unset variable):
+  - on a session of the run itself: stops the run. No further call is made except the clean-up's, and the run's `stopped_reason` is `stopped: session.init[i] (<tool>) failed on session <label>, before any probe on it: <reason>` (redacted);
+  - on a server a check starts for itself (a launch check of MWS-CFG-1 to CFG-4, the restart steps of MWS-RETRY-2): that server is stopped and that check's requirements are `not tested`, with the reason; the run goes on;
+  - on the clean-up's session: a clean-up failure (the objects stay in the ledger as not cleaned up); the init is tried once more on the next clean-up call, then not again.
+- **Side effects:** what an init call does on the server (a connection, a login, a session row) is not in the ledger and is not cleaned up.
+- **Evidence:** each init call is in the capture and the history like any call; `target.mcp.notes` says that session.init ran and whether it was counted. Where the tenant guard fails with an answer that says the server is not connected and no `session.init` is declared, the refusal points here.
+- **Plan hash:** a manifest with `session.init` has a `session_init` member in its plan (and new bytes), so a new hash; a manifest without it keeps its hash.
 
 ## resources
 
