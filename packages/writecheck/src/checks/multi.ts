@@ -21,7 +21,7 @@ import type { MultiSpec, ResourceSpec } from '../core/manifest.js';
 import { goneFrom } from '../core/objects.js';
 import { render, templateRoots } from '../core/template.js';
 import { deepEqual, getPath, isObj, short } from '../core/util.js';
-import { lastMutating, MUTATING } from '../gate/gate.js';
+import { isMutating, lastMutating } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { listScope, newScope, scratch } from './scratch.js';
 import { tgt1HeldFor } from './targeting.js';
@@ -254,7 +254,9 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
       const mark = gate.mark();
       await call(ds, ds.map((d) => d.id), batch, 'learn');
       const reqs = await gate.since(mark);
-      const muts = reqs.filter((r) => MUTATING.has(r.method));
+      // why: B1 review: the gate's own classification; on the wire gate the verbs (UPDATE, SET) are not HTTP methods, and a count
+      // by method gave 0 writes while lastMutating found one, so the trials were armed with nth 0 and never applied.
+      const muts = reqs.filter((r) => isMutating(r));
       o.mutating_in_learning = muts.length;
       if (lastMutating(reqs))
         for (const k of [...new Set([2, muts.length])].filter((k) => k <= muts.length)) {

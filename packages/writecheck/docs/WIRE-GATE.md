@@ -177,7 +177,8 @@ The checks read `GateRequest.status` with HTTP meanings (2xx done, 4xx refused a
 - `src/core/egress.ts`: `assertEgress(url, policy, { wire: true })`; default ports per scheme in `hostAllowed` and `egressFor`.
 - `src/gate/gate.ts`: `Gate.route` gains `'wire'`; `GateRequest.wire?`; `isMutating(r)` (= `r.mutating` when present, else the HTTP method set); `lastMutating` uses it; `createGate` picks the wire gate by scheme.
 - `src/checks/gated.ts`: the ATOM learned-write filter and the R9-1 settled-outcome filter use `isMutating` instead of the HTTP method list; `Req` keeps `mutating`.
-- Not changed here (other lanes own them), and still HTTP-only: `src/checks/creates.ts:292` and `src/checks/multi.ts:257` (`MUTATING.has(method)`), `src/checks/inputrequired.ts:24`. On a wire gate these see no writes, so their proxy positions record "no mutating request" until switched to `isMutating`. One-line changes each; listed in §8.
+- `src/checks/inputrequired.ts` (MWS-RETRY-3, proxy position), `src/checks/multi.ts` (the ATOM trials' learning pass) and `src/checks/creates.ts` (MWS-RES-3's late failure) count writes with `isMutating`. By HTTP method alone they saw no write on the wire gate: the RETRY-3 proxy record said `held` for a server that wrote before input_required, and the other two skipped their trials. `test/integration/wire-gate-retry3.test.ts` runs all three through the Postgres fake.
+- Still HTTP-only, by design: the forwarder and the hook gate (their requests are HTTP), and `undoneBy` in `src/checks/idempotency.ts` (MWS-RETRY-2 proxy step: a DELETE whose path ends in the object's id). On the wire gate the path is a table, so a server that undoes its first write is not recognised there and the trial is judged on the read-back.
 
 ## 7. Tests
 
@@ -201,7 +202,6 @@ Files: `test/unit/wire-{postgres,redis,mongodb}.test.ts`, `test/integration/wire
 ## 8. Not built in this preview (follow-ups)
 
 - Argv rewrite (`rewrite_arg`) for servers that take the URL as an argument (t09); `session.ts` and the plan (B9).
-- `creates.ts`, `multi.ts`, `inputrequired.ts` switched to `isMutating`.
 - Upstream TLS (Postgres SSLRequest upstream, `rediss:`, Mongo `tls=true`).
 - Mongo transaction emulation after an injected error; OP_COMPRESSED decompression (zlib is in Node; snappy and zstd are not).
 - Redis `CLIENT REPLY OFF|SKIP`, RESP2 pub/sub multiplexed with commands (handled as passthrough).

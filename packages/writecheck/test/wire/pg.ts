@@ -6,6 +6,8 @@
  *   UPDATE kv SET v = '<v>' WHERE k = '<k>'      (or $1 / $2 parameters)
  *   INSERT INTO kv (k, v) VALUES ('<k>', '<v>')  (23505 when k exists)
  *   SELECT v FROM kv WHERE k = '<k>'
+ *   DELETE FROM kv WHERE k = '<k>'               (outside a transaction only)
+ *   SELECT k FROM kv WHERE k LIKE '<prefix>%'    (every key with the prefix, committed rows only)
  *   BEGIN | COMMIT | END | ROLLBACK | SELECT 1 | SAVEPOINT s | ROLLBACK TO s
  *   COPY kv FROM STDIN                            (CopyData lines "k\tv\n", then CopyDone)
  *   SELECT hang()                                 (never answered)
@@ -120,6 +122,21 @@ export async function fakePostgres(initial: Record<string, string> = {}): Promis
         if (state === 'T') pending.push([m[1]!, m[2]!]);
         else table.set(m[1]!, m[2]!);
         return [msg('C', cstr('INSERT 0 1'))];
+      }
+      m = /^SELECT k FROM kv WHERE k LIKE '([^'%]*)%'$/i.exec(sql);
+      if (m) {
+        const keys = [...table.keys()].filter((k) => k.startsWith(m![1]!)).sort();
+        return [rowDesc(), ...keys.map((k) => dataRow(k)), msg('C', cstr(`SELECT ${keys.length}`))];
+      }
+      m = /^DELETE FROM kv WHERE k = '([^']*)'$/i.exec(sql);
+      if (m) {
+        // A fixture: deletes are autocommit only (no tombstones in a transaction's pending writes).
+        if (state !== 'I') {
+          state = 'E';
+          return [errorMsg('0A000', 'DELETE inside a transaction is not supported by the fake')];
+        }
+        const had = table.delete(m[1]!);
+        return [msg('C', cstr(`DELETE ${had ? 1 : 0}`))];
       }
       m = /^SELECT v FROM kv WHERE k = '([^']*)'$/i.exec(sql);
       if (m) {
