@@ -19,7 +19,7 @@ import { applyBaseline, exitCodeFor } from '../../src/report/baseline.js';
 import { signChecksums, verifyChecksums, writeChecksums } from '../../src/report/evidence.js';
 import { renderJunit } from '../../src/report/junit.js';
 import { renderMarkdown } from '../../src/report/markdown.js';
-import { RESULTS_KEYS, type ResultsDoc } from '../../src/report/results.js';
+import { RESULTS_KEYS, RESULTS_KEYS_WRITTEN, type ResultsDoc } from '../../src/report/results.js';
 import { result } from '../../src/report/verdicts.js';
 import { COVERAGE, previewSentence, REQUIREMENTS } from '../../src/requirements.js';
 
@@ -63,7 +63,7 @@ test('the requirement registry has 37 permanent MWS- ids, unique', () => {
 test('results schema: exactly the document keys, no additional top-level property, no aggregate field', () => {
   const schema = JSON.parse(readFileSync(join(pkg, 'schema', 'mws-results-1.schema.json'), 'utf8')) as { additionalProperties: boolean; properties: Record<string, unknown>; required: string[] };
   assert.equal(schema.additionalProperties, false);
-  assert.deepEqual(Object.keys(schema.properties), [...RESULTS_KEYS]);
+  assert.deepEqual(Object.keys(schema.properties), [...RESULTS_KEYS_WRITTEN]);
   assert.deepEqual(Object.keys(doc()), [...RESULTS_KEYS]);
   const text = JSON.stringify(schema);
   for (const banned of ['score', 'passed', 'percent', 'total', 'grade', 'summary']) assert.ok(!new RegExp(`"${banned}"`).test(text), `schema has no ${banned}`);
