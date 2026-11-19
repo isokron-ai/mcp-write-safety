@@ -59,7 +59,12 @@ const saidNo = (rs: Result[]) => rs.filter((r) => r.verdict === 'self-attested' 
  *                             own finding (CONC-6) is review-only, below
  *   coerce-types              a conversion that changes the meaning (IN-1) is also a value of
  *                             another type that was accepted (IN-6; spec: "a record here and under
- *                             MWS-IN-1")
+ *                             MWS-IN-1"); a list sent for delete_project's key is converted to the
+ *                             key "1", and the not-found that follows does not name the argument
+ *                             (IN-4; spec: a rejection after a conversion that changes the meaning)
+ *   skip-limits               an out-of-bounds value reaches the backend, whose refusal is passed on
+ *                             without naming the argument (IN-4; spec MWS-IN-3: a refusal by the
+ *                             backend that is passed on is a rejection, and MWS-IN-4 judges its form)
  * Two defects are found by review-only clauses, so the record is self-attested with the answer "no"
  * (asserted below), never `violated` (spec 8.2, rule 11):
  *   stale-unannounced         MWS-CONC-5: delete_project's description no longer says that a stale
@@ -98,9 +103,9 @@ const EXPECT: Record<string, string[]> = {
   'retry-without-key': ['MWS-RETRY-2'],
   'key-store-in-memory': ['MWS-RETRY-2'],
   'close-before-confirm': ['MWS-RETRY-3'],
-  'coerce-types': ['MWS-IN-1', 'MWS-IN-6'],
+  'coerce-types': ['MWS-IN-1', 'MWS-IN-4', 'MWS-IN-6'],
   'drop-unknown-args': ['MWS-IN-2', 'MWS-IN-7'],
-  'skip-limits': ['MWS-IN-3'],
+  'skip-limits': ['MWS-IN-3', 'MWS-IN-4'],
   'vague-validation-error': ['MWS-IN-4'],
   'undeclared-title-limit': ['MWS-IN-5'],
   'convert-numeric-strings': ['MWS-IN-6'],
@@ -123,10 +128,36 @@ const EXPECT: Record<string, string[]> = {
   'token-in-error': ['MWS-SEC-1'],
 };
 
+/**
+ * B-GAP F2 (B3): the input defects are found on the write tools other than the update tool too (src/checks/inputwrites.ts). Each
+ * listed write path must be violated for the defect's requirement.
+ */
+const ON_WRITE_TOOLS: Record<string, [string, string[]]> = {
+  'coerce-types': ['MWS-IN-1', ['ticket:create_ticket', 'ticket:bulk_update_tickets']],
+  'drop-unknown-args': ['MWS-IN-2', ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project']],
+  // close_ticket is not listed: its old MWS-IN-3 violation came only from reading the intermediate input_required
+  // answer as acceptance. With the declared answers the final result refuses the invalid id (owner-approved, 19 Nov 2026).
+  'skip-limits': ['MWS-IN-3', ['ticket:create_ticket', 'ticket:delete_tickets', 'project:create_project']],
+  'vague-validation-error': ['MWS-IN-4', ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project']],
+};
+
+/** The write tools whose MWS-IN-1 to IN-4 the correct build must hold (B-GAP F2), and the cells spec R15-4 leaves not tested. */
+const IN_WRITE_TOOLS = ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project', 'ticket:update_ticket', 'ticket-replace:replace_ticket'];
+const IN_NOT_HELD: Record<string, RegExp> = {
+  // delete_project's only argument is its key; the counterpart of the probe 5 is the key "5", another project, so the control is
+  // not sent to a deleting tool (spec R15-4) and the probe is not judged.
+  'MWS-IN-1 project:delete_project': /delete_project deletes or acts on more than one object/,
+  'MWS-IN-4 project:delete_project': /delete_project deletes or acts on more than one object/,
+};
+
 /** Review-only findings each defect must give as self-attested "no". */
 const SAID_NO: Record<string, string[]> = {
   'stale-unannounced': ['MWS-CONC-5 project:delete_project'],
   'conflict-as-generic-error': ['MWS-CONC-6 ticket:set_labels'],
+  // B-GAP F2: the review-only reason clause of MWS-IN-4 is now asked on every write tool. Under these defects a value reaches the
+  // backend, whose refusal (a not-found after a converted key; a length or pattern refusal) is passed on without the reason.
+  'coerce-types': ['MWS-IN-4 project:delete_project'],
+  'skip-limits': ['MWS-IN-4 ticket:add_comment'],
 };
 
 test('the expectations cover every tiny-tracker defect the default profile runs', { skip }, async () => {
@@ -188,6 +219,18 @@ for (const protocol of [undefined, '2025-11-25']) {
         assert.equal(v('MWS-RETRY-2', path, 'idempotency-replay.concurrent'), protocol ? 'not tested' : 'not observed', `${path}: spec 8.2 rule 6`);
       }
       assert.ok(!rs.some((x) => x.requirement === 'MWS-RETRY-2' && /outcome not established|key record not kept/.test(x.reason)), 'held without a note');
+      // B-GAP F2: MWS-IN-1 to IN-4 on every write tool (over 2025-11-25 close_ticket answers no input_required, so its base call differs).
+      if (!protocol) {
+        for (const path of IN_WRITE_TOOLS) {
+          for (const req of ['MWS-IN-1', 'MWS-IN-2', 'MWS-IN-3', 'MWS-IN-4']) {
+            const recs = rs.filter((x) => x.requirement === req && writePathKey(x.write_path) === path && !x.scenario.id.endsWith('.review'));
+            const why = IN_NOT_HELD[`${req} ${path}`];
+            assert.ok(recs.length >= 1, `${req} ${path} has a record`);
+            if (why) assert.ok(recs.every((x) => x.verdict === 'not tested' && why.test(x.reason)), `${req} ${path}: ${recs.map((x) => `${x.verdict}: ${x.reason}`).join(' | ')}`);
+            else assert.ok(recs.every((x) => x.verdict === 'held'), `${req} ${path}: ${recs.map((x) => `${x.verdict}: ${x.reason}`).join(' | ')}`);
+          }
+        }
+      }
       assert.ok(rs.find((x) => x.scenario.id === 'idempotency-replay' && x.write_path.tool === 'create_project')!.notes.some((n) => /^Step \(b\): held\..*name check/.test(n)), 'a new key for a project key that exists is refused by the declared name check, on its own merits');
       const held = rs.find((x) => x.scenario.id === 'held-request' && x.requirement === 'MWS-CONC-3' && x.write_path.tool === 'update_ticket')!;
       assert.ok(held.notes.some((n) => /^hold A, run B: held #\d+ PATCH \/tickets\/T-\d+, released after the other writer finished/.test(n)), 'the record says which request was held and when it was released');
@@ -206,6 +249,8 @@ for (const [defect, expect] of Object.entries(EXPECT)) {
     try {
       const r = await runTT(t);
       assert.deepEqual(violatedIds(r.doc.results), [...expect].sort(), violatedKeys(r.doc.results).join('; '));
+      const onWrite = ON_WRITE_TOOLS[defect];
+      if (onWrite) for (const path of onWrite[1]) assert.ok(r.doc.results.some((x) => x.requirement === onWrite[0] && writePathKey(x.write_path) === path && x.verdict === 'violated'), `${onWrite[0]} ${path} violated: ${violatedKeys(r.doc.results).join('; ')}`);
       assert.deepEqual(r.doc.leftovers, []);
       assert.deepEqual(saidNo(r.doc.results).sort(), SAID_NO[defect] ?? []);
     } finally {
