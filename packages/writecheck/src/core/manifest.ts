@@ -1223,6 +1223,13 @@ const PATTERN_KINDS = ['applied_all', 'not_applied', 'write_failed', 'repeat_inv
  * a literal value sits under the scope argument; `ids` where a template refers to the tester's exact objects ({{ids}},
  * {{ids[0]}}, {{json:ids}}).
  */
+/**
+ * settings.read_only blocks whose `valid` is the map form ({ value: restrict | permit }), which classes every value. Kept outside
+ * the parsed object so the declaration that enters each record's test_hash is unchanged (a list form and a map form whose
+ * values are all permit parse alike otherwise).
+ */
+export const classifiedReadOnly = new WeakSet<object>();
+
 export function multiBinding(args: unknown, scopeArg: string | null): { scope: boolean; ids: boolean } {
   const roots = templateRoots(args);
   const literal = !!scopeArg && isObj(args) && Object.hasOwn(args, scopeArg);
@@ -1310,6 +1317,7 @@ function topLevel(o: Obj): Pick<Manifest, 'settings' | 'secrets' | 'canaries' | 
       }
       const on = String(ro['on'] ?? 'true');
       settings.read_only = { env: str(ro['env'], 'settings.read_only.env', ENV), on, valid, restrict: [...new Set([on, ...restrict])], empty_distinct: ro['empty_distinct'] === true };
+      if (!Array.isArray(ro['valid']) && ro['valid'] !== undefined) classifiedReadOnly.add(settings.read_only);
     }
     if (st['tool_filters'] !== undefined) {
       if (!Array.isArray(st['tool_filters'])) throw fail('settings.tool_filters', 'a list of { env, kind: allow | deny }');

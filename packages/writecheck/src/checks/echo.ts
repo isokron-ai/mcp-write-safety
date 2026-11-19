@@ -67,7 +67,8 @@ const wordsOf = (key: string): string[] => key.replace(/([a-z0-9])([A-Z])/g, '$1
 const COUNT_WORD = /^(count|rowcount|rows|affected|changes|changed|inserted|updated|deleted|modified|matched|upserted)$/;
 const ID_WORD = /^(id|uid|uuid|rowid|version|revision|rev|etag|generation|seq|sequence)$/;
 /** An identifier of the call, not of anything the backend holds (request_id, trace_id, session_id). */
-const CALL_WORD = /^(request|req|trace|span|session|correlation|connection|conn|call|invocation|message|msg|rpc|client|user|tenant)$/;
+// why: a query, job, execution, statement, operation, task or run id names the call's own unit of work, not an object the write made.
+const CALL_WORD = /^(request|req|trace|span|session|correlation|connection|conn|call|invocation|message|msg|rpc|client|user|tenant|query|job|execution|exec|statement|stmt|operation|op|task|run|process|pid)$/;
 const STATE_WORD = /^(status|state|phase|stage)$/;
 const WRITTEN_WORD = /^(created|updated|modified|changed|deleted|written|inserted|mtime|ctime)$/;
 const WRITE_STEM = /^(creat|updat|modif|chang|delet|writ|insert)/;
@@ -78,7 +79,8 @@ function keyKind(key: string, objectKeys: readonly string[]): KeyKind {
   const last = w.at(-1) ?? '';
   const prev = w.at(-2) ?? '';
   if (COUNT_WORD.test(last)) return 'count';
-  if (ID_WORD.test(last)) return CALL_WORD.test(prev) ? null : 'id';
+  // why: a key the object as read back also has (a task tracker's task_id) is the object's state, whatever its words.
+  if (ID_WORD.test(last)) return !CALL_WORD.test(prev) ? 'id' : objectKeys.includes(key) ? 'field' : null;
   if (STATE_WORD.test(last)) return 'state';
   if (WRITTEN_WORD.test(last) || (TIME_WORD.test(last) && WRITE_STEM.test(prev))) return 'time';
   return objectKeys.includes(key) ? 'field' : null;
@@ -97,9 +99,35 @@ const COUNT_PHRASE = /\b\d+\s+(?:rows?|records?|documents?|docs?|items?|entries|
 const STAMP = /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?|(?<![A-Za-z0-9_.-])\d{1,2}:\d{2}(?::\d{2})?(?![A-Za-z0-9_-])/g;
 const AFTER_WRITE_WORD = /(creat|updat|modif|chang|writ|insert|delet)[a-z]*[\s_]*(at|on|time|date)?[\s:=]*$/i;
 
-/** Tokens of a free text that could carry server state: they hold a digit (a count, an id, a version, the time of a write). */
-const tokens = (s: string): string[] =>
-  (s.replace(STAMP, (m, at: number) => (AFTER_WRITE_WORD.test(s.slice(Math.max(0, at - 32), at)) ? m : ' ')).replace(DURATION, '$1 ').replace(STATUS_CODE, ' ').match(/[A-Za-z0-9][A-Za-z0-9_.:/-]*/g) ?? []).map((t) => t.replace(/[.:/-]+$/, '')).filter((t) => /\d/.test(t));
+/** A statement's bind placeholder ($1, ?1, :1): part of the request's own text, never a server figure. */
+const PLACEHOLDER = /(?<![A-Za-z0-9_])[$?:]\d+(?![A-Za-z0-9_])/g;
+/** Words of a free text after which a token names what a write made: a write word, or an identifier or version word. */
+const TEXT_WRITE_WORD = /^(created?|creates|updated?|modified|changed|deleted|written|wrote|inserted|saved|generated|assigned|stored|upserted|added)$/i;
+const TEXT_ID_WORD = /^(id|uid|uuid|rowid|version|revision|rev|etag|generation|seq|sequence)$/i;
+
+/**
+ * Tokens of a free text that could carry server state: they hold a digit, and they come right after a write word or an
+ * identifier word that is not an identifier of the call ("created T-907", "version 4", "rowid 42"; not "request 7f3a2c9e",
+ * not "request id 99", not the $1 of a statement). Dates and times count only after a write word (STAMP).
+ */
+function tokens(s: string): string[] {
+  const clean = s.replace(STAMP, (m, at: number) => (AFTER_WRITE_WORD.test(s.slice(Math.max(0, at - 32), at)) ? `\u0000${m}` : ' ')).replace(DURATION, '$1 ').replace(STATUS_CODE, ' ').replace(PLACEHOLDER, ' ');
+  const out: string[] = [];
+  const words: string[] = [];
+  for (const m of clean.matchAll(/\u0000?[A-Za-z0-9][A-Za-z0-9_.:/-]*/g)) {
+    const kept = m[0].startsWith('\u0000');
+    const t = m[0].replace('\u0000', '').replace(/[.:/-]+$/, '');
+    if (/\d/.test(t)) {
+      // why: an echoing tool's free text carries digit tokens of its own (a request id, a job number);
+      // only one placed as what a write made, or as an identifier that is not the call's, states something of the backend.
+      const before = words.slice(-3).map((w) => w.toLowerCase());
+      const named = before.some((w) => TEXT_WRITE_WORD.test(w) || (TEXT_ID_WORD.test(w) && !CALL_WORD.test(before[before.indexOf(w) - 1] ?? '')));
+      if (kept || (named && !before.some((w) => CALL_WORD.test(w) && !TEXT_ID_WORD.test(w) && !TEXT_WRITE_WORD.test(w)))) out.push(t);
+    }
+    for (const w of t.split(/[_.:/-]+/)) if (w) words.push(w);
+  }
+  return out;
+}
 
 /** The text as a JSON object or array, where it is one (a text block that mirrors the structured content). */
 function jsonOf(text: string): unknown {
@@ -152,7 +180,11 @@ export function serverData(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<Ca
     const where = path || '(value)';
     const key = path.replace(/(\[\d+\])+$/, '').split('.').pop() ?? '';
     if (typeof x === 'string' && (/\s/.test(x) || x.length > 200)) return free(x, where);
-    if (key === '' || CARRIER_KEY.test(key)) return free(String(x), where);
+    if (key === '' || CARRIER_KEY.test(key)) {
+      // why: a lone scalar under a key that only carries the result (result: "T-907") is the result itself, not prose around it.
+      if (/\d/.test(String(x)) && !inRequest(hay, String(x))) add(`${where}: ${JSON.stringify(x)}`);
+      return;
+    }
     // why: the answer of an echoing tool also carries facts about the call (duration_ms, statusCode, operation, database,
     // request_id): they are not in the request, and they say nothing of what the backend now holds. Only a key that names
     // backend state counts.
@@ -181,23 +213,52 @@ export function serverData(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<Ca
 export interface Echo {
   /** null: the arguments were not kept (older evidence, or too large); the filter does not apply. */
   hay: string | null;
+  /** The arguments as kept, for a check by key (createdIdEcho). */
+  args?: unknown;
   server: string[];
 }
 
 /** `objectKeys`: the fields of the object as the tester read it back, where it did (a value under one of them is the object's state). */
 export function echoOf(b: Pick<CallBrief, 'text' | 'data'> & Partial<Pick<CallBrief, 'tool' | 'shape' | 'hay'>>, args: unknown, objectKeys: readonly string[] | null = null): Echo {
   const hay = requestHay(args);
-  return { hay, server: hay === null ? [] : serverData(b, hay, 3, objectKeys ?? []) };
+  return { hay, args, server: hay === null ? [] : serverData(b, hay, 3, objectKeys ?? []) };
+}
+
+/**
+ * Is the identifier of the object a create made an echo of its request? Only where the request holds it as a value under a
+ * key that names the object's own identifier (`id`, `uid`, `uuid`, `key`, `name`, `slug`, the declared caller-chosen key, the
+ * last segment of the create's declared id path), as a whole token inside a text it sent (a statement: `VALUES (42, …)`), or
+ * where it contains the call's marker. A scalar argument under any other key (priority: 1, ticket_id: 1) does not make the
+ * server's new id 1 an echo.
+ *
+ * why: a whole-token match anywhere in the arguments demoted true receipts: a create sent with
+ * priority 1 that the server answered with its new id 1, or a comment created on ticket_id 1 that got id 1.
+ */
+export function createdIdEcho(args: unknown, v: unknown, o: { marker?: string | null; keys?: readonly (string | null | undefined)[] }): boolean {
+  if (v === null || v === undefined || v === '') return false;
+  if (o.marker && typeof v === 'string' && v.includes(o.marker)) return true;
+  const keys = new Set(['id', 'uid', 'uuid', 'key', 'name', 'slug', ...(o.keys ?? []).filter((k): k is string => !!k)]);
+  const same = (y: unknown) => y !== null && y !== undefined && typeof y !== 'object' && String(y) === String(v);
+  let hit = false;
+  const walk = (x: unknown, key: string | null): void => {
+    if (hit || x === null || x === undefined) return;
+    if (Array.isArray(x)) x.forEach((y) => walk(y, key));
+    else if (isObj(x)) for (const [k, y] of Object.entries(x)) walk(y, k);
+    else if (key !== null && keys.has(key) && same(x)) hit = true;
+    else if (typeof x === 'string' && /\s/.test(x) && inRequest(x, v)) hit = true;
+  };
+  walk(args, null);
+  return hit;
 }
 
 /**
  * Does the answer carry the value as evidence (yes), carry it only as an echo of the request (echo), or not at all (no)?
  * `found`: whether the answer mentions it, as the caller read it (a mention, a shape member, a field name or value).
  */
-export function credit(found: boolean, e: Echo, v: unknown): 'yes' | 'echo' | 'no' {
+export function credit(found: boolean, e: Echo, v: unknown, isEcho?: (v: unknown) => boolean): 'yes' | 'echo' | 'no' {
   if (!found) return 'no';
   // why: rule above: a value in the request counts only beside data the request did not contain.
-  if (e.hay === null || !inRequest(e.hay, v) || e.server.length) return 'yes';
+  if (e.hay === null || !(isEcho ? isEcho(v) : inRequest(e.hay, v)) || e.server.length) return 'yes';
   return 'echo';
 }
 
@@ -222,12 +283,13 @@ export class Tally {
   /** Items found by a value from the request, counted because the answer carries server data too. */
   readonly counted: string[] = [];
   constructor(readonly e: Echo) {}
-  any(label: string, alts: [boolean, unknown][]): boolean {
+  /** An alternative's third member, where given, decides whether its value is an echo (createdIdEcho for a create's identifier). */
+  any(label: string, alts: [boolean, unknown, ((v: unknown) => boolean)?][]): boolean {
     let echo = false;
-    for (const [found, v] of alts) {
-      const k = credit(found, this.e, v);
+    for (const [found, v, isEcho] of alts) {
+      const k = credit(found, this.e, v, isEcho);
       if (k === 'yes') {
-        if (this.e.hay !== null && inRequest(this.e.hay, v)) this.counted.push(label);
+        if (this.e.hay !== null && (isEcho ? isEcho(v) : inRequest(this.e.hay, v))) this.counted.push(label);
         return true;
       }
       if (k === 'echo') echo = true;

@@ -27,7 +27,7 @@ import { result, type Result } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { saidBy, says } from './says.js';
 import { scratch } from './scratch.js';
-import { echoOf, echoReason, keptArgs, Tally } from './echo.js';
+import { createdIdEcho, echoOf, requestHay, echoReason, keptArgs, Tally } from './echo.js';
 import { decidedByShape, quoteField, reportsSuccess, sameValue, shapeFallbackNote, shapeNamesField, shapeOf } from './shape.js';
 import { brief, forPatterns, mentions, offeredKeys, res2Judge, schemaProps, textStatement, toolByName, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
@@ -47,6 +47,8 @@ interface CreateObs {
   first: CallBrief | null;
   /** The arguments the first create sent, for the echo filter (src/checks/echo.ts); absent in older evidence (no filter). */
   sent_args?: unknown;
+  /** The marker the first create carried (absent in older evidence): an identifier that contains it is the request's own. */
+  marker?: string;
   found: unknown[];
   /** The second identical create (RETRY-1): objects found by the same marker afterwards. */
   repeat: CallBrief | null;
@@ -298,6 +300,7 @@ async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, labe
   const r1 = await send(args, 'first');
   o.first = r1 ? brief(r1) : null;
   o.sent_args = keptArgs(args);
+  o.marker = marker;
   const learned = gate ? await gate.since(mark) : [];
   const found = await c.find(ctx, marker, label, scope);
   if (found === null) return { ...o, skipped: 'the created object could not be looked for (the find or list call failed)' };
@@ -345,36 +348,49 @@ async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, labe
   return o;
 }
 
+/**
+ * why: where the arguments were not kept (evidence of version 1 read by recheck, or arguments past the
+ * size limit) the echo filter cannot apply, and the records are judged exactly as version 1 judged them. They carry version 1,
+ * so a rechecked record keeps the procedure version and the test_hash it was made with, instead of claiming the filter.
+ */
+const V1 = { id: ID, version: '1' };
+const filterOff = (sent: unknown): boolean => requestHay(sent) === null;
+
 export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext): Result[] {
   const sc = { id: ID, version: VERSION };
   const out: Result[] = [];
   const ign = res.read.ignore;
   for (const c of o.creates) {
     const w = wp(res.name, c.tool);
+    const scc = filterOff(c.sent_args) ? V1 : sc;
+    // why: the identifier a create made is an echo only where the request holds it as the object's own id, or it contains the marker.
+    const idEcho = (args: unknown) => (v: unknown) => createdIdEcho(args, v, { marker: c.marker ?? null, keys: [res.key?.arg, res.create?.id?.split('.').pop()?.replace(/\[.*$/, '')] });
     // MWS-RES-3
-    if (c.skipped || !c.first || c.first.indeterminate) out.push(result('MWS-RES-3', w, sc, 'not tested', c.skipped ?? 'the create\'s outcome is unknown'));
-    else if (!c.first.ok) out.push(result('MWS-RES-3', w, sc, 'not tested', `the create did not succeed (${short(c.first.text ?? c.first.rpc_error?.message ?? '', 120)})`));
-    else if (c.found.length !== 1) out.push(result('MWS-RES-3', w, sc, 'not tested', `${c.found.length} objects carry the call's marker; the object the call made could not be identified${c.found.length === 0 && !c.consistency ? ' (for a list that shows a new object only after a while, declare list.consistency)' : ''}`, { notes: c.consistency ? [c.consistency] : [] }));
-    else if (!mentions(c.first, c.found[0])) out.push(result('MWS-RES-3', w, sc, 'violated', `${c.tool} created ${short(c.found[0], 40)} (found by its marker), and its answer does not carry that identifier.`, { steps: [c.first.step] }));
+    if (c.skipped || !c.first || c.first.indeterminate) out.push(result('MWS-RES-3', w, scc, 'not tested', c.skipped ?? 'the create\'s outcome is unknown'));
+    else if (!c.first.ok) out.push(result('MWS-RES-3', w, scc, 'not tested', `the create did not succeed (${short(c.first.text ?? c.first.rpc_error?.message ?? '', 120)})`));
+    else if (c.found.length !== 1) out.push(result('MWS-RES-3', w, scc, 'not tested', `${c.found.length} objects carry the call's marker; the object the call made could not be identified${c.found.length === 0 && !c.consistency ? ' (for a list that shows a new object only after a while, declare list.consistency)' : ''}`, { notes: c.consistency ? [c.consistency] : [] }));
+    else if (!mentions(c.first, c.found[0])) out.push(result('MWS-RES-3', w, scc, 'violated', `${c.tool} created ${short(c.found[0], 40)} (found by its marker), and its answer does not carry that identifier.`, { steps: [c.first.step] }));
     else {
       // why: corpus finding (lane F9): an answer that only echoes the request (a SQL tool returning its own statement) carries an
       // identifier the call itself named whether or not anything was made. A value that appears verbatim in the arguments counts
       // only beside data the request did not contain (src/checks/echo.ts); an echo alone leaves the record open, never held.
       const t3 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
-      t3.any(`the identifier (${short(c.found[0], 40)})`, [[true, c.found[0]]]);
-      const lf = t3.echoOnly.length ? null : c.late_failure;
+      t3.any(`the identifier (${short(c.found[0], 40)})`, [[true, c.found[0], idEcho(c.sent_args)]]);
+      // why: the late-failure clause is independent evidence: an object left made behind an error that
+      // does not name it is a violation whatever the first answer was, so it is judged before the echo demotion.
+      const lf = c.late_failure;
       let note = lf?.skipped ?? (lf ? '' : 'Whether the identifier survives a failure of a later step needs backend.gate; not tested.');
       const notes: string[] = [];
       let lateEcho: string | null = null;
       if (lf && !lf.skipped && lf.call) {
         const made = lf.found;
         if (made.length && !lf.call.ok && !made.every((id) => mentions(lf.call!, id))) {
-          out.push(result('MWS-RES-3', w, sc, 'violated', `With its last backend write failed, ${c.tool} left ${made.map((v) => short(v, 30)).join(', ')} created, and its error does not carry the identifier.`, { steps: [lf.call.step] }));
+          out.push(result('MWS-RES-3', w, scc, 'violated', `With its last backend write failed, ${c.tool} left ${made.map((v) => short(v, 30)).join(', ')} created, and its error does not carry the identifier.`, { steps: [lf.call.step] }));
           continue;
         }
         if (made.length && !lf.call.ok) {
           const tl = new Tally(echoOf(lf.call, lf.sent_args));
-          for (const id of made) tl.any(`the identifier (${short(id, 30)})`, [[true, id]]);
+          for (const id of made) tl.any(`the identifier (${short(id, 30)})`, [[true, id, idEcho(lf.sent_args)]]);
           if (tl.echoOnly.length) lateEcho = `with its last backend write failed, ${echoReason(c.tool, tl.echoOnly)} (the answer is the error)`;
           const n = tl.note();
           if (n) notes.push(n);
@@ -382,9 +398,9 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
         note = `With the last of ${lf.mutating} backend writes failed, ${made.length ? 'the error carried the identifier of the object that exists' : 'no object was left'}.`;
       }
       const n3 = t3.note();
-      if (t3.echoOnly.length) out.push(result('MWS-RES-3', w, sc, 'not tested', echoReason(c.tool, t3.echoOnly)));
-      else if (lateEcho) out.push(result('MWS-RES-3', w, sc, 'not tested', lateEcho));
-      else out.push(result('MWS-RES-3', w, sc, 'held', `The answer carries the identifier of the object the create made (${short(c.found[0], 40)}).`, { notes: [...(note ? [note] : []), ...(n3 ? [n3] : []), ...notes, ...(c.consistency ? [c.consistency] : [])] }));
+      if (t3.echoOnly.length) out.push(result('MWS-RES-3', w, scc, 'not tested', echoReason(c.tool, t3.echoOnly)));
+      else if (lateEcho) out.push(result('MWS-RES-3', w, scc, 'not tested', lateEcho));
+      else out.push(result('MWS-RES-3', w, scc, 'held', `The answer carries the identifier of the object the create made (${short(c.found[0], 40)}).`, { notes: [...(note ? [note] : []), ...(n3 ? [n3] : []), ...notes, ...(c.consistency ? [c.consistency] : [])] }));
     }
     // MWS-RES-4 for the create: identity, version where declared, no server-managed field the read omits.
     const csh = c.first?.ok && c.found.length === 1 ? shapeOf(c.first) : null;
@@ -400,51 +416,52 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
       if (cfail) miss.push(`a text that does not say the create failed (${cfail}; rule 11, point 13: the shape beside it does not repair it)`);
       // why: the echo filter (src/checks/echo.ts) applies here too; an adopted shape is itself data the request did not contain.
       const t4 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
-      const idOk = csh.object?.id !== undefined ? t4.any('the identifier', [[sameValue(csh.object.id, c.found[0]), c.found[0]], [c.parent !== null && (sameValue(csh.object.id, c.parent) || sameValue(csh.object.parent?.id, c.parent)), c.parent]]) : t4.any('the identifier', [[mentions(pc, c.found[0]), c.found[0]], [c.parent !== null && (mentions(pc, c.parent) || sameValue(csh.object?.parent?.id, c.parent)), c.parent]]);
+      const idOk = csh.object?.id !== undefined ? t4.any('the identifier', [[sameValue(csh.object.id, c.found[0]), c.found[0], idEcho(c.sent_args)], [c.parent !== null && (sameValue(csh.object.id, c.parent) || sameValue(csh.object.parent?.id, c.parent)), c.parent]]) : t4.any('the identifier', [[mentions(pc, c.found[0]), c.found[0], idEcho(c.sent_args)], [c.parent !== null && (mentions(pc, c.parent) || sameValue(csh.object?.parent?.id, c.parent)), c.parent]]);
       if (!idOk) miss.push(csh.object?.id !== undefined ? `the identifier (${quoteField('object.id', csh.object.id)}; the create made ${short(c.found[0], 40)})` : 'the identifier (no mws.object.id, and not in the rest of the answer)');
       if (c.name === res.name && res.version && c.version !== null && !t4.any('the new version', [[csh.object?.version !== undefined ? sameValue(csh.object.version, c.version) : mentions(pc, c.version), c.version]])) miss.push(csh.object?.version !== undefined ? `the new version (${quoteField('object.version', csh.object.version)}; the object reads ${short(c.version, 20)})` : `the new version (${short(c.version, 20)}; no mws.object.version, and not in the rest of the answer)`);
       // why: a nested create is judged on the identifier, and its parent's counts (as without the shape): B-9 v2's object.parent.
       const notes = [decidedByShape([['outcome', csh.outcome], ['object', csh.object ?? null]], c.first), ...(c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts, as mws.object.id or mws.object.parent.id).']), ...(t4.note() ? [t4.note()!] : [])];
-      if (miss.length) out.push(result('MWS-RES-4', w, sc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes }));
-      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, sc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes }));
-      else out.push(result('MWS-RES-4', w, sc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''} (${quoteField('object', csh.object ?? null)}).`, { notes }));
+      if (miss.length) out.push(result('MWS-RES-4', w, scc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes }));
+      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, scc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes }));
+      else out.push(result('MWS-RES-4', w, scc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''} (${quoteField('object', csh.object ?? null)}).`, { notes }));
     } else if (c.first?.ok && c.found.length === 1) {
       const miss: string[] = [];
       const t4 = new Tally(echoOf(c.first, c.sent_args, c.read_keys));
-      if (!t4.any('the identifier', [[mentions(c.first, c.found[0]), c.found[0]], [c.parent !== null && mentions(c.first, c.parent), c.parent]])) miss.push('the identifier');
+      if (!t4.any('the identifier', [[mentions(c.first, c.found[0]), c.found[0], idEcho(c.sent_args)], [c.parent !== null && mentions(c.first, c.parent), c.parent]])) miss.push('the identifier');
       if (c.name === res.name && res.version && c.version !== null && !t4.any(`the new version (${short(c.version, 20)})`, [[mentions(c.first, c.version), c.version]])) miss.push(`the new version (${short(c.version, 20)})`);
       // why: spec MWS-RES-4 (516c4ed): for a create, only the identifier and the declared version; the fields set are checked for updates.
       const extra = c.read_keys ? extraManaged(c.first, ign, c.read_keys) : [];
       const measured = extra.length ? [`Measured, not judged (spec Annex A, A-3): server-managed field(s) the read tool omits: ${extra.join(', ')}.`] : [];
       const nested = c.name === res.name ? [] : ['A nested create is judged on the identifier (its parent\'s identifier counts).'];
       const en = t4.note();
-      if (miss.length) out.push(result('MWS-RES-4', w, sc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes: [...measured, ...nested] }));
-      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, sc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes: [...measured, ...nested] }));
-      else out.push(result('MWS-RES-4', w, sc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''}.`, { notes: [...measured, ...nested, ...(en ? [en] : [])] }));
+      if (miss.length) out.push(result('MWS-RES-4', w, scc, 'violated', `${c.tool}'s answer lacks ${miss.join(' and ')}.`, { steps: [c.first.step], notes: [...measured, ...nested] }));
+      else if (t4.echoOnly.length) out.push(result('MWS-RES-4', w, scc, 'not tested', echoReason(c.tool, t4.echoOnly), { notes: [...measured, ...nested] }));
+      else out.push(result('MWS-RES-4', w, scc, 'held', `${c.tool}'s answer identifies the object${c.name === res.name && res.version ? ' and carries its new version' : ''}.`, { notes: [...measured, ...nested, ...(en ? [en] : [])] }));
     }
     // MWS-RETRY-1
     // why: a list that cannot see what the first call made (found != 1) cannot count a second object either.
     if (c.first?.ok && c.found.length === 1 && c.found_after_repeat !== null && c.repeat && !c.repeat.indeterminate) {
-      if (c.found_after_repeat < 2) out.push(result('MWS-RETRY-1', w, sc, 'not applicable', `Two calls with the same arguments did not make two objects (${c.found_after_repeat} found; the second call ${c.repeat.ok ? `was answered without isError${c.repeat.text ? `: ${JSON.stringify(short(c.repeat.text, 100))}` : ''}` : 'was refused'}).`, { notes: c.consistency ? [c.consistency] : [] }));
-      else if (!c.key) out.push(result('MWS-RETRY-1', w, sc, 'not tested', 'two identical calls made two objects; the key check did not run'));
+      if (c.found_after_repeat < 2) out.push(result('MWS-RETRY-1', w, scc, 'not applicable', `Two calls with the same arguments did not make two objects (${c.found_after_repeat} found; the second call ${c.repeat.ok ? `was answered without isError${c.repeat.text ? `: ${JSON.stringify(short(c.repeat.text, 100))}` : ''}` : 'was refused'}).`, { notes: c.consistency ? [c.consistency] : [] }));
+      else if (!c.key) out.push(result('MWS-RETRY-1', w, scc, 'not tested', 'two identical calls made two objects; the key check did not run'));
       else if (!c.key.declared) {
         // why: dogfood C4: a tool whose input schema offers a key the declaration does not name is a declaration gap, not a finding.
         const offered = offeredKeys(ctx.tools, c.tool);
-        if (offered.length) out.push(result('MWS-RETRY-1', w, sc, 'not tested', `two identical calls made two objects, and ${c.tool}'s input schema offers ${offered.join(', ')}, which the declaration does not name as the idempotency key; declare it (idempotency.key) so that the keyed call is tried`, { steps: [c.first.step, c.repeat.step] }));
-        else out.push(result('MWS-RETRY-1', w, sc, 'violated', `Two identical calls made two objects, and the declaration names no idempotency key for ${c.tool} (its input schema offers none either).`, { steps: [c.first.step, c.repeat.step] }));
+        if (offered.length) out.push(result('MWS-RETRY-1', w, scc, 'not tested', `two identical calls made two objects, and ${c.tool}'s input schema offers ${offered.join(', ')}, which the declaration does not name as the idempotency key; declare it (idempotency.key) so that the keyed call is tried`, { steps: [c.first.step, c.repeat.step] }));
+        else out.push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects, and the declaration names no idempotency key for ${c.tool} (its input schema offers none either).`, { steps: [c.first.step, c.repeat.step] }));
       }
-      else if (!c.key.call || c.key.call.indeterminate) out.push(result('MWS-RETRY-1', w, sc, 'not tested', 'the call with the key has an unknown outcome'));
-      else if (!c.key.call.ok) out.push(result('MWS-RETRY-1', w, sc, 'violated', `Two identical calls made two objects, and a call carrying the key in ${c.key.declared} was refused (${short(c.key.call.text ?? c.key.call.rpc_error?.message ?? '', 100)}).`, { steps: [c.key.call.step] }));
-      else if (c.key.carrier === 'arg' && c.key.in_schema === false && c.key.closed_schema) out.push(result('MWS-RETRY-1', w, sc, 'violated', `Two identical calls made two objects; the call carrying ${c.key.declared} was answered, but ${c.tool}'s input schema does not declare that argument and allows no others, so the key was dropped, not accepted (see MWS-IN-2).`, { steps: [c.key.call.step] }));
-      else out.push(result('MWS-RETRY-1', w, sc, 'held', `${c.tool} accepts an idempotency key (${c.key.declared}); what it does with it is judged by MWS-RETRY-2.`));
+      else if (!c.key.call || c.key.call.indeterminate) out.push(result('MWS-RETRY-1', w, scc, 'not tested', 'the call with the key has an unknown outcome'));
+      else if (!c.key.call.ok) out.push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects, and a call carrying the key in ${c.key.declared} was refused (${short(c.key.call.text ?? c.key.call.rpc_error?.message ?? '', 100)}).`, { steps: [c.key.call.step] }));
+      else if (c.key.carrier === 'arg' && c.key.in_schema === false && c.key.closed_schema) out.push(result('MWS-RETRY-1', w, scc, 'violated', `Two identical calls made two objects; the call carrying ${c.key.declared} was answered, but ${c.tool}'s input schema does not declare that argument and allows no others, so the key was dropped, not accepted (see MWS-IN-2).`, { steps: [c.key.call.step] }));
+      else out.push(result('MWS-RETRY-1', w, scc, 'held', `${c.tool} accepts an idempotency key (${c.key.declared}); what it does with it is judged by MWS-RETRY-2.`));
     }
   }
   // MWS-RES-4 for the update
   if (o.update_receipt?.call && !o.update_receipt.call.indeterminate && o.update_receipt.call.ok && res.update) {
     const u = o.update_receipt;
     const w = wp(res.name, res.update.tool);
+    const scu = filterOff(u.sent_args) ? V1 : sc;
     const ush = shapeOf(u.call!);
-    if (ush) out.push(receiptByShape(ush, u, res, w, sc));
+    if (ush) out.push(receiptByShape(ush, u, res, w, scu));
     else {
     const fb = shapeFallbackNote(u.call!);
     const miss: string[] = [];
@@ -467,9 +484,9 @@ export function createsVerdicts(o: CheckObs, res: ResourceSpec, ctx: PlanContext
     const extra = u.read_keys ? extraManaged(u.call!, ign, u.read_keys) : [];
     const measured = extra.length ? [`Measured, not judged (spec Annex A, A-3): server-managed field(s) the read tool omits: ${extra.join(', ')}.`] : [];
     const en = tu.note();
-    if (miss.length) out.push(result('MWS-RES-4', w, sc, 'violated', `${res.update.tool}'s answer lacks ${miss.join(', ')}.`, { steps: [u.call!.step], notes: [...(fb ? [fb] : []), ...measured] }));
-    else if (tu.echoOnly.length) out.push(result('MWS-RES-4', w, sc, 'not tested', echoReason(res.update.tool, tu.echoOnly), { notes: [...(fb ? [fb] : []), ...measured] }));
-    else out.push(result('MWS-RES-4', w, sc, 'held', `${res.update.tool}'s answer identifies the object, names ${u.changed ? `each field the call changed (${[...new Set(u.changed.map((c) => c.path.replace(/\[[^\]]*\]/g, '').split('.')[0]))].join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})` : 'the field set (the object did not read back around the call)'}${res.version ? ' and carries the new version' : ''}.`, { notes: [...(fb ? [fb] : []), ...measured, ...(en ? [en] : [])] }));
+    if (miss.length) out.push(result('MWS-RES-4', w, scu, 'violated', `${res.update.tool}'s answer lacks ${miss.join(', ')}.`, { steps: [u.call!.step], notes: [...(fb ? [fb] : []), ...measured] }));
+    else if (tu.echoOnly.length) out.push(result('MWS-RES-4', w, scu, 'not tested', echoReason(res.update.tool, tu.echoOnly), { notes: [...(fb ? [fb] : []), ...measured] }));
+    else out.push(result('MWS-RES-4', w, scu, 'held', `${res.update.tool}'s answer identifies the object, names ${u.changed ? `each field the call changed (${[...new Set(u.changed.map((c) => c.path.replace(/\[[^\]]*\]/g, '').split('.')[0]))].join(', ') || 'none'}; server-managed fields left out: ${[...res.read.ignore].join(', ') || 'none'})` : 'the field set (the object did not read back around the call)'}${res.version ? ' and carries the new version' : ''}.`, { notes: [...(fb ? [fb] : []), ...measured, ...(en ? [en] : [])] }));
     }
   }
   // why: action dogfood SH-8: a write path whose update gave no receipt to read gets a record that says why, never no record.

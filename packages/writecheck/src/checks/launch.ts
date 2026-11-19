@@ -26,7 +26,7 @@
  */
 
 import { multiGate } from './multi.js';
-import { multiBinding } from '../core/manifest.js';
+import { classifiedReadOnly, multiBinding } from '../core/manifest.js';
 import { fromDeclaration, saidBy, says } from './says.js';
 import { declaredWriteTools, readOnlyMarkedCalls } from './coverage.js';
 import { baseVars, deleteArgs, needsVersion, type Driver } from '../core/driver.js';
@@ -281,9 +281,12 @@ export interface Cfg1Probe {
   basis: string;
   /** Does a value mean the opposite of restrict on this switch (and is not declared to restrict)? Such a value is never judged. */
   isOpposite: (v: string) => boolean;
+  /** Is a value a misspelling of a word that permits writes on this switch, and not one this procedure sends? Never judged. */
+  permitTypo: (v: string) => boolean;
 }
 
-export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean }): Cfg1Probe {
+/** `classified`: `valid` was the map form, which classes each value as restrict or permit (read from the manifest where absent). */
+export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean; classified?: boolean }): Cfg1Probe {
   const valid = ro.valid.length ? ro.valid : [ro.on];
   const restrict = ro.restrict ?? [ro.on];
   // why: corpus finding (lane F9): a read-only switch can be an inverted allow-write flag, where the restricting value is "false".
@@ -296,7 +299,10 @@ export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]
   // why: a restricting value that is a mode name (MODE=readonly) reads neither way; the values that permit then say which side
   // of the switch permits (WRITE_ACCESS: readonly restricts, "true" permits), and the restricting side is the other one.
   const permits = ro.valid.filter((v) => !restrict.includes(v));
-  const fromPermits = !senses.size && sensesOf(permits).size > 0;
+  // why: only the map form says a value permits; a list form (valid: ["readonly", "true"]) classes
+  // nothing, so it keeps the earlier reading (normal) and never turns the probes falsy on a correct server.
+  const classified = ro.classified ?? classifiedReadOnly.has(ro);
+  const fromPermits = classified && !senses.size && sensesOf(permits).size > 0;
   if (fromPermits) senses = new Set([...sensesOf(permits)].map((x) => (x === 'true' ? ('false' as const) : ('true' as const))));
   const polarity: Cfg1Polarity = senses.has('false') ? (senses.has('true') ? 'mixed' : 'inverted') : 'normal';
   const against = polarity === 'normal' ? 'false' : polarity === 'inverted' ? 'true' : null;
@@ -327,7 +333,11 @@ export function cfg1Probe(ro: { on: string; valid: string[]; restrict?: string[]
       : polarity === 'mixed'
         ? `Polarity: mixed (${fromPermits ? `${how} both true and false` : `the restricting values ${read} read as both true and false`}); no spelling variant was sent, only a misspelling of ${JSON.stringify(ro.on)}.`
         : `Polarity: normal (${how} ${fromPermits ? 'false' : 'true, or as neither'}); truthy variants were probed.`;
-  return { polarity, values, opposite, basis, isOpposite };
+  // why: procedure version 1 misspelled the first alphabetic valid value even where it permits writes
+  // (afsle beside on: "true"); version 2 never sends such a typo, so recheck sets a recorded start under one aside too.
+  const permitsWord = (w: string) => (against !== null && switchSense(w) === against) || (classified && !restrict.includes(w));
+  const permitTypo = (v: string) => !values.includes(v) && !restrict.includes(v) && valid.some((w) => alpha(w) && permitsWord(w) && (misspell(w) === v || transposeInner(w) === v));
+  return { polarity, values, opposite, basis, isOpposite, permitTypo };
 }
 
 export function cfg1Values(ro: { on: string; valid: string[]; restrict?: string[]; empty_distinct: boolean }): string[] {
@@ -591,7 +601,9 @@ export function launchVerdicts(o0: LaunchObs, ro: Parameters<typeof cfg1Probe>[0
   // the evidence holds a start under it: a run of scenario version 1 sent the truthy variants whatever the polarity, and
   // recheck reads such evidence with these rules.
   const pb = ro && o0.cfg1 ? cfg1Probe(ro) : null;
-  const aside = pb && o0.cfg1 ? o0.cfg1.starts.filter((s) => pb.isOpposite(s.value)) : [];
+  const opp = pb && o0.cfg1 ? o0.cfg1.starts.filter((s) => pb.isOpposite(s.value)) : [];
+  const typo = pb && o0.cfg1 ? o0.cfg1.starts.filter((s) => !opp.includes(s) && pb.permitTypo(s.value)) : [];
+  const aside = [...opp, ...typo];
   const o: LaunchObs = aside.length && o0.cfg1 ? { ...o0, cfg1: { ...o0.cfg1, starts: o0.cfg1.starts.filter((s) => !aside.includes(s)), polarity: pb!.polarity, basis: pb!.basis } } : o0;
   if (o.cfg1) {
     const w = sw(o.cfg1.env);
@@ -610,7 +622,8 @@ export function launchVerdicts(o0: LaunchObs, ro: Parameters<typeof cfg1Probe>[0
     const initFailed = o.cfg1.starts.filter((s) => s.init_failed);
     const notes = [
       ...(o.cfg1.basis ? [`${o.cfg1.basis}${o.cfg1.opposite?.length ? ` Not sent, as meaning the opposite of restrict on this switch: ${o.cfg1.opposite.map((v) => JSON.stringify(v)).join(', ')}.` : ''}`] : []),
-      ...(aside.length ? [`Not judged: the evidence holds ${aside.length === 1 ? 'a start' : 'starts'} under ${aside.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, sent by an earlier procedure version; on this switch ${aside.length === 1 ? 'that value means' : 'those values mean'} the opposite of restrict (${aside.length === 1 ? 'it permits' : 'they permit'} writes), so a write under ${aside.length === 1 ? 'it' : 'them'} is the switch working.`] : []),
+      ...(opp.length ? [`Not judged: the evidence holds ${opp.length === 1 ? 'a start' : 'starts'} under ${opp.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, sent by an earlier procedure version; on this switch ${opp.length === 1 ? 'that value means' : 'those values mean'} the opposite of restrict (${opp.length === 1 ? 'it permits' : 'they permit'} writes), so a write under ${opp.length === 1 ? 'it' : 'them'} is the switch working.`] : []),
+      ...(typo.length ? [`Not judged: the evidence holds ${typo.length === 1 ? 'a start' : 'starts'} under ${typo.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}`).join(', ')}, sent by an earlier procedure version; ${typo.length === 1 ? 'it is a misspelling' : 'they are misspellings'} of a value that permits writes on this switch, which this procedure no longer sends.`] : []),
       ...o.cfg1.starts.map((s) => `${o.cfg1!.env}=${JSON.stringify(s.value)}: ${s.started ? (s.write ? `started; the write was ${s.write.changed ? `applied (answered ${s.write.ok ? 'as a success' : 'as an error'})` : s.write.ok ? 'answered as a success but changed nothing' : 'refused'}` : 'started; no write was tried') : s.init_failed ? `started, but not tried: ${s.init_failed}` : `did not start (${s.reason})`}${s.tools ? `; every declared write tool called: ${s.tools.map((c) => `${c.tool} ${c.skipped ? `not called (${c.skipped})` : c.effect ? `wrote (${c.effect})` : c.observed === false ? 'outcome not read back' : 'no write'}`).join(', ')}` : ''}`),
       ...(base ? [`Positive control: with no setting, ${base.filter((c) => c.effect).map((c) => c.tool).join(', ') || 'no tool'} wrote; ${base.filter((c) => !c.effect && !c.skipped && c.step).map((c) => c.tool).join(', ') || 'none'} wrote nothing even then, so ${base.filter((c) => !c.effect && !c.skipped && c.step).length === 1 ? 'it is' : 'they are'} not compared.`] : []),
       ...partial.map((s) => `Observation: under ${o.cfg1!.env}=${JSON.stringify(s.value)} some write tools refused and others wrote, so the server recognized the value; the writes that went through are judged by MWS-CFG-3, not here (spec R7-6).`),
