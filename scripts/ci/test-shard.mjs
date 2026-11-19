@@ -4,10 +4,13 @@
 //
 //   node scripts/ci/test-shard.mjs run --shard 2/6 --cwd packages/writecheck --dir dist/test \
 //        [--exclude dist/test/unit] [--split dist/test/integration/tiny-tracker.test.js] \
-//        [--weights scripts/ci/weights.json] --manifest shard-2.json
-//   node scripts/ci/test-shard.mjs verify --cwd packages/writecheck --src test [--exclude test/unit] shard-*.json
+//        [--weights scripts/ci/weights.json] [--top-only] --manifest shard-2.json
+//   node scripts/ci/test-shard.mjs verify --cwd packages/writecheck --dir dist/test --src test [--exclude test/unit] \
+//        [--top-only] shard-*.json
 //
-// run: the test files are every *.test.js under --dir, less --exclude. A file not named by --split runs
+// run: the test files are every *.test.js under --dir, less --exclude (with --top-only: only those directly
+// in --dir, matching an `npm test` glob of dir/*.test.js; a nested *.test.js is an error, since npm test
+// would not run it). A file not named by --split runs
 // whole in exactly one shard: files are dealt out longest first (by --weights, seconds per file, default 1)
 // to the shard with the least work so far, ties to the lowest shard. A --split file runs in every shard, and
 // scripts/ci/test-shard-hook.mjs keeps only this shard's top-level tests in it. The manifest records the
@@ -16,7 +19,14 @@
 // verify: all manifests name the same files and the same n, one manifest per shard 1..n; every file is run
 // whole by exactly one shard or split; every shard saw the same split-file units in the same order, and each
 // unit was kept by exactly one shard; and the file list equals the *.test.ts files under --src (less
-// --exclude), so a test file the build dropped is caught.
+// --exclude), so a test file the build dropped is caught (with --top-only, a nested *.test.ts under --src is
+// an error).
+//
+// Split files: the hook only intercepts calls of the named exports test, it, describe and suite. A split file
+// (its built .js in run, its .ts source under --src in verify) must not use what would bypass it and run in
+// every shard: a default import of node:test (or require('node:test')), test/it/describe/suite .only, .skip
+// or .todo, or a top-level before, after, beforeEach or afterEach. Both commands refuse such a file; the hook
+// also throws on those calls at top level, as a second line.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -26,9 +36,11 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const [cmd, ...rest] = process.argv.slice(2);
 const opts = { exclude: [], split: [], files: [] };
+const FLAGS = new Set(['top-only']);
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a.startsWith('--')) {
+  if (FLAGS.has(a.slice(2))) opts[a.slice(2)] = true;
+  else if (a.startsWith('--')) {
     const key = a.slice(2);
     const val = rest[++i];
     if (val === undefined) die(`${a} needs a value`);
@@ -47,6 +59,30 @@ const walk = (dir, suffix) =>
     .filter((rel) => !excluded(rel))
     .sort();
 
+/** Paths under `dir` (relative to cwd) that are not directly in it. */
+const nested = (dir, files) => files.filter((f) => relative(norm(dir), f).split('\\').join('/').includes('/'));
+
+/** Constructs in a split file that the hook cannot see, so they would run in every shard. */
+function splitHazards(text) {
+  const found = [];
+  const at = (re, what) => {
+    for (const m of text.matchAll(re)) {
+      const line = text.slice(0, m.index).split('\n').length;
+      found.push(`line ${line}: ${what}: ${m[0].replace(/\s+/g, ' ').trim()}`);
+    }
+  };
+  at(/\bimport\s+(?!type\b)[\w$]+\s*(,[^;]*?)?\bfrom\s*['"]node:test['"]/g, 'default import of node:test (use named imports)');
+  at(/\brequire\s*\(\s*['"]node:test['"]\s*\)/g, "require('node:test') (use named imports)");
+  at(/\b(test|it|describe|suite)\s*\.\s*(only|skip|todo)\s*\(/g, '.only/.skip/.todo (use the skip/todo option)');
+  at(/^([\w$]+\s*\.\s*)?(before|after|beforeEach|afterEach)\s*\(/gm, 'top-level hook (move it into a test or suite)');
+  return found;
+}
+
+function checkSplit(path, label) {
+  const hazards = splitHazards(readFileSync(path, 'utf8'));
+  return hazards.map((h) => `split file ${label}: ${h}`);
+}
+
 if (cmd === 'run') run();
 else if (cmd === 'verify') verify();
 else die('usage: test-shard.mjs run|verify ...');
@@ -57,9 +93,15 @@ function run() {
   const [shard, total] = [+m[1], +m[2]];
   if (!opts.dir || !opts.manifest) die('--dir and --manifest are required');
   const all = walk(opts.dir, '.test.js');
+  if (opts['top-only']) {
+    const deep = nested(opts.dir, all);
+    if (deep.length) die(`--top-only: nested test files that npm test would not run: ${deep.join(', ')}`);
+  }
   if (all.length === 0) die(`no *.test.js under ${opts.dir}`);
   const split = opts.split.map(norm);
   for (const s of split) if (!all.includes(s)) die(`--split ${s} is not one of the test files`);
+  const hazards = split.flatMap((s) => checkSplit(resolve(cwd, s), s));
+  if (hazards.length) die(hazards.join('\n'));
   const weights = opts.weights ? JSON.parse(readFileSync(resolve(opts.weights), 'utf8')) : {};
   const assigned = deal(all.filter((f) => !split.includes(f)), total, (f) => weights[f] ?? 1);
   const mine = all.filter((f) => assigned.get(f) === shard || split.includes(f));
@@ -144,8 +186,23 @@ function verify() {
     units += ref.length;
   }
 
+  if (opts['top-only']) {
+    const deep = nested(opts.dir ?? 'dist', all);
+    if (deep.length) problems.push(`--top-only: manifests list nested test files: ${deep.join(', ')}`);
+  }
+
   if (opts.src) {
-    const want = walk(opts.src, '.test.ts').map((f) => f.replace(/\.ts$/, '.js'));
+    const srcTests = walk(opts.src, '.test.ts');
+    if (opts['top-only']) {
+      const deep = nested(opts.src, srcTests);
+      if (deep.length) problems.push(`--top-only: nested test files that npm test would not run: ${deep.join(', ')}`);
+    }
+    for (const f of split) {
+      const src = join(norm(opts.src), relative(norm(opts.dir ?? 'dist'), f)).replace(/\.js$/, '.ts');
+      if (!existsSync(resolve(cwd, src))) problems.push(`split file ${f}: no source ${src}`);
+      else problems.push(...checkSplit(resolve(cwd, src), src));
+    }
+    const want = srcTests.map((f) => f.replace(/\.ts$/, '.js'));
     const got = all.map((f) => relative(norm(opts.dir ?? 'dist'), f).split('\\').join('/'));
     const relSrc = want.map((f) => relative(norm(opts.src), f).split('\\').join('/'));
     const missing = relSrc.filter((f) => !got.includes(f));

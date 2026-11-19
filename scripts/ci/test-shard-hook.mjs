@@ -48,10 +48,20 @@ if (m && split.includes(file)) {
       return orig.call(this, ...named, { ...options, skip: `shard ${owner + 1}/${total}` }, fn ?? (() => {}));
     };
 
+  // What would bypass the wrapper and run in every shard is refused at top level (test-shard.mjs also refuses
+  // it statically, with a default import of node:test, which no hook can intercept).
+  const refuse = (orig, what) =>
+    function (...args) {
+      if (inside.getStore()) return orig.apply(this, args);
+      throw new Error(`test-shard: ${rel} is split across shards; a top-level ${what} would run in every shard`);
+    };
   for (const [key, kind] of [['test', 'test'], ['it', 'test'], ['describe', 'suite'], ['suite', 'suite']]) {
-    // test.skip / .todo / .only stay the originals: they are not used in this repository's tests
-    nt[key] = Object.assign(wrap(nt[key], kind), nt[key]);
+    const orig = nt[key];
+    const wrapped = Object.assign(wrap(orig, kind), orig);
+    for (const m of ['only', 'skip', 'todo']) if (typeof orig[m] === 'function') wrapped[m] = refuse(orig[m], `${key}.${m}()`);
+    nt[key] = wrapped;
   }
+  for (const key of ['before', 'after', 'beforeEach', 'afterEach']) nt[key] = refuse(nt[key], `${key}()`);
   syncBuiltinESMExports();
 }
 
