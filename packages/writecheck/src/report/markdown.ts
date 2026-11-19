@@ -172,7 +172,18 @@ export function renderMarkdown(d: ResultsDoc): string {
   L.push('## Evidence');
   L.push('');
   L.push('`SHA256SUMS` lists every file in this folder. Check it with `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).');
-  if (d.evidence.signature) L.push(`It is signed with the runner's own SSH key (\`${d.evidence.signature}\`): \`ssh-keygen -Y verify -f allowed_signers -I <signer> -n mcp-writecheck -s SHA256SUMS.sig < SHA256SUMS\`. A signature shows the files were not changed afterwards; it does not show there were no other runs, and it is the runner's own statement about its own server.`);
+  // why: F8: evidence.signature is the ssh signature file of SHA256SUMS (a string), or a results signature naming it in `sums`.
+  const sig = d.evidence.signature;
+  const sums = typeof sig === 'string' ? sig : sig?.sums ?? null;
+  if (sums) L.push(`It is signed with the runner's own SSH key (\`${sums}\`): \`ssh-keygen -Y verify -f allowed_signers -I <signer> -n mcp-writecheck -s SHA256SUMS.sig < SHA256SUMS\`. A signature shows the files were not changed afterwards; it does not show there were no other runs, and it is the runner's own statement about its own server.`);
+  if (sig && typeof sig === 'object') L.push(`results.json is signed with the Ed25519 key \`${sig.key_id}\` (content digest \`${sig.digest}\`): \`mcp-writecheck verify-results results.json --pubkey <the signer's public key>\`. Check it against a key obtained from the signer, not the one embedded in the file.`);
+  else if (!sig) L.push('results.json is not signed.');
+  if (d.identity) {
+    const i = d.identity;
+    const srv = [i.server.repo, i.server.tag, i.server.commit ? `@ ${i.server.commit}` : null, i.server.image].filter(Boolean).join(' ');
+    L.push(`Run identity (\`results.identity\`): ${i.tester.name} ${i.tester.version} @ ${i.tester.commit ?? 'unstamped build'}${i.tester.dirty ? ' (uncommitted changes)' : ''}; MWS ${i.spec.version}; server build ${srv || 'not stated'}${i.backend.length ? `; backend ${i.backend.map((b) => `${b.name} ${b.image ?? '(no image)'}`).join(', ')}` : ''}. Each record carries a \`test_hash\`; \`mcp-writecheck compare\` joins two runs on it.`);
+    if (i.gaps.length) L.push(`Not stated or not pinned: ${i.gaps.map((g) => esc(g)).join('; ')}.`);
+  }
   L.push('`mcp-writecheck recheck <this folder>` re-applies the current rules to the recorded observations without contacting the server.');
   L.push('');
   L.push('Every `violated` from simultaneous or stale calls was produced deliberately; it says nothing about how often it happens in normal use.');

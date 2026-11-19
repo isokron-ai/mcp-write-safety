@@ -23,7 +23,10 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { IN5_READING } from '../checks/in5search.js';
 import { catalogCommand, cleanupCommand, planCommand, recheckCommand, rerunCommand, reviewCommand } from './commands.js';
+import { loadSigningKey } from '../report/sign.js';
+import { compareCommand, finishRecheck, IDENTITY_FLAGS, IDENTITY_USAGE, identityOptions, verifyResultsCommand } from './compare.js';
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
 import { runCommand, type RunOutcome } from './run.js';
@@ -81,15 +84,17 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     usage: `mcp-writecheck run -m manifest.yaml [--confirm-target T --plan-hash H] [--out mwsc-results]
                    [--state .mwsc] [--baseline baseline.yaml] [--review answers.yaml] [--sign ~/.ssh/key]
     Run the checks. Asks for the target and the plan hash (or takes them as flags in CI; there is no
-    --yes). Writes report.md, results.json, junit.xml, the capture and SHA256SUMS to --out/<run id>.`,
-    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--pair-budget'],
+    --yes). Writes report.md, results.json, junit.xml, the capture and SHA256SUMS to --out/<run id>.
+    --in5-reading=tester: a constraint that only the tester's differential reading confirms gives
+    MWS-IN-5 violated (spec draft 0.10); by default it is a candidate, seen, not judged.`,
+    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--in5-reading', '--pair-budget'],
   },
   rerun: {
     usage: `mcp-writecheck rerun <results folder> -m manifest.yaml [--confirm-target T --plan-hash H] [same options as run]
     Run again what a recorded run ran. The manifest must be the one that run used (its sha256 is
     recorded); if today's plan differs (catalog, suite, hosts), that is printed and the new hash is
     the one to confirm. The new results say which run they repeat.`,
-    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--pair-budget'],
+    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--in5-reading', '--pair-budget'],
   },
   cleanup: {
     usage: `mcp-writecheck cleanup -m manifest.yaml [--confirm-target T] [--state .mwsc] [--run ID] [--abandon]
@@ -102,7 +107,7 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     usage: `mcp-writecheck recheck <results folder> [--review answers.yaml]
     Re-apply this release's rules (and the review answers) to a recorded run, offline. Writes
     <folder>/recheck/; the original evidence is not changed.`,
-    flags: ['--review'],
+    flags: ['--review', '--in5-reading'],
   },
   review: {
     usage: `mcp-writecheck review <results folder>
@@ -111,9 +116,31 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     under in the manifest's review block. Answers are recorded as self-attested.`,
     flags: [],
   },
+  compare: {
+    usage: `mcp-writecheck compare <before results.json|folder> <after results.json|folder> [--out DIR] [--pubkey KEY]
+    Before/after per cell (requirement @ tool), joined only where the test hashes are equal; verdicts rolled up by MWS 8.2
+    rule 13. Labels each cell fixed, regressed, unchanged, changed (no claim) or not comparable, with the reason. Writes
+    compare.json and compare.md to --out (default .). Refuses different MWS versions. --pubkey: both files must be signed
+    by that key. Exit 1 when a cell regressed, or a slot regressed inside a cell (--fail-on-slot-regression false: warn only).`,
+    flags: ['--out', '-o', '--pubkey', '--fail-on-slot-regression'],
+  },
+  'verify-results': {
+    usage: `mcp-writecheck verify-results <results.json|folder> [--pubkey KEY]
+    Check the results signature (--sign-key) against a pinned Ed25519 key (PEM, or an ssh-ed25519 line or .pub file).
+    Exit 0 signed by that key and unchanged; 1 unsigned, or not pinned (no --pubkey); 3 changed or signed by another key.`,
+    flags: ['--pubkey'],
+  },
   requirements: { usage: `mcp-writecheck requirements\n    List the requirement IDs this release knows, with their level.`, flags: [] },
   version: { usage: `mcp-writecheck version\n    Print the suite and requirements versions.`, flags: [] },
 };
+
+// why: F8: the run identity flags are added here, apart from the run and rerun entries, so other changes to those lines merge cleanly.
+for (const c of ['run', 'rerun'] as const) {
+  COMMANDS[c]!.flags.push(...IDENTITY_FLAGS);
+  COMMANDS[c]!.usage += `\n${IDENTITY_USAGE}`;
+}
+COMMANDS['recheck']!.flags.push('--sign-key');
+COMMANDS['recheck']!.usage += '\n    The rechecked copy is unsigned (the original signature does not cover new verdicts), or signed with --sign-key FILE.';
 
 const USAGE = `${HEAD}
 
@@ -173,6 +200,12 @@ const one = (a: Args, ...names: string[]): string | undefined => {
 export async function main(argv: string[]): Promise<number> {
   const log = (s: string) => process.stdout.write(s + '\n');
   const a = parse(argv);
+  // why: review of lane F7: until MWS 0.10 accepts the tester's differential reading, it gives MWS-IN-5 violated only on request.
+  const ir = one(a, '--in5-reading');
+  if (ir !== undefined) {
+    if (ir !== 'tester' && ir !== 'declaration') throw new WritecheckError('--in5-reading: tester or declaration', 2);
+    IN5_READING.value = ir;
+  }
   if (a.help && COMMANDS[a.cmd]) {
     log(`${HEAD}\n\n${COMMANDS[a.cmd]!.usage}`);
     return 0;
@@ -245,9 +278,21 @@ export async function main(argv: string[]): Promise<number> {
       return (await catalogCommand({ ...(m ? { manifest: m } : {}), ...(cat ? { catalog: cat } : {}), out: one(a, '--out', '-o') ?? 'mwsc-results', env: process.env, log })).exit;
     }
     case 'run':
-      return report(await runCommand(runOpts()));
+      return report(await runCommand({ ...runOpts(), identity: identityOptions((n) => one(a, n), (n) => a.flags.get(n) ?? []) }));
     case 'rerun':
-      return report(await rerunCommand({ ...runOpts(), dir: folder() }));
+      return report(await rerunCommand({ ...runOpts(), identity: identityOptions((n) => one(a, n), (n) => a.flags.get(n) ?? []), dir: folder() }));
+    case 'compare': {
+      const [before, after] = a.rest;
+      if (!before || !after) throw new WritecheckError('compare <before> <after> (see mcp-writecheck compare --help)', 2);
+      const pubkey = one(a, '--pubkey');
+      const fosr = one(a, '--fail-on-slot-regression') ?? 'true';
+      if (fosr !== 'true' && fosr !== 'false') throw new WritecheckError('--fail-on-slot-regression takes true or false', 2);
+      return compareCommand({ before, after, out: one(a, '--out', '-o') ?? '.', ...(pubkey ? { pubkey } : {}), failOnSlotRegression: fosr === 'true', log }).exit;
+    }
+    case 'verify-results': {
+      const pubkey = one(a, '--pubkey');
+      return verifyResultsCommand({ file: folder(), ...(pubkey ? { pubkey } : {}), log }).exit;
+    }
     case 'cleanup': {
       const run = one(a, '--run');
       const confirmTarget = one(a, '--confirm-target');
@@ -256,7 +301,12 @@ export async function main(argv: string[]): Promise<number> {
     }
     case 'recheck': {
       const review = one(a, '--review');
+      // why: F8 review: the rechecked copy is not covered by the original signature; it is unsigned or signed again. The key is
+      // read before recheck writes anything, so a bad key leaves no half-finished copy.
+      const sk = one(a, '--sign-key');
+      const key = loadSigningKey(sk, sk ? {} : process.env);
       recheckCommand({ dir: folder(), ...(review ? { review } : {}), log });
+      await finishRecheck(folder(), { key, log });
       return 0;
     }
     case 'review':
