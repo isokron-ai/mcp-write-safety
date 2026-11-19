@@ -44,6 +44,7 @@ const doc = (): ResultsDoc => ({
   manifest: { path: 'manifest.yaml', sha256: 'm' },
   plan: { hash: 'h' },
   results,
+  cells: [],
   not_built: [],
   measurements: null,
   leftovers: [],

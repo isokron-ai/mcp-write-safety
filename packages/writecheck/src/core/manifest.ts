@@ -569,6 +569,23 @@ export interface ReviewSpec {
   answers: Record<string, { answer: boolean; note: string | null }>;
 }
 
+/** F5 (rating method 0.4): the pair budget per probabilistic requirement, 2 repeats of 1500 barrier pairs; used only when declared. */
+export const PAIR_BUDGET = { repeats: 2, pairs: 1500 } as const;
+export const MAX_WRITE_BUDGET = 250_000;
+/**
+ * F5: the write budget when none is declared, sized to fit the run: 1000 for everything but the pairs, and for each resource
+ * with an update tool and two fields, four writes per barrier pair (two writes and the reset) in each repeat, twice where a
+ * control block can run the control arm, plus the RETRY-2 overlapped pairs of a resource with an idempotency block.
+ */
+export function defaultWriteBudget(resources: ResourceSpec[], pairs: number, repeats: number): number {
+  let n = 1000;
+  for (const r of resources) {
+    if (r.update && r.fields) n += (repeats * (pairs + 1)) * 4 * (r.control ? 2 : 1);
+    if (r.idempotency) n += pairs * 4;
+  }
+  return Math.min(MAX_WRITE_BUDGET, Math.max(500, n));
+}
+
 export interface Manifest {
   mws: string;
   /** The first part of every name the run gives its objects (`<prefix>-<run>-…`); default mwsc. */
@@ -612,7 +629,18 @@ export interface Manifest {
   limits: {
     write_budget: number;
     writes_per_second: number;
+    /** Barrier pairs per repeat (MWS-CONC-3 tier 2). Default 40, or pair_budget.pairs where a pair budget is declared. */
     pairs: number;
+    /**
+     * Repeats of the barrier pairs. Absent means 1. Present only where declared, or where a pair budget is declared (so the plan
+     * hash of a manifest that opts into nothing does not change).
+     */
+    pair_repeats?: number;
+    /**
+     * F5 (opt-in): the pair budget a rating asks of a probabilistic requirement (rating method 0.4: 2 × 1500), from
+     * `limits.pair_budget` or `--pair-budget`. Absent: no budget; the record states none. A run below it reports "below the pair budget".
+     */
+    pair_budget?: { repeats: number; pairs: number };
     stale_reps: number;
     gate_reps: number;
     timeout_ms: number;
@@ -1349,7 +1377,7 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
   return isAbsolute(cwd) ? cwd : resolve(dirname(resolve(manifestPath)), cwd);
 }
 
-export function validateManifest(raw: unknown, source: { path: string; sha256: string }): Manifest {
+export function validateManifest(raw: unknown, source: { path: string; sha256: string }, opts: ManifestOptions = {}): Manifest {
   const o = obj(raw, '(top)');
   keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'in5', 'session'], '(top)');
   const mws = String(o['mws'] ?? '');
@@ -1435,7 +1463,18 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
-  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases', 'in5_probes', 'in5_payload_bytes', 'in5_creates'], 'limits');
+  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'pair_repeats', 'pair_budget', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases', 'in5_probes', 'in5_payload_bytes', 'in5_creates'], 'limits');
+  // why: review S2: the pair budget is opt-in (limits.pair_budget, or --pair-budget through opts); without it the defaults are as before.
+  let pairBudget: { repeats: number; pairs: number } | null = null;
+  if (opts.pairBudget) pairBudget = { ...opts.pairBudget };
+  else if (lim['pair_budget'] !== undefined) {
+    const pb = obj(lim['pair_budget'], 'limits.pair_budget');
+    keys(pb, ['repeats', 'pairs'], 'limits.pair_budget');
+    pairBudget = { repeats: num(pb['repeats'], PAIR_BUDGET.repeats, 1, 10, 'limits.pair_budget.repeats'), pairs: num(pb['pairs'], PAIR_BUDGET.pairs, 1, 5000, 'limits.pair_budget.pairs') };
+  }
+  const pairsDeclared = lim['pairs'] !== undefined;
+  const pairs = num(lim['pairs'], pairBudget ? pairBudget.pairs : 40, 1, 5000, 'limits.pairs');
+  const pairRepeats = lim['pair_repeats'] !== undefined ? num(lim['pair_repeats'], 1, 1, 10, 'limits.pair_repeats') : pairBudget && !pairsDeclared ? pairBudget.repeats : null;
   let backend: Manifest['backend'] = null;
   if (o['backend'] !== undefined) {
     const b = obj(o['backend'], 'backend');
@@ -1483,9 +1522,12 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}), ...(serverExtract ? { extract: serverExtract } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
-      write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
+      // why: F5: with a declared pair budget the default is sized to fit it (see defaultWriteBudget); a declared write_budget stays a hard cap.
+      write_budget: num(lim['write_budget'], pairBudget ? defaultWriteBudget(resources, pairs, pairRepeats ?? 1) : 500, 1, MAX_WRITE_BUDGET, 'limits.write_budget'),
       writes_per_second: num(lim['writes_per_second'], 5, 0.1, 1000, 'limits.writes_per_second'),
-      pairs: num(lim['pairs'], 40, 1, 1000, 'limits.pairs'),
+      pairs,
+      ...(pairRepeats !== null ? { pair_repeats: pairRepeats } : {}),
+      ...(pairBudget ? { pair_budget: pairBudget } : {}),
       stale_reps: num(lim['stale_reps'], 3, 1, 100, 'limits.stale_reps'),
       gate_reps: num(lim['gate_reps'], 2, 1, 100, 'limits.gate_reps'),
       timeout_ms: num(lim['timeout_ms'], 30_000, 100, 600_000, 'limits.timeout_ms'),
@@ -1520,15 +1562,30 @@ function in5Of(v: unknown, manifestPath: string): Pick<Manifest, 'in5'> {
 }
 
 /** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */
-export function loadManifest(file: string): Manifest {
-  const text = readFileSync(file, 'utf8');
-  return parseManifestText(text, file);
+/** Options that act as part of the declaration (they enter the limits, so the plan hash). */
+export interface ManifestOptions {
+  /** `--pair-budget RxP`: as `limits.pair_budget: { repeats: R, pairs: P }`, overriding it. */
+  pairBudget?: { repeats: number; pairs: number } | null;
 }
 
-export function parseManifestText(text: string, file: string): Manifest {
+/** Parse `--pair-budget`: `2x1500` (repeats × pairs). */
+export function parsePairBudget(v: string): { repeats: number; pairs: number } {
+  const m = /^\s*(\d+)\s*[x×*]\s*(\d+)\s*$/i.exec(v);
+  const repeats = m ? Number(m[1]) : NaN;
+  const pairs = m ? Number(m[2]) : NaN;
+  if (!m || repeats < 1 || repeats > 10 || pairs < 1 || pairs > 5000) throw new WritecheckError(`--pair-budget ${JSON.stringify(v)}: give repeats x pairs, e.g. 2x1500 (repeats 1 to 10, pairs 1 to 5000)`, 2);
+  return { repeats, pairs };
+}
+
+export function loadManifest(file: string, opts: ManifestOptions = {}): Manifest {
+  const text = readFileSync(file, 'utf8');
+  return parseManifestText(text, file, opts);
+}
+
+export function parseManifestText(text: string, file: string, opts: ManifestOptions = {}): Manifest {
   const guessed = text.split('\n').map((l, i) => ({ l, i })).filter(({ l }) => l.includes(GUESSED));
   if (guessed.length) {
     throw new WritecheckError(`manifest ${file}: ${guessed.length} line(s) still marked "${GUESSED}" (first at line ${guessed[0]!.i + 1}). Read each guess, correct it, and remove the marker; that is the confirmation that a person checked it.`, 2);
   }
-  return validateManifest(parseConfigText(text, file), { path: file, sha256: sha256(text) });
+  return validateManifest(parseConfigText(text, file), { path: file, sha256: sha256(text) }, opts);
 }

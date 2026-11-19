@@ -697,13 +697,12 @@ export function in5SearchVerdict(o: ToolObs5, res: ResourceSpec, mode: 'declarat
   if (counted.length) {
     const opts: NonNullable<Parameters<typeof result>[5]> & { evidence?: { acknowledged?: boolean | null; read_back?: boolean | null; synthetic_fault?: boolean | null } } = {
       numbers,
-      steps: counted.flatMap((k) => k.steps),
       notes: [...counted.map(reading), ...notes, ...candNotes, ...seen],
       // why: lane F1 (docs/CELLS.md, rule 4): the evidence the check knows. The violation rests on refusals, not on writes the
       // server acknowledged, and nothing was injected by the gate.
       evidence: { synthetic_fault: false, ...(o.calls.some((c) => c.phase === 'declared' && c.stored === false) ? { read_back: true } : {}) },
     };
-    return result('MWS-IN-5', w, SC, 'violated', `${o.tool} refused value(s) valid by its input schema under a fixed constraint on one argument that the schema does not declare: ${counted.map(describe).join('; ')}.`, opts);
+    return result('MWS-IN-5', w, SC, 'violated', `${o.tool} refused value(s) valid by its input schema under a fixed constraint on one argument that the schema does not declare: ${counted.map(describe).join('; ')}.`, { ...opts, steps: counted.flatMap((k) => k.steps) });
   }
   // review M5: a search with no judged call examined nothing.
   if (!judgedCalls.length) return result('MWS-IN-5', w, SC, 'not tested', o.calls.length ? `every call the search sent to ${o.tool} was left out of the reading (an unknown outcome, a rate limit, the backend's state), so nothing was examined` : `no probe could be sent to ${o.tool}: ${argNotes.length ? argNotes.join('; ') : 'no argument the search may probe has a value valid by its schema'}`, { numbers, notes });
