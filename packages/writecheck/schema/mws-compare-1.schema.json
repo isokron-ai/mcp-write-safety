@@ -748,6 +748,38 @@
           "newly_found": {
             "type": "boolean",
             "description": "Violated on the after build in a cell the before build did not test."
+          },
+          "facets": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "schema",
+                "annotations",
+                "description"
+              ]
+            },
+            "description": "Only on the transition subject-changed: the parts of the tool entry that the requirement judges and that changed between the two builds (the input schema, the annotations or the description)."
+          }
+        },
+        "if": {
+          "required": [
+            "transition"
+          ],
+          "properties": {
+            "transition": {
+              "const": "subject-changed"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "facets"
+          ]
+        },
+        "else": {
+          "properties": {
+            "facets": false
           }
         }
       }

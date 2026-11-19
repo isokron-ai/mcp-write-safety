@@ -14,8 +14,8 @@
 // Mirrors: the Payload conflict-recovery runs (the vendor build gave no usable
 // conflict signal in 15 of 15) and, as the passing reference, PostHog's "what
 // held up" (a conflict that said nothing had been written).
-//   https://isokron.ai/research/payload-mcp-server-audit#conflict-recovery
-//   https://isokron.ai/research/posthog-mcp-server-audit#what-held-up
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#conflict-recovery
+//   https://isokron.ai/research/posthog-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#what-held-up
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

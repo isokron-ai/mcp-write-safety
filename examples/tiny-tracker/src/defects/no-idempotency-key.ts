@@ -14,8 +14,8 @@
 // Mirrors: GitHub "other observations" (a retry after a lost response creates
 // a duplicate issue or comment) and Kubernetes K8S-05 (a client timeout hides
 // the outcome).
-//   https://isokron.ai/research/github-mcp-server-audit#other-observations
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#other-observations
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

@@ -126,6 +126,8 @@ export interface CellCompare {
   same_test_because?: string[];
   /** Violated on the after build in a cell the before build did not test (no cell, not tested or not applicable). */
   newly_found?: boolean;
+  /** Only on `subject-changed`: the parts of the tool entry the requirement judges that changed (report/testhash.ts, subjectFacets). */
+  facets?: Facet[];
 }
 
 export interface RunSummary {
@@ -565,7 +567,7 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
   return { problem: null, ...base };
 }
 
-type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[]; same_test_because?: string[] };
+type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[]; same_test_because?: string[]; facets?: Facet[] };
 
 export function classify(b: Side, a: Side): Classified {
   const mb = mismatch(b);
@@ -596,7 +598,8 @@ export function classify(b: Side, a: Side): Classified {
         return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` });
       // why: review M4: held → violated across a change of the judged schema, every other input the same, is a regression.
       if ((b.verdict === 'held' || b.verdict === 'not observed') && a.verdict === 'violated') return withSlots({ transition: 'regressed', label: 'regressed', why: `${b.verdict} on the before build; violated on the after build, where ${j.problem.why.replace(/^the tool's/, 'only the tool\'s')}` });
-      return withSlots({ ...j.problem, label: 'not comparable', ...(open.length && b.verdict === 'violated' ? { why: `${j.problem.why}; not schema-fixed: ${open.map((m) => `${m.slot} ${m.before} → ${m.after}${m.ambiguous ? ` (${m.ambiguous})` : ''}`).join(', ')}` } : {}) });
+      // why: the cell says which judged part changed (facets), so a reader need not parse `why`; the schema allows it on this transition only.
+      return withSlots({ transition: 'subject-changed', why: j.problem.why, facets: j.problem.facets ?? [], label: 'not comparable', ...(open.length && b.verdict === 'violated' ? { why: `${j.problem.why}; not schema-fixed: ${open.map((m) => `${m.slot} ${m.before} → ${m.after}${m.ambiguous ? ` (${m.ambiguous})` : ''}`).join(', ')}` } : {}) });
     }
     if (j.problem) return withSlots({ transition: j.problem.transition, why: j.problem.why, label: 'not comparable' });
   } else {
@@ -678,7 +681,7 @@ export function summarize(doc: Record<string, unknown>, file: string, bytes: Buf
 export function compareDocs(b: Record<string, unknown>, a: Record<string, unknown>, before: RunSummary, after: RunSummary): CompareDoc {
   for (const [d, n] of [[b, 'before'], [a, 'after']] as const) {
     if (d['format'] !== 'mws-results/1') throw new CompareRefused(`${n}: not an mws-results/1 document (format ${JSON.stringify(d['format'])})`);
-    if (!recsOf(d).some((r) => typeof r.test_hash === 'string')) throw new CompareRefused(`${n}: its records carry no test_hash (written before ${TEST_HASH_FORMAT}); run it again with this release, or compare by the interim rule of the before/after design by hand`);
+    if (!recsOf(d).some((r) => typeof r.test_hash === 'string')) throw new CompareRefused(`${n}: its records carry no test_hash (written before ${TEST_HASH_FORMAT}); run it again with this release`);
     const id = isObj(d['identity']) ? d['identity'] : null;
     if (id && !(TEST_HASH_FORMATS_READ as readonly unknown[]).includes(id['test_hash'])) throw new CompareRefused(`${n}: test hashes made by ${String(id['test_hash'])}; this release reads ${TEST_HASH_FORMATS_READ.join(' and ')}`);
   }
