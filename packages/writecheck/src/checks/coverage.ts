@@ -97,7 +97,7 @@ export function coverageRows(m: Manifest, tools: Tool[], results: Result[]): Res
 
 /**
  * Adjustments that need the whole run: a declared explicit override in the update arguments takes MWS-CONC-1's default-arguments
- * arm away (NF-7; gate-2 Grafana item 4); an apply with field ownership leaves MWS-CONC-2 open (gate-2 K8s B7); and a `held`
+ * arm away (NF-7; gate-2 item 4); an apply with field ownership leaves MWS-CONC-2 open (gate-2 B7); and a `held`
  * beside a `violated` for the same requirement and write path says that the other trial decides.
  */
 export function adjustResults(m: Manifest, results: Result[]): Result[] {
@@ -108,9 +108,41 @@ export function adjustResults(m: Manifest, results: Result[]): Result[] {
       if (u.override && r.requirement === 'MWS-CONC-1' && (r.verdict === 'violated' || r.verdict === 'held')) return { ...r, verdict: 'not tested' as const, attribution: null, reason: `the declared update arguments set the explicit override ${u.override} (spec NF-7), so the call with default arguments that MWS-CONC-1 asks for was not made; the run that was made would have given ${r.verdict}`, steps: [] };
       if (u.apply && r.requirement === 'MWS-CONC-2' && r.verdict !== 'not tested' && r.verdict !== 'not applicable') return { ...r, verdict: 'not tested' as const, attribution: null, reason: `${u.tool} sends an apply with field ownership (declared update.apply); how MWS-CONC-2 applies to it is an open question for the spec, so no verdict is given (the run that was made would have given ${r.verdict})`, steps: [] };
     }
-    if (r.verdict === 'held' && results.some((x) => x.requirement === r.requirement && x.verdict === 'violated' && writePathKey(x.write_path) === writePathKey(r.write_path))) return { ...r, notes: [...r.notes, 'Another trial on this write path gives violated, and that record decides; this one covers only its own trial.'] };
+    const NOTE = 'Another trial on this write path gives violated, and that record decides; this one covers only its own trial.';
+    if (r.verdict === 'held' && !r.notes.includes(NOTE) && results.some((x) => x.requirement === r.requirement && x.verdict === 'violated' && writePathKey(x.write_path) === writePathKey(r.write_path))) return { ...r, notes: [...r.notes, NOTE] };
     return r;
   });
+}
+
+/** The reason the first-write rule gives (postEvaluate); recheck reads it back from a file written before first_write was kept. */
+const FIRST_WRITE_REASON = 'the first write after the create';
+
+/**
+ * The whole-run adjustments made after the checks' evaluate(), one step for `run` and `recheck` (review M3), so a recheck by the
+ * build that made the run gives the run's verdicts: the first write after a create that changed fields it did not name keeps
+ * MWS-UPD-1 from `held`; then adjustResults (a declared explicit override for MWS-CONC-1, an apply with
+ * field ownership for MWS-CONC-2, and the note on a held record beside a violated one). Idempotent.
+ */
+export function postEvaluate(m: Manifest, results: Result[], firstWrite: ReadonlyMap<string, string[]>): Result[] {
+  const out = results.map((r) => {
+    const moved = firstWrite.get(r.write_path.resource);
+    const res = m.resources.find((x) => x.name === r.write_path.resource);
+    if (!moved || !res?.update || !res.fields || r.requirement !== 'MWS-UPD-1' || r.verdict !== 'held' || r.write_path.tool !== res.update.tool) return r;
+    return { ...r, verdict: 'not tested' as const, reason: `${FIRST_WRITE_REASON} (a setup write naming only ${res.fields[0].path}) changed fields it did not name: ${moved.slice(0, 5).join(', ')}; the compared reads come after the setup writes, and judging that first write against the platform is not built in this preview`, notes: [...r.notes, `Later writes changed only the fields they named: ${r.reason}`] };
+  });
+  return adjustResults(m, out);
+}
+
+/** The first-write findings of a recorded run: from its observations (first_write), else read back from its records' reasons. */
+export function firstWriteOf(observations: { resource?: string; first_write?: string[] }[], recorded: Result[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const o of observations) if (o.resource && Array.isArray(o.first_write) && o.first_write.length) out.set(o.resource, o.first_write);
+  for (const r of recorded) {
+    if (r.requirement !== 'MWS-UPD-1' || r.verdict !== 'not tested' || !r.reason.startsWith(FIRST_WRITE_REASON) || out.has(r.write_path.resource)) continue;
+    const m = /changed fields it did not name: (.*?); the compared reads/.exec(r.reason);
+    if (m) out.set(r.write_path.resource, m[1]!.split(', '));
+  }
+  return out;
 }
 
 /** What the declaration must give for a requirement's test to run, where a run made no record for it (writesafe self-test T5). */

@@ -93,6 +93,17 @@ calls:
   # tiny-tracker 0.2.0 (feature lookup): the read-only lookup tool, called with a key of this run that no write used.
   get_operation: { resource: ticket, args: { idempotency_key: "{{marker}}" } }
 
+# MWS-IN probes on every write tool (spec MWS-IN-4, R15-4): the arguments to which the tester may give, in a base call on its own
+# objects, the value a refused probe means (its counterpart), so that the counterpart control is that base call. Each acts on the
+# tester's own objects only: a label name, the force override on the tester's own ticket, an assignee on the tester's own tickets,
+# and the delete-all switch inside the tester's own container.
+inputs:
+  add_label: { counterpart_args: [name] }
+  set_labels: { counterpart_args: [force] }
+  delete_ticket: { counterpart_args: [force] }
+  bulk_update_tickets: { counterpart_args: [assignee] }
+  delete_tickets: { counterpart_args: [all] }
+
 resources:
   # Projects: the scopes tickets live in. The caller chooses the key (MWS-TGT-3).
   - name: project
@@ -111,6 +122,12 @@ resources:
     effects:
       - { tool: create_project, args: { key: "{{key}}", name: "{{marker}}" }, effect: [created, { path: name, value: "{{marker}}" }] }
       - { tool: delete_project, args: { key: "{{id}}" }, effect: deleted }
+    # MWS-RES-2 (black-box): calls that are refused. Projects have no object under test, so each is read back by the key it
+    # carries: the project must not exist afterwards. A name over 100 characters is refused by the tool's schema check (and by
+    # the backend); a delete of a project that does not exist is refused by the backend.
+    failures:
+      - { name: project_name_too_long, tool: create_project, args: { key: "{{key}}", name: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" } }
+      - { name: delete_missing_project, tool: delete_project, args: { key: "{{prefix}}absent" } }
 
   # Tickets through update_ticket (a field patch). The version is optional in the schema; without it the tool
   # needs force: true (an explicit override, default off), which the tester sends wherever it sends no version.
@@ -199,8 +216,14 @@ resources:
         args: { id: "{{id}}", body: "{{marker}}" }
         find: { tool: get_ticket, args: { id: "{{id}}" }, items: comments, id: id, match: body }
         idempotency: { key: { arg: idempotency_key } }
+    # MWS-RES-2 (black-box): calls the backend refuses; each must be an error, and the ticket under test must stay as it was.
+    # close_ticket has none here: it answers input_required before it writes, and its failures are brought about through the
+    # gate (the write-faults check fails or cuts the backend request of its confirmed retry).
     failures:
       - { name: comment_on_missing_ticket, tool: add_comment, args: { id: "{{missing_id}}", body: "{{prefix}}x" } }
+      - { name: label_on_missing_ticket, tool: add_label, args: { id: "{{missing_id}}", name: x } }
+      - { name: remove_label_not_on_ticket, tool: remove_label, args: { id: "{{id}}", label_id: L-999999 } }
+      - { name: set_labels_on_missing_ticket, tool: set_labels, args: { id: "{{missing_id}}", labels: [x], force: true } }
     jobs:
       - name: triage
         calls:

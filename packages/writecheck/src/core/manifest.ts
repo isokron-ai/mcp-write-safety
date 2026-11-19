@@ -425,6 +425,12 @@ export interface ListSpec extends ToolTemplate, Decode {
   ignore: string[];
   /** How to ask for the next page: the value at `path` in an answer, sent as the argument `arg`; null: one answer is the list. */
   next: { path: string; arg: string } | null;
+  /**
+   * For an eventually consistent list (MWS-RES-3, RETRY-1): `args`, arguments merged into this list's arguments when it is read
+   * to find the run's own new objects (the backend's consistent-read option); `settle_ms`, how long such a find is repeated
+   * until it shows the objects it looks for. Absent: one plain read, as before.
+   */
+  consistency?: { args: Record<string, unknown> | null; settle_ms: number };
 }
 
 /** A case the declaration adds to MWS-RES-1: an update with these arguments must leave `expect` in effect. */
@@ -680,13 +686,21 @@ export interface Manifest {
   backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
   /** Arguments for other tools (annotation effects), bound to a resource whose scratch object `{{id}}` names. */
   calls: Record<string, { args: unknown; resource: string | null }>;
+  /**
+   * Per write tool, for the MWS-IN probes on every write tool (spec MWS-IN-4, R15-4): `counterpart_args` are the arguments to
+   * which the operator lets the tester give, in a base call on its own objects, the value of the declared type that a refused
+   * probe means (its counterpart). The counterpart control is then that base call itself, so it changes nothing the base call
+   * does not. Absent: no such argument is declared, and a refused probe whose counterpart would send another value to a tool
+   * that writes an existing object is not judged.
+   */
+  inputs: Record<string, { counterpart_args: string[] }>;
   resources: ResourceSpec[];
   /** Start-up settings meant to restrict writes (MWS-CFG-1 to MWS-CFG-3), set through environment variables of a server the tester starts. */
   settings: {
     /** Settings applied with a request (spec 516c4ed, MWS-CFG-1 to CFG-4) are declared with `applied: request`; this preview does not test them. */
     per_request: { name: string; kind: 'read_only' | 'deny' | 'allow' }[];
     /** valid: every value the declaration lists as valid; restrict: those it says restrict writes (Annex E, R7-6). The `on` value restricts. */
-    read_only: { env: string; on: string; valid: string[]; restrict: string[]; empty_distinct: boolean } | null;
+    read_only: { env: string; on: string; valid: string[]; restrict: string[]; empty_distinct: boolean; permit?: string[] } | null;
     tool_filters: { env: string; kind: 'allow' | 'deny'; separator: string }[];
   };
   /** MWS-SEC-1: extra values to look for (environment variable names; never the values) and URL query parameters that carry a token or a signature. */
@@ -831,14 +845,25 @@ function control(v: unknown, where: string): ControlSpec {
 export const RESERVED_VARS = ['prefix', 'id', 'field', 'value', 'object', 'version', 'key', 'scope', 'marker', 'ids', 'batch', 'missing_id', 'names_inserted', 'position', 'element_id', 'n'];
 
 function listSpec(v: unknown, where: string): ListSpec {
-  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode']);
+  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode', 'consistency']);
+  let consistency: ListSpec['consistency'];
+  if (l['consistency'] !== undefined) {
+    const c = obj(l['consistency'], `${where}.consistency`);
+    keys(c, ['args', 'settle_ms'], `${where}.consistency`);
+    const args = c['args'] === undefined ? null : obj(c['args'], `${where}.consistency.args`);
+    const settle = c['settle_ms'] === undefined ? 0 : c['settle_ms'];
+    if (typeof settle !== 'number' || !Number.isInteger(settle) || settle < 0 || settle > 120_000) throw fail(`${where}.consistency.settle_ms`, 'a whole number of milliseconds from 0 to 120000');
+    if (!args && !settle) throw fail(`${where}.consistency`, '{ args, settle_ms }: the arguments of a consistent read, a settle window, or both');
+    if (args && l.args !== undefined && l.args !== null && (typeof l.args !== 'object' || Array.isArray(l.args))) throw fail(`${where}.consistency.args`, `merged into ${where}.args, which must then be an object`);
+    consistency = { args, settle_ms: settle };
+  }
   let next: ListSpec['next'] = null;
   if (l['next'] !== undefined) {
     const n = obj(l['next'], `${where}.next`);
     keys(n, ['path', 'arg'], `${where}.next`);
     next = { path: path(n['path'], `${where}.next.path`), arg: str(n['arg'], `${where}.next.arg`) };
   }
-  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...decodeOf(l['decode'], where) };
+  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...(consistency ? { consistency } : {}), ...decodeOf(l['decode'], where) };
 }
 
 const optBool = (v: unknown, where: string): boolean | null => {
@@ -1355,6 +1380,9 @@ function topLevel(o: Obj): Pick<Manifest, 'settings' | 'secrets' | 'canaries' | 
       }
       const on = String(ro['on'] ?? 'true');
       settings.read_only = { env: str(ro['env'], 'settings.read_only.env', ENV), on, valid, restrict: [...new Set([on, ...restrict])], empty_distinct: ro['empty_distinct'] === true };
+      // why: the map form classes every value; `permit` (present only for it) keeps that in the parsed declaration, so it enters
+      // each record's test_hash and survives a copy, while a list-form manifest parses, and hashes, as before.
+      if (!Array.isArray(ro['valid']) && ro['valid'] !== undefined) settings.read_only.permit = valid.filter((v) => !settings.read_only!.restrict.includes(v));
     }
     if (st['tool_filters'] !== undefined) {
       if (!Array.isArray(st['tool_filters'])) throw fail('settings.tool_filters', 'a list of { env, kind: allow | deny }');
@@ -1442,7 +1470,7 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
 
 export function validateManifest(raw: unknown, source: { path: string; sha256: string }, opts: ManifestOptions = {}): Manifest {
   const o = obj(raw, '(top)');
-  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'in5', 'session'], '(top)');
+  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'inputs', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'in5', 'session'], '(top)');
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
@@ -1562,11 +1590,28 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
       calls[name] = { args: cc['args'] ?? {}, resource: optStr(cc['resource'], `calls.${name}.resource`) };
     }
   }
+  const inputs: Manifest['inputs'] = {};
+  if (o['inputs'] !== undefined) {
+    for (const [name, c] of Object.entries(obj(o['inputs'], 'inputs'))) {
+      const cc = obj(c, `inputs.${name}`);
+      keys(cc, ['counterpart_args'], `inputs.${name}`);
+      inputs[name] = { counterpart_args: strList(cc['counterpart_args'], `inputs.${name}.counterpart_args`) };
+    }
+  }
   // why: a team may need its own recognisable prefix on the test objects (CLI-BUGS item 14); it must stay short and plain.
   const prefix = o['prefix'] === undefined ? 'mwsc' : str(o['prefix'], 'prefix');
   if (!/^[a-z][a-z0-9]{1,7}$/.test(prefix)) throw fail('prefix', 'two to eight lowercase letters or digits, starting with a letter (default mwsc)');
   if (!Array.isArray(o['resources']) || o['resources'].length === 0) throw fail('resources', 'at least one resource');
   const resources = (o['resources'] as unknown[]).map(resource);
+  // why: spec 7.3, rule 1: on a tool that deletes or acts on several objects, a base call with a counterpart's value is one more
+  // call of that tool that the run's checks do not otherwise make; it is allowed only where every object is declared disposable.
+  if (!resources.some((r) => !!r.selector?.send_empty_forms)) {
+    for (const [name, x] of Object.entries(inputs)) {
+      if (!x.counterpart_args.length || resources.some((r) => r.read.tool === name || r.update?.tool === name)) continue;
+      const r = resources.find((rr) => rr.create?.tool !== name && !rr.creates.some((cr) => cr.tool === name) && (rr.delete?.tool === name || rr.multi.some((mu) => mu.tool === name)));
+      if (r) throw fail(`inputs.${name}.counterpart_args`, `${name} deletes or acts on several objects (resource ${r.name}), so a base call with a counterpart's value is allowed only where the backend is declared disposable (selector.send_empty_forms: true; spec 7.3, rule 1)`);
+    }
+  }
   // why: spec R15-4, review of 3283a69 (5): restorable applies only to a tool that updates one object named by its identifier.
   for (const [i, r] of resources.entries()) {
     if (!r.restorable.length || !r.update) continue;
@@ -1605,6 +1650,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     },
     backend,
     calls,
+    inputs,
     resources,
     ...topLevel(o),
     ...in5Of(o['in5'], source.path),

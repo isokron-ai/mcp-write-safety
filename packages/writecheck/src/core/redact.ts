@@ -239,6 +239,19 @@ export class Redactor {
 
   /** Mask secrets inside a string. */
   text(s: string): string {
+    return this.textWith(s, false);
+  }
+
+  /**
+   * A manifest's text (the copy a run keeps): as text(), except that a header-like key whose value is a YAML flow collection
+   * (`authorization: { env: TOKEN, prefix: "Bearer " }`, which names a variable, not a value) is left whole, so the copy stays
+   * YAML that recheck can read. Credentials inside it are still masked by every other rule.
+   */
+  manifestText(s: string): string {
+    return this.textWith(s, true);
+  }
+
+  private textWith(s: string, flowSafe: boolean): string {
     let out = this.paths(s);
     for (const k of this.secrets) out = out.split(k).join(REDACTED);
     for (const p of PATTERNS) out = out.replace(p, REDACTED);
@@ -246,6 +259,7 @@ export class Redactor {
     out = out.replace(URL_PASSWORD, (_m, pre: string) => `${pre}${REDACTED}@`);
     out = maskSignedUrls(out);
     out = out.replace(HEADER_LINE, (m, pre: string) => {
+      if (flowSafe && /^[[{]/.test(m.slice(pre.length))) return m;
       const scheme = /^(Bearer|Basic|Token)\s/i.exec(m.slice(pre.length));
       return `${pre}${scheme ? `${scheme[1]} ` : ''}${REDACTED}`;
     });
@@ -276,17 +290,27 @@ export class Redactor {
 
   /** Deep-copy a JSON value with secret-named keys masked and string leaves scrubbed. */
   value<T>(v: T): T {
-    return this.walk(v) as T;
+    return this.walk(v, false) as T;
   }
 
-  private walk(v: unknown): unknown {
+  /**
+   * A tool catalog (tools/list): as value(), except that a secret-named key is masked only where its value is a string. In a
+   * catalog such a key is the name of an argument (`properties.password`), and its value a schema the test hash reads (review
+   * S1); a string under it is still masked, and every string leaf is still scrubbed.
+   */
+  catalogValue<T>(v: T): T {
+    return this.walk(v, true) as T;
+  }
+
+  private walk(v: unknown, stringsOnly: boolean): unknown {
     if (typeof v === 'string') return this.text(v);
-    if (Array.isArray(v)) return v.map((x) => this.walk(x));
+    if (Array.isArray(v)) return v.map((x) => this.walk(x, stringsOnly));
     if (v && typeof v === 'object') {
       const out: Record<string, unknown> = {};
       for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-        const secret = SECRET_KEY.test(k) && x !== null && x !== '' && (k.toLowerCase() !== 'token' || (typeof x === 'string' && looksSecret(x)));
-        out[k] = secret ? REDACTED : this.walk(x);
+        const secret = SECRET_KEY.test(k) && x !== null && x !== '' && (!stringsOnly || typeof x === 'string') && (k.toLowerCase() !== 'token' || (typeof x === 'string' && looksSecret(x)));
+        if (secret) out[k] = REDACTED;
+        else Object.defineProperty(out, k, { value: this.walk(x, stringsOnly), enumerable: true, writable: true, configurable: true });
       }
       return out;
     }

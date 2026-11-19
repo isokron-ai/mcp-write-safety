@@ -31,7 +31,7 @@ const ID = 'effects';
 const VERSION = '1';
 const SC = { id: ID, version: VERSION };
 /** The multi-item check's scenario (src/checks/multi.ts passes its own; this default is for callers that judge a recorded observation). */
-const MULTI_SC = { id: 'multi-item', version: '2' };
+const MULTI_SC = { id: 'multi-item', version: '3' };
 
 /** One effect trial: the call, and what the read-back showed of each declared condition. */
 export interface EffectTrial {
@@ -149,7 +149,8 @@ async function onObject(ctx: RunContext, res: ResourceSpec, e: EffectSpec & { fr
   t.call = b;
   if (retried) t.retried = true;
   if (e.deleted) {
-    const back = await d.readSettled(label, `effects.${e.tool}.after`, b.ok ? () => false : () => false);
+    // why: the wait ends on the first read that shows the object gone; after a refusal nothing is awaited (one read).
+    const back = await d.readSettled(label, `effects.${e.tool}.after`, b.ok ? () => false : undefined, b.ok ? (r) => goneFrom(res, r) === true : undefined);
     const gone = goneFrom(res, back) ?? ((await goneByAnswer(ctx.session, res, ctx.prefix, label, back.call, s.id)) ? true : null);
     // why: as creates.ts (S5): a server read that no longer shows the object while the platform's own read still returns it is a
     // soft delete or a read that hides it; the outcome is not judged.

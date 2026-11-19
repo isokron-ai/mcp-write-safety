@@ -181,8 +181,8 @@ test('multi-item: the call on good items only is held where every item holds the
   assert.equal(multiRes1(o(undefined, { skipped: 'not bound' }), res, m).verdict, 'not tested');
   assert.match(multiRes1(o(undefined), res, m).reason, /no call on good items only/);
   assert.equal(multiRes1(o({ call: null, items: [], applied: [], skipped: 'the items could not be created' }), res, m).reason, 'the items could not be created');
-  // The record is the multi-item check's: its scenario id and version (2 since the check sends the call on good items only).
+  // The record is the multi-item check's: its scenario id and version (3 since the check sends the call on good items only and the gate's lost-answer trial).
   const multi = CHECKS.find((c) => c.id === 'multi-item')!;
   assert.deepEqual(v.scenario, { id: multi.id, version: multi.version });
-  assert.equal(multi.version, '2');
+  assert.equal(multi.version, '3');
 });
