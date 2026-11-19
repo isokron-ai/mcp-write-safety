@@ -35,6 +35,7 @@ import { result, VIOLATED_CAVEAT, type Result, type WritePath } from '../report/
 import { ignoredPaths } from './readback.js';
 import { ruleNote } from './rules.js';
 import { fromDeclaration, outcomeByField, saidBy, says } from './says.js';
+import { conflictSignal } from './signals.js';
 import { decidedByShape, quoteField, shapeNamesField, shapeOf, type WriteResult } from './shape.js';
 import { appliedAllSaid, appliedAllUnread, brief, failedKind, identifiesChangeText, KNOWN_RESULT_TYPES, mayBeUnknown, notAppliedText, proseOf, readSecondClause, res2Judge, saysUnknownText, valueMentioned, wp, type CallBrief, type CheckModule, type FollowThroughRead, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
@@ -166,12 +167,13 @@ export const gatedCheck: CheckModule = {
       ...(res.update!.mode === 'full_replace' && hasControl(res, 'read', 'patch', 'write') ? [`control x${n * 2}: control read; control write ${res.fields![1].path} from it; control write ${res.fields![0].path} from the same read; control read`] : hasControl(res, 'read', 'patch') ? [`control x${n * 2}: control patch ${res.fields![1].path}; control patch ${res.fields![0].path}; control read`] : []),
       ...(!res.version?.arg && hasControl(res, 'read', 'patch', 'write') ? [`MWS-CONC-1 x${n}: hold the tool's last mutating request, change ${res.fields![1].path} through the platform's API, release`] : []),
       `MWS-RES-2: fail ${res.update!.tool}'s last mutating backend request (status 500); ${res.read.tool}`,
+      `MWS-RES-2, lost answer: let that request through and cut its answer; ${res.read.tool}; where the error names the version the call carried, change ${res.fields![0].path} out of band${hasControl(res, 'patch') ? ' (control.patch)' : ` (${res.update!.tool})`} and send the call again once with that version (R10-11); ${res.read.tool}`,
       ...(res.update!.mode === 'composite' ? ['MWS-ATOM-1/2: fail the second and the last mutating backend request of the composite update; read back'] : []),
     ];
     // why: every write path the plan lists for MWS-CONC-1 gets a record (gate-2 Grafana N3): a field patch with no version is the
     // gated check's alone (the stale-write check defers to it), so a missing control.write is reported here, never dropped.
     const nr = !res.version?.arg && res.update!.mode !== 'full_replace' && !hasControl(res, 'read', 'patch', 'write') ? [result('MWS-CONC-1', w, { id: ID, version: VERSION }, 'not tested', `${res.update!.tool} takes no version, so MWS-CONC-1 is tested by holding its write; the control arm, which shows whether the platform's API refuses a write from outdated state, needs a control block with read, patch and write (missing: ${(['read', 'patch', 'write'] as const).filter((k) => !hasControl(res, k)).map((k) => `control.${k}`).join(', ')})`)] : [];
-    return { ...base, runs: true, calls, writes: 4 + n * 2 * 6 + n * 4 + n * 4 + 4 + 6, notRun: nr };
+    return { ...base, runs: true, calls, writes: 4 + n * 2 * 6 + n * 4 + n * 4 + 4 + 6 + 2, notRun: nr };
   },
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const gate = ctx.gate;
@@ -284,9 +286,16 @@ export const gatedCheck: CheckModule = {
       // R10-11: the error names the version the call carried: send the call again once with that version, with no fault, and read
       // back. The first write was applied, so a repeat that is applied again shows that the version did not guard it.
       else if (a2.ok && obs.res2u.applied && obs.res2u.call && namesCarriedVersion(obs.res2u.call, res.version?.arg ?? null, obs.res2u.version_sent)) {
-        const rep = await d.update(A, f0, f0.values[1], { step: ctx.session.stepId('gate.res2u.follow'), ...(b2.ok ? { base: { obj: b2.obj, version: b2.version } } : {}) });
-        const a3 = await d.readSettled('R', 'gate.res2u.follow.after', () => false);
-        obs.res2u.follow = followRead(rep, a2, a3, !!res.version, res.version?.read ?? null, ignoredPaths(res));
+        // why: review of f4: the object is changed out of band first, so a repeat that the version does not guard shows as applied.
+        const oob = await changeOutOfBand(d, res, a2.obj, 'R', ctx.session.stepId('gate.res2u.oob'));
+        const mid = await d.readSettled('R', 'gate.res2u.oob.after', () => false);
+        if (!oob || !oob.ok || !mid.ok || (deepEqual(mid.version, a2.version) && !withoutIgnored(diff(a2.obj, mid.obj), ignoredPaths(res)).length)) obs.res2u.follow = { applied_again: null, how: `the object could not be changed out of band before the repeat (${oob ? oob.how : 'no control.patch and no declared field'}), so an unguarded repeat would not show` };
+        else {
+          const rep = await d.update(A, f0, f0.values[1], { step: ctx.session.stepId('gate.res2u.follow'), ...(b2.ok ? { base: { obj: b2.obj, version: b2.version } } : {}) });
+          const a3 = await d.readSettled('R', 'gate.res2u.follow.after', () => false);
+          const fr = followRead(brief(rep), mid, a3, !!res.version, res.version?.read ?? null, ignoredPaths(res));
+          obs.res2u.follow = { ...fr, how: `out of band, ${oob.how}; ${fr.how}` };
+        }
       }
     }
     // A composite update: fail its second and its last mutating backend request.
@@ -615,7 +624,7 @@ export function lostAnswerVerdict(r: LostAnswerObs, x: { w: WritePath; sc: { id:
     const by = [...new Set(settledBy)];
     rec = rec.verdict === 'violated' ? { ...rec, reason: `${rec.reason} ${why}`, notes: [...rec.notes, ...by] } : { ...rec, verdict: 'violated', reason: `${why} ${rec.verdict === 'held' ? `(The lost-answer trial alone: ${rec.reason})` : ''}`.trim(), notes: [...rec.notes, ...by] };
   }
-  if (r.follow) extraNotes.push(`Follow-through (R10-11): the call was sent again once with the version it carried (${short(r.version_sent, 40)}), with no fault; ${r.follow.applied_again === true ? 'it was applied again' : r.follow.applied_again === false ? 'it was not applied again' : 'whether it was applied again could not be read'} (${r.follow.how}).`);
+  if (r.follow) extraNotes.push(/^the object could not be changed out of band/.test(r.follow.how) ? `Follow-through (R10-11): not sent: ${r.follow.how}.` : `Follow-through (R10-11): the object was changed out of band, and the call was sent again once with the version it carried (${short(r.version_sent, 40)}), with no fault; ${r.follow.applied_again === true ? 'it was applied again' : r.follow.applied_again === false ? 'it was not applied again' : 'whether the version guards the repeat could not be read'} (${r.follow.how}).`);
   if (extraNotes.length) rec = { ...rec, notes: [...rec.notes, ...extraNotes] };
   if (r.faulted && r.call && !r.call.indeterminate && r.applied === true && r.call.ok && !(r.requests ?? []).some((q) => q.seq > r.faulted!.seq)) rec = { ...rec, notes: [...rec.notes, 'Observation: unverified-success (the server made no further backend request after the cut, and answered with a success).'] };
   return rec;
@@ -625,7 +634,11 @@ export function lostAnswerVerdict(r: LostAnswerObs, x: { w: WritePath; sc: { id:
 export function textNamesVersion(c: CallBrief, versionArg: string | null, versionSent: unknown): boolean {
   if (!versionArg) return false;
   const text = `${c.text ?? ''} ${c.rpc_error?.message ?? ''}`.trim();
-  return (versionSent !== undefined && versionSent !== null && valueMentioned(c, versionSent)) || new RegExp(`(^|[^A-Za-z0-9_])${versionArg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text);
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // why: review of f4: a bare number is named as the version only beside the version argument's name or the word "version"
+  // ("expected_version 3", "version: 3", "3 (the version)"); a number elsewhere in the text (an id, a count) is not.
+  const byValue = versionSent !== undefined && versionSent !== null && (typeof versionSent === 'number' || /^\d+$/.test(String(versionSent)) ? new RegExp(`\\b(${esc(versionArg)}|version)\\b[^.\\n\\d]{0,24}(^|[^A-Za-z0-9_-])${esc(String(versionSent))}($|[^A-Za-z0-9_-])|(^|[^A-Za-z0-9_-])${esc(String(versionSent))}\\W{1,4}(the )?(${esc(versionArg)}|version)\\b`, 'i').test(text) : valueMentioned(c, versionSent));
+  return byValue || new RegExp(`(^|[^A-Za-z0-9_])${versionArg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text);
 }
 
 /**
@@ -638,17 +651,44 @@ export function namesCarriedVersion(c: CallBrief, versionArg: string | null, ver
 }
 
 /**
- * What the follow-through repeat did (R10-11), from the read after the trial and the read after the repeat: with a declared
- * version, a change of the version is a second application; without one, any change of the state is (a write that leaves the same
- * state when applied twice is then not seen, as the Known limitations say).
+ * What the follow-through repeat did (R10-11). The object was changed out of band after the lost-answer trial (`mid` is the read
+ * after that change), so a repeat that is applied again shows: the version moved, or the state changed, from `mid` to `after`.
+ * A repeat that changed nothing meets the requirement only where it was refused as a conflict (a structured signal, or a declared
+ * patterns.conflict) or answered as a replay (an adopted shape's replayed: true); any other answer that changed nothing (a plain
+ * success, a refusal of another kind) does not show what the version did, and gives null: not tested. A backend that leaves the
+ * version alone for a write that changes nothing would otherwise give an unearned held.
  */
-export function followRead(rep: { ok: boolean; text: string | null; rpc_error: { code: number; message: string } | null; timed_out?: boolean; transport_error?: string | null }, before: { ok: boolean; obj: unknown; version: unknown }, after: { ok: boolean; obj: unknown; version: unknown }, versioned: boolean, versionPath: string | null, ignore: string[]): FollowThroughRead {
+export function followRead(rep: { ok: boolean; text: string | null; rpc_error: { code: number; message: string } | null; data?: unknown; shape?: CallBrief['shape']; tool?: string; timed_out?: boolean; transport_error?: string | null }, mid: { ok: boolean; obj: unknown; version: unknown }, after: { ok: boolean; obj: unknown; version: unknown }, versioned: boolean, versionPath: string | null, ignore: string[]): FollowThroughRead {
   const answer = rep.timed_out || rep.transport_error ? 'the repeat timed out or lost its connection' : rep.ok ? 'the repeat was answered as a success' : `the repeat was refused (${JSON.stringify(short(rep.text ?? rep.rpc_error?.message ?? '', 100))})`;
-  if (!before.ok || !after.ok) return { applied_again: null, how: `${answer}; the object did not read back around it` };
-  if (versioned) {
-    const again = !deepEqual(before.version, after.version);
-    return { applied_again: again, how: `${answer}; the version read ${short(before.version, 30)} before it and ${short(after.version, 30)} after it` };
+  if (rep.timed_out || rep.transport_error) return { applied_again: null, how: answer };
+  if (!mid.ok || !after.ok) return { applied_again: null, how: `${answer}; the object did not read back around it` };
+  const moved = versioned && !deepEqual(mid.version, after.version);
+  const changed = withoutIgnored(diff(mid.obj, after.obj), [...ignore, ...(versionPath ? [versionPath] : [])]).map((e) => e.path);
+  const seen = `${versioned ? `the version read ${short(mid.version, 30)} before it and ${short(after.version, 30)} after it; ` : ''}the state ${changed.length ? `changed (${changed.join(', ')})` : 'read back unchanged'}`;
+  if (moved || changed.length) return { applied_again: true, how: `${answer}; ${seen}` };
+  const conflict = !rep.ok ? (conflictSignal(rep as never)?.source ?? (fromDeclaration('conflict') && says('conflict', `${rep.text ?? ''} ${rep.rpc_error?.message ?? ''}`) ? 'the declared patterns.conflict' : null)) : null;
+  if (conflict) return { applied_again: false, how: `${answer}, as a conflict (${conflict}); ${seen}` };
+  if (rep.ok && shapeOf(rep as never)?.replayed === true) return { applied_again: false, how: `${answer}, as a replay (mws.replayed = true); ${seen}` };
+  return { applied_again: null, how: `${answer}; ${seen}; it was neither refused as a conflict nor answered as a replay, so it does not show whether the version guards a repeat` };
+}
+
+/**
+ * The out-of-band change before the follow-through repeat (R10-11): one declared field set to a value it does not hold, through
+ * the platform's API (control.patch) where declared, else through the update tool with the current version. Null where neither is
+ * declared or the object has no declared field.
+ */
+export async function changeOutOfBand(d: Driver, res: ResourceSpec, cur: unknown, label: string, step: string): Promise<{ ok: boolean; how: string } | null> {
+  const f = res.fields?.[0];
+  if (!f) return null;
+  const now = valueAt(cur, f.path);
+  const v = f.values.find((x) => !deepEqual(x, now)) ?? f.values[0];
+  if (hasControl(res, 'patch')) {
+    const r = await d.controlPatch(f, v, step).catch(() => null);
+    return { ok: !!r?.ok, how: `${f.path} set to ${short(v, 30)} through control.patch${r?.ok ? '' : ` (refused: HTTP ${r?.status ?? '?'})`}` };
   }
-  const changed = withoutIgnored(diff(before.obj, after.obj), [...ignore, ...(versionPath ? [versionPath] : [])]).map((e) => e.path);
-  return { applied_again: changed.length > 0, how: `${answer}; no version is declared, and the state read back ${changed.length ? `changed (${changed.join(', ')})` : 'unchanged'}` };
+  if (res.update) {
+    const r = await d.update(label, f, v, { step });
+    return { ok: r.ok, how: `${f.path} set to ${short(v, 30)} through ${res.update.tool}${r.ok ? '' : ' (refused)'}` };
+  }
+  return null;
 }

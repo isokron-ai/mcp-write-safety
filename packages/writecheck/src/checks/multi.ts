@@ -27,6 +27,7 @@ import { listScope, newScope, scratch } from './scratch.js';
 import { tgt1HeldFor } from './targeting.js';
 import { decidedByShape, itemStatus, quoteField, shapeFallbackNote, shapeOf } from './shape.js';
 import { lostAnswerVerdict, type LostAnswerObs } from './gated.js';
+import { SYNTHETIC_FAULT } from './writefaults.js';
 import { appliedAllSaid, appliedAllUnread, brief, forPatterns, mentions, res2Judge, textStatement, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'multi-item';
@@ -407,6 +408,11 @@ export function multiRes2Verdicts(o: MultiObs, res: ResourceSpec, asyncOps: stri
   const su = { id: `${ID}.res2.unknown-outcome`, version: VERSION };
   const route = `Route: ${o.routing}`;
   if (o.skipped) return [result('MWS-RES-2', w, sc, 'not tested', `${o.tool} was not called: ${o.skipped}`, { notes: [route] }), result('MWS-RES-2', w, su, 'not tested', `${o.tool} was not called: ${o.skipped}`, { notes: [route] })];
+  // why: review of f4: the trials fail a write the learning pass showed working; without that, neither RES-2 record is judged.
+  if (o.learn && (!o.learn.call.ok || o.learn.applied !== true)) {
+    const why = `the learning pass did not show a working write (${o.learn.call.indeterminate ? 'its outcome is unknown' : !o.learn.call.ok ? `it was refused: ${JSON.stringify(short(o.learn.call.text ?? o.learn.call.rpc_error?.message ?? '', 120))}` : o.learn.applied === null ? 'an item did not read back' : 'it answered success and not every item read back with the effect'}), so there is no write to fail`;
+    return [result('MWS-RES-2', w, sc, 'not tested', `failed backend request: ${why}`, { notes: [route] }), result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${why}`, { notes: [route] })];
+  }
   const asyncOp = asyncOps.includes(o.tool);
   const ids = (xs: unknown[]) => Object.fromEntries(xs.map((id) => [String(id), id]));
   const out: Result[] = [];
@@ -418,7 +424,7 @@ export function multiRes2Verdicts(o: MultiObs, res: ResourceSpec, asyncOps: stri
     const js = judged.map((x) => ({ x, j: res2Judge(x.call!, x.applied.map(String), 'backend', `The tester failed the backend request (${x.position})`, ids(x.applied), { async: asyncOp }) }));
     const bad = js.filter((y) => y.j.verdict === 'violated');
     const open = js.filter((y) => y.j.verdict === 'not tested');
-    if (bad.length) out.push(result('MWS-RES-2', w, sc, 'violated', bad.map((y) => y.j.reason).join(' '), { steps: bad.map((y) => y.x.call!.step), notes: [route, ...new Set(bad.flatMap((y) => y.j.notes))] }));
+    if (bad.length) out.push(result('MWS-RES-2', w, sc, 'violated', bad.map((y) => y.j.reason).join(' '), { steps: bad.map((y) => y.x.call!.step), notes: [route, ...new Set(bad.flatMap((y) => y.j.notes))], ...SYNTHETIC_FAULT }));
     else if (open.length) out.push(result('MWS-RES-2', w, sc, 'not tested', open.map((y) => y.j.reason).join(' '), { notes: [route, ...new Set(open.flatMap((y) => y.j.notes))] }));
     else out.push(result('MWS-RES-2', w, sc, 'held', `${js.length} failed backend request(s): ${js.map((y) => y.j.reason).join(' ')}`, { notes: [route, ...new Set(js.flatMap((y) => y.j.notes))] }));
   }

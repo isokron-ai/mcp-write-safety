@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, test } from 'node:test';
 
 import { createsCheck } from '../../src/checks/creates.js';
-import { lostAnswerVerdict, type LostAnswerObs } from '../../src/checks/gated.js';
+import { followRead, lostAnswerVerdict, textNamesVersion, type LostAnswerObs } from '../../src/checks/gated.js';
 import { multiCheck, multiRes2Verdicts, type MultiObs } from '../../src/checks/multi.js';
 import { usePatterns } from '../../src/checks/says.js';
 import { useShapes, type ShapeCapture } from '../../src/checks/shape.js';
@@ -18,7 +18,7 @@ import { resourceWriteCalls, writeCallsOf, writeFaultsCheck, writeFaultsVerdicts
 import { parseManifestText } from '../../src/core/manifest.js';
 
 const TT = parseManifestText(readFileSync(new URL('../../../../../examples/tiny-tracker/writecheck.yaml', import.meta.url), 'utf8'), 'writecheck.yaml');
-const TOOLS = ['create_ticket', 'get_ticket', 'list_tickets', 'update_ticket', 'replace_ticket', 'delete_ticket', 'delete_tickets', 'bulk_update_tickets', 'close_ticket', 'add_comment', 'add_label', 'remove_label', 'set_labels', 'create_project', 'list_projects', 'delete_project'].map((name) => ({ name, inputSchema: { type: 'object' }, annotations: name.startsWith('get_') || name.startsWith('list_') ? { readOnlyHint: true } : {} })) as unknown as Tool[];
+const TOOLS = ['create_ticket', 'get_ticket', 'list_tickets', 'update_ticket', 'replace_ticket', 'delete_ticket', 'delete_tickets', 'bulk_update_tickets', 'close_ticket', 'add_comment', 'add_label', 'remove_label', 'set_labels', 'create_project', 'list_projects', 'delete_project', 'get_operation'].map((name) => ({ name, inputSchema: { type: 'object' }, annotations: name.startsWith('get_') || name.startsWith('list_') ? { readOnlyHint: true } : {} })) as unknown as Tool[];
 
 const base = (extra = '') =>
   parseManifestText(
@@ -49,11 +49,11 @@ const req = { seq: 7, method: 'DELETE', path: '/t/T1', status: null };
 useShapes(MAN, [{ name: 't_get' }, { name: 't_delete' }, { name: 't_update' }, { name: 't_list' }]);
 afterEach(() => usePatterns(null));
 
-test('write calls: every declared write of tiny-tracker is judged once, under the first resource that declares it', () => {
+test('write calls: every declared write of tiny-tracker is judged once per argument template; read tools never', () => {
   const by = (name: string) => writeCallsOf(TT, TOOLS, TT.resources.find((r) => r.name === name)!).map((c) => `${c.tool}:${c.kind}`);
   assert.deepEqual(by('project'), ['create_project:create', 'delete_project:delete']);
   assert.deepEqual(by('ticket'), ['create_ticket:create', 'delete_ticket:delete', 'add_label:object', 'remove_label:object', 'set_labels:object', 'close_ticket:object', 'add_comment:object']);
-  assert.deepEqual(by('ticket-replace'), [], 'create_ticket and delete_ticket are judged under ticket; replace_ticket by the held-request check');
+  assert.deepEqual(by('ticket-replace'), ['create_ticket:create', 'delete_ticket:delete'], 'its create and delete templates differ from ticket\'s (delete with force: true): write paths of their own; replace_ticket is the held-request check\'s');
   const all = TT.resources.flatMap((r) => writeCallsOf(TT, TOOLS, r).map((c) => c.tool));
   for (const t of ['update_ticket', 'replace_ticket', 'bulk_update_tickets', 'delete_tickets', 'get_ticket', 'list_projects']) assert.ok(!all.includes(t), `${t} is judged elsewhere, or is a read`);
   const close = resourceWriteCalls(TT, TT.resources.find((r) => r.name === 'ticket')!).find((c) => c.tool === 'close_ticket')!;
@@ -95,8 +95,12 @@ test('verdicts: the failed request and the lost answer of a write call, each in 
   // a skipped learning pass gives both records, not tested, with the reason
   const sk = writeFaultsVerdicts(obs({ skipped: 't_delete sent no mutating request to the backend in the learning pass (no backend request)' }), RES);
   assert.deepEqual(sk.map((r) => `${r.scenario.id} ${r.verdict}`), ['write-faults not tested', 'write-faults.unknown-outcome not tested']);
-  // the server retried the failed request and the write took effect: no failure was produced
-  assert.match(rec(obs({ fail: trial({ call: call({ text: 'Deleted T1.' }), applied: true }) }), 'write-faults').reason, /retried/);
+  // the server retried the failed request and the write took effect: no failure was produced, but only where the gate shows it
+  const retried = rec(obs({ fail: trial({ call: call({ text: 'Deleted T1.' }), applied: true, requests: [{ ...req, status: 500 }, { seq: 8, method: 'DELETE', path: '/t/T1', status: 204 }] }) }), 'write-faults');
+  assert.equal(retried.verdict, 'not tested');
+  assert.match(retried.reason, /retried/);
+  const notRetried = rec(obs({ fail: trial({ call: call({ text: 'Deleted T1.' }), applied: true, requests: [{ seq: 6, method: 'PATCH', path: '/t/T1', status: 200 }, { ...req, status: 500 }] }) }), 'write-faults');
+  assert.equal(notRetried.verdict, 'violated', 'a success over a failed later request, with no retry seen at the gate');
 });
 
 test('R10-11 follow-through, shape side: same_version decided by the repeat with that version', () => {
@@ -168,4 +172,58 @@ test('multi-item tools without backend.gate: MWS-RES-2 is not tested, and says w
   assert.deepEqual(r2.map((r) => r.write_path.tool), ['bulk_update_tickets', 'delete_tickets']);
   assert.ok(r2.every((r) => r.verdict === 'not tested' && /backend\.gate/.test(r.reason)));
   assert.equal(multiCheck.plan({ manifest: TT, tools: TOOLS }, ticket).notRun.filter((r) => r.requirement === 'MWS-RES-2').length, 0);
+});
+
+test('fallback: a call is tried under the next resource that can run it', () => {
+  const m = parseManifestText(
+    `mws: "0.9"
+server: { stdio: [node, s.js] }
+target: { environment: test, confirm: t }
+backend: { gate: { rewrite_env: U } }
+resources:
+  - name: a
+    create: { tool: t_create, args: { title: "{{marker}}" }, id: id }
+    read: { tool: t_get, args: { id: "{{id}}" } }
+    delete: { tool: t_delete, args: { id: "{{id}}" } }
+  - name: b
+    create: { tool: t_create, args: { title: "{{marker}}" }, id: id }
+    read: { tool: t_get, args: { id: "{{id}}" } }
+    list: { tool: t_list, args: {}, items: items, id: id, name: title }
+    delete: { tool: t_delete, args: { id: "{{id}}" } }
+    cleanup: delete
+`,
+    'm.yaml',
+  );
+  const tools = ['t_create', 't_get', 't_list', 't_delete'].map((name) => ({ name, inputSchema: { type: 'object' } })) as unknown as Tool[];
+  assert.deepEqual(writeCallsOf(m, tools, m.resources[0]!).map((c) => c.tool), [], 'a has no cleanup policy');
+  assert.deepEqual(writeCallsOf(m, tools, m.resources[1]!).map((c) => c.tool), ['t_create', 't_delete']);
+});
+
+test('follow-through read (review of f4): applied again by a change after the out-of-band write; held only on a conflict or a replay', () => {
+  usePatterns(null);
+  const mid = { ok: true, obj: { status: 'open', version: 5 }, version: 5 };
+  const same = { ok: true, obj: { status: 'open', version: 5 }, version: 5 };
+  const ok = { ok: true, text: 'Updated.', rpc_error: null, data: null };
+  assert.equal(followRead(ok, mid, { ok: true, obj: { status: 'closed', version: 6 }, version: 6 }, true, 'version', []).applied_again, true);
+  assert.equal(followRead(ok, mid, same, true, 'version', []).applied_again, null, 'a plain success that changed nothing does not show the guard');
+  assert.equal(followRead({ ok: false, text: 'Not applied.', rpc_error: null, data: { status: 412 } }, mid, same, true, 'version', []).applied_again, false, 'a conflict by a structured signal');
+  assert.equal(followRead({ ok: false, text: 'Not found.', rpc_error: null, data: null }, mid, same, true, 'version', []).applied_again, null, 'a refusal of another kind');
+  assert.equal(followRead({ ok: false, text: 'x', rpc_error: null, data: null, timed_out: true }, mid, same, true, 'version', []).applied_again, null);
+});
+
+test('the version is named by a number only beside the version argument or the word version (review of f4)', () => {
+  const c = (text: string) => call({ ok: false, isError: true, text });
+  assert.equal(textNamesVersion(c('Repeat with expected_version 3.'), 'expected_version', 3), true);
+  assert.equal(textNamesVersion(c('Send version: 3 again.'), 'expected_version', 3), true);
+  assert.equal(textNamesVersion(c('Ticket T-3 had 3 labels.'), 'expected_version', 3), false);
+  assert.equal(textNamesVersion(c('Send the same expected_version.'), 'expected_version', 3), true, 'the argument name alone still names it');
+});
+
+test('learning pass gate (review of f4): a write call whose learning pass did not apply is not tested', () => {
+  const o = obs({ skipped: 'the learning pass did not show a working write (it answered success and the read-back shows nothing applied), so there is no write to fail' });
+  assert.deepEqual(writeFaultsVerdicts(o, RES).map((r) => r.verdict), ['not tested', 'not tested']);
+  const ms: MultiObs = { tool: 't_bulk', routing: 'loopback', mutating_in_learning: 1, trials: [], learn: { call: call({ tool: 't_bulk' }), requests: [], applied: false } };
+  const rs = multiRes2Verdicts(ms, RES);
+  assert.deepEqual(rs.map((r) => r.verdict), ['not tested', 'not tested']);
+  assert.match(rs[0]!.reason, /learning pass did not show a working write/);
 });

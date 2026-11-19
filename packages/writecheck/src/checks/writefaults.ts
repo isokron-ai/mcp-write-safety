@@ -32,12 +32,19 @@ import { deepEqual, diff, getPath, isObj, short, sleep, withoutIgnored } from '.
 import { lastMutating, type GateRequest } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { declaredWriteTools } from './coverage.js';
-import { lostAnswerVerdict, namesCarriedVersion, type LostAnswerObs, type SettledRun } from './gated.js';
+import { changeOutOfBand, followRead, lostAnswerVerdict, namesCarriedVersion, type LostAnswerObs, type SettledRun } from './gated.js';
 import { ignoredPaths } from './readback.js';
 import { scratch } from './scratch.js';
 import { brief, res2Judge, toolByName, wp, type CallBrief, type CheckModule, type FollowThroughRead, type Observation, type PlanContext, type PlannedCheck, type RunContext, type Tool } from './types.js';
 
 const ID = 'write-faults';
+
+/**
+ * The evidence a violation provoked by an injected status carries (F1: Evidence.synthetic_fault): a 500 the gate made, which the
+ * real backend may never send. Passed through result()'s options; a result() without the evidence option ignores it. The lost
+ * answer (a connection cut after the backend applied the write) is not synthetic.
+ */
+export const SYNTHETIC_FAULT: object = { evidence: { synthetic_fault: true } };
 const VERSION = '1';
 
 /** One declared write call: the tool, its argument template, and how its target is set up and read back. */
@@ -72,20 +79,24 @@ export function resourceWriteCalls(m: PlanContext['manifest'], res: ResourceSpec
 }
 
 /**
- * The write calls this check judges for a resource: the declared write tools (never a read tool), each under the first resource
- * that declares a call for it, leaving out every resource's update tool (the held-request check) and every multi-item tool (the
- * multi-item check), which have their own failed-request and lost-answer trials.
+ * The write calls this check judges for a resource: the declared write tools (never a read tool), leaving out every resource's
+ * update tool (the held-request check) and every multi-item tool (the multi-item check), which have their own failed-request and
+ * lost-answer trials. One trial per distinct argument template of a tool (a delete declared with the version on one resource and
+ * with force: true on another is two write paths), under the first resource declaring that template that can run the trial; where
+ * none can, under the first that declares it, which then records why.
  */
 export function writeCallsOf(m: PlanContext['manifest'], tools: Tool[], res: ResourceSpec): WriteCall[] {
   const writes = declaredWriteTools(m, tools);
   const elsewhere = new Set<string>([...m.resources.flatMap((r) => (r.update ? [r.update.tool] : [])), ...m.resources.flatMap((r) => r.multi.map((x) => x.tool))]);
   const owner = new Map<string, string>();
-  for (const r of m.resources) for (const c of resourceWriteCalls(m, r)) if (!owner.has(c.tool)) owner.set(c.tool, r.name);
-  return resourceWriteCalls(m, res).filter((c) => writes.has(c.tool) && !elsewhere.has(c.tool) && owner.get(c.tool) === res.name);
+  const keyOf = (c: WriteCall) => `${c.tool}\u0000${c.kind}\u0000${JSON.stringify(c.args ?? null)}`;
+  for (const r of m.resources) for (const c of resourceWriteCalls(m, r)) if (!owner.has(keyOf(c)) && !cannotTry(r, c)) owner.set(keyOf(c), r.name);
+  for (const r of m.resources) for (const c of resourceWriteCalls(m, r)) if (!owner.has(keyOf(c))) owner.set(keyOf(c), r.name);
+  return resourceWriteCalls(m, res).filter((c) => writes.has(c.tool) && !elsewhere.has(c.tool) && owner.get(keyOf(c)) === res.name);
 }
 
 /** Why a write call cannot be tried on this resource, or null. */
-function cannotTry(res: ResourceSpec, c: WriteCall): string | null {
+function cannotTry(res: ResourceSpec, c: Pick<WriteCall, 'kind' | 'tool'>): string | null {
   if (!res.cleanup || res.cleanup === 'leave') return `${res.name} has no cleanup policy, and every trial makes objects`;
   if (c.kind === 'create') return res.key || res.list ? null : `${res.name} declares neither a key nor a list block, so the object a create made cannot be found by anything but its answer`;
   if (!res.create) return `${res.name} has no create block, so there is no scratch object for ${c.tool} to act on`;
@@ -192,14 +203,22 @@ export const writeFaultsCheck: CheckModule = {
         nr.push(result('MWS-RES-2', w, sc, 'not tested', no));
         continue;
       }
-      calls.push(`MWS-RES-2 ${c.tool} (${c.from}): learning pass on a fresh ${c.kind === 'create' ? 'marker' : 'scratch object'}; fail its last mutating backend request (status 500); let it through and cut the answer (lost answer, with the follow-through where the error names the version); read back after each`);
-      writes += 4 + (c.input ? 3 : 0) + (c.kind === 'create' ? 0 : 3);
+      calls.push(`MWS-RES-2 ${c.tool} (${c.from}): learning pass on a fresh ${c.kind === 'create' ? 'marker' : 'scratch object'}; fail its last mutating backend request (status 500); let it through and cut the answer (lost answer); where the error names the version the call carried, change the object out of band and send the call again once with that version (R10-11); read back after each`);
+      // Four sends of the call (learning pass, failed request, lost answer, follow-through), each two calls where it answers
+      // input_required and is retried; the out-of-band change; and a scratch object per trial except for a create.
+      writes += (c.input ? 2 : 1) * 4 + 1 + (c.kind === 'create' ? 0 : 3);
       creates += c.kind === 'create' ? 4 : 3;
     }
     if (!res.update)
       for (const f of res.failures) {
         if (!toolByName(ctx.tools, f.tool)) {
           nr.push(result('MWS-RES-2', wp(res.name, f.tool), { id: `${ID}.declared`, version: VERSION }, 'not tested', `${f.tool} is not in tools/list`));
+          continue;
+        }
+        const keyed = !!res.key && isObj(f.args) && f.args[res.key.arg] !== undefined;
+        const nof = !namesTarget(f.args) && !keyed ? `${f.tool}'s arguments name neither an object of ${res.name} ({{id}}) nor a key (${res.key ? res.key.arg : 'no key declared'}), so nothing could be read around the call; it is not sent` : cannotTry(res, { tool: f.tool, kind: namesTarget(f.args) ? 'object' : 'create' });
+        if (nof) {
+          nr.push(result('MWS-RES-2', wp(res.name, f.tool), { id: `${ID}.declared`, version: VERSION }, 'not tested', `${f.name}: ${nof}`));
           continue;
         }
         calls.push(`MWS-RES-2 declared failure ${f.name}: ${f.tool}${namesTarget(f.args) ? ' on a scratch object' : ''}; ${res.read.tool} around it`);
@@ -211,7 +230,7 @@ export const writeFaultsCheck: CheckModule = {
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const obs: WriteFaultsObs = { routing: ctx.gate?.describe() ?? null, calls: [], failures: [] };
     if (ctx.gate) for (const c of writeCallsOf(ctx.manifest, ctx.tools, res)) if (toolByName(ctx.tools, c.tool) && !cannotTry(res, c)) obs.calls.push(await runCall(ctx, res, c));
-    if (!res.update) for (const f of res.failures) if (toolByName(ctx.tools, f.tool)) obs.failures.push(await runFailure(ctx, res, f));
+    if (!res.update) for (const f of res.failures) if (toolByName(ctx.tools, f.tool) && (namesTarget(f.args) || (!!res.key && isObj(f.args) && f.args[res.key.arg] !== undefined)) && !cannotTry(res, { tool: f.tool, kind: namesTarget(f.args) ? 'object' : 'create' })) obs.failures.push(await runFailure(ctx, res, f));
     return { check: ID, version: VERSION, resource: res.name, data: obs };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
@@ -347,15 +366,26 @@ async function runCall(ctx: RunContext, res: ResourceSpec, c: WriteCall): Promis
     tr.applied = ch ? ch.paths.length > 0 : null;
     if (f && !tr.faulted) tr.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
     // R10-11: the error names the version the call carried: the call is sent again once with that version, with no fault.
+    // why: review of f4: the object is changed out of band first, so that a repeat the version does not guard shows as applied.
     if (mode === 'lost' && tr.faulted && tr.applied && tr.call && namesCarriedVersion(tr.call, vArg ?? null, tr.version_sent)) {
-      const again = await send(ctx, res, c, t, args, label, `${c.tool}.follow`);
-      const a2 = await snap(ctx, res, t, label, `${mode}.follow`, true);
-      tr.follow = followOf(res, a, a2, again.r);
+      const oob = t.driver && a.present ? await changeOutOfBand(t.driver, res, a.obj, label, ctx.session.stepId('res2w.oob')) : null;
+      const mid = oob?.ok ? await snap(ctx, res, t, label, `${mode}.oob`, true) : null;
+      const moved = !!mid && mid.ok && mid.present && (!deepEqual(mid.version, a.version) || withoutIgnored(diff(a.obj, mid.obj), ignoredPaths(res)).length > 0);
+      if (!oob || !oob.ok || !mid || !moved) tr.follow = { applied_again: null, how: `the object could not be changed out of band before the repeat (${!t.driver || !a.present ? 'the object is not present to change' : oob ? oob.how : 'no control.patch, no update tool or no declared field'}), so an unguarded repeat would not show` };
+      else {
+        const again = await send(ctx, res, c, t, args, label, `${c.tool}.follow`);
+        const a2 = await snap(ctx, res, t, label, `${mode}.follow`, true);
+        const fr = followRead(brief(again.r), mid, a2, !!res.version, res.version?.read ?? null, ignoredPaths(res));
+        tr.follow = { ...fr, how: `out of band, ${oob.how}; ${fr.how}` };
+      }
     }
     return tr;
   };
   o.learn = await one('learn');
   if (o.learn.skipped) return { ...o, skipped: `learning pass: ${o.learn.skipped}` };
+  // why: review of f4: the trials fail a write the learning pass showed working; a pass that was refused, or that the read-back
+  // does not show applied, gives no write to fail.
+  if (!o.learn.call?.ok || o.learn.applied !== true) return { ...o, skipped: `the learning pass did not show a working write (${!o.learn.call ? 'no answer' : o.learn.call.indeterminate ? 'its outcome is unknown' : !o.learn.call.ok ? `it was refused: ${JSON.stringify(short(o.learn.call.text ?? o.learn.call.rpc_error?.message ?? '', 120))}` : o.learn.applied === null ? 'the target did not read back around it' : 'it answered success and the read-back shows nothing applied'}), so there is no write to fail` };
   const reqs = o.learn.requests;
   const last = lastMutating(reqs);
   if (!last) return { ...o, skipped: `${c.tool} sent no mutating request to the backend in the learning pass (${reqs.length ? reqs.map(showReq).join(', ') : 'no backend request'})` };
@@ -363,21 +393,6 @@ async function runCall(ctx: RunContext, res: ResourceSpec, c: WriteCall): Promis
   o.fail = await one('fail');
   o.lost = await one('lost');
   return o;
-}
-
-/** The follow-through (R10-11) read for a scratch object, a keyed create or a create found by its marker. */
-function followOf(res: ResourceSpec, a: Snap, a2: Snap, rep: CallResult): FollowThroughRead {
-  const answer = rep.timed_out || rep.transport_error ? 'the repeat timed out or lost its connection' : rep.ok ? 'the repeat was answered as a success' : `the repeat was refused (${JSON.stringify(short(rep.text ?? rep.rpc_error?.message ?? '', 100))})`;
-  if (!a.ok || !a2.ok) return { applied_again: null, how: `${answer}; the target did not read back around it` };
-  if (a.ids || a2.ids) {
-    const more = (a2.ids ?? []).length > (a.ids ?? []).length;
-    return { applied_again: more, how: `${answer}; ${(a.ids ?? []).length} object(s) with the marker before it, ${(a2.ids ?? []).length} after it` };
-  }
-  if (!a.present && !a2.present) return { applied_again: false, how: `${answer}; the object stayed absent` };
-  if (a.present !== a2.present) return { applied_again: true, how: `${answer}; the object was ${a2.present ? 'present again' : 'gone'} after it` };
-  if (res.version) return { applied_again: !deepEqual(a.version, a2.version), how: `${answer}; the version read ${short(a.version, 30)} before it and ${short(a2.version, 30)} after it` };
-  const d = withoutIgnored(diff(a.obj, a2.obj), ignoredPaths(res)).map((e) => e.path);
-  return { applied_again: d.length > 0, how: `${answer}; no version is declared, and the state read back ${d.length ? `changed (${d.join(', ')})` : 'unchanged'}` };
 }
 
 async function runFailure(ctx: RunContext, res: ResourceSpec, f: ResourceSpec['failures'][number]): Promise<DeclaredFailureObs> {
@@ -403,13 +418,23 @@ async function runFailure(ctx: RunContext, res: ResourceSpec, f: ResourceSpec['f
   if (!t.driver) return { ...o, skipped: `${f.tool}'s arguments name neither an object of ${res.name} ({{id}}) nor a key (${res.key ? res.key.arg : 'no key declared'}), so nothing could be read around the call` };
   const b = await snap(ctx, res, t, label, `fail.${f.name}.before`, false);
   if (!b.ok) return { ...o, skipped: `before the call: ${b.why}` };
+  // why: review of f4: a failure read back by its key needs that key free; an object already under it is not the tester's to judge by.
+  if (!byObject && b.present) return { ...o, skipped: `an object already exists under the key ${short(t.driver.id, 60)} the call carries, so what the call changed could not be told apart from it; the call was not sent` };
   const args = render(f.args, { ...t.vars, ...(b.present ? { object: b.obj, version: b.version } : {}) });
   const step = ctx.session.stepId(`res2w.fail.${f.name}`);
   // why: a failure that names a key creates nothing on a correct server; through the ledger all the same, so a server that does
   // create it leaves the key for clean-up.
-  const r = res.create && f.tool === res.create.tool ? (await createVerified(ctx.session, ctx.ledger, res, ctx.prefix, { tool: f.tool, args, purpose: `MWS-RES-2 declared failure ${f.name}`, label, step })).call! : await ctx.session.call(label, f.tool, args, { step });
+  const viaCreate = !!res.create && f.tool === res.create.tool;
+  const cr = viaCreate ? await createVerified(ctx.session, ctx.ledger, res, ctx.prefix, { tool: f.tool, args, purpose: `MWS-RES-2 declared failure ${f.name}`, label, step }) : null;
+  const r = cr ? cr.call! : await ctx.session.call(label, f.tool, args, { step });
   o.call = brief(r);
   const a = await snap(ctx, res, t, label, `fail.${f.name}.after`, true);
+  // why: review of f4: a failure keyed on an object that the server wrongly made (by a tool other than the create, or a create whose
+  // answer gave no id) is the run's object: it goes into the ledger, so clean-up removes it.
+  if (!byObject && a.ok && a.present && !b.present && !cr?.ok) {
+    const intent = ctx.ledger.intent(res.name, f.tool, `MWS-RES-2 declared failure ${f.name}: an object found under the key the call carried`);
+    ctx.ledger.append({ kind: 'created', intent, resource: res.name, id: t.driver.id, name: String(t.driver.id), via: 'sweep' });
+  }
   const ch = changes(res, t, b, a);
   o.changed = ch?.paths ?? null;
   o.values = ch?.values ?? {};
@@ -436,10 +461,13 @@ export function writeFaultsVerdicts(o: WriteFaultsObs, res: ResourceSpec, asyncO
     const r = c.fail;
     if (!r || r.skipped || !r.call || r.call.indeterminate) out.push(result('MWS-RES-2', w, sc, 'not tested', `failed backend request: ${r?.skipped ?? (r?.call ? 'the outcome of the call is unknown' : 'the call was not made')}`, { notes }));
     else if (r.changed === null) out.push(result('MWS-RES-2', w, sc, 'not tested', 'failed backend request: the target did not read back around the call', { notes }));
-    else if (r.call.ok && r.applied) out.push(result('MWS-RES-2', w, sc, 'not tested', 'failed backend request: the server retried the failed request and the write took effect, so no failure was produced', { notes }));
+    // why: review of f4: a success with the write in effect counts as a retry the server made only where the gate shows the faulted
+    // request sent again and carried out (a 2xx for the same method and path after it); in a call of several backend requests a
+    // success over a failed later request is otherwise a failure reported as a success.
+    else if (r.call.ok && r.applied && r.requests.some((q) => q.seq > r.faulted!.seq && q.method === r.faulted!.method && q.path === r.faulted!.path && typeof q.status === 'number' && q.status >= 200 && q.status < 300)) out.push(result('MWS-RES-2', w, sc, 'not tested', 'failed backend request: the server retried the failed request (the gate shows it sent again and carried out) and the write took effect, so no failure was produced', { notes }));
     else {
       const j = res2Judge(r.call, r.changed, 'backend', `The tester failed the backend request (failed ${showReq(r.faulted!)} with status 500, not forwarded)`, r.values, { async: asyncOps.includes(c.tool), object: r.object });
-      out.push(result('MWS-RES-2', w, sc, j.verdict, j.reason, { steps: j.verdict === 'violated' ? r.steps : [], notes: [...notes, ...j.notes] }));
+      out.push(result('MWS-RES-2', w, sc, j.verdict, j.reason, { steps: j.verdict === 'violated' ? r.steps : [], notes: [...notes, ...j.notes], ...SYNTHETIC_FAULT }));
     }
     // The lost answer, judged by the same rules as the update tool's (gated.ts lostAnswerVerdict).
     const l = c.lost;

@@ -622,7 +622,13 @@ test('Action CI SH-4 and SH-5: the plan omits a failure call that names an objec
       - { name: bad_create, tool: c, args: { t: "" } }
 `, 'm.yaml');
   const calls = createsCheck.plan({ manifest: m, tools: [] } as never, m.resources[0]!).calls.filter((c) => c.startsWith('MWS-RES-2 declared failure'));
-  assert.deepEqual(calls, ['MWS-RES-2 declared failure bad_create: c; sea_get']);
+  assert.deepEqual(calls, [], 'without an object under test, the write-faults check runs the declared failures');
+  // B-GAP F4: a failure that names {{id}} runs on a scratch object; one that names neither an object nor a key is not sent.
+  const { writeFaultsCheck } = await import('../../src/checks/writefaults.js');
+  const tools = ['c', 'd', 'sea_get', 'sea_update'].map((name) => ({ name, inputSchema: { type: 'object' } }));
+  const wf = writeFaultsCheck.plan({ manifest: m, tools } as never, m.resources[0]!);
+  assert.deepEqual(wf.calls.filter((c) => c.startsWith('MWS-RES-2 declared failure')), ['MWS-RES-2 declared failure foreign: sea_update on a scratch object; sea_get around it', 'MWS-RES-2 declared failure foreign_json: sea_update on a scratch object; sea_get around it']);
+  assert.match(wf.notRun.find((r) => r.write_path.tool === 'c' && /bad_create|neither an object/.test(r.reason))!.reason, /neither an object of sea/);
   assert.deepEqual(ignoredPaths(m.resources[0]!), ['metadata.resourceVersion', 'metadata.managedFields']);
 });
 
