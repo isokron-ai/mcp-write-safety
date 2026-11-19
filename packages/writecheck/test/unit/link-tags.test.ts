@@ -63,7 +63,7 @@ test('link tags: every isokron.ai link in the repository carries its surface tag
         if (exempt(line, m)) continue;
         const surface = SURFACES.find(([p]) => f === p || (p.endsWith('/') && f.startsWith(p)));
         assert.ok(surface, `${f}:${i + 1} has a link to isokron.ai, and no surface covers this file: ${m[0]}`);
-        const q = new URLSearchParams((m[2] ?? '').replace(/^\?/, '').replace(/[.,;:]+$/, ''));
+        const q = new URLSearchParams((m[2] ?? '').replace(/^\?/, ''));
         assert.equal(q.get('utm_source'), surface[1], `${f}:${i + 1}: ${m[0]}`);
         assert.equal(q.get('utm_medium'), surface[2], `${f}:${i + 1}: ${m[0]}`);
         assert.deepEqual([...q.keys()].sort(), ['utm_medium', 'utm_source'], `${f}:${i + 1}: only the source and the medium`);

@@ -7,7 +7,7 @@ description: Build rules for MCP servers whose tools create, update or delete st
 
 MWS states what an MCP server must do so that a write made through one of its tools has the effect the caller asked for, on the object the caller named, and is reported truthfully. This skill restates its 37 requirements as build rules.
 
-Source: MCP Write-Safety Requirements, version 0.9 (draft for public comment), https://isokron.ai/mws?utm_source=mws-skill&utm_medium=skill. Every requirement in 0.9 has the status `draft`; wording and levels may change before 1.0. The requirement is the sentence in section 9 of the spec. Where this skill and the spec differ, the spec is right: read the requirement by its ID before you rely on a rule here.
+Source: MCP Write-Safety Requirements, version 0.9 (draft for public comment), <https://isokron.ai/mws?utm_source=mws-skill&utm_medium=skill>. Every requirement in 0.9 has the status `draft`; wording and levels may change before 1.0. The requirement is the sentence in section 9 of the spec. Where this skill and the spec differ, the spec is right: read the requirement by its ID before you rely on a rule here.
 
 How to read the rules:
 

@@ -8,18 +8,18 @@ No model, no account, no telemetry. The tool connects to your server, to the hos
 
 Packages: `@mcp-write-safety/writecheck` (this tool; the command is `mcp-writecheck`) and `@mcp-write-safety/tiny-tracker` (the sample server). The requirements: [MCP Write-Safety Requirements 0.9](https://isokron.ai/mws?utm_source=writecheck-readme&utm_medium=readme). Source: [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety/tree/main/packages/writecheck). Node 22 or later.
 
-## Before you run: a full run makes thousands of real writes
+## Before you run: a full run makes real writes, up to about 1,800 for the sample server
 
 `run` creates, changes and deletes real objects in whatever system the manifest points at, and sends the destructive MWS-TGT-2 forms only where you opt in. Read this first.
 
 - **Use a disposable backend.** A backend that you start for the test (a container, an in-memory build) or a tenant that exists only for testing, with a credential that is valid only there. Never a shared or production system.
-- **Read the plan before you run.** `plan` calls no tool and writes nothing; it prints the largest number of writes and creates and the plan hash. For the sample server, tiny-tracker, it is at most 1,789 writes and 307 creates; `--pair-budget 2x1500` adds about 12,000 writes per resource. The default `limits.write_budget` is 20,000. `run` takes the plan hash back from a person (`--plan-hash`), and the target (`--confirm-target`); there is no `--yes`.
+- **Read the plan before you run.** `plan` calls no tool and writes nothing; it prints the largest number of writes and creates and the plan hash. For the sample server, tiny-tracker, it is up to about 1,800 real writes (at most 1,789 writes and 307 creates); the default `limits.write_budget` is 20,000, and `--pair-budget 2x1500` adds about 12,000 writes per resource. `run` takes the plan hash back from a person (`--plan-hash`), and the target (`--confirm-target`); there is no `--yes`.
 - **Destructive forms need an explicit flag.** The empty and match-all selector forms of MWS-TGT-2 are sent only with `selector.send_empty_forms: true` in the manifest, which you set only for a backend where every object is disposable. Without it MWS-TGT-2 is `not tested`.
 - **The checks refuse obvious mistakes; they do not prove a target is a test system.** The manifest must say `environment: test`, hosts that look like production are refused unless listed, and a read-only guard call must match before any write (see Seat belts below). The decision to point the manifest at a system is yours.
 
 Status: a preview for the MWS 0.9 comment window. It covers a stated subset of the 37 requirements (the coverage table below); a requirement or a tool it does not exercise is reported `not tested`, with the reason, never guessed.
 
-## Try it in a few minutes
+## Try it in about a minute
 
 `demo` runs the suite against tiny-tracker, the MWS sample server: a small issue tracker whose default build is written to meet the requirements and whose broken builds switch on deliberate defects, one per requirement. (A run reports per requirement and write path; no run says a server meets MWS as a whole.) Everything runs on 127.0.0.1 and stops when the demo ends; nothing leaves the machine.
 
@@ -85,7 +85,7 @@ MWS-ANN-4    SHOULD violated in (catalog):remove_label
 MWS-ANN-5    SHOULD violated in project:create_project, ticket:add_label, ticket:set_labels
 MWS-SEC-1    MUST   violated in (server):get_ticket
 
-442 records in about <seconds> s. One line per requirement; the report has one row per write path. There is no total.
+442 records in <seconds> s. One line per requirement; the report has one row per write path. There is no total.
 mcp-writecheck is a preview: of the 37 requirements of MWS 0.9 it executes the test of 14 in full and of 23 in part; what is not built is reported "not tested" with the reason (README: Coverage in this preview).
 report: <tmp>/mwsc-demo-results/<run id>/report.md
 ```
