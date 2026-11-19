@@ -20,7 +20,9 @@
  * regression when held → violated); a probed argument that is gone is a changed test. Several records in one slot without case
  * ids keep the slot from a fix where their counts differ or an after record is not tested, not observed or violated?. A slot on
  * one side only is joined when its record is `not tested` or `not applicable`, and is `coverage-change` when it carries a tested
- * verdict. A fix is claimed only between records judged by one stated, clean tester build (else `tester-unpinned`). `test_hash` on
+ * verdict. A fix is claimed only between records judged by one stated, clean tester build (else `tester-unpinned`), and, where a
+ * record's hash cannot be recomputed (mws-test-hash/1, no test inputs), only between two files signed by a pinned key (else
+ * `hash-unverified`). `test_hash` on
  * a side is sha256 over the cell's sorted distinct record hashes, for display.
  *
  * Labels: `fixed` (violated → held, nothing else), `regressed` (held or not observed → violated), `unchanged` (the same
@@ -69,7 +71,8 @@ export type Transition =
   | 'schema-fixed'
   | 'scheme-changed'
   | 'hash-mismatch'
-  | 'tester-unpinned';
+  | 'tester-unpinned'
+  | 'hash-unverified';
 
 interface Rec {
   requirement: string;
@@ -578,22 +581,39 @@ export function joinCell(b: Rec[], a: Rec[]): Join {
 
 type Classified = { transition: Transition; label: Label; why: string; slot_moves?: SlotMove[]; slot_regressions?: string[]; same_test_because?: string[]; facets?: Facet[] };
 
-export function classify(b: Side, a: Side): Classified {
+/**
+ * A record whose stored test hash compare cannot recompute: it carries no test inputs of this scheme (a record of a file
+ * hashed under mws-test-hash/1). Its hash is taken as stated, so a hash copied from another record would join (review R2).
+ */
+export const unrecomputable = (r: Rec): boolean => typeof r.test_hash === 'string' && r.test_inputs?.scheme !== TEST_HASH_FORMAT;
+
+/** Why no fix or regression is claimed from records whose hashes cannot be recomputed, where the files are not both pinned. */
+export const UNVERIFIED_HASH_WHY = 'its test hashes (mws-test-hash/1) cannot be recomputed from the records, and the two files are not both signed by a pinned key (--pubkey): a copied hash would join any two records';
+
+/**
+ * `o.pinned`: both files carry a results signature that verified under the key given with --pubkey. Without it, a cell whose
+ * records include one whose hash cannot be recomputed (unrecomputable) claims no fix or regression (`hash-unverified`).
+ */
+export function classify(b: Side, a: Side, o: { pinned?: boolean } = {}): Classified {
   const mb = mismatch(b);
   const ma = mismatch(a);
   if (mb || ma) return { transition: 'rollup-mismatch', label: 'not comparable', why: [mb && `before: ${mb}`, ma && `after: ${ma}`].filter(Boolean).join('; ') };
   let slots: SlotMove[] = [];
   let tolerated: string[] = [];
   let tester: string | null = null;
+  // why: review R2: a mws-test-hash/1 hash is taken as stated; only a pinned signature over both files vouches for it.
+  const unverified = !o.pinned && [...(b.recs ?? []), ...(a.recs ?? [])].some(unrecomputable) ? UNVERIFIED_HASH_WHY : null;
   // why: re-review 1: the slot moves (and regressions) on equal hashes are reported whatever else makes the cell not comparable;
   // review M4: so are the moves of slots whose judged schema changed.
   const withSlots = (c: Classified): Classified => {
     const moved = slots.filter((m) => m.before !== m.after);
     const regs = moved.filter(isRegression).map((m) => `${m.slot} ${m.before} → violated`);
     // why: review S3, F6: a fix or a regression is claimed only between two records judged by one stated, clean tester build.
-    const gated = tester && (c.label === 'fixed' || c.label === 'schema-fixed' || c.label === 'regressed') ? { transition: 'tester-unpinned' as Transition, label: 'not comparable' as Label, why: `${c.why}; not claimed: ${tester}` } : c;
-    const regsWhy = tester && regs.length ? { why: `${gated.why}; slot regressions not claimed (${regs.join(', ')}): ${tester}` } : {};
-    return { ...gated, ...regsWhy, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && !tester && gated.label !== 'regressed' ? { slot_regressions: regs } : {}), ...(tolerated.length ? { same_test_because: tolerated } : {}) };
+    // why: review R2: nor from hashes nobody can recompute, unless both files are pinned.
+    const gate = tester ? { transition: 'tester-unpinned' as Transition, why: tester } : unverified ? { transition: 'hash-unverified' as Transition, why: unverified } : null;
+    const gated = gate && (c.label === 'fixed' || c.label === 'schema-fixed' || c.label === 'regressed') ? { transition: gate.transition, label: 'not comparable' as Label, why: `${c.why}; not claimed: ${gate.why}` } : c;
+    const regsWhy = gate && regs.length ? { why: `${gated.why}; slot regressions not claimed (${regs.join(', ')}): ${gate.why}` } : {};
+    return { ...gated, ...regsWhy, ...(moved.length ? { slot_moves: moved } : {}), ...(regs.length && !gate && gated.label !== 'regressed' ? { slot_regressions: regs } : {}), ...(tolerated.length ? { same_test_because: tolerated } : {}) };
   };
   if (b.recs && a.recs) {
     const j = joinCell(b.recs, a.recs);
@@ -604,7 +624,7 @@ export function classify(b: Side, a: Side): Classified {
       // why: re-review 2: schema-fixed needs every slot violated before (judged-part slots and the others) held after.
       const open = openSlots(slots);
       if (j.problem.facets?.includes('schema') && b.verdict === 'violated' && a.verdict === 'held' && !open.length)
-        return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: relaxedIn(tolerated).length ? `${j.problem.why}: every slot violated before is held after, where the after build's schema no longer requires an argument it required before (${relaxedIn(tolerated).join(', ')}): the constraint the before run found was taken out of the schema, not enforced; check that this is the fix meant` : `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas: check that the after build's schema now declares the constraint the before run found` });
+        return withSlots({ transition: 'schema-fixed', label: 'schema-fixed', why: relaxedIn(tolerated).length ? `${j.problem.why}: every slot violated before is held after, where the after build's schema no longer requires an argument it required before (${relaxedIn(tolerated).join(', ')}): the constraint the before run found was taken out of the schema, not enforced; check that this is the fix meant` : `${j.problem.why}: every slot violated before is held after. compare cannot read the schemas, and a change of the judged schema may tighten or loosen it: check in the after build's schema whether the change enforces what the before run found, or takes it out of the schema` });
       // why: review M4: held → violated across a change of the judged schema, every other input the same, is a regression.
       if ((b.verdict === 'held' || b.verdict === 'not observed') && a.verdict === 'violated') return withSlots({ transition: 'regressed', label: 'regressed', why: `${b.verdict} on the before build; violated on the after build, where ${j.problem.why.replace(/^the tool's/, 'only the tool\'s')}` });
       // why: the cell says which judged part changed (facets), so a reader need not parse `why`; the schema allows it on this transition only.
@@ -735,6 +755,9 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
   const sb = sides(b);
   const sa = sides(a);
   const keys = [...new Set([...sb.keys(), ...sa.keys()])].sort();
+  // why: review R2: pinned only where compareCommand verified both files under the key given with --pubkey.
+  const isPinned = (s: RunSummary) => s.signature.status === 'valid' && s.signature.accepted === 'pinned';
+  const pinned = isPinned(before) && isPinned(after);
   const cells: CellCompare[] = keys.map((key) => {
     const x = sb.get(key);
     const y = sa.get(key);
@@ -742,8 +765,13 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
     const tool = (x ?? y)!.tool;
     if (!x) return { key, requirement, tool, before: null, after: y!.side, transition: 'new-cell', label: 'not comparable', why: 'records for this cell only on the after build (a tool or requirement added, or the before run did not reach it)' };
     if (!y) return { key, requirement, tool, before: x.side, after: null, transition: 'removed-cell', label: 'not comparable', why: 'records for this cell only on the before build (a tool or requirement removed, or the after run did not reach it)' };
-    return { key, requirement, tool, before: x.side, after: y.side, ...classify(x.side, y.side) };
+    return { key, requirement, tool, before: x.side, after: y.side, ...classify(x.side, y.side, { pinned }) };
   });
+  // why: review R2: every cell whose hash is taken as stated is said, pinned or not.
+  for (const key of keys) {
+    const rs = [...(sb.get(key)?.recs ?? []), ...(sa.get(key)?.recs ?? [])];
+    if (rs.some(unrecomputable)) warnings.push(`${key}: a test hash of this cell (mws-test-hash/1, no test inputs) could not be recomputed and is taken as stated; ${pinned ? 'both files are signed by the pinned key, which vouches for it' : 'no fix or regression is claimed on it, since the two files are not both signed by a pinned key'}`);
+  }
   for (const c of cells) {
     // why: review S5: a violation the after build shows in a cell the before build did not test is said, not left in the list.
     if (c.after?.verdict === 'violated' && (!c.before || UNTESTED.includes(c.before.verdict))) {
@@ -754,8 +782,9 @@ export function compareDocs(b: Record<string, unknown>, a: Record<string, unknow
     if (c.after) delete c.after.recs;
     // why: review: a slot that regressed inside a cell whose roll-up did not move is said, never hidden by the roll-up.
     for (const r of c.slot_regressions ?? []) warnings.push(`${c.key}: slot regressed inside a cell labelled ${c.label}: ${r}`);
-    if (c.transition === 'tester-unpinned' && c.before?.verdict === 'violated' && c.after?.verdict === 'held') warnings.push(`${c.key}: violated → held, not claimed as fixed: ${c.why.replace(/^.*not claimed: /, '')}`);
-    if (c.transition === 'tester-unpinned' && c.after?.verdict === 'violated' && c.before && c.before.verdict !== 'violated') warnings.push(`${c.key}: ${c.before.verdict} → violated, not claimed as regressed: ${c.why.replace(/^.*not claimed: /, '')}`);
+    const gatedCell = c.transition === 'tester-unpinned' || c.transition === 'hash-unverified';
+    if (gatedCell && c.before?.verdict === 'violated' && c.after?.verdict === 'held') warnings.push(`${c.key}: violated → held, not claimed as fixed: ${c.why.replace(/^.*not claimed: /, '')}`);
+    if (gatedCell && c.after?.verdict === 'violated' && c.before && c.before.verdict !== 'violated') warnings.push(`${c.key}: ${c.before.verdict} → violated, not claimed as regressed: ${c.why.replace(/^.*not claimed: /, '')}`);
     if (/slot regressions not claimed/.test(c.why)) warnings.push(`${c.key}: ${c.why.replace(/^.*slot regressions not claimed /, 'slot regressions not claimed ')}`);
     if (c.transition === 'hash-mismatch') warnings.push(`${c.key}: ${c.why}`);
   }

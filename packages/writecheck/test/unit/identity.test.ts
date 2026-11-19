@@ -213,6 +213,18 @@ const miniDoc = (results: Result[], over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * A file's summary as `compare --pubkey` gives it: the document signed by the pinned key. miniDoc's records are mws-test-hash/1
+ * (no test inputs), so compare claims a fix or a regression from them only between two pinned files (review R2).
+ */
+const PIN = generateKeyPairSync('ed25519').privateKey;
+const pinnedSum = (d: Record<string, unknown>, f = 'f') => {
+  const signed = { ...d, evidence: { ...(d['evidence'] as object), signature: signResults(d, PIN) } };
+  const s = summarize(signed, f, JSON.stringify(signed), verifyResults(signed, createPublicKey(PIN)));
+  s.signature.accepted = 'pinned';
+  return s;
+};
+
 test('results signature: signs the canonical document, verifies against a pinned key, refuses changes and other keys', () => {
   const { privateKey } = generateKeyPairSync('ed25519');
   const other = generateKeyPairSync('ed25519').privateKey;
@@ -315,8 +327,7 @@ test('re-review: slot regressions survive not-comparable cells; fixes need every
   const cell = (b: ReturnType<typeof R>[], a: ReturnType<typeof R>[]) => {
     const B = miniDoc(b as never);
     const A = miniDoc(a as never);
-    const sum = (d: Record<string, unknown>) => summarize(d, 'f', JSON.stringify(d), verifyResults(d, null));
-    return compareDocs(B, A, sum(B), sum(A));
+    return compareDocs(B, A, pinnedSum(B), pinnedSum(A));
   };
   const suspect = { validity: { counts: false } };
   // A, A2: schema-fixed only when every slot violated before is held after.
@@ -390,22 +401,25 @@ test('compare: rule 13 roll-up, and only violated → held on an equal test hash
   // Review: the same slot, tested on one build and not tested on the other, is a coverage change.
   assert.equal(joinCell([R('violated', s1, 'h1')], [R('not tested', s1, 'h1')]).problem?.transition, 'coverage-change');
   const withRecs = (v: Side['verdict'], recs: ReturnType<typeof R>[]) => side(v, 'sha256:x', { recs: recs as never });
-  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1')])).label, 'fixed');
-  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1'), R('held', s1, 'h1', 'b')])).transition, 'coverage-change', 'held where before had no evidence is not a fix');
+  // (these records carry no test inputs, as mws-test-hash/1 records do: claims stand only between pinned files, review R2)
+  const PINNED = { pinned: true };
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1')])).transition, 'hash-unverified');
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1')]), PINNED).label, 'fixed');
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1')]), withRecs('held', [R('held', s1, 'h1'), R('held', s1, 'h1', 'b')]), PINNED).transition, 'coverage-change', 'held where before had no evidence is not a fix');
   // Reviewer probes: a violated slot not re-tested while another slot is newly held is never fixed.
   const s2 = { id: 'probes', version: '1' };
-  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('not tested', s2, 'h2')]), withRecs('held', [R('not tested', s1, 'h1'), R('held', s2, 'h2')])).transition, 'coverage-change');
-  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('not tested', s1, 'h3', 'b')]), withRecs('held', [R('not tested', s1, 'h1'), R('held', s1, 'h3', 'b')])).transition, 'coverage-change');
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('not tested', s2, 'h2')]), withRecs('held', [R('not tested', s1, 'h1'), R('held', s2, 'h2')]), PINNED).transition, 'coverage-change');
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('not tested', s1, 'h3', 'b')]), withRecs('held', [R('not tested', s1, 'h1'), R('held', s1, 'h3', 'b')]), PINNED).transition, 'coverage-change');
   // A violated slot that went to not observed while another held: the cell rolls up to held, but it is not a fix.
-  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('held', s2, 'h2')]), withRecs('held', [R('not observed', s1, 'h1'), R('held', s2, 'h2')])).transition, 'partly-held');
+  assert.equal(classify(withRecs('violated', [R('violated', s1, 'h1'), R('held', s2, 'h2')]), withRecs('held', [R('not observed', s1, 'h1'), R('held', s2, 'h2')]), PINNED).transition, 'partly-held');
   // A regression hidden by the roll-up is reported per slot.
-  const hidden = classify(withRecs('violated', [R('violated', s1, 'h1'), R('held', s1, 'h3', 'b')]), withRecs('violated', [R('held', s1, 'h1'), R('violated', s1, 'h3', 'b')]));
+  const hidden = classify(withRecs('violated', [R('violated', s1, 'h1'), R('held', s1, 'h3', 'b')]), withRecs('violated', [R('held', s1, 'h1'), R('violated', s1, 'h3', 'b')]), PINNED);
   assert.equal(hidden.label, 'unchanged');
   assert.deepEqual(hidden.slot_regressions, ['b/rw held → violated']);
   // A requirement that judges the schema: the schema changed and the violation is gone.
   const X = (verdict: string, h: string) => ({ ...R(verdict, s1, h), requirement: 'MWS-IN-3', test_hash_core: 'core' });
-  assert.equal(classify(withRecs('violated', [X('violated', 'h1')]), withRecs('held', [X('held', 'h2')])).label, 'schema-fixed');
-  assert.equal(classify(withRecs('violated', [X('violated', 'h1')]), withRecs('violated', [X('violated', 'h2')])).transition, 'subject-changed');
+  assert.equal(classify(withRecs('violated', [X('violated', 'h1')]), withRecs('held', [X('held', 'h2')]), PINNED).label, 'schema-fixed');
+  assert.equal(classify(withRecs('violated', [X('violated', 'h1')]), withRecs('violated', [X('violated', 'h2')]), PINNED).transition, 'subject-changed');
   // The run's own cell disagrees with the records: not compared.
   assert.equal(classify(side('held', 'sha256:x', { run_cell: 'platform' }), side('held')).transition, 'rollup-mismatch');
   assert.equal(classify(side('not tested', 'sha256:x', { run_cell: 'not applicable' }), side('not tested')).label, 'unchanged');
@@ -424,8 +438,12 @@ test('compare: joins cells on test_hash across a patched build with more tools; 
   const b = miniDoc(before as Result[]);
   const a = miniDoc([...(after as Result[]), afterDel as Result], { identity: { ...miniDoc([]).identity, tools_fingerprint: 't2' } });
   const sum = (d: Record<string, unknown>, f: string) => summarize(d, f, JSON.stringify(d), verifyResults(d, null));
-  const c = compareDocs(b, a, sum(b, 'b'), sum(a, 'a'));
+  const c = compareDocs(b, a, pinnedSum(b, 'b'), pinnedSum(a, 'a'));
   const by = new Map(c.cells.map((x) => [x.key, x]));
+  // (unsigned, these mws-test-hash/1 hashes vouch for nothing: the same pair claims no fix, and says why)
+  const cu = compareDocs(b, a, sum(b, 'b'), sum(a, 'a'));
+  assert.equal(cu.cells.find((x) => x.key === 'MWS-CONC-1@update_ticket')!.transition, 'hash-unverified');
+  assert.ok(cu.warnings.some((x) => /signature unsigned/.test(x)));
   assert.equal(by.get('MWS-CONC-1@update_ticket')!.label, 'fixed');
   assert.equal(by.get('MWS-CONC-3@update_ticket')!.before!.verdict, 'platform', 'B4: the cell is platform, not held');
   assert.equal(by.get('MWS-CONC-3@update_ticket')!.label, 'unchanged');
@@ -433,7 +451,6 @@ test('compare: joins cells on test_hash across a patched build with more tools; 
   assert.equal(by.get('MWS-ANN-4@admin_reset')!.transition, 'new-cell');
   assert.equal(c.same.tools, false);
   assert.equal(c.rating, null);
-  assert.ok(c.warnings.some((x) => /signature unsigned/.test(x)));
   assert.equal(c.cells[0]!.label, 'fixed', 'regressed first, then fixed');
   assert.ok(!/"(total|score|percent|passed)"/.test(JSON.stringify(c)), 'no aggregate');
   // Refusals.

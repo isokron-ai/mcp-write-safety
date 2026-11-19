@@ -672,6 +672,7 @@
               "schema-fixed",
               "scheme-changed",
               "tester-unpinned",
+              "hash-unverified",
               "hash-mismatch"
             ]
           },

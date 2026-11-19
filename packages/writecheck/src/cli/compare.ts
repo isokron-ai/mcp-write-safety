@@ -17,7 +17,7 @@ import { applyInputs, hashExtras, stampTestHashes, type TestInputs } from '../re
 import type { Result } from '../report/verdicts.js';
 import { reviewOf } from './run.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
-import { readCatalogFile } from './commands.js';
+import { readCatalogFile, UNHASHED_PROCEDURE_NOTE } from './commands.js';
 
 import type { ProvenanceFlags } from '../core/identity.js';
 import { WritecheckError } from '../core/util.js';
@@ -181,7 +181,9 @@ export async function finishRecheck(runDir: string, o: { key: KeyObject | null; 
   const slot = (r: Result) => `${r.requirement}|${r.write_path.resource}|${r.write_path.tool}|${r.scenario.id}|${r.scenario.version}|${r.case ?? ''}`;
   const recorded = new Map<string, TestInputs>();
   for (const r of original.results) if (r.test_inputs?.scheme === TEST_HASH_FORMAT && !recorded.has(slot(r))) recorded.set(slot(r), r.test_inputs);
-  const fresh = doc.results.filter((r) => typeof r.test_hash !== 'string');
+  // why: review R1: a record recheck re-evaluated across a procedure version keeps the recorded hash, or carries none
+  // (recheckCommand's keepRecordedProcedure); it is never hashed here from the copies with this build's procedure.
+  const fresh = doc.results.filter((r) => typeof r.test_hash !== 'string' && !r.notes.some((n) => n.startsWith(UNHASHED_PROCEDURE_NOTE)));
   const computed: Result[] = [];
   let reused = 0;
   for (const r of fresh) {

@@ -175,12 +175,16 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   for (const [oi, obs] of (doc.observations as Observation[]).entries()) {
     const mod = checkById(obs.check);
     if (!mod) throw new WritecheckError(`recheck: no check ${obs.check} in this version`, 2);
-    if (mod.version !== obs.version) o.log(`note: ${obs.check} was recorded at scenario version ${obs.version}; this release has ${mod.version}`);
+    const otherVersion = mod.version !== obs.version;
+    if (otherVersion) o.log(`note: ${obs.check} was recorded at scenario version ${obs.version}; this release has ${mod.version}. Its re-evaluated records keep version ${obs.version} and the test hash recorded with them (none where none was recorded)`);
     // why: review (1): the losses an opt-in run saw around this check (k1) block held on recheck too.
     const runLosses = [...((obs as { setup_losses?: Loss[] }).setup_losses ?? []), ...((obs as { bracket_losses?: Loss[] }).bracket_losses ?? [])];
     // why: k1 (gate-2 re-run on 0295ed6): a loss seen later in the run blocks held on recheck too.
     const later = (obs as { later_losses?: LaterLoss[] }).later_losses ?? [];
-    for (const r of mod.evaluate(obs, ctx)) {
+    for (const r0 of mod.evaluate(obs, ctx)) {
+      // why: review R1 (procedure version rule, MANIFEST.md "Recheck across a procedure version"): the observation is what the
+      // recorded procedure sent; hashing it with this build's procedure would name a test that was never run.
+      const r = otherVersion ? keepRecordedProcedure(r0, obs.version, mod.version, doc.results) : r0;
       const x = runLosses.length ? withLoss(r, [], false, runLosses) : r;
       const y = later.length ? withLaterLoss(x, later) : x;
       fresh.push(y);
@@ -216,6 +220,29 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   writeFileSync(join(dir, 'report.md'), renderMarkdown(out));
   o.log(changed.length ? changed.map((c) => `${c.key}: ${c.before} → ${c.after}`).join('\n') : 'No verdict changed.');
   return { doc: out, changed };
+}
+
+/** The note on a record recheck re-evaluated across a procedure version that had no recorded test hash: finishRecheck leaves it unhashed. */
+export const UNHASHED_PROCEDURE_NOTE = 'Not hashed by recheck: re-evaluated from an observation recorded at another procedure version';
+
+/**
+ * The procedure version rule of recheck (MANIFEST.md, "Recheck across a procedure version"): a record re-evaluated from an
+ * observation whose procedure version differs from the check module's keeps the observation's version, and the test_hash,
+ * test_hash_core and test_inputs of the original record of its slot and case (requirement, resource, tool, procedure id, that
+ * version, case), unchanged. Where the original record carries no test_hash (or there is none), the record gets none: compare
+ * then says `no-test-hash`. It is never hashed from the run folder's copies, which this build's procedure would read otherwise.
+ */
+export function keepRecordedProcedure(r: Result, recordedVersion: string, moduleVersion: string, original: Result[]): Result {
+  const { test_hash: _h, test_hash_core: _c, test_inputs: _i, ...base } = r;
+  const out: Result = { ...base, scenario: { id: r.scenario.id, version: recordedVersion } };
+  const was = original.find((o) => o.requirement === r.requirement && o.write_path.resource === r.write_path.resource && o.write_path.tool === r.write_path.tool && o.scenario.id === r.scenario.id && o.scenario.version === recordedVersion && (o.case ?? '') === (r.case ?? ''));
+  if (was && typeof was.test_hash === 'string') {
+    out.test_hash = was.test_hash;
+    if (typeof was.test_hash_core === 'string') out.test_hash_core = was.test_hash_core;
+    if (was.test_inputs) out.test_inputs = was.test_inputs;
+    out.notes = [...out.notes, `Re-evaluated by procedure ${r.scenario.id} version ${moduleVersion} from an observation recorded at version ${recordedVersion}: the record keeps version ${recordedVersion} and the test hash recorded with it.`];
+  } else out.notes = [...out.notes, `${UNHASHED_PROCEDURE_NOTE} (${recordedVersion}; this build has ${moduleVersion}), and the original record carries no test hash: compare does not compare it.`];
+  return out;
 }
 
 /**

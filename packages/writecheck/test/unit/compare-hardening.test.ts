@@ -24,7 +24,7 @@ import { compareDocs, RELAXED_REQUIRED_IS_SAME_TEST, summarize, UNDECLARED_IN_CL
 import { signResults, verifyResults } from '../../src/report/sign.js';
 import { hashOfInputs, narrowSchema, stampTestHashes, testHash, testInputs, usedArgs, type TesterId } from '../../src/report/testhash.js';
 import { furtherProbes } from '../../src/checks/readback.js';
-import { misspelledArgument, probeCases } from '../../src/checks/schema.js';
+import { misspelledArgument, probeCases, schemaCheck } from '../../src/checks/schema.js';
 import { result, type Result } from '../../src/report/verdicts.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -670,7 +670,7 @@ test('final N1: MWS-IN-3 sends missing_required only for a required argument: re
   const capped = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { labels: { type: 'array', maxItems: 5, items: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } } })));
   const z = cellOf(cmp(doc(stamped([rec('MWS-IN-3', 'violated', { scenario: inSc })], m, after)), doc(stamped([rec('MWS-IN-3', 'held', { scenario: inSc })], m, capped))), 'MWS-IN-3@update_ticket');
   assert.equal(z.label, 'schema-fixed', z.why);
-  assert.match(z.why, /now declares the constraint the before run found/);
+  assert.match(z.why, /may tighten or loosen it: check in the after build's schema whether the change enforces what the before run found, or takes it out of the schema/);
 });
 
 test('final N2: in a file hashed under mws-test-hash/2, a record without test_inputs or with inputs of another scheme is hash-mismatch: (a) inputs deleted and the hash copied; (b) a foreign scheme on both sides', () => {
@@ -764,4 +764,111 @@ test('final N5: the closed-schema note names the closed side; a probed relaxatio
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- Review of fe1a7f4 (R1-R3) ----
+
+test('review R1: recheck across a procedure version keeps the recorded version and test hash (or none), never the new procedure\'s', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    const mf = join(dir, 'manifest.yaml');
+    writeFileSync(mf, ttManifest);
+    const m = parseManifestText(ttManifest, mf);
+    const tools = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, additionalProperties: false })));
+    writeFileSync(join(dir, 'catalog.json'), JSON.stringify({ tools, prompts: [], resourceTemplates: [] }));
+    const obs = { check: 'schema-probes', version: '1', resource: 'ticket', data: { probes: [], no_object: ['update_ticket'] } };
+    // the module of this build is version 2 and stamps it on what it evaluates (the repro of the finding)
+    assert.notEqual(schemaCheck.version, '1');
+    const evaluated = schemaCheck.evaluate(obs as never, { manifest: m, tools } as never);
+    assert.ok(evaluated.length && evaluated.every((r) => r.scenario.version === schemaCheck.version));
+    // the original run, made by the version 1 procedure: its records at version 1, hashed by the build that ran it
+    const runBuild = { ...tester, commit: 'c'.repeat(40) };
+    const v1 = stamped(evaluated.map((r) => ({ ...r, scenario: { ...r.scenario, version: '1' } })), m, tools, runBuild);
+    const extra = { scope: 's', target: { confirm: 'x', environment: 'test', server: 's', catalog_fingerprint: 'sha256:c', guard: null }, cells: [], not_built: [], measurements: null, leftovers: [], cleanup: null, observations: [obs], safety: { canaries: [], fixtures_restored: [], gate: null, protocol: null, rerun_of: null }, identity: { ...(doc([])['identity'] as object), spec: { version: '0.9' }, manifest_sha256: 'm1', plan_hash: 'p1', started: 's', finished: 'f', provenance: { sources: [], overridden: [] }, runner: { os: 'x', arch: 'x', node: 'x', ci: null }, server: { repo: null, commit: null, tag: null, image: null, recipe: null, launch: 'x', transport: null } } };
+    const recheck = async (results: Result[]) => {
+      rmSync(join(dir, 'recheck'), { recursive: true, force: true });
+      writeFileSync(join(dir, 'results.json'), JSON.stringify(doc(results, extra)));
+      recheckCommand({ dir, log: () => {} });
+      return (await finishRecheck(dir, { key: null, log: () => {} })).results.filter((r) => r.scenario.id.startsWith('schema-probes'));
+    };
+    const slot = (r: Result) => `${r.requirement}|${r.write_path.tool}|${r.scenario.id}|${r.case ?? ''}`;
+    const kept = await recheck(v1);
+    assert.equal(kept.length, v1.length);
+    for (const r of kept) {
+      const was = v1.find((x) => slot(x) === slot(r))!;
+      assert.equal(r.scenario.version, '1', `${slot(r)} keeps the recorded procedure version`);
+      assert.equal(r.test_hash, was.test_hash, `${slot(r)} keeps the recorded test hash`);
+      assert.equal(canonical(r.test_inputs), canonical(was.test_inputs), `${slot(r)} keeps the recorded test inputs`);
+    }
+    const fresh = stamped(evaluated, m, tools);
+    // an original without test hashes for the slot: the re-evaluated records carry none, and compare says no-test-hash
+    const other = stamped([rec('MWS-CONC-1', 'held')], m, tools, runBuild)[0]!;
+    const bare = await recheck([...v1.map((r) => { const { test_hash: _h, test_hash_core: _c, test_inputs: _i, ...x } = r; return x as Result; }), other]);
+    assert.ok(bare.length && bare.every((r) => r.test_hash === undefined && r.test_inputs === undefined && r.scenario.version === '1'), JSON.stringify(bare.map((r) => [r.scenario.version, r.test_hash])));
+    assert.ok(bare.every((r) => r.notes.some((n) => /^Not hashed by recheck: re-evaluated from an observation recorded at another procedure version/.test(n))));
+    const key = `${bare[0]!.requirement}@update_ticket`;
+    const after = [...fresh, stamped([rec('MWS-CONC-1', 'held')], m, tools, runBuild)[0]!];
+    assert.equal(cellOf(cmp(doc([...bare, other]), doc(after)), key).transition, 'no-test-hash');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('review R2: a mws-test-hash/1 hash that cannot be recomputed claims no fix, schema-fix or regression unless both files are pinned; every such cell is warned', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    const h1 = `sha256:${'1'.repeat(64)}`;
+    const old = (r: Result, h = h1, core?: string): Result => ({ ...r, test_hash: h, ...(core ? { test_hash_core: core } : {}) });
+    const v1doc = (rs: Result[]) => doc(rs, { identity: { ...(doc([])['identity'] as object), test_hash: 'mws-test-hash/1' } });
+    const b = v1doc([old(viol(rec('MWS-CONC-1', 'held'))), old(rec('MWS-CONC-3', 'held', { scenario: { id: 's1', version: '1' } })), old(viol(rec('MWS-CONC-3', 'held', { scenario: { id: 's2', version: '1' } })), `sha256:${'2'.repeat(64)}`), old(viol(rec('MWS-IN-3', 'held', { scenario: inSc })), `sha256:${'3'.repeat(64)}`, 'sha256:core'), old(rec('MWS-CONC-2', 'held', { tool: 'delete_ticket' }))]);
+    const a = v1doc([old(rec('MWS-CONC-1', 'held')), old(viol(rec('MWS-CONC-3', 'held', { scenario: { id: 's1', version: '1' } }))), old(rec('MWS-CONC-3', 'held', { scenario: { id: 's2', version: '1' } }), `sha256:${'2'.repeat(64)}`), old(rec('MWS-IN-3', 'held', { scenario: inSc }), `sha256:${'4'.repeat(64)}`, 'sha256:core'), old(viol(rec('MWS-CONC-2', 'held', { tool: 'delete_ticket' })))]);
+    // unsigned, accepted with --allow-unsigned: a copied hash would pass, so nothing is claimed
+    const put = (n: string, d: Record<string, unknown>) => {
+      mkdirSync(join(dir, n), { recursive: true });
+      writeFileSync(join(dir, n, 'results.json'), JSON.stringify(d));
+      return join(dir, n);
+    };
+    const u = compareCommand({ before: put('b', b), after: put('a', a), out: join(dir, 'o1'), allowUnsigned: true, log: () => {} });
+    const cu = u.doc;
+    for (const k of ['MWS-CONC-1@update_ticket', 'MWS-IN-3@update_ticket', 'MWS-CONC-2@delete_ticket']) {
+      const x = cellOf(cu, k);
+      assert.equal(x.transition, 'hash-unverified', `${k}: ${x.label} ${x.why}`);
+      assert.equal(x.label, 'not comparable');
+      assert.match(x.why, /cannot be recomputed/);
+    }
+    const w = cellOf(cu, 'MWS-CONC-3@update_ticket');
+    assert.equal(w.slot_regressions, undefined, 'no slot regression claimed');
+    assert.match(w.why, /slot regressions not claimed/);
+    for (const k of ['MWS-CONC-1@update_ticket', 'MWS-CONC-3@update_ticket', 'MWS-IN-3@update_ticket', 'MWS-CONC-2@delete_ticket']) assert.ok(cu.warnings.some((x) => x.startsWith(`${k}: a test hash of this cell (mws-test-hash/1, no test inputs) could not be recomputed`) && /no fix or regression is claimed/.test(x)), `${k} warned`);
+    assert.equal(u.exit, 0);
+    // both signed by the pinned key: the signer vouches for the hashes, and the claims stand (still warned)
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const sign = (d: Record<string, unknown>) => ({ ...d, evidence: { ...(d['evidence'] as object), signature: signResults(d, privateKey) } });
+    writeFileSync(join(dir, 'pub.pem'), publicKey.export({ format: 'pem', type: 'spki' }));
+    const p = compareCommand({ before: put('bs', sign(b)), after: put('as', sign(a)), out: join(dir, 'o2'), pubkey: join(dir, 'pub.pem'), log: () => {} });
+    assert.equal(cellOf(p.doc, 'MWS-CONC-1@update_ticket').label, 'fixed');
+    assert.equal(cellOf(p.doc, 'MWS-IN-3@update_ticket').label, 'schema-fixed');
+    assert.equal(cellOf(p.doc, 'MWS-CONC-2@delete_ticket').label, 'regressed');
+    assert.deepEqual(cellOf(p.doc, 'MWS-CONC-3@update_ticket').slot_regressions, ['ticket/s1 held → violated']);
+    assert.ok(p.doc.warnings.some((x) => x.startsWith('MWS-CONC-1@update_ticket: a test hash of this cell') && /signed by the pinned key/.test(x)));
+    assert.equal(p.exit, 1);
+    // one side signed and pinned is not enough: compare with --pubkey refuses the unsigned one, and --allow-unsigned claims nothing
+    const half = compareCommand({ before: put('bs2', sign(b)), after: put('a2', a), out: join(dir, 'o3'), allowUnsigned: true, log: () => {} });
+    assert.equal(cellOf(half.doc, 'MWS-CONC-1@update_ticket').transition, 'hash-unverified');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('review R3: the schema-fixed text is neutral for a loosening that is not a relaxation of required, and keeps the relaxation text', () => {
+  const m = load();
+  // a bound of a probed argument taken away (maxItems 5 → none): a loosening of the judged schema, not a relaxation of required
+  const narrow = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { labels: { type: 'array', maxItems: 5, items: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } } })));
+  const wide = toolsFor(m);
+  const x = cellOf(cmp(doc(stamped([rec('MWS-IN-3', 'violated', { scenario: inSc })], m, narrow)), doc(stamped([rec('MWS-IN-3', 'held', { scenario: inSc })], m, wide))), 'MWS-IN-3@update_ticket');
+  assert.equal(x.label, 'schema-fixed', x.why);
+  assert.doesNotMatch(x.why, /now declares the constraint/);
+  assert.match(x.why, /may tighten or loosen it: check in the after build's schema whether the change enforces what the before run found, or takes it out of the schema/);
+  const r = cellOf(cmp(doc(stamped([rec('MWS-IN-3', 'violated', { scenario: inSc })], m, reqPriority)), doc(stamped([rec('MWS-IN-3', 'held', { scenario: inSc })], m, toolsFor(m)))), 'MWS-IN-3@update_ticket');
+  assert.match(r.why, /the constraint the before run found was taken out of the schema, not enforced/);
 });

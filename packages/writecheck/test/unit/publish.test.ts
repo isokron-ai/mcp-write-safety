@@ -12,6 +12,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -20,6 +21,7 @@ import { test } from 'node:test';
 import ts from 'typescript';
 
 import { compareCommand } from '../../src/cli/compare.js';
+import { signResults } from '../../src/report/sign.js';
 import { TEST_HASH_FORMAT } from '../../src/core/identity.js';
 import { validates } from '../../src/core/jsonschema.js';
 import type { CompareDoc, Transition } from '../../src/report/compare.js';
@@ -80,7 +82,11 @@ const CASES: Record<Transition, { before: Rec[]; after: Rec[] }> = {
   'hash-mismatch': { before: [withInputs(R('mismatch', 'violated', null), { hash: h('a1') })], after: [withInputs(R('mismatch', 'held', null), { hash: h('a1') })] },
   // violated → held on one test, judged by a build that states no commit: no fix is claimed.
   'tester-unpinned': { before: [withInputs(R('unpinned', 'violated', null), { commit: null })], after: [withInputs(R('unpinned', 'held', null), { commit: null })] },
+  // violated → held on one mws-test-hash/1 hash nobody can recompute, in files not signed by a pinned key (compared apart, below).
+  'hash-unverified': { before: [R('unverified', 'violated', 'a1')], after: [R('unverified', 'held', 'a1')] },
 };
+/** The cases compared without a pinned key; every other case is compared between two files signed by the pinned key. */
+const UNPINNED: Transition[] = ['hash-unverified'];
 const MORE_SUBJECTS: { before: Rec[]; after: Rec[] }[] = [
   { before: [R('subject-ann', 'held', 'a1', { req: 'MWS-ANN-1', core: 'c1' })], after: [R('subject-ann', 'held', 'b1', { req: 'MWS-ANN-1', core: 'c1' })] },
   { before: [R('subject-desc', 'held', 'a1', { req: 'MWS-CONC-5', core: 'c1' })], after: [R('subject-desc', 'held', 'b1', { req: 'MWS-CONC-5', core: 'c1' })] },
@@ -100,32 +106,46 @@ const resultsDoc = (results: Rec[], cells: { key: string; verdict: string }[]) =
   identity: { test_hash: 'mws-test-hash/1', tester: { commit: 'a'.repeat(40) }, tools_fingerprint: 't1', server: { repo: 'https://example.invalid/server', commit: 'b'.repeat(40) }, backend: [{ name: 'db', image: null, version: null }], gaps: ['server.image: not stated'] },
 });
 
-/** compare.json and compare.md as `mcp-writecheck compare` writes them for the cases above. */
-function compared(): { doc: CompareDoc; md: string } {
+/**
+ * compare.json and compare.md as `mcp-writecheck compare` writes them for the cases above: the cases of UNPINNED between two
+ * unsigned files (--allow-unsigned), every other case between two files signed by the pinned key (--pubkey).
+ */
+function compared(): { doc: CompareDoc; md: string }[] {
   const dir = mkdtempSync(join(tmpdir(), 'mwsc-publish-'));
   try {
-    const all = [...Object.values(CASES), ...MORE_SUBJECTS];
-    const write = (name: 'before' | 'after') => {
-      mkdirSync(join(dir, name));
-      const cells = name === 'before' ? [{ key: 'MWS-CONC-1@rollup', verdict: 'held' }] : [];
-      writeFileSync(join(dir, name, 'results.json'), JSON.stringify(resultsDoc(all.flatMap((c) => c[name]), cells), null, 2) + '\n');
-      return join(dir, name);
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    writeFileSync(join(dir, 'pub.pem'), publicKey.export({ format: 'pem', type: 'spki' }));
+    const run = (tag: string, all: { before: Rec[]; after: Rec[] }[], pinned: boolean) => {
+      const write = (name: 'before' | 'after') => {
+        mkdirSync(join(dir, tag, name), { recursive: true });
+        const cells = name === 'before' && pinned ? [{ key: 'MWS-CONC-1@rollup', verdict: 'held' }] : [];
+        const d = resultsDoc(all.flatMap((c) => c[name]), cells) as Record<string, unknown> & { evidence: Record<string, unknown> };
+        if (pinned) d.evidence['signature'] = signResults(d, privateKey);
+        writeFileSync(join(dir, tag, name, 'results.json'), JSON.stringify(d, null, 2) + '\n');
+        return join(dir, tag, name);
+      };
+      const out = join(dir, tag, 'out');
+      compareCommand({ before: write('before'), after: write('after'), out, ...(pinned ? { pubkey: join(dir, 'pub.pem') } : { allowUnsigned: true }), log: () => {} });
+      return { doc: JSON.parse(readFileSync(join(out, 'compare.json'), 'utf8')) as CompareDoc, md: readFileSync(join(out, 'compare.md'), 'utf8') };
     };
-    compareCommand({ before: write('before'), after: write('after'), out: join(dir, 'out'), allowUnsigned: true, log: () => {} });
-    return { doc: JSON.parse(readFileSync(join(dir, 'out', 'compare.json'), 'utf8')) as CompareDoc, md: readFileSync(join(dir, 'out', 'compare.md'), 'utf8') };
+    const pick = (unpinned: boolean) => Object.entries(CASES).filter(([t]) => UNPINNED.includes(t as Transition) === unpinned).map(([, c]) => c);
+    return [run('pinned', [...pick(false), ...MORE_SUBJECTS], true), run('unpinned', pick(true), false)];
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 test('compare.json: every transition the code gives, with facets and the slot lists, matches mws-compare-1 member for member', () => {
-  const { doc, md } = compared();
+  const both = compared();
+  const { doc } = both[0]!;
   const schema = schemaFile('mws-compare-1');
-  assertMatchesSchema('mws-compare-1', doc, 'compare.json');
-  assertNoBannedText(doc, { 'compare.md': md });
+  for (const x of both) {
+    assertMatchesSchema('mws-compare-1', x.doc, 'compare.json');
+    assertNoBannedText(x.doc, { 'compare.md': x.md });
+  }
 
-  // Each case gave the transition it is named for, so the document above holds every one of them.
-  const by = new Map(doc.cells.map((c) => [c.tool, c]));
+  // Each case gave the transition it is named for, so the documents above hold every one of them.
+  const by = new Map(both.flatMap((x) => x.doc.cells).map((c) => [c.tool, c]));
   for (const [transition, c] of Object.entries(CASES)) {
     const tool = (c.before[0] ?? c.after[0])!.write_path.tool;
     assert.equal(by.get(tool)?.transition, transition, `the cell of ${tool}`);
@@ -134,7 +154,7 @@ test('compare.json: every transition the code gives, with facets and the slot li
   // The schema lists exactly the transitions and labels the code gives: one added on either side alone fails here.
   const cell = ((schema['properties'] as Record<string, { items: { properties: Record<string, { enum: string[] }> } }>)['cells']!).items.properties;
   assert.deepEqual([...cell['transition']!.enum].sort(), Object.keys(CASES).sort(), 'the transitions of the schema are the transitions of the code');
-  assert.deepEqual([...cell['label']!.enum].sort(), [...new Set(doc.cells.map((c) => c.label))].sort(), 'the labels of the schema are the labels of the code');
+  assert.deepEqual([...cell['label']!.enum].sort(), [...new Set(both.flatMap((x) => x.doc.cells).map((c) => c.label))].sort(), 'the labels of the schema are the labels of the code');
 
   // facets: on subject-changed and nowhere else, one of the three judged parts.
   const withFacets = doc.cells.filter((c) => c.facets !== undefined);
