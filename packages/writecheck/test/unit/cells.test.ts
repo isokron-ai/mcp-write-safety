@@ -9,12 +9,18 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { readdirSync } from 'node:fs';
+
 import { applicability, cellPass, CELLS_SCENARIO, dedupe, inputRequiredTools, PER_TOOL_MUST, toolRoles } from '../../src/checks/cells.js';
+import { buildPlan, durationText, planHash, renderPlan } from '../../src/core/plan.js';
+import { renderMarkdown } from '../../src/report/markdown.js';
+import type { ResultsDoc } from '../../src/report/results.js';
+import { cutShortOf, STEPS_EXEMPT, SYNTHETIC_SCENARIO } from '../../src/report/validity.js';
 import { pairsBudgetVerdicts } from '../../src/checks/pairs.js';
 import { staleCheck } from '../../src/checks/stale.js';
 import { wp, type Tool } from '../../src/checks/types.js';
 import type { ExperimentOutcome } from '../../src/core/exec.js';
-import { defaultWriteBudget, parseManifestText, PAIR_BUDGET } from '../../src/core/manifest.js';
+import { defaultWriteBudget, parseManifestText, parsePairBudget, PAIR_BUDGET } from '../../src/core/manifest.js';
 import { validityOf } from '../../src/report/validity.js';
 import { result, type Result } from '../../src/report/verdicts.js';
 
@@ -161,7 +167,7 @@ test('F6: validity rules on violated records', () => {
   assert.deepEqual([v(ok).class, v(ok).counts, v(ok).failed], ['valid', true, []]);
   const noSteps = result('MWS-RETRY-2', wp('ticket', 'create_ticket'), sc, 'violated', 'twice');
   assert.deepEqual([v(noSteps).class, v(noSteps).counts, v(noSteps).failed], ['harness-suspect', false, ['V-STEPS']]);
-  assert.deepEqual(v(ok, 'the write budget ran out').failed, ['V-RUN']);
+  assert.deepEqual(v(ok, 'stopped: create_ticket would exceed the write budget of 500').failed, ['V-RUN']);
   const unresolved = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'moved', { steps: ['s'] });
   assert.equal(unresolved.attribution, 'unresolved');
   assert.deepEqual([v(unresolved).class, v(unresolved).counts], ['platform', true]);
@@ -201,8 +207,7 @@ test('F5: barrier pairs judged against the pair budget', () => {
   assert.equal(stopped.verdict, 'not tested', 'a stopped repeat gives not tested, never a partial result');
 });
 
-test('F5: limits: the pair budget defaults to 2 × 1500, a declared pairs keeps one repeat, and write_budget is sized to fit', () => {
-  const base = `mws: "0.9"
+const MINI = `mws: "0.9"
 server: { stdio: [node, s.js] }
 target: { environment: test, confirm: t }
 resources:
@@ -212,16 +217,130 @@ resources:
     update: { tool: update, mode: field_patch, args: { id: "{{id}}", "{{field}}": "{{value}}" } }
     fields: [{ path: a, values: [x, y] }, { path: b, values: [x, y] }]
 `;
-  const d = parseManifestText(base, 'm.yaml');
-  assert.deepEqual(d.limits.pair_budget, { ...PAIR_BUDGET });
-  assert.equal(d.limits.pairs, 1500);
-  assert.equal(d.limits.pair_repeats, 2);
-  assert.equal(d.limits.write_budget, defaultWriteBudget(d.resources, 1500, 2));
-  assert.equal(d.limits.write_budget, 1000 + 2 * 1501 * 4);
-  assert.ok(d.limits.write_budget >= 2 * 1500 * 4, 'the default budget fits the pairs');
-  const declared = parseManifestText(base + 'limits: { pairs: 40, write_budget: 900 }\n', 'm.yaml');
-  assert.deepEqual([declared.limits.pairs, declared.limits.pair_repeats, declared.limits.write_budget], [40, 1, 900]);
-  const custom = parseManifestText(base + 'limits: { pair_budget: { repeats: 3, pairs: 500 } }\n', 'm.yaml');
-  assert.deepEqual([custom.limits.pairs, custom.limits.pair_repeats], [500, 3]);
-  assert.throws(() => parseManifestText(base + 'limits: { pair_budget: { reps: 3 } }\n', 'm.yaml'));
+
+test('F5 (review S2): the pair budget is opt-in; undeclared limits are as before, so the plan hash does not move', () => {
+  const d = parseManifestText(MINI, 'm.yaml');
+  assert.deepEqual(d.limits, { write_budget: 500, writes_per_second: 5, pairs: 40, stale_reps: 3, gate_reps: 2, timeout_ms: 30_000, max_fuzz_cases: 200 }, 'exactly the old keys and defaults');
+  const declared = parseManifestText(MINI + 'limits: { pairs: 40, write_budget: 900 }\n', 'm.yaml');
+  assert.deepEqual([declared.limits.pairs, declared.limits.pair_repeats, declared.limits.write_budget], [40, undefined, 900]);
+  const opted = parseManifestText(MINI + 'limits: { pair_budget: { repeats: 2, pairs: 1500 } }\n', 'm.yaml');
+  assert.deepEqual([opted.limits.pairs, opted.limits.pair_repeats, opted.limits.pair_budget], [1500, 2, { ...PAIR_BUDGET }]);
+  assert.equal(opted.limits.write_budget, 1000 + 2 * 1501 * 4, 'the write budget is sized to fit a declared pair budget');
+  assert.equal(opted.limits.write_budget, defaultWriteBudget(opted.resources, 1500, 2));
+  const flag = parseManifestText(MINI, 'm.yaml', { pairBudget: parsePairBudget('3x500') });
+  assert.deepEqual([flag.limits.pairs, flag.limits.pair_repeats, flag.limits.pair_budget], [500, 3, { repeats: 3, pairs: 500 }], '--pair-budget acts as the declaration');
+  assert.throws(() => parsePairBudget('1500'), /repeats x pairs/);
+  assert.throws(() => parseManifestText(MINI + 'limits: { pair_budget: { reps: 3 } }\n', 'm.yaml'));
+  // The plan hash of tiny-tracker (which declares pairs: 40 and no budget) is the same with or without this change's keys.
+  const t = tt();
+  assert.equal(t.limits.pair_budget, undefined);
+  assert.equal(t.limits.pair_repeats, undefined);
+  const withFlag = parseManifestText(readFileSync(ttFile, 'utf8'), ttFile, { pairBudget: { repeats: 2, pairs: 1500 } });
+  assert.notEqual(planHash(buildPlan(t, TOOLS)), planHash(buildPlan(withFlag, TOOLS)), 'the budget enters the hash');
+  assert.match(renderPlan(buildPlan(withFlag, TOOLS), 'h'), /Estimated time for the writes at 1000 per second: .*Pair budget 2 × 1500: a target with a rate limit may answer 429/);
+  assert.match(renderPlan(buildPlan(parseManifestText(MINI + 'limits: { pair_budget: { repeats: 2, pairs: 1500 } }\n', 'm.yaml'), []), 'h'), /Estimated time for the writes at 5 per second: about \d+ (s|min) at most/);
+  assert.deepEqual([durationText(30), durationText(600), durationText(5400)], ['about 30 s', 'about 10 min', 'about 1 h 30 min']);
+});
+
+test('F5 (review S2): with no budget and one repeat the pairs record is exactly as before', () => {
+  const res = tt().resources.find((r) => r.name === 'ticket')!;
+  const [r] = pairsBudgetVerdicts([outcome({ valid: 40, overlapped: 40 })], res, true, null);
+  assert.match(r!.reason, /^No lost update in 40 simultaneous pairs/);
+  assert.equal(r!.numbers['pair_budget'], undefined);
+});
+
+test('F6 (review B1): only a cut-short stop (write budget, 429, interrupt) fails V-RUN; clean-up, fixture and bystander stops do not', () => {
+  assert.equal(cutShortOf(null), null);
+  assert.ok(cutShortOf('stopped: update_ticket would exceed the write budget of 500'));
+  assert.ok(cutShortOf('stopped: the target answered 429 (rate limited) to x; nothing after it was run'));
+  assert.ok(cutShortOf('interrupted by SIGINT'));
+  assert.ok(cutShortOf('clean-up did not finish: x; stopped: y would exceed the write budget of 9'), 'a cut-short part anywhere in the reason');
+  for (const st of ['clean-up did not finish: delete failed; objects of this run may be left behind', 'the fixture ticket could not be put back as it was', "objects the tester did not create were lost outside any check's records (x)"]) {
+    const r = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'lost field', { steps: ['s1'], attribution: 'server' });
+    const v = validityOf(r, { stopped: st });
+    assert.deepEqual([v.class, v.counts, v.failed], ['valid', true, []], st);
+    assert.deepEqual(cellPass(tt(), TOOLS, [r], { stopped: st }).cells.find((c) => c.key === 'MWS-UPD-1@update_ticket')!.validity, 'valid');
+  }
+  const r = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'lost field', { steps: ['s1'], attribution: 'server' });
+  assert.deepEqual(validityOf(r, { stopped: 'stopped: x would exceed the write budget of 500' }).failed, ['V-RUN']);
+});
+
+test('F6 (review B2): every violated producer in src/checks sets steps or is a listed exemption (catalog, launch, ledger facts)', () => {
+  const dir = join(here, '..', '..', '..', 'src', 'checks');
+  const scenarioOf: Record<string, string> = { 'catalog.ts': 'catalog', 'launch.ts': 'launch-settings', 'annotations.ts': 'annotation-effects' };
+  const bad: string[] = [];
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.ts'))) {
+    readFileSync(join(dir, f), 'utf8').split('\n').forEach((line, i) => {
+      const m = /(?:result|add)\('(MWS-[A-Z]+-\d+)'[^;]*?'violated',/.exec(line);
+      if (!m || /\bsteps\b/.test(line)) return;
+      if (STEPS_EXEMPT.some((e) => e.requirement === m[1] && e.scenario === scenarioOf[f])) return;
+      bad.push(`${f}:${i + 1} ${m[1]}`);
+    });
+  }
+  assert.deepEqual(bad, []);
+  // An exempt record keeps counting and names where its evidence is; the same record in another scenario does not.
+  const ann4 = result('MWS-ANN-4', wp('(catalog)', 'add_label'), { id: 'catalog', version: '1' }, 'violated', 'no hint');
+  assert.deepEqual([validityOf(ann4, { stopped: null }).class, validityOf(ann4, { stopped: null }).evidence.basis], ['valid', STEPS_EXEMPT[0]!.basis]);
+  const cfg4 = result('MWS-CFG-4', wp('(server)', 'X_TOOLS'), { id: 'launch-settings', version: '1' }, 'violated', 'started');
+  assert.equal(validityOf(cfg4, { stopped: null }).class, 'valid');
+  const ann1 = result('MWS-ANN-1', wp('ticket', 'create_x'), { id: 'annotation-effects', version: '1' }, 'violated', 'created');
+  assert.equal(validityOf(ann1, { stopped: null }).class, 'valid');
+  const other = result('MWS-ANN-1', wp('ticket', 'create_x'), { id: 'annotations', version: '1' }, 'violated', 'created');
+  assert.deepEqual(validityOf(other, { stopped: null }).failed, ['V-STEPS']);
+});
+
+test('F6 (F4 scenarios): injected-fault scenarios are synthetic; a cut answer (unknown outcome) is not', () => {
+  for (const id of ['held-request', 'write-faults', 'multi-item.res2']) assert.ok(SYNTHETIC_SCENARIO.test(id), id);
+  for (const id of ['held-request.unknown-outcome', 'write-faults.unknown-outcome', 'creates']) assert.ok(!SYNTHETIC_SCENARIO.test(id), id);
+  const v = (id: string) => validityOf(result('MWS-RES-2', wp('ticket', 'add_label'), { id, version: '1' }, 'violated', 'said ok', { steps: ['s'] }), { stopped: null }).synthetic_fault;
+  assert.deepEqual([v('write-faults'), v('multi-item.res2'), v('held-request.unknown-outcome')], [true, true, false]);
+});
+
+test('F1 (review B3): a tool the declaration gives a write role keeps its cells even when it declares readOnlyHint: true', () => {
+  const lying = TOOLS.map((t) => (t.name === 'update_ticket' ? { ...t, annotations: { readOnlyHint: true } } : t));
+  const r = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'lost field', { steps: ['s1'], attribution: 'server' });
+  const { results, cells } = cellPass(tt(), lying, [r], { stopped: null });
+  assert.equal(results[0]!.cell, 'MWS-UPD-1@update_ticket');
+  assert.equal(cells.filter((c) => c.tool === 'update_ticket').length, 23);
+  assert.equal(cells.find((c) => c.key === 'MWS-UPD-1@update_ticket')!.verdict, 'violated');
+  // A read tool stays out of the cells.
+  assert.ok(!cells.some((c) => c.tool === 'get_ticket'));
+});
+
+test('F1 (review S1): the schema decides in doubt: a version-like or scope-like argument makes CONC-2, CONC-4 and TGT-1 apply', () => {
+  const m = tt();
+  for (const r of m.resources) {
+    r.version = null;
+    r.versioned = [];
+  }
+  const roles = toolRoles(m, TOOLS);
+  assert.equal(applicability('MWS-CONC-2', roles.get('update_ticket')!, new Set()), null, 'expected_version in the schema');
+  assert.equal(applicability('MWS-CONC-4', roles.get('update_ticket')!, new Set()), null);
+  assert.equal(applicability('MWS-CONC-2', roles.get('close_ticket')!, new Set())?.rule, 'CONC-2.no-version', 'close_ticket takes only an id');
+  const ws = TOOLS.map((t) => (t.name === 'add_label' ? { ...t, inputSchema: { type: 'object', properties: { id: {}, name: {}, workspace_id: {} } } } : t));
+  assert.equal(applicability('MWS-TGT-1', toolRoles(tt(), ws).get('add_label')!, new Set()), null, 'workspace_id names a container');
+  assert.equal(applicability('MWS-TGT-1', toolRoles(tt(), TOOLS).get('add_label')!, new Set())?.rule, 'TGT-1.no-scope');
+});
+
+test('F1 (review M1): a violated record whose evidence does not count ranks below held; alone, the cell is violated and marked', () => {
+  const suspect = result('MWS-CONC-1', wp('ticket', 'update_ticket'), { id: 'held-request', version: '1' }, 'violated', 'went over');
+  const held = result('MWS-CONC-1', wp('ticket-replace', 'update_ticket'), { id: 'stale-write', version: '4' }, 'held', 'refused', { steps: ['s'] });
+  const both = cellPass(tt(), TOOLS, [suspect, held], { stopped: null }).cells.find((c) => c.key === 'MWS-CONC-1@update_ticket')!;
+  assert.deepEqual([both.verdict, both.validity], ['held', undefined]);
+  const alone = cellPass(tt(), TOOLS, [suspect], { stopped: null });
+  const c = alone.cells.find((x) => x.key === 'MWS-CONC-1@update_ticket')!;
+  assert.deepEqual([c.verdict, c.validity], ['violated', 'harness-suspect']);
+  const counted = result('MWS-CONC-1', wp('ticket', 'update_ticket'), { id: 'stale-write', version: '4' }, 'violated', 'x', { steps: ['s'] });
+  assert.equal(cellPass(tt(), TOOLS, [held, counted], { stopped: null }).cells.find((x) => x.key === 'MWS-CONC-1@update_ticket')!.verdict, 'violated');
+  // review M5: the report marks such a cell V?.
+  const doc = { format: 'mws-results/1', scope: 's', suite: { name: 'x', version: '0' }, spec: { version: '0.9' }, run: { id: 'r', prefix: 'p', started: 'a', ended: 'b', status: 'complete', stopped_reason: null, writes: 0, processes_started: 0 }, target: { confirm: 't', environment: 'test', server: 's', catalog_fingerprint: 'f', guard: null }, manifest: { path: 'manifest.yaml', sha256: 'x' }, plan: { hash: 'h' }, results: alone.results, cells: alone.cells, not_built: [], measurements: null, leftovers: [], cleanup: null, observations: [], evidence: { capture: null, checksums: 'SHA256SUMS', signature: null }, safety: { canaries: [], fixtures_restored: [], gate: null, protocol: null, rerun_of: null } } as unknown as ResultsDoc;
+  assert.match(renderMarkdown(doc), /\| update_ticket \|[^\n]*\| V\? \|/);
+});
+
+test('F1 (review M2): the cell pass re-derives its own rows; a stale cells row fed back is replaced', () => {
+  const first = cellPass(tt(), TOOLS, [], { stopped: null });
+  const stale = first.results.map((r) => (r.cell === 'MWS-UPD-1@update_ticket' ? { ...r, reason: 'stale' } : r));
+  const again = cellPass(tt(), TOOLS, stale.filter((r) => r.scenario.id !== CELLS_SCENARIO.id), { stopped: null });
+  assert.ok(!again.results.some((r) => r.reason === 'stale'));
+  assert.equal(again.results.length, first.results.length);
 });

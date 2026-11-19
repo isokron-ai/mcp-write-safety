@@ -15,7 +15,6 @@
     "manifest",
     "plan",
     "results",
-    "cells",
     "not_built",
     "measurements",
     "leftovers",
@@ -385,6 +384,9 @@
                       "boolean",
                       "null"
                     ]
+                  },
+                  "basis": {
+                    "type": "string"
                   }
                 }
               }

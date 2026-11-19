@@ -60,6 +60,8 @@ import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 
 export interface RunOptions {
   manifest: string;
+  /** `--pair-budget`: as limits.pair_budget (it enters the plan hash, so plan must be given the same). */
+  pairBudget?: { repeats: number; pairs: number } | null;
   outRoot: string;
   stateDir: string;
   confirmTarget?: string;
@@ -111,7 +113,7 @@ export function reviewOf(m: Manifest, file: string | undefined): ReviewSpec | nu
 }
 
 export async function runCommand(o: RunOptions): Promise<RunOutcome> {
-  const manifest = loadManifest(o.manifest);
+  const manifest = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   usePatterns(manifest);
   useShapes(manifest);
   checkTarget(manifest, o.env);

@@ -78,6 +78,8 @@ export interface Evidence {
   read_back?: boolean | null;
   /** The violation was provoked with a fault the gate injected. */
   synthetic_fault?: boolean | null;
+  /** Where the evidence is when it is not a call trace (validity.ts STEPS_EXEMPT): the catalog, the launch observation, the ledger. */
+  basis?: string;
 }
 
 export function result(id: RequirementId, wp: WritePath, scenario: { id: string; version: string }, verdict: Verdict, reason: string, o: { numbers?: Record<string, unknown>; steps?: string[]; notes?: string[]; attribution?: 'server' | 'platform' | 'unresolved'; evidence?: Evidence } = {}): Result {

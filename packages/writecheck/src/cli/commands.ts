@@ -11,7 +11,7 @@
  *            <folder>/recheck/.
  */
 
-import { cellPass, inputRequiredTools } from '../checks/cells.js';
+import { cellPass, CELLS_SCENARIO, inputRequiredTools } from '../checks/cells.js';
 import type { Loss } from '../checks/bystanders.js';
 import { withLaterLoss, withLoss, type LaterLoss } from '../checks/targeting.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,8 +46,8 @@ import { previewSentence, REQUIREMENTS, SPEC_VERSION, type RequirementId } from 
 import { egressOf, redactorFor, reviewOf, runCommand, type RunOptions, type RunOutcome } from './run.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 
-export async function planCommand(o: { manifest: string; catalog?: string; env: NodeJS.ProcessEnv; log: (s: string) => void }): Promise<{ plan: Plan; hash: string; warning: string | null }> {
-  const manifest = loadManifest(o.manifest);
+export async function planCommand(o: { manifest: string; catalog?: string; pairBudget?: { repeats: number; pairs: number } | null; env: NodeJS.ProcessEnv; log: (s: string) => void }): Promise<{ plan: Plan; hash: string; warning: string | null }> {
+  const manifest = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   let warning: string | null = null;
   try {
     checkTarget(manifest, o.env);
@@ -181,7 +181,8 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   const before = new Map(doc.results.map((r) => [k(r), r.verdict]));
   const changed = results.filter((r) => before.get(k(r)) !== r.verdict).map((r) => ({ key: k(r), before: before.get(k(r)) ?? '(none)', after: r.verdict }));
   // why: F1/F6: the cells and validity are re-derived from the rechecked records (docs/CELLS.md).
-  const celled = cellPass(manifest, tools, results, { stopped: doc.run.stopped_reason, input_required_tools: inputRequiredTools(doc.target.mcp) });
+  // why: review M2: the cell pass's own rows are re-derived, never kept (a rule or a record that changed would leave a stale one).
+  const celled = cellPass(manifest, tools, results.filter((r) => r.scenario.id !== CELLS_SCENARIO.id), { stopped: doc.run.stopped_reason, input_required_tools: inputRequiredTools(doc.target.mcp) });
   const out: ResultsDoc = { ...doc, results: celled.results, cells: celled.cells, scope: `${doc.scope} Rechecked offline with this release's rules.` };
   const dir = join(o.dir, 'recheck');
   mkdirSync(dir, { recursive: true });
@@ -232,7 +233,7 @@ export async function rerunCommand(o: Omit<RunOptions, 'rerunOf'> & { dir: strin
   const file = join(o.dir, 'results.json');
   if (!existsSync(file)) throw new WritecheckError(`${o.dir}: no results.json (give the folder a run wrote, e.g. mwsc-results/<run id>)`, 2);
   const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
-  const m = loadManifest(o.manifest);
+  const m = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   if (m.source.sha256 !== doc.manifest.sha256) throw new WritecheckError(`${o.manifest} is not the manifest run ${doc.run.id} used (sha256 ${m.source.sha256.slice(0, 16)}… now, ${doc.manifest.sha256.slice(0, 16)}… then); a rerun repeats a recorded run exactly, so it refuses. Use \`run\` for a new plan.`, 3);
   if (doc.suite.version !== SUITE_VERSION) o.log(`note: run ${doc.run.id} was made with ${doc.suite.name} ${doc.suite.version}; this is ${SUITE_VERSION}, so scenario versions may differ.`);
   const { hash } = await planCommand({ manifest: o.manifest, env: o.env, log: () => {} });
