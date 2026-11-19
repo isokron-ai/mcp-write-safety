@@ -17,7 +17,8 @@ import { renderMarkdown } from '../../src/report/markdown.js';
 import type { ResultsDoc } from '../../src/report/results.js';
 import { cutShortOf, STEPS_EXEMPT, SYNTHETIC_SCENARIO } from '../../src/report/validity.js';
 import { withLoss } from '../../src/checks/targeting.js';
-import { pairsBudgetVerdicts } from '../../src/checks/pairs.js';
+import { pairsBudgetVerdicts, pairsData } from '../../src/checks/pairs.js';
+import { recheckLate } from '../../src/cli/commands.js';
 import { staleCheck } from '../../src/checks/stale.js';
 import { wp, type Tool } from '../../src/checks/types.js';
 import type { ExperimentOutcome } from '../../src/core/exec.js';
@@ -375,4 +376,39 @@ test('F6 (review R2): a targeting record turned into violated by a bystander los
   assert.equal(validityOf(v, { stopped: null }).class, 'valid');
   const own = result('MWS-TGT-1', wp('ticket', 'delete_tickets'), { id: 'targeting', version: '1' }, 'held', 'named scope only', { steps: ['own.1'] });
   assert.deepEqual(withLoss(own, [{ gone: ['other-1'], changed: [] } as never], true, [], ['x']).steps, ['own.1'], 'a record\'s own steps are kept');
+});
+
+test('F5 (review N1): the barrier pairs wrapper carries the first stopped repeat, so run.ts stops the run and marks the cut', () => {
+  const stopMsg = 'stopped: update_ticket would exceed the write budget of 900';
+  const wrapped = pairsData([outcome({ valid: 1500, overlapped: 1500 }), outcome({ valid: 3, overlapped: 3, stopped: stopMsg })], { repeats: 2, pairs: 1500 }) as { stopped?: string | null };
+  assert.equal(wrapped.stopped, stopMsg);
+  assert.ok(/stopped:/.test(wrapped.stopped!), 'the form run.ts reads (obs.data.stopped matching /stopped:/)');
+  assert.equal((pairsData([outcome({ valid: 1500, overlapped: 1500 })], { repeats: 1, pairs: 1500 }) as { stopped?: string | null }).stopped, null);
+  const one = outcome({ valid: 40, overlapped: 40, stopped: stopMsg });
+  assert.equal(pairsData([one], null), one, 'no budget, one repeat: the experiment itself (its own stopped)');
+});
+
+test('F6 (review, round 3): recheck takes the cut from run.cut_at; a post-cut record re-evaluated to violated stays late, an early one sharing the key is not voided', () => {
+  const k = (v: 'violated' | 'not tested', step: string) => result('MWS-UPD-1', wp('ticket', 'update_ticket'), { id: 'read-after-write', version: '1' }, v, 'x', { steps: [step], attribution: 'server' });
+  const earlyRec = k('violated', 'e');
+  const lateRec = { ...k('not tested', 'l'), validity: undefined };
+  const doc = { run: { id: 'r', prefix: 'p', started: 'a', ended: 'b', status: 'stopped' as const, stopped_reason: 'stopped: x would exceed the write budget of 9', writes: 1, processes_started: 1, cut_at: { record: 1, observation: 1 } }, results: [earlyRec, lateRec] };
+  const freshEarly = k('violated', 'e2');
+  const freshLate = k('violated', 'l2');
+  const late = recheckLate(doc, new Map([[freshEarly, 0], [freshLate, 1]]));
+  assert.deepEqual([late(freshEarly), late(freshLate), late(earlyRec), late(lateRec)], [false, true, false, true]);
+  const { results } = cellPass(tt(), TOOLS, [freshEarly, freshLate], { stopped: doc.run.stopped_reason, late });
+  assert.deepEqual(results.slice(0, 2).map((r) => r.validity!.failed), [[], ['V-RUN']]);
+  // A file without run.cut_at falls back to the records that failed V-RUN before, by key.
+  const old = { run: { ...doc.run, cut_at: undefined }, results: [{ ...earlyRec, validity: { class: 'harness-suspect' as const, counts: false, failed: ['V-RUN'], synthetic_fault: false, evidence: {} } }] };
+  assert.equal(recheckLate(old, new Map())(freshEarly), true);
+});
+
+test('F6 (review, round 3): cellPass reports where the late records start (persisted as run.cut_at.record)', () => {
+  const a = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'held', 'a', { steps: ['a'] });
+  const b = result('MWS-RES-1', wp('ticket', 'update_ticket'), sc, 'violated', 'b', { steps: ['b'], attribution: 'server' });
+  const r = cellPass(tt(), TOOLS, [a, structuredClone(a), b], { stopped: 'interrupted by SIGINT', late: (_x, i) => i >= 2 });
+  assert.equal(r.late_from, 1, 'after the duplicate goes, the late record is at 1');
+  assert.equal(r.results[r.late_from!]!.requirement, 'MWS-RES-1');
+  assert.equal(cellPass(tt(), TOOLS, [a], { stopped: null }).late_from, null);
 });

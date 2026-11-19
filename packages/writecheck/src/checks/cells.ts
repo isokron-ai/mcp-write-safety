@@ -305,7 +305,7 @@ export interface CellRun {
  * cell that has none, stamps `cell` on each record that belongs to a cell and `validity` on each violated record, and returns
  * the cells. Records keep their order; added records go at the end.
  */
-export function cellPass(m: Manifest, tools: Tool[], input: Result[], run: CellRun): { results: Result[]; cells: Cell[] } {
+export function cellPass(m: Manifest, tools: Tool[], input: Result[], run: CellRun): { results: Result[]; cells: Cell[]; late_from: number | null } {
   const roles = toolRoles(m, tools);
   const offered = new Set(tools.map((t) => t.name));
   const seen = new Set(run.input_required_tools ?? []);
@@ -319,6 +319,9 @@ export function cellPass(m: Manifest, tools: Tool[], input: Result[], run: CellR
   }));
   // why: the cells now carry these requirements per tool; the run-wide "no record" row for them would be a second, emptier answer.
   if (roles.size) results = results.filter((r) => !(r.write_path.resource === '(declaration)' && PER_TOOL_MUST.includes(r.requirement)));
+  // The index, in the output, of the first record made after the cut (records keep their order; added records go at the end).
+  const lateIdx = lateSet ? results.findIndex((r) => lateOf.get(r)) : -1;
+  const kept = results.length;
   const added: Result[] = [];
   for (const [tool, r] of roles) {
     for (const req of PER_TOOL_MUST) {
@@ -366,7 +369,8 @@ export function cellPass(m: Manifest, tools: Tool[], input: Result[], run: CellR
     const x = order(a), y = order(b);
     return x[0] - y[0] || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0) || x[2] - y[2];
   });
-  return { results, cells };
+  // late_from: where the late records start in the output (the end of the run's own records where none is late); null without `late`.
+  return { results, cells, late_from: !lateSet ? null : lateIdx >= 0 ? lateIdx : kept };
 }
 
 /** The tools that answered input_required in a run, from the record of spec 7.3 rule 10 (results.target.mcp.input_requests). */

@@ -99,6 +99,25 @@
         },
         "processes_started": {
           "type": "integer"
+        },
+        "cut_at": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "record",
+            "observation"
+          ],
+          "description": "Where a run cut short (write budget, rate limit, interrupt) was cut: the index in results of the first record made after the cut, and the index in observations of the first observation made after it. Absent when the run was not cut short.",
+          "properties": {
+            "record": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "observation": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },

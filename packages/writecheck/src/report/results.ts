@@ -21,7 +21,12 @@ export interface ResultsDoc {
   scope: string;
   suite: { name: string; version: string };
   spec: { version: string };
-  run: { id: string; prefix: string; started: string; ended: string; status: 'complete' | 'stopped'; stopped_reason: string | null; writes: number; processes_started: number };
+  /**
+   * cut_at (optional): where a run cut short (write budget, rate limit, interrupt) was cut: `record`, the index in `results` of
+   * the first record made after the cut; `observation`, the index in `observations` of the first observation made after it.
+   * Recheck uses it to keep V-RUN on exactly those records (docs/CELLS.md, Validity).
+   */
+  run: { id: string; prefix: string; started: string; ended: string; status: 'complete' | 'stopped'; stopped_reason: string | null; writes: number; processes_started: number; cut_at?: { record: number; observation: number } };
   /** mcp: spec 5.3, the protocol revision and transport, and the client capabilities and extensions the tester declared (with rule 10's input requests and rule 11's patterns). */
   target: { confirm: string; environment: string; server: string; catalog_fingerprint: string; guard: { tool: string; matched: string; basis?: 'annotation' | 'operator'; note?: string; calls?: number; call_steps?: string[]; counted_as_writes?: number } | null; mcp?: McpRecord };
   manifest: { path: string; sha256: string };

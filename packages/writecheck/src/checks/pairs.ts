@@ -132,17 +132,26 @@ export const pairsCheck: CheckModule = {
     }
     // why: the budget is kept with the observation, so recheck judges against the budget the run was made under.
     const budget = ctx.manifest.limits.pair_budget ?? null;
-    return { check: ID, version: VERSION, resource: res.name, data: runs.length === 1 && !budget ? runs[0] : { repeats: runs, budget } };
+    return { check: ID, version: VERSION, resource: res.name, data: pairsData(runs, budget) };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
-    const data = obs.data as ExperimentOutcome | { repeats: ExperimentOutcome[]; budget?: { repeats: number; pairs: number } | null };
+    const data = obs.data as ExperimentOutcome | { repeats: ExperimentOutcome[]; budget?: { repeats: number; pairs: number } | null; stopped?: string | null };
     const runs = 'repeats' in data ? data.repeats : [data];
     const budget = 'repeats' in data ? data.budget ?? null : null;
     const outs = runs.map((rec) => recount(rec.experiment, rec.arms, rec.simulated, rec.stopped));
     return pairsBudgetVerdicts(outs, res, ctx.manifest.backend?.gate != null, budget);
   },
 };
+
+/**
+ * The observation data of the barrier pairs: one experiment as before, or the repeats with the budget. Review N1: the wrapper
+ * carries `stopped` (the first stopped repeat's reason), which run.ts reads to stop the run and mark the cut.
+ */
+export function pairsData(runs: ExperimentOutcome[], budget: { repeats: number; pairs: number } | null): ExperimentOutcome | { repeats: ExperimentOutcome[]; budget: { repeats: number; pairs: number } | null; stopped: string | null } {
+  if (runs.length === 1 && !budget) return runs[0]!;
+  return { repeats: runs, budget, stopped: runs.find((r) => r.stopped)?.stopped ?? null };
+}
 
 /**
  * F5: the verdict over every repeat, judged against the pair budget. A violated or platform repeat decides (one valid violation

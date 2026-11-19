@@ -148,6 +148,13 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   let stopped: string | null = null;
   /** Review R1: the index of the first record made after the run was cut short (write budget, rate limit, interrupt); only records from there on fail V-RUN. */
   let cutAt: number | null = null;
+  /** The index of the first observation made after the cut (persisted as run.cut_at, so recheck knows which re-evaluated records are late). */
+  let cutObs: number | null = null;
+  const markCut = (record: number, observation: number) => {
+    if (cutAt !== null) return;
+    cutAt = record;
+    cutObs = observation;
+  };
   const results: Result[] = [];
   const firstWrite = new Map<string, string[]>();
   const observations: Observation[] = [];
@@ -225,7 +232,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     interrupted = true;
     o.log(`\n${sig}: stopping; cleaning up this run's objects before exit…`);
     stopped = `interrupted by ${sig}`;
-    cutAt ??= results.length;
+    markCut(results.length, observations.length);
     session.abort(stopped);
     setTimeout(() => {
       if (finished) return;
@@ -394,7 +401,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       } catch (e) {
         if ((e instanceof RateLimited || e instanceof BudgetExhausted) && !stopped) {
           stopped = e.message;
-          cutAt ??= results.length;
+          markCut(results.length, observations.length);
         }
       }
     };
@@ -446,12 +453,12 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           if (stop && /stopped:/.test(stop)) {
             stopped = stop;
             // why: review R1: the records of the check that was cut short come after the cut.
-            cutAt ??= start;
+            markCut(start, observations.length - 1);
           }
         } catch (e) {
           if (e instanceof RateLimited || e instanceof BudgetExhausted) {
             stopped = e.message;
-            cutAt ??= results.length;
+            markCut(results.length, observations.length);
           }
           // the losses after a check that failed are compared at the next bracket (gapLoss), and named there
           results.push(...notRun(mod, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
@@ -563,7 +570,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       } catch (e) {
         if (e instanceof RateLimited || e instanceof BudgetExhausted) {
           stopped = e.message;
-          cutAt ??= results.length;
+          markCut(results.length, observations.length);
         }
         allNotRun(`setup failed: ${(e as Error).message}`);
         setupFailed.push(`${res.name}: ${short((e as Error).message, 120)}`);
@@ -614,7 +621,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
       } catch (e) {
         if (e instanceof RateLimited || e instanceof BudgetExhausted) {
           stopped = e.message;
-          cutAt ??= results.length;
+          markCut(results.length, observations.length);
         }
         results.push(...notRun(g, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
       }
@@ -717,7 +724,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     scope: scopeSentence({ server: serverLabel(manifest), catalog: fingerprint || 'sha256:unknown', resources: manifest.resources.map((r) => ({ name: r.name, tool: r.update?.tool ?? r.create?.tool ?? r.read.tool, fields: r.fields?.map((f) => f.path) ?? [] })), notBuiltCount: plan?.not_built.length ?? 0 }),
     suite: { name: SUITE_NAME, version: SUITE_VERSION },
     spec: { version: SPEC_VERSION },
-    run: { id: runId, prefix, started: iso(started), ended: iso(Date.now()), status: stopped ? 'stopped' : 'complete', stopped_reason: stopped, writes: session.writes, processes_started: session.started.length },
+    run: { id: runId, prefix, started: iso(started), ended: iso(Date.now()), status: stopped ? 'stopped' : 'complete', stopped_reason: stopped, writes: session.writes, processes_started: session.started.length, ...(cutAt !== null && celled.late_from !== null ? { cut_at: { record: celled.late_from, observation: cutObs ?? observations.length } } : {}) },
     target: { confirm: manifest.target.confirm, environment: manifest.target.environment, server: serverLabel(manifest), catalog_fingerprint: fingerprint, guard: guardRecord(), mcp },
     manifest: { path: 'manifest' + (o.manifest.endsWith('.json') ? '.json' : '.yaml'), sha256: manifest.source.sha256 },
     plan: { hash },

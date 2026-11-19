@@ -160,7 +160,11 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   useShapes(manifest, tools);
   const ctx = { manifest, tools, review: reviewOf(manifest, o.review), gated: !!manifest.backend?.gate };
   const fresh: Result[] = [];
-  for (const obs of doc.observations as Observation[]) {
+  // why: review (F1 round 3): the cut of a run cut short is persisted (run.cut_at); a record re-evaluated from an observation made
+  // after it stays late, and one from before it is never voided, whatever key it shares.
+  const cut = doc.run.cut_at ?? null;
+  const freshObs = new Map<Result, number>();
+  for (const [oi, obs] of (doc.observations as Observation[]).entries()) {
     const mod = checkById(obs.check);
     if (!mod) throw new WritecheckError(`recheck: no check ${obs.check} in this version`, 2);
     if (mod.version !== obs.version) o.log(`note: ${obs.check} was recorded at scenario version ${obs.version}; this release has ${mod.version}`);
@@ -170,7 +174,9 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
     const later = (obs as { later_losses?: LaterLoss[] }).later_losses ?? [];
     for (const r of mod.evaluate(obs, ctx)) {
       const x = runLosses.length ? withLoss(r, [], false, runLosses) : r;
-      fresh.push(later.length ? withLaterLoss(x, later) : x);
+      const y = later.length ? withLaterLoss(x, later) : x;
+      fresh.push(y);
+      freshObs.set(y, oi);
     }
   }
   // Results decided without calls (not applicable, not tested, the catalog) are kept as recorded.
@@ -183,15 +189,35 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   // why: F1/F6: the cells and validity are re-derived from the rechecked records (docs/CELLS.md).
   // why: review M2: the cell pass's own rows are re-derived, never kept (a rule or a record that changed would leave a stale one).
   // why: review R1: a record made after the run was cut short is known from the recorded validity (V-RUN), not from the stop text.
-  const lateKeys = new Set(doc.results.filter((r) => r.validity?.failed.includes('V-RUN')).map(k));
-  const celled = cellPass(manifest, tools, results.filter((r) => r.scenario.id !== CELLS_SCENARIO.id), { stopped: doc.run.stopped_reason, late: (r) => lateKeys.has(k(r)), input_required_tools: inputRequiredTools(doc.target.mcp) });
-  const out: ResultsDoc = { ...doc, results: celled.results, cells: celled.cells, scope: `${doc.scope} Rechecked offline with this release's rules.` };
+  const late = recheckLate(doc, freshObs);
+  // why: the late records go last, so the rechecked file's run.cut_at.record again marks where they start.
+  const input = results.filter((r) => r.scenario.id !== CELLS_SCENARIO.id);
+  const ordered = cut ? [...input.filter((r) => !late(r)), ...input.filter(late)] : input;
+  const celled = cellPass(manifest, tools, ordered, { stopped: doc.run.stopped_reason, late, input_required_tools: inputRequiredTools(doc.target.mcp) });
+  const run = cut && celled.late_from !== null ? { ...doc.run, cut_at: { record: celled.late_from, observation: cut.observation } } : doc.run;
+  const out: ResultsDoc = { ...doc, run, results: celled.results, cells: celled.cells, scope: `${doc.scope} Rechecked offline with this release's rules.` };
   const dir = join(o.dir, 'recheck');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'results.json'), JSON.stringify(out, null, 2) + '\n');
   writeFileSync(join(dir, 'report.md'), renderMarkdown(out));
   o.log(changed.length ? changed.map((c) => `${c.key}: ${c.before} → ${c.after}`).join('\n') : 'No verdict changed.');
   return { doc: out, changed };
+}
+
+/**
+ * Which records of a recheck were made after the run was cut short (V-RUN). With run.cut_at: a record re-evaluated from an
+ * observation at or after cut_at.observation, or a kept record at or after cut_at.record. Without it (a file from before the
+ * field), the records that failed V-RUN before, by requirement, write path and scenario.
+ */
+export function recheckLate(doc: Pick<ResultsDoc, 'run' | 'results'>, freshObs: Map<Result, number>): (r: Result) => boolean {
+  const cut = doc.run.cut_at ?? null;
+  const k = (r: Result) => `${r.requirement} ${writePathKey(r.write_path)} ${r.scenario.id}`;
+  if (!cut) {
+    const lateKeys = new Set(doc.results.filter((r) => r.validity?.failed.includes('V-RUN')).map(k));
+    return (r) => lateKeys.has(k(r));
+  }
+  const keptAt = new Map(doc.results.map((r, i) => [r, i] as const));
+  return (r) => (freshObs.has(r) ? freshObs.get(r)! >= cut.observation : keptAt.has(r) && keptAt.get(r)! >= cut.record);
 }
 
 /**
