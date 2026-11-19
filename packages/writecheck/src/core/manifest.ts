@@ -363,7 +363,7 @@ export interface Manifest {
    * MWS-IN-5 search (optional): documents the tester reads for bounds stated in words (`docs`, paths relative to this file),
    * resolved to absolute paths. Read at plan time; nothing is fetched.
    */
-  in5?: { docs: string[] };
+  in5?: { docs: string[]; allow_args?: string[] };
   source: { path: string; sha256: string };
 }
 
@@ -1207,9 +1207,9 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
 function in5Of(v: unknown, manifestPath: string): Pick<Manifest, 'in5'> {
   if (v === undefined) return {};
   const o = obj(v, 'in5');
-  keys(o, ['docs'], 'in5');
+  keys(o, ['docs', 'allow_args'], 'in5');
   const base = dirname(resolve(manifestPath));
-  return { in5: { docs: strList(o['docs'], 'in5.docs').map((d) => (isAbsolute(d) ? d : resolve(base, d))) } };
+  return { in5: { docs: strList(o['docs'], 'in5.docs').map((d) => (isAbsolute(d) ? d : resolve(base, d))), allow_args: strList(o['allow_args'], 'in5.allow_args') } };
 }
 
 /** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */

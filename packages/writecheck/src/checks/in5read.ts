@@ -57,6 +57,8 @@ export interface In5Call {
   stored?: boolean | null;
   /** In context B: whether this call re-sends the refused value or its accepted neighbour (review M3). */
   repeat_of?: 'refused' | 'neighbour';
+  /** In context B: the repeat sequence the call belongs to (`<class of the refused value>:<position>`). */
+  group?: string;
   /** In context B: false where the fresh context could not vary anything (a read tool with no other argument to vary; review M4). */
   fresh?: boolean;
   /** The argument is an integer (review S4: a boundary on numbers is exact only for an integer). */
@@ -85,6 +87,8 @@ export interface Constraint {
   /** The declaration's reason, for `declared`. */
   reason?: string;
   steps: string[];
+  /** Refusals of the value in the fresh context (two in the N-R-N-R sequence); 0 for a constraint the declaration states. */
+  b_refusals: number;
   text: string;
   refusal: RefusalClass;
 }
@@ -228,12 +232,12 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
     for (const c of mine.filter(refusedCall)) {
       const fc = fixed.find((f) => f.arg === arg && safeTest(f.pattern, textOf(c)));
       if (!fc || out.confirmed.some((k) => k.arg === arg && k.keyword === 'declared')) continue;
-      out.confirmed.push({ arg, keyword: 'declared', bound: null, exact: false, accepted_at: null, refused_at: c.n ?? null, reading_by: 'declaration', reason: fc.reason, steps: [c.step], text: quote(c), refusal: classify(c) });
+      out.confirmed.push({ arg, keyword: 'declared', bound: null, exact: false, accepted_at: null, refused_at: c.n ?? null, reading_by: 'declaration', reason: fc.reason, steps: [c.step], b_refusals: 0, text: quote(c), refusal: classify(c) });
       counted.add(c);
     }
     for (const dim of ['length', 'value', 'items'] as Dim[]) {
       const b = boundaryOf(mine, dim);
-      const repeats = mine.filter((c) => c.dim === dim && c.context === 'B');
+      const repeats = mine.filter((c) => c.dim === dim && c.context === 'B' && c.cls.startsWith('repeat.'));
       for (const side of ['upper', 'lower'] as const) {
         const cand = b[side];
         if (!cand) continue;
@@ -262,7 +266,7 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
         // (b) the refusal repeats in the fresh context, on the refused side, and its accepted neighbour, sent after it there, is
         // accepted again (review M3: a failure that begins at some point of the run, such as a rate limit or a backend an earlier
         // probe broke, refuses the neighbour too).
-        const fr = freshness(repeats, onRefusedSide, (n) => n === cand.acc);
+        const fr = freshness(repeats, (c) => c.n !== undefined && onRefusedSide(c.n), (c) => c.n === cand.acc, textOf(at), `repeat.${dim}:${cand.ref}`);
         if (fr.why) {
           for (const c of refusedHere) if (!counted.has(c)) out.seen.push({ call: c, why: fr.why });
           refusedHere.forEach((c) => counted.add(c));
@@ -271,7 +275,7 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
         // review S4: on numbers the boundary is exact only for an integer argument (between 1 and 2 a number may stop at 1.2).
         const exact = Math.abs(cand.ref - cand.acc) === 1 && (dim !== 'value' || at.integer === true);
         const kw = KEYWORDS[dim][side];
-        out.confirmed.push({ arg, keyword: kw, bound: cand.acc, exact, accepted_at: cand.acc, refused_at: cand.ref, reading_by: 'tester (differential probe)', steps: [at.step, nb.step, fr.ref!.step, fr.nb!.step], text: quote(at), refusal: classify(at, cand.acc) });
+        out.confirmed.push({ arg, keyword: kw, bound: cand.acc, exact, accepted_at: cand.acc, refused_at: cand.ref, reading_by: 'tester (differential probe)', steps: [at.step, nb.step, ...fr.steps!], b_refusals: fr.refusals!, text: quote(at), refusal: classify(at, cand.acc) });
         refusedHere.forEach((c) => counted.add(c));
       }
     }
@@ -285,12 +289,12 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
         continue;
       }
       const rep = mine.filter((x) => x.context === 'B' && (x.cls === c.cls || (x.cls === 'plain' && x.n === c.plain_len && x.repeat_of === 'neighbour')));
-      const fr = freshness(rep, () => true, () => true, c.cls);
+      const fr = freshness(rep, (x) => x.cls === c.cls, (x) => x.cls === 'plain' && x.n === c.plain_len, textOf(c), `${c.cls}:`);
       if (fr.why) {
         out.seen.push({ call: c, why: fr.why });
         continue;
       }
-      out.confirmed.push({ arg, keyword: 'pattern', bound: null, exact: false, accepted_at: c.plain_len ?? null, refused_at: null, cls: c.cls, reading_by: 'tester (differential probe)', steps: [c.step, nb.step, fr.ref!.step, fr.nb!.step], text: quote(c), refusal: classify(c) });
+      out.confirmed.push({ arg, keyword: 'pattern', bound: null, exact: false, accepted_at: c.plain_len ?? null, refused_at: null, cls: c.cls, reading_by: 'tester (differential probe)', steps: [c.step, nb.step, ...fr.steps!], b_refusals: fr.refusals!, text: quote(c), refusal: classify(c) });
     }
     // Every other refusal of the search: listed, seen, not judged.
     for (const c of mine.filter((x) => refusedCall(x) && x.context === 'A' && !counted.has(x))) {
@@ -302,21 +306,30 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
   return out;
 }
 
+/** A refusal's text, apart from numbers and quoted values (ids, versions, the value itself), for comparing two refusals. */
+const shape = (t: string): string => t.replace(/"[^"]*"|'[^']*'/g, '"…"').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+
 /**
- * Rule (b) of the reading, on the calls of context B (in the order sent): the refused value was refused again, its accepted
- * neighbour was sent after it and accepted, and the context varied something (review M3, M4). `why` is null where it holds.
+ * Rule (b) of the reading, on the calls of context B in the order sent (review of 7fcd9ef, 1 and 2): the accepted neighbour, then
+ * the refused value, then the neighbour again (N-R-N), and the refused value once more (R-N-R) where the run sent it. Every N
+ * must be accepted and every R refused, the first R with the same text as the refusal in context A (apart from numbers and
+ * quoted values), and the context must have varied something (review M3, M4). `why` is null where it holds; `refusals` counts
+ * the Rs, which tester mode needs to be two.
  */
-function freshness(b: In5Call[], refusedSide: (n: number) => boolean, isNb: (n: number) => boolean, cls?: string): { why: string | null; ref?: In5Call; nb?: In5Call } {
-  const refs = b.filter((c) => c.repeat_of !== 'neighbour' && (cls ? c.cls === cls : c.n !== undefined && refusedSide(c.n)));
-  const ref = refs.find(refusedCall);
-  if (!refs.length) return { why: 'the repeat in a fresh context was not sent (the per-tool budget, or no fresh context could be made)' };
-  if (!ref || refs.some((c) => !refusedCall(c))) return { why: 'the refusal did not repeat in a fresh context, so it may depend on the state of the object or on another argument' };
-  if (ref.fresh === false) return { why: 'the fresh context could not vary another argument (a read tool with none the search may vary), so a constraint across arguments cannot be told from one on this argument' };
-  const nbs = b.filter((c) => c.repeat_of === 'neighbour' && (cls ? c.cls === 'plain' : c.n !== undefined && isNb(c.n)) && b.indexOf(c) > b.indexOf(ref));
-  if (!nbs.length) return { why: 'the accepted neighbour was not sent again after the repeat, so a failure that began during the run cannot be ruled out' };
-  const nb = nbs.find((c) => !refusedCall(c));
-  if (!nb || nbs.some(refusedCall)) return { why: 'the accepted neighbour was refused too when sent again after the repeat, so the refusals may come from a failure that began during the run (a rate limit, a quota, a backend an earlier call broke), not from the value' };
-  return { why: null, ref, nb };
+function freshness(b: In5Call[], isRef: (c: In5Call) => boolean, isNb: (c: In5Call) => boolean, aText: string, group?: string): { why: string | null; steps?: string[]; refusals?: number; ref?: In5Call } {
+  const seq = b.filter((c) => (group === undefined || c.group === undefined || c.group === group) && ((c.repeat_of === 'refused' && isRef(c)) || (c.repeat_of === 'neighbour' && isNb(c))));
+  const rs = seq.filter((c) => c.repeat_of === 'refused');
+  if (!rs.length) return { why: 'the repeat in a fresh context was not sent (the per-tool budget, or no fresh context could be made)' };
+  if (rs.some((c) => !refusedCall(c))) return { why: 'the refusal did not repeat in a fresh context, so it may depend on the state of the object or on another argument' };
+  const r1 = rs[0]!;
+  if (r1.fresh === false) return { why: 'the fresh context could not vary another argument (a read tool with none the search may vary, or none with a value other than the base call\'s), so a constraint across arguments cannot be told from one on this argument' };
+  const i = seq.indexOf(r1);
+  const before = seq.slice(0, i).filter((c) => c.repeat_of === 'neighbour');
+  const after = seq.slice(i + 1).filter((c) => c.repeat_of === 'neighbour');
+  if (!before.length || !after.length) return { why: 'the accepted neighbour was not sent both before and after the repeat, so a failure that began or ended during the run cannot be ruled out' };
+  if ([...before, ...after].some(refusedCall)) return { why: 'the accepted neighbour was refused too in the fresh context, so the refusals may come from a failure during the run (a rate limit, a quota, a backend an earlier call broke), not from the value' };
+  if (shape(textOf(r1)) !== shape(aText)) return { why: `the refusal in the fresh context does not say the same as in the search (${JSON.stringify(short(textOf(r1), 80))} against ${JSON.stringify(short(aText, 80))}), so the two may have different causes` };
+  return { why: null, steps: seq.map((c) => c.step), refusals: rs.length, ref: r1 };
 }
 
 function safeTest(pattern: string, text: string): boolean {

@@ -104,8 +104,12 @@ export function sourcesOf(m: Manifest, tools: Tool[], res: ResourceSpec): Source
 
 /** Does the search search this resource's update tool (on scratch objects)? Where not, schema-probes sends its try_values. */
 export function searchesUpdate(m: Manifest, tools: Tool[], res: ResourceSpec): boolean {
-  return sourcesOf(m, tools, res).some((s) => s.role === 'update' && s.tool === res.update?.tool && gate(m, tools, res, s) === null);
+  // why: review of 7fcd9ef (5): a tool searched under any resource is searched; its try_values are not sent a second time.
+  return m.resources.some((r) => sourcesOf(m, tools, r).some((s) => s.role === 'update' && s.tool === res.update?.tool && gate(m, tools, r, s) === null));
 }
+
+/** Will schema-probes send this resource's try_values (and give the MWS-IN-5 record of its update tool)? */
+export const tryValuesByProbes = (m: Manifest, tools: Tool[], res: ResourceSpec): boolean => !!res.update && res.try_values.length > 0 && !searchesUpdate(m, tools, res);
 
 /** Declared write tools of the resource that the search does not cover in this release. */
 function uncovered(m: Manifest, tools: Tool[], res: ResourceSpec): string[] {
@@ -121,11 +125,16 @@ function skippedTools(ctx: PlanContext, res: ResourceSpec): { tool: string; why:
   const out: { tool: string; why: string }[] = [];
   for (const s of sourcesOf(ctx.manifest, ctx.tools, res)) {
     const g = gate(ctx.manifest, ctx.tools, res, s);
-    if (g) out.push({ tool: s.tool, why: `${s.tool} was not searched: ${g}` });
+    // why: review of 7fcd9ef (5): one MWS-IN-5 record per write path; where schema-probes tries the declared values on this
+    // update tool, its record is the one.
+    if (g && !(s.role === 'update' && tryValuesByProbes(ctx.manifest, ctx.tools, res))) out.push({ tool: s.tool, why: `${s.tool} was not searched: ${g}` });
   }
   for (const tool of uncovered(ctx.manifest, ctx.tools, res)) out.push({ tool, why: `the MWS-IN-5 search starts only from a resource's read, list, create and update calls in this release, and ${tool} is none of them` });
   return out;
 }
+
+/** Names of quantities that may cost on a real server (snake_case, camelCase or kebab-case words). */
+export const COST_LIKE = /(^|[_-])(replicas?|size|amount|count|quantity|instances?|price|budget|gb|cpus?|memory)($|[_-])|[a-z](Replicas?|Size|Amount|Count|Quantity|Instances?|Price|Budget|Gb|GB|Cpus?|CPU|Memory)$/i;
 
 /** Arguments never probed, and why (by name and by the declaration; the run adds those whose value names its objects). */
 function neverProbed(m: Manifest, tools: Tool[], res: ResourceSpec, s: Source): Map<string, string> {
@@ -137,6 +146,9 @@ function neverProbed(m: Manifest, tools: Tool[], res: ResourceSpec, s: Source): 
   if (res.version?.override) out.set(res.version.override, 'the version override');
   if (s.role === 'create' && res.key) out.set(res.key.arg, "the caller's key for the object (MWS-TGT-3)");
   for (const k of offeredKeys(tools, s.tool)) out.set(k, 'an idempotency key');
+  // why: review of 7fcd9ef (4): on a write tool an argument named like a quantity that costs (replicas, size, amount, a price, a
+  // budget, gigabytes, CPU, memory) is not probed unless the declaration lets it (in5.allow_args).
+  if (s.role !== 'read') for (const k of props) if (COST_LIKE.test(k) && !(m.in5?.allow_args ?? []).some((a) => a === k || a === `${s.tool}.${k}`)) out.set(k, 'its name is that of a quantity that may cost (in5.allow_args lets it be probed)');
   return new Map([...out].filter(([k]) => props.includes(k)));
 }
 
@@ -405,7 +417,7 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
   const integer = (arg: string) => isObj(props[arg]) && (props[arg] as Obj)['type'] === 'integer';
   for (const arg of Object.keys(props)) {
     if (prot.has(arg)) {
-      o.args.push({ arg, probes: 0, skipped: `not probed: ${prot.get(arg)}`, rule: 'names the object, scope, version or key' });
+      o.args.push({ arg, probes: 0, skipped: `not probed: ${prot.get(arg)}`, rule: /quantity that may cost/.test(prot.get(arg)!) ? 'cost-like name' : 'names the object, scope, version or key' });
       continue;
     }
     const g = in5Probes(schema, baseNow, arg, { payload_bytes: payload, keep_prefix: keep.has(arg) ? ctx.prefix : null, hints, role: s.role === 'read' ? 'read' : 'write' });
@@ -461,7 +473,7 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
 
   const bOpen = async (): Promise<boolean> => {
     if (B) return !B.why;
-    B = s.role === 'read' ? readB(A, o.calls, values, prot, keep) : await mk('B');
+    B = s.role === 'read' ? readB(A, o.calls, values, prot, keep, baseNow) : await mk('B');
     if (B.why) o.notes.push(`The fresh context for the repeats could not be made: ${B.why}.`);
     return !B.why;
   };
@@ -548,9 +560,14 @@ export async function searchPhases(io: SearchIO): Promise<void> {
     }
   }
   if (repeats.length && !io.stopped() && (await io.openB())) {
+    // why: review of 7fcd9ef (1, 2): N-R-N-R. The neighbour before and after the refusal shows the context accepted that kind of
+    // call on both sides of it in time; the second refusal is what tester mode needs to count the constraint.
     for (const r of repeats) {
-      if (!(await io.send('B', r.p, 'repeat', { repeat_of: 'refused' }))) break;
-      if (!(await io.send('B', r.nb, 'repeat', { repeat_of: 'neighbour' }))) break;
+      const group = `${r.p.cls}:${r.p.n ?? ''}`;
+      if (!(await io.send('B', r.nb, 'repeat', { repeat_of: 'neighbour', group }))) break;
+      if (!(await io.send('B', r.p, 'repeat', { repeat_of: 'refused', group }))) break;
+      if (!(await io.send('B', r.nb, 'repeat', { repeat_of: 'neighbour', group }))) break;
+      if (!(await io.send('B', r.p, 'repeat', { repeat_of: 'refused', group }))) break;
     }
   }
 }
@@ -560,9 +577,11 @@ export async function searchPhases(io: SearchIO): Promise<void> {
  * was accepted in context A (the one sent first), so a constraint across two arguments (page and per_page) does not repeat as
  * one on a single argument. Where no other argument can be varied, the repeat is still sent, and marked not fresh.
  */
-function readB(A: Ctx5, calls: In5Call[], values: Map<In5Call, unknown>, prot: Map<string, string>, keep: Set<string>): Ctx5 {
+export function readB(A: Ctx5, calls: In5Call[], values: Map<In5Call, unknown>, prot: Map<string, string>, keep: Set<string>, base: Obj): Ctx5 {
+  // why: review of 7fcd9ef (3): only a value other than the base call's varies anything; where none was accepted, the repeat is
+  // sent unvaried and marked not fresh.
   const accepted = new Map<string, unknown>();
-  for (const c of calls) if (c.context === 'A' && c.ok && !c.indeterminate && !accepted.has(c.arg) && !prot.has(c.arg) && !keep.has(c.arg)) accepted.set(c.arg, values.get(c));
+  for (const c of calls) if (c.context === 'A' && c.ok && !c.indeterminate && !accepted.has(c.arg) && !prot.has(c.arg) && !keep.has(c.arg) && !deepEqual(values.get(c), base[c.arg])) accepted.set(c.arg, values.get(c));
   const pick = (arg: string): [string, unknown] | null => [...accepted].find(([k]) => k !== arg) ?? null;
   return {
     ...A,
@@ -637,7 +656,10 @@ export function in5SearchVerdict(o: ToolObs5, res: ResourceSpec, mode: 'declarat
     return a.probes > 0 && mine.length >= a.probes && mine.every((c) => excludedWhy(c) === null);
   });
   const refusals = o.calls.filter((c) => refusedCall(c) && excludedWhy(c) === null);
-  const counted = rd.confirmed.filter((k) => k.reading_by === 'declaration' || mode === 'tester');
+  // why: review of 7fcd9ef (2): in tester mode the differential reading counts a constraint only with two refusals in the fresh
+  // context, and only where the refusal names the argument and says what kind of rule it is; any other stays a candidate.
+  const strong = (k: Constraint) => k.b_refusals >= 2 && k.refusal.names_arg && k.refusal.kind !== 'unstated';
+  const counted = rd.confirmed.filter((k) => k.reading_by === 'declaration' || (mode === 'tester' && strong(k)));
   const candidates = rd.confirmed.filter((k) => !counted.includes(k));
   const constraintsOf = (ks: Constraint[], candidate: boolean) => ks.map((k) => ({ arg: k.arg, keyword: k.keyword, bound: k.bound, exact: k.exact, accepted_at: k.accepted_at, refused_at: k.refused_at, ...(k.cls ? { class: k.cls } : {}), reading_by: k.reading_by, ...(candidate ? { candidate: true } : {}) }));
   const numbers = {
@@ -669,7 +691,7 @@ export function in5SearchVerdict(o: ToolObs5, res: ResourceSpec, mode: 'declarat
     ...o.notes,
     ...rd.excluded.filter((x) => refusedCall(x.call) || x.call.indeterminate).slice(0, 10).map((x) => `Excluded from the reading: ${x.call.arg}=${x.call.value} (${x.call.cls}, step ${x.call.step}): ${x.why}${x.call.text ? `: ${JSON.stringify(short(x.call.text, 160))}` : ''}.`),
   ];
-  const candNotes = candidates.map((k) => `Candidate constraint, seen, not judged: ${reading(k)} The tester's differential reading is a source of this verdict only in the draft for MWS 0.10; run with --in5-reading=tester to record it as violated.`);
+  const candNotes = candidates.map((k) => `Candidate constraint, seen, not judged: ${reading(k)} ${mode === 'tester' ? `In tester mode the differential reading counts a constraint only with two refusals in the fresh context (${k.b_refusals} here) and a refusal that names the argument and the kind of rule.` : "The tester's differential reading is a source of this verdict only in the draft for MWS 0.10; run with --in5-reading=tester to record it as violated."}`);
   const seen = rd.seen.map((x) => `Seen, not judged: ${x.call.arg}=${x.call.value} (${x.call.cls}, step ${x.call.step}) was refused${x.call.ok ? ' (answered as a success, and the value is not stored)' : ''}: ${JSON.stringify(x.call.text ?? '')}. ${x.why}; neither the declaration (fixed_constraints) nor the tester's differential reading states that the constraint is fixed.`);
   if (o.not_probed) return result('MWS-IN-5', w, SC, 'not tested', `${o.tool} was not searched: ${o.not_probed}`, { numbers, notes });
   if (counted.length) {

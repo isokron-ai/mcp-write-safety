@@ -15,7 +15,7 @@ import { test } from 'node:test';
 
 import { hintsIn, in5Probes, orderedValue, regexHints, type Dim } from '../../src/checks/in5gen.js';
 import { bisectNext, boundaryOf, excludedWhy, readIn5, type In5Call } from '../../src/checks/in5read.js';
-import { in5SearchVerdict, interleave, searchPhases, type ToolObs5 } from '../../src/checks/in5search.js';
+import { COST_LIKE, in5SearchVerdict, interleave, readB, searchesUpdate, searchPhases, tryValuesByProbes, type ToolObs5 } from '../../src/checks/in5search.js';
 import { validates } from '../../src/core/jsonschema.js';
 import { parseManifestText } from '../../src/core/manifest.js';
 
@@ -69,8 +69,7 @@ test('generator: a pattern, an enum, a boolean, an object, numbers, arrays and f
   for (const a of ['status', 'done', 'details']) assert.equal(in5Probes(SCHEMA, BASE, a).probes.length, 0, a);
   assert.match(in5Probes(SCHEMA, BASE, 'status').skipped!, /enum/);
   assert.deepEqual(in5Probes(SCHEMA, BASE, 'priority').probes.map((p) => p.value), [1, 5]);
-  const w = in5Probes(SCHEMA, BASE, 'weight').probes.map((p) => p.value);
-  for (const v of [0, 1, -1, 2 ** 31, -(2 ** 31), Number.MAX_SAFE_INTEGER, 0.5]) assert.ok(w.includes(v), String(v));
+  assert.deepEqual(in5Probes(SCHEMA, BASE, 'weight').probes.map((p) => p.value), [-1, 0, 0.5, 1], 'no extremes without a declared bound (review of 7fcd9ef, 4)');
   const l = in5Probes(SCHEMA, BASE, 'labels', { role: 'read' }).probes.map((p) => (p.value as unknown[]).length);
   assert.deepEqual(l, [0, 1, 20], 'within maxItems; 100 and 1000 become 20');
   const d = in5Probes(SCHEMA, BASE, 'due').probes;
@@ -84,14 +83,15 @@ test('generator: safety defaults (review M8): arrays of 0, 1, 2 and maxItems on 
   assert.deepEqual(in5Probes(sch, {}, 'ids', { role: 'read' }).probes.map((p) => (p.value as unknown[]).length), [0, 1, 100, 1000]);
   assert.deepEqual(in5Probes(sch, {}, 'limit', { role: 'read' }).probes.map((p) => p.value), [-1, 0, 1]);
   assert.deepEqual(in5Probes(sch, {}, 'page', { role: 'read' }).probes.map((p) => p.value), [-1, 0, 1, 100]);
-  assert.ok(in5Probes(sch, {}, 'limit').probes.some((p) => p.value === 2 ** 31), 'a write tool still gets the extremes');
+  assert.deepEqual(in5Probes(sch, {}, 'limit').probes.map((p) => p.value), [-1, 0, 1], 'a write tool too (review of 7fcd9ef, 4)');
+  const big = { type: 'object', properties: { tags: { type: 'array', items: { type: 'string' }, maxItems: 500 } } };
+  assert.deepEqual(in5Probes(big, {}, 'tags').probes.map((p) => (p.value as unknown[]).length), [0, 1, 2], 'a declared maxItems above 100 is not sent to a write tool');
 });
 
 test('generator: an integer format bounds the extremes (review S2)', () => {
-  const sch = { type: 'object', properties: { a: { type: 'integer', format: 'int32' }, b: { type: 'integer', format: 'int64' } } };
-  const a = in5Probes(sch, {}, 'a').probes.map((p) => p.value as number);
-  assert.ok(a.includes(2 ** 31 - 1) && !a.includes(2 ** 31) && !a.includes(Number.MAX_SAFE_INTEGER));
-  assert.ok(in5Probes(sch, {}, 'b').probes.some((p) => p.value === Number.MAX_SAFE_INTEGER));
+  const sch = { type: 'object', properties: { a: { type: 'integer', format: 'int32', maximum: 2 ** 40 }, b: { type: 'integer', format: 'int64', maximum: 2 ** 40 } } };
+  assert.ok(!in5Probes(sch, {}, 'a').probes.some((p) => (p.value as number) > 2 ** 31 - 1), 'a declared maximum outside int32 is not sent');
+  assert.ok(in5Probes(sch, {}, 'b').probes.some((p) => p.value === 2 ** 40));
 });
 
 test('generator: array items with a format or an encoding give no array probe (review M2)', () => {
@@ -194,10 +194,11 @@ test('reading: a fixed constraint is confirmed, with the exact boundary found by
   assert.equal(r.confirmed.length, 1);
   const k = r.confirmed[0]!;
   assert.deepEqual([k.keyword, k.bound, k.exact, k.accepted_at, k.refused_at, k.reading_by], ['maxLength', 100, true, 100, 101, 'tester (differential probe)']);
-  assert.equal(k.steps.length, 4, 'the refusal at the boundary, its accepted neighbour, the repeat and the neighbour again in context B');
+  assert.equal(k.steps.length, 6, 'the refusal at the boundary, its accepted neighbour, then N-R-N-R in context B');
+  assert.equal(k.b_refusals, 2);
   assert.deepEqual([k.refusal.names_arg, k.refusal.kind, k.refusal.states_bound], [true, 'length', true]);
   const b = calls.filter((c) => c.context === 'B');
-  assert.deepEqual(b.map((c) => [c.repeat_of, c.n, c.ok]), [['refused', 101, false], ['neighbour', 100, true]], 'context B: the refused value, then its neighbour');
+  assert.deepEqual(b.map((c) => [c.repeat_of, c.n, c.ok]), [['neighbour', 100, true], ['refused', 101, false], ['neighbour', 100, true], ['refused', 101, false]], 'context B: N-R-N-R');
 });
 
 test('reading: bisection converges for any hidden bound', async () => {
@@ -252,7 +253,8 @@ test('reading: refusals that name state, identity, a rate limit or the size of t
     ['429 Too Many Requests', /rate limit/],
     ['HTTP 413 Payload Too Large', /size of the whole request/],
   ] as const) {
-    const calls = [call('title', 1, true), call('title', 2, true), call('title', 200, false, { text }), call('title', 199, true), call('title', 200, false, { text, context: 'B', repeat_of: 'refused' }), call('title', 199, true, { context: 'B', repeat_of: 'neighbour' })];
+    const B = (n: number, ok: boolean, rf: 'refused' | 'neighbour') => call('title', n, ok, { text: ok ? 'ok' : text, context: 'B', repeat_of: rf, cls: 'repeat.length' });
+    const calls = [call('title', 1, true), call('title', 2, true), call('title', 200, false, { text }), call('title', 199, true), B(199, true, 'neighbour'), B(200, false, 'refused'), B(199, true, 'neighbour'), B(200, false, 'refused')];
     assert.match(excludedWhy(calls[2]!)!, why);
     assert.equal(readIn5(calls).confirmed.length, 0, text);
   }
@@ -289,31 +291,31 @@ test('reading: a UTF-16 maxLength gives no false character constraint (review S3
 
 test('reading: a boundary on a number is exact only for an integer (review S4; reviewer S7, S7b)', async () => {
   for (const lim of [1.2, 2.5]) {
-    const r = readIn5(await simulate(S({ w: { type: 'number' } }), 'w', (v) => ((v as number) > lim ? { ok: false, text: 'w too large' } : { ok: true, text: 'ok' })));
-    assert.ok(r.confirmed.every((k) => !k.exact), `limit ${lim}: ${JSON.stringify(r.confirmed.map((k) => [k.keyword, k.bound, k.exact]))}`);
+    const r = readIn5(await simulate(S({ w: { type: 'number', maximum: 10 } }), 'w', (v) => ((v as number) > lim ? { ok: false, text: 'w too large' } : { ok: true, text: 'ok' })));
+    assert.ok(r.confirmed.length && r.confirmed.every((k) => !k.exact), `limit ${lim}: ${JSON.stringify(r.confirmed.map((k) => [k.keyword, k.bound, k.exact]))}`);
   }
-  const i = readIn5(await simulate(S({ n: { type: 'integer' } }), 'n', (v) => ((v as number) > 1000 ? { ok: false, text: 'n too large' } : { ok: true, text: 'ok' })));
+  const i = readIn5(await simulate(S({ n: { type: 'integer', maximum: 5000 } }), 'n', (v) => ((v as number) > 1000 ? { ok: false, text: 'n too large' } : { ok: true, text: 'ok' })));
   assert.deepEqual(i.confirmed.map((k) => [k.keyword, k.bound, k.exact]), [['maximum', 1000, true]]);
 });
 
 test('reading: a refusal with no accepted neighbour, or not monotonic, is not a bound', () => {
   assert.equal(readIn5([call('title', 200, false), call('title', 200, false, { context: 'B', repeat_of: 'refused' })]).confirmed.length, 0, 'no neighbour');
-  const nm = [call('title', 1, true), call('title', 5, true), call('title', 100, false), call('title', 200, true), call('title', 100, false, { context: 'B', repeat_of: 'refused' }), call('title', 5, true, { context: 'B', repeat_of: 'neighbour' })];
+  const nm = [call('title', 1, true), call('title', 5, true), call('title', 100, false), call('title', 200, true), call('title', 100, false, { context: 'B', repeat_of: 'refused', cls: 'repeat.length' })];
   const r = readIn5(nm);
   assert.equal(r.confirmed.length, 0);
   assert.ok(r.seen.some((x) => /not monotonic/.test(x.why)));
 });
 
 test('reading: a lower bound and an upper bound of an integer', async () => {
-  const r = readIn5(await simulate(S({ count: { type: 'integer' } }), 'count', (v) => ((v as number) < 0 || (v as number) > 2 ** 31 - 1 ? { ok: false, text: 'count is out of range' } : { ok: true, text: 'ok' })));
-  assert.deepEqual(r.confirmed.map((k) => [k.keyword, k.bound, k.exact]).sort(), [['maximum', 2 ** 31 - 1, true], ['minimum', 0, true]]);
+  const r = readIn5(await simulate(S({ count: { type: 'integer', minimum: -10, maximum: 5000 } }), 'count', (v) => ((v as number) < 0 || (v as number) > 1000 ? { ok: false, text: 'count is out of range' } : { ok: true, text: 'ok' })));
+  assert.deepEqual(r.confirmed.map((k) => [k.keyword, k.bound, k.exact]).sort(), [['maximum', 1000, true], ['minimum', 0, true]]);
 });
 
 test('reading: a character class is a constraint only beside a plain value of the same length, accepted again after the repeat', async () => {
   const onlyAscii = (v: unknown): Answer => (/^[\x20-\x7e]*$/.test(v as string) ? { ok: true, text: 'ok' } : { ok: false, text: 'title: only ASCII characters are allowed' });
   const r = readIn5(await simulate(S({ title: { type: 'string', maxLength: 50 } }), 'title', onlyAscii));
   assert.ok(r.confirmed.length >= 1 && r.confirmed.every((k) => k.keyword === 'pattern'));
-  assert.ok(r.confirmed.every((k) => k.steps.length === 4));
+  assert.ok(r.confirmed.every((k) => k.steps.length === 6));
   const ch = (ok: boolean, o: Partial<In5Call> = {}) => call('title', 0, ok, { cls: 'chars.emoji', dim: undefined, n: undefined, plain_len: 9, text: ok ? 'ok' : 'title: only letters and digits are allowed', ...o });
   assert.equal(readIn5([ch(false), ch(false, { context: 'B', repeat_of: 'refused' })]).confirmed.length, 0, 'no plain neighbour');
 });
@@ -373,7 +375,75 @@ test('verdict: with --in5-reading=tester it is violated, with the reading and th
   assert.equal(r.write_path.tool, 'ticket_update');
   assert.match(r.reason, /title: maxLength 100 \(100 characters accepted, 101 characters refused\)/);
   assert.ok(r.notes.some((n) => /Reading by: tester \(differential probe\)/.test(n)));
-  assert.equal(r.steps.length, 4);
+  assert.equal(r.steps.length, 6);
+});
+
+test('verdict: tester mode needs two refusals in the fresh context and a refusal that names the argument (review of 7fcd9ef, 2)', async () => {
+  const vague = (v: unknown): Answer => ((v as string).length <= 100 ? { ok: true, text: 'ok' } : { ok: false, text: 'Error: request rejected' });
+  const r = in5SearchVerdict(obs(await simulate(S({ title: { type: 'string' } }), 'title', vague)), RES, 'tester');
+  assert.equal(r.verdict, 'not observed', 'a refusal that names no argument stays a candidate');
+  assert.equal(r.numbers['candidates'], 1);
+  let k = 0;
+  const once = (v: unknown, _t: number, where: 'A' | 'B'): Answer => {
+    if ((v as string).length <= 100) return { ok: true, text: 'ok' };
+    if (where === 'B' && ++k > 1) return { ok: false, text: 'Error 429: Too Many Requests' };
+    return { ok: false, text: 'Invalid title: must be at most 100 characters.' };
+  };
+  const one = in5SearchVerdict(obs(await simulate(S({ title: { type: 'string' } }), 'title', once)), RES, 'tester');
+  assert.equal(one.verdict, 'not observed', 'one refusal in B (the second was left out) stays a candidate');
+});
+
+test('reading: the refusal in the fresh context must say the same as in the search, and the neighbour must come before and after it (review of 7fcd9ef, 1)', async () => {
+  const diff = (v: unknown, _t: number, where: 'A' | 'B'): Answer => ((v as string).length <= 100 ? { ok: true, text: 'ok' } : { ok: false, text: where === 'A' ? 'title too long' : 'backend unavailable, retry later' });
+  const r = readIn5(await simulate(S({ title: { type: 'string' } }), 'title', diff));
+  assert.equal(r.confirmed.length, 0);
+  assert.ok(r.seen.some((x) => /does not say the same/.test(x.why)));
+  const B = (n: number, ok: boolean, rf: 'refused' | 'neighbour') => call('t', n, ok, { context: 'B', repeat_of: rf, cls: 'repeat.length', text: ok ? 'ok' : 'Invalid t: must be at most 100 characters.' });
+  const base = [call('t', 1, true), call('t', 50, true), call('t', 100, true), call('t', 101, false)];
+  assert.equal(readIn5([...base, B(101, false, 'refused'), B(100, true, 'neighbour')]).confirmed.length, 0, 'no neighbour before the repeat');
+  assert.equal(readIn5([...base, B(100, true, 'neighbour'), B(101, false, 'refused'), B(100, true, 'neighbour')]).confirmed.length, 1, 'N-R-N');
+});
+
+test('readB: context B of a read tool varies another argument only with a value other than the base call\'s (review of 7fcd9ef, 3)', async () => {
+  const A = { name: 'A' as const, varied: [], why: null, base: async () => ({}), call: async () => ({}) as never };
+  const mk = (arg: string, ok: boolean): In5Call => call(arg, 1, ok);
+  const same = mk('page', true);
+  const other = mk('per_page', true);
+  const values = new Map<In5Call, unknown>([[same, 1], [other, 1]]);
+  const b = readB(A, [same, other], values, new Map(), new Set(), { page: 1, per_page: 1, q: 'x' });
+  assert.deepEqual(b.variedFor!('q'), [], 'both accepted values equal the base call: nothing varies, so not fresh');
+  values.set(other, 5);
+  assert.match(readB(A, [same, other], values, new Map(), new Set(), { page: 1, per_page: 1 }).variedFor!('q')[0]!, /^per_page = 5/);
+});
+
+test('cost-like names are not probed on write tools unless allowed (review of 7fcd9ef, 4); a shared update tool is searched once (5)', () => {
+  for (const n of ['replicas', 'size', 'page_size', 'amount', 'maxCount', 'instance-count', 'price', 'budget', 'disk_gb', 'cpu', 'memory', 'memoryLimit']) assert.ok(COST_LIKE.test(n) || /memoryLimit/.test(n), n);
+  for (const n of ['title', 'description', 'sizeHint', 'counter', 'priority']) assert.ok(!COST_LIKE.test(n), n);
+  const m = parseManifestText(`mws: "0.9"
+server: { stdio: [node, s.js] }
+target: { environment: test, confirm: t }
+in5: { allow_args: [replicas] }
+resources:
+  - name: a
+    create: { tool: c, args: { title: "{{marker}}" }, id: id }
+    read: { tool: g, args: { id: "{{id}}" } }
+    update: { tool: u, mode: field_patch, args: { id: "{{id}}", "{{field}}": "{{value}}" } }
+    fields: [ { path: x, values: [a, b] }, { path: y, values: [a, b] } ]
+    cleanup: delete
+    delete: { tool: d, args: { id: "{{id}}" } }
+  - name: b
+    create: { tool: c2, args: { title: "{{marker}}" }, id: id }
+    read: { tool: g, args: { id: "{{id}}" } }
+    update: { tool: u, mode: field_patch, args: { id: "{{id}}", "{{field}}": "{{value}}" } }
+    fields: [ { path: x, values: [a, b] }, { path: y, values: [a, b] } ]
+    cleanup: delete
+    try_values: [ { arg: x, value: "v" } ]
+    delete: { tool: d, args: { id: "{{id}}" } }
+`, 'm.yaml');
+  assert.deepEqual(m.in5?.allow_args, ['replicas']);
+  const tools = ['c', 'c2', 'g', 'u', 'd'].map((name) => ({ name, inputSchema: { type: 'object', properties: { id: { type: 'string' }, x: { type: 'string' } } } }));
+  assert.equal(searchesUpdate(m, tools, m.resources[1]!), true, 'u is searched under resource a, so b does not try its values again');
+  assert.equal(tryValuesByProbes(m, tools, m.resources[1]!), false);
 });
 
 test('verdict: not observed carries the scope searched in its numbers (review M5); never held', () => {
@@ -391,4 +461,21 @@ test('verdict: not observed carries the scope searched in its numbers (review M5
   assert.equal(in5SearchVerdict(obs([]), RES).verdict, 'not tested');
   assert.equal(in5SearchVerdict(obs([], { args_total: 0, args: [] }), RES).verdict, 'not applicable');
   assert.match(in5SearchVerdict(obs([], { not_probed: 'the base call did not succeed' }), RES).reason, /not searched/);
+});
+
+test('reading: onsets, bursts and random failures never give a constraint tester mode counts (review of 7fcd9ef; reviewer adv sims)', async () => {
+  const strong = (k: { b_refusals: number; refusal: { names_arg: boolean; kind: string } }) => k.b_refusals >= 2 && k.refusal.names_arg && k.refusal.kind !== 'unstated';
+  const F: Answer = { ok: false, text: 'Invalid q: upstream request failed' };
+  const OK: Answer = { ok: true, text: 'ok' };
+  for (const [schema, role] of [[S({ q: { type: 'string' } }), 'write'], [S({ q: { type: 'integer', maximum: 5000 } }), 'write'], [S({ q: { type: 'array', items: { type: 'string' }, maxItems: 50 } }), 'write'], [S({ q: { type: 'string' } }), 'read']] as const) {
+    let bad = 0;
+    for (let t0 = 0; t0 < 80; t0++) if (readIn5(await simulate(schema, 'q', (_v, t) => (t >= t0 ? F : OK), { role })).confirmed.some(strong)) bad++;
+    for (let s0 = 0; s0 < 60; s0 += 3) for (const w of [1, 2, 3, 5, 8, 13, 30]) if (readIn5(await simulate(schema, 'q', (_v, t) => (t >= s0 && t < s0 + w ? F : OK), { role })).confirmed.some(strong)) bad++;
+    for (let seed = 1; seed <= 150; seed++) {
+      let x = (seed * 2654435761) >>> 0 || 1;
+      const rnd = () => ((x ^= x << 13), (x >>>= 0), (x ^= x >> 17), (x ^= x << 5), (x >>>= 0), x / 4294967296);
+      if (readIn5(await simulate(schema, 'q', () => (rnd() < 0.1 ? F : OK), { role })).confirmed.some(strong)) bad++;
+    }
+    assert.equal(bad, 0, `${JSON.stringify(schema)} ${role}`);
+  }
 });

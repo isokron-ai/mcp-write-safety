@@ -408,7 +408,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         }
         // why: spec R15-4: an object that could not be put back after an MWS-IN-4 control is used in no later test.
         if (d.unusable) {
-          results.push(...notRun(mod, rest, w, 'not tested', d.unusable));
+          // why: review of lane F7 (one record per requirement and write path): a requirement an earlier check of this resource
+          // already recorded for the same write path (MWS-IN-5 of a halted update tool) gets no second, generic record.
+          const had = (id: string) => results.some((r) => r.requirement === id && r.write_path.resource === w.resource && r.write_path.tool === w.tool);
+          results.push(...notRun(mod, rest.filter((id) => !had(id)), w, 'not tested', d.unusable));
           continue;
         }
         o.log(`${res.name}: ${c.check}…`);

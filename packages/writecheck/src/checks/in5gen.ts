@@ -103,9 +103,9 @@ export interface GenOptions {
   keep_prefix?: string | null;
   hints?: Hint[];
   /**
-   * Whether the tool reads or writes (default write). Safety defaults (review M8): on a read tool a number above 1 is sent only
-   * up to a declared maximum (a huge `limit`, `per_page` or `depth` is a load on the backend, not a probe); on a write tool an
-   * array has 0, 1 or 2 items, plus the declared maxItems (each item may be a write of its own).
+   * Whether the tool reads or writes (default write). Safety defaults (review M8, and of 7fcd9ef): on any tool a number outside
+   * [-1, 1] is sent only within declared bounds (a huge `limit`, `replicas` or `amount` is a load or a cost, not a probe); on a
+   * write tool an array has 0, 1 or 2 items, plus a declared maxItems of at most 100 (each item may be a write of its own).
    */
   role?: 'read' | 'write';
 }
@@ -195,15 +195,17 @@ export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: Gen
   if (t === 'integer' || t === 'number') {
     const declMax = num(s, 'maximum') ?? (num(s, 'exclusiveMaximum') !== null ? num(s, 'exclusiveMaximum')! - (t === 'integer' ? 1 : 0.5) : null);
     const declMin = num(s, 'minimum') ?? (num(s, 'exclusiveMinimum') !== null ? num(s, 'exclusiveMinimum')! + (t === 'integer' ? 1 : 0.5) : null);
-    const vals: number[] = read ? [0, 1, -1, ...(declMax !== null ? [declMax] : []), ...(declMin !== null ? [declMin] : [])] : [...NUMBERS, ...(t === 'number' ? FRACTIONS : [])];
-    if (!read && declMax !== null) vals.push(declMax);
+    // why: review of 7fcd9ef (4): on a real server a number is a quantity (replicas, a page size, an amount), so on every tool
+    // only 0, 1, -1 and the bounds the schema declares are sent; the extremes ±2^31 and 2^53 only where a declared bound allows.
+    const vals: number[] = [0, 1, -1, ...(declMax !== null ? [declMax] : []), ...(declMin !== null ? [declMin] : [])];
     if (t === 'number') vals.push(...FRACTIONS);
     for (const h of hints) if (h.n !== undefined && h.unit === 'value') vals.push(...(h.kind === 'max' ? [h.n, h.n + 1] : [h.n - 1, h.n]));
     const range = intRange(s);
     for (const v of [...new Set(vals)].sort((a, b) => a - b)) {
       if (range && (v < range[0] || v > range[1])) continue;
-      // why: review M8: on a read tool nothing above a declared maximum, and nothing above 1 where none is declared.
-      if (read && v > 1 && (declMax === null || v > declMax)) continue;
+      // why: review M8 and of 7fcd9ef (4): nothing above a declared maximum (or 1) and nothing below a declared minimum (or -1).
+      if (v > 1 && (declMax === null || v > declMax)) continue;
+      if (v < -1 && (declMin === null || v < declMin)) continue;
       const fromHint = hints.some((h) => h.n !== undefined && h.unit === 'value' && Math.abs(h.n - v) <= 1) && !(NUMBERS as readonly number[]).includes(v);
       add({ cls: fromHint ? 'hint' : 'number', value: v, dim: 'value', n: v, source: fromHint ? 'hint' : 'generator', why: fromHint ? `${v}, at a bound a text states` : String(v) });
     }
@@ -218,7 +220,8 @@ export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: Gen
     const sizes = new Set<number>();
     const grid = read ? ARRAY_SIZES : ([0, 1, 2] as const);
     for (const n of grid) sizes.add(Math.max(min, max !== null ? Math.min(n, max) : n));
-    if (!read && max !== null) sizes.add(max);
+    // why: review of 7fcd9ef (4): on a write tool a declared maxItems is sent only up to 100 items.
+    if (!read && max !== null && max <= 100) sizes.add(max);
     for (const h of hints) if (h.n !== undefined && h.unit === 'items') for (const n of h.kind === 'max' ? [h.n, h.n + 1] : [h.n - 1, h.n]) if (n >= 0) sizes.add(n);
     // why: review M6: the size of an array is estimated from one item before it is built.
     const per = bytes(it(0)) + 1;
