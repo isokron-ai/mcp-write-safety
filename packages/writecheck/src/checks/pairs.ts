@@ -106,7 +106,8 @@ export const pairsCheck: CheckModule = {
   plan(ctx: PlanContext, res: ResourceSpec): PlannedCheck {
     const w = wp(res.name, res.update!.tool);
     const base: PlannedCheck = { check: ID, version: VERSION, resource: res.name, runs: false, calls: [], writes: 0, creates: 0, notRun: [] };
-    const n = ctx.manifest.limits.pairs * ctx.manifest.limits.pair_repeats;
+    const reps = ctx.manifest.limits.pair_repeats ?? 1;
+    const n = ctx.manifest.limits.pairs * reps;
     const ctl = needsBase(res) ? hasControl(res, 'read', 'write') : hasControl(res, 'read', 'patch');
     const mode = ctx.manifest.server.processes;
     return {
@@ -114,7 +115,7 @@ export const pairsCheck: CheckModule = {
       runs: true,
       calls: [
         `validity x1: ${res.update!.tool} ${res.fields![0].path}, then ${res.fields![1].path}; ${res.read.tool}; and back in the other order; ${res.read.tool}`,
-        `test x${n}${ctx.manifest.limits.pair_repeats > 1 ? ` (${ctx.manifest.limits.pair_repeats} repeats of ${ctx.manifest.limits.pairs})` : ''}: ${needsBase(res) ? `${res.read.tool}; ` : ''}${res.update!.tool} ${res.fields![0].path} || ${res.update!.tool} ${res.fields![1].path} (released together, ${mode}); ${res.read.tool}`,
+        `test x${n}${reps > 1 ? ` (${reps} repeats of ${ctx.manifest.limits.pairs})` : ''}${ctx.manifest.limits.pair_budget ? ` against a pair budget of ${ctx.manifest.limits.pair_budget.repeats} × ${ctx.manifest.limits.pair_budget.pairs}` : ''}: ${needsBase(res) ? `${res.read.tool}; ` : ''}${res.update!.tool} ${res.fields![0].path} || ${res.update!.tool} ${res.fields![1].path} (released together, ${mode}); ${res.read.tool}`,
         ...(ctl ? [`control x${n}: ${needsBase(res) ? 'control read; control write' : 'control patch'} ${res.fields![0].path} || ${needsBase(res) ? 'control write' : 'control patch'} ${res.fields![1].path}; control read`] : []),
       ],
       writes: (1 + n) * 4 + (ctl ? n * 4 : 0),
@@ -124,19 +125,22 @@ export const pairsCheck: CheckModule = {
     const exp = pairsExperiment(res, ctx.manifest.limits.pairs, ctx.manifest.server.processes);
     const runs: ExperimentOutcome[] = [];
     // why: F5: the pair budget is repeats × pairs; each repeat is its own experiment (fresh servers per arm), and a stopped repeat ends the series.
-    for (let i = 0; i < ctx.manifest.limits.pair_repeats; i++) {
+    for (let i = 0; i < (ctx.manifest.limits.pair_repeats ?? 1); i++) {
       const out = await runExperiment({ session: ctx.session, driver: ctx.driver }, exp);
       runs.push(out);
       if (out.stopped) break;
     }
-    return { check: ID, version: VERSION, resource: res.name, data: runs.length === 1 ? runs[0] : { repeats: runs } };
+    // why: the budget is kept with the observation, so recheck judges against the budget the run was made under.
+    const budget = ctx.manifest.limits.pair_budget ?? null;
+    return { check: ID, version: VERSION, resource: res.name, data: runs.length === 1 && !budget ? runs[0] : { repeats: runs, budget } };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
-    const data = obs.data as ExperimentOutcome | { repeats: ExperimentOutcome[] };
+    const data = obs.data as ExperimentOutcome | { repeats: ExperimentOutcome[]; budget?: { repeats: number; pairs: number } | null };
     const runs = 'repeats' in data ? data.repeats : [data];
+    const budget = 'repeats' in data ? data.budget ?? null : null;
     const outs = runs.map((rec) => recount(rec.experiment, rec.arms, rec.simulated, rec.stopped));
-    return pairsBudgetVerdicts(outs, res, ctx.manifest.backend?.gate != null, ctx.manifest.limits.pair_budget);
+    return pairsBudgetVerdicts(outs, res, ctx.manifest.backend?.gate != null, budget);
   },
 };
 
@@ -145,13 +149,15 @@ export const pairsCheck: CheckModule = {
  * counts); otherwise the repeats' pairs are added up, and `not observed` says whether the run reached the budget: "not observed
  * (below budget)" is never a statement about the budget's bound. Pairs never give `held`.
  */
-export function pairsBudgetVerdicts(outs: ExperimentOutcome[], res: ResourceSpec, gateConfigured: boolean, budget: { repeats: number; pairs: number }): Result[] {
+export function pairsBudgetVerdicts(outs: ExperimentOutcome[], res: ResourceSpec, gateConfigured: boolean, budget: { repeats: number; pairs: number } | null): Result[] {
   const per = outs.map((o) => pairsVerdicts(o, res, gateConfigured)[0]!);
+  // why: review S2: with no declared budget and one repeat the record is exactly as before.
+  if (!budget && outs.length === 1) return per;
   const c = (o: ExperimentOutcome, k: string) => o.arms['test']?.counts[k] ?? 0;
   const run = outs.map((o) => c(o, 'valid'));
-  const met = outs.length >= budget.repeats && run.slice(0, budget.repeats).every((n) => n >= budget.pairs);
-  const budgetNumbers = { pair_budget: { repeats: budget.repeats, pairs: budget.pairs }, repeats_run: outs.length, pairs_run: run, budget_met: met };
-  const label = `${budget.repeats} × ${budget.pairs}`;
+  const met = !!budget && outs.length >= budget.repeats && run.slice(0, budget.repeats).every((n) => n >= budget.pairs);
+  const budgetNumbers = { pair_budget: budget ? { repeats: budget.repeats, pairs: budget.pairs } : null, repeats_run: outs.length, pairs_run: run, budget_met: met };
+  const label = budget ? `${budget.repeats} × ${budget.pairs}` : '';
   const decided = per.findIndex((r) => r.verdict === 'violated' || r.verdict === 'platform');
   if (decided >= 0) {
     const r = per[decided]!;
@@ -174,8 +180,8 @@ export function pairsBudgetVerdicts(outs: ExperimentOutcome[], res: ResourceSpec
   const wi = wilson(0, overlapped);
   const r3 = ruleOfThree(overlapped);
   Object.assign(numbers, { loss_rate_upper_95_wilson: wi ? Math.round(wi.hi * 10_000) / 10_000 : null, loss_rate_upper_95_rule_of_three: r3 ? Math.round(r3.approx * 10_000) / 10_000 : null });
-  const head = met ? `Not observed at the full pair budget (${label} pairs): ` : `Not observed, below the pair budget (${run.join(' + ')} of ${label} pairs run): `;
-  return [result('MWS-CONC-3', w, sc, 'not observed', `${head}no lost update in ${valid} simultaneous pairs (${overlapped} overlapped); the per-pair loss rate under these conditions could still be up to about ${r3 ? Math.round(r3.approx * 1000) / 10 : '?'}% (95% bound). ${NOT_OBSERVED_SENTENCE}`, { numbers, notes: gateNote })];
+  const head = !budget ? '' : met ? `Not observed at the full pair budget (${label} pairs): ` : `Not observed, below the pair budget (${run.join(' + ')} of ${label} pairs run): `;
+  return [result('MWS-CONC-3', w, sc, 'not observed', `${head}${head ? 'no' : 'No'} lost update in ${valid} simultaneous pairs (${overlapped} overlapped); the per-pair loss rate under these conditions could still be up to about ${r3 ? Math.round(r3.approx * 1000) / 10 : '?'}% (95% bound). ${NOT_OBSERVED_SENTENCE}`, { numbers, notes: gateNote })];
 }
 
 export function pairsVerdicts(out: ExperimentOutcome, res: ResourceSpec, gateConfigured: boolean): Result[] {

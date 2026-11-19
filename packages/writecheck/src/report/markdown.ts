@@ -92,11 +92,11 @@ export function renderMarkdown(d: ResultsDoc): string {
     L.push('');
     L.push('## Cells');
     L.push('');
-    L.push('One MUST requirement on one declared write tool (or on the server), merged across resources and scenarios (docs/CELLS.md). V violated, P platform, H held, NO not observed, NT not tested, na not applicable (with its rule in the records), SA self-attested. Read tools are not cells.');
+    L.push('One MUST requirement on one declared write tool (or on the server), merged across resources and scenarios (docs/CELLS.md). V violated, P platform, H held, NO not observed, NT not tested, na not applicable (with its rule in the records), SA self-attested; V? a violation whose evidence did not meet a validity rule (it does not count). Read tools are not cells.');
     L.push('');
     L.push(`| Tool | ${reqs.map(short).join(' | ')} |`);
     L.push(`|---|${reqs.map(() => '---').join('|')}|`);
-    for (const tool of [...new Set(cells.map((c) => c.tool))]) L.push(`| ${esc(tool)} | ${reqs.map((q) => { const c = cells.find((x) => x.tool === tool && x.requirement === q); return c ? ABBR[c.verdict] : ''; }).join(' | ')} |`);
+    for (const tool of [...new Set(cells.map((c) => c.tool))]) L.push(`| ${esc(tool)} | ${reqs.map((q) => { const c = cells.find((x) => x.tool === tool && x.requirement === q); return c ? `${ABBR[c.verdict]}${c.verdict === 'violated' && c.validity === 'harness-suspect' ? '?' : ''}` : ''; }).join(' | ')} |`);
   }
   L.push('');
   L.push('Verdicts: `violated` (reproduced; if a control ran, the platform API did not do the same), `platform` (the platform API does the same), `held` (the situation was forced and the server did the right thing), `not observed` (attempted, not forced, nothing seen; not evidence of safety), `not tested` (with the reason), `not applicable`, `self-attested`. There is no total and no score.');

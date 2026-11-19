@@ -156,12 +156,21 @@ export function buildPlan(manifest: Manifest, tools: Tool[], hosts: string[] = [
 
 export const planHash = (p: Plan): string => sha256(canonical(p)).slice(0, 16);
 
+/** Seconds as "about N s", "about N min" or "about N h M min". */
+export function durationText(sec: number): string {
+  if (sec < 90) return `about ${Math.max(1, Math.round(sec))} s`;
+  const min = Math.round(sec / 60);
+  return min < 90 ? `about ${min} min` : `about ${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
 export function renderPlan(p: Plan, hash: string): string {
   const L: string[] = [];
   L.push(`Plan ${hash} for target ${p.target.confirm} (environment: ${p.target.environment})`);
   L.push(`Hosts reached or given to the server: ${p.target.hosts.join(', ') || 'none (a local stdio server with no URL or host in its environment or command line)'}`);
   L.push(`${p.suite.name} ${p.suite.version}, requirements ${p.spec.version}, manifest sha256 ${p.manifest_sha256.slice(0, 16)}…, catalog ${p.catalog_fingerprint.slice(0, 23)}…`);
   L.push(`At most ${p.writes_at_most} writes and ${p.creates_at_most} created objects (write budget ${p.limits.write_budget}, ${p.limits.writes_per_second} writes per second).`);
+  // why: review S2: the time the writes take at the configured rate, so a large pair budget is seen before the run (rate limits too).
+  L.push(`Estimated time for the writes at ${p.limits.writes_per_second} per second: ${durationText(p.writes_at_most / p.limits.writes_per_second)} at most (reads, waits and server starts come on top).${p.limits.pair_budget ? ` Pair budget ${p.limits.pair_budget.repeats} × ${p.limits.pair_budget.pairs}: a target with a rate limit may answer 429, which stops the run.` : ''}`);
   L.push('No tool call was made to build this plan.');
   for (const w of p.warnings ?? []) L.push(`warning: ${w}`);
   for (const r of p.resources) {

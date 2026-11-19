@@ -6,7 +6,7 @@ The tester prints no total, no percentage and no letter. `cells` is a merged vie
 
 ## The cell universe
 
-- **Write tools:** the tools the declaration names as write tools (`declaredWriteTools` in `checks/coverage.ts`). A tool that is a read tool of a resource, or that declares `readOnlyHint: true`, is not a write tool. Read tools are not cells. Their records, such as MWS-IN-* on `get_ticket` or MWS-ANN-1 on `list_projects`, stay in `results` with no `cell`.
+- **Write tools (`cellTools` in `checks/cells.ts`):** the declared write tools (`declaredWriteTools` in `checks/coverage.ts`), plus every tool the declaration gives a write role, whatever its annotations say. The write roles are `create`, `update`, `delete`, `archive`, `selector`, `list_edit` (and its `insert`), `idempotency`, `versioned`, `no_version_check`, `multi`, `creates` and `input_required`. A write tool that declares `readOnlyHint: true` keeps its cells, so a violation through it is never dropped. Otherwise, a read tool of a resource, or a tool that declares `readOnlyHint: true` and has no write role, is not a cell. Its records, such as MWS-IN-* on `get_ticket` or MWS-ANN-1 on `list_projects`, stay in `results` with no `cell`. The rating counts a violation of a rated MUST requirement there anyway.
 - **Per-tool requirements:** the 23 MUST requirements other than MWS-CFG-1..3. Each makes one cell per write tool: `<requirement>@<tool>`.
 - **Server-level requirements:** MWS-CFG-1, MWS-CFG-2, MWS-CFG-3. Each makes one cell, `<requirement>@(server)`. Any record of these requirements lands there, whatever setting it names in `write_path.tool`.
 - SHOULD requirements make no cells.
@@ -32,7 +32,7 @@ A check needs to do nothing new. A record whose requirement is a per-tool MUST a
 
 A cell's verdict comes from its records, in this order:
 
-1. `violated`, then `platform`, then `held`, then `not observed`, then `self-attested`: the first verdict any record has decides.
+1. A counted `violated` record (its validity counts), then `platform`, then `held`. Then a `violated` record whose evidence does not count (`harness-suspect`): it ranks below `held`, and alone it makes the cell `violated` with `validity: harness-suspect`, shown as `V?` in the report. Then `not observed`, then `self-attested`. The first of these that any record has decides.
 2. If only `not applicable` and `not tested` remain:
    - all `not applicable` gives `not applicable`;
    - a check's `not applicable` beats a `not tested` row on the **same write path** (resource and tool), and the generic rows of the coverage and cell passes (scenarios `coverage` and `cells`). This is TB-B2-2 (t23).
@@ -59,9 +59,9 @@ A rule only excludes. A forced record from a check always overrides a rule.
 | MWS-UPD-1 | tools that modify an existing object | `UPD-1.create` (create-only), `UPD-1.delete` (delete-only), `UPD-1.replace` (declared `full_replace`: judged by MWS-CONC-2) |
 | MWS-UPD-2 | a `list_edit` tool, or a tool with a position, index, offset, pointer or path argument | `UPD-2.no-address` |
 | MWS-CONC-1 | every tool except create-only | `CONC-1.create` |
-| MWS-CONC-2, MWS-CONC-4 | tools that delete, replace a whole object, or take the version (a `{{version}}` in their declared arguments, or the resource's version argument in their schema), including `no_version_check` deletes | `CONC-2.create` / `CONC-4.create`, `CONC-2.no-version` / `CONC-4.no-version` |
+| MWS-CONC-2, MWS-CONC-4 | tools that delete, replace a whole object, or take the version: a `{{version}}` in their declared arguments, the resource's version argument in their schema, or a version-like argument name in the schema (`version`, `etag`, `revision`, `rev`, `if_match`, `if_unmodified…`, `precondition`, `…sha`, `lock_token`). This includes `no_version_check` deletes | `CONC-2.create` / `CONC-4.create`, `CONC-2.no-version` / `CONC-4.no-version` |
 | MWS-CONC-3 | every tool except create-only and delete-only | `CONC-3.create`, `CONC-3.delete` |
-| MWS-TGT-1 | tools whose schema has the resource's scope argument | `TGT-1.no-scope` |
+| MWS-TGT-1 | tools whose schema has the scope argument of any resource, or a container-like argument name (`project`, `workspace`, `namespace`, `org`, `team`, `tenant`, `space`, `parent`, `folder`, `board`, `repo`, `database`, `schema`, `collection`, `bucket`, `account`, `site`, `environment`, `cluster`, `index`, `table`…, alone or with `_id`, `_key`, `_name`, `_slug`; not `owner`, which more often names a person) | `TGT-1.no-scope` |
 | MWS-TGT-2 | the `selector` tool, or a tool with a filter-like argument (`filter`, `where`, `query`, `selector`, `match`, `q`, `all`, `*_prefix`, `*_filter`, `*_query`) | `TGT-2.no-selector` |
 | MWS-TGT-3 | creates whose resource declares `key`, or whose schema has `id`, `key`, `slug` or `uid` (not a `creates` entry) | `TGT-3.not-create`, `TGT-3.server-id` |
 | MWS-RES-1, MWS-RES-2, MWS-SEC-1 | every write tool | none |
@@ -86,8 +86,8 @@ Rules, all of which a record must meet:
 
 | Rule | The record must show |
 |---|---|
-| V-STEPS | the step ids of its trace (at least one), so the capture shows what happened |
-| V-RUN | the run completed: it was not stopped by the write budget, a rate limit or an error |
+| V-STEPS | the step ids of its trace (at least one), so the capture shows what happened. Exempt (`STEPS_EXEMPT` in `validity.ts`): evidence that is not a call trace. That is MWS-ANN-4 from the catalog, MWS-CFG-4 from the launch observation, and MWS-ANN-1 from the ledger (objects created through a tool marked read-only). An exempt record names its evidence in `evidence.basis` |
+| V-RUN | the run was not cut short by the write budget, a rate limit (429) or an interrupt (`cutShortOf` in `validity.ts`). A stop for another reason keeps the record's violations: clean-up not finished, a fixture not put back, or bystanders lost. Those stops are safety facts of their own and say nothing against evidence already recorded. The rating gives a stopped run no letter better than "Not rated yet" |
 | V-ACK | every write the violation rests on was acknowledged as a success: from `evidence.acknowledged`, or for barrier pairs from `numbers` (`both_ok >= lost >= 1`) |
 | V-READBACK | the final state was read back (`evidence.read_back`; not `false`) |
 
@@ -97,15 +97,17 @@ Classes:
 - **platform:** meets every rule, and its attribution is `unresolved` (spec 8.2 rule 3: no control arm decided whether the backend does the same). It counts, and is printed apart as "attribution unresolved". An undisclosed loss is the caller's loss either way. Leaving the control block out of a declaration must not turn a violation into no finding. A record where the control arm showed the platform does the same has the verdict `platform`, not `violated`.
 - **harness-suspect:** failed at least one rule. It does not count until a re-run reproduces it. `failed` names the rules.
 
-`synthetic_fault` is true where the violation was provoked with a status the gate injected (gated.ts: MWS-RES-2 and MWS-ATOM-1 under `held-request`, or `evidence.synthetic_fault`). It is printed. It does not disqualify the record, because what is tested is how the server reports a backend refusal.
+`synthetic_fault` is true where the violation was provoked with a status the gate injected. That covers MWS-RES-2 and MWS-ATOM-1 under the scenarios `held-request`, `write-faults` and `multi-item.res2`, or any record with `evidence.synthetic_fault`. A connection cut after the backend applied the write (`*.unknown-outcome`) is not synthetic, because a lost answer is a real-world event. The flag is printed. It does not disqualify the record, because what is tested is how the server reports a backend refusal.
 
-## Pair budget
+A test (`test/unit/cells.test.ts`) scans `src/checks` and fails on any `violated` producer that neither sets `steps` nor is an exemption.
 
-The MWS-CONC-3 barrier-pair record carries:
+## Pair budget (opt-in)
 
-- `numbers.pair_budget`: `{ repeats, pairs }`, default 2 × 1500;
+A pair budget is declared with `limits.pair_budget` or `--pair-budget 2x1500`; there is none by default. With one, the MWS-CONC-3 barrier-pair record carries:
+
+- `numbers.pair_budget`: `{ repeats, pairs }`;
 - `repeats_run`;
 - `pairs_run`: the valid pairs per repeat;
 - `budget_met`.
 
-`not observed` reads "Not observed at the full pair budget" or "Not observed, below the pair budget (N of R × P pairs run)". Pairs never give `held`, and a stopped repeat gives `not tested`. See MANIFEST.md, `limits`.
+`not observed` then reads "Not observed at the full pair budget" or "Not observed, below the pair budget (N of R × P pairs run)". Without a budget and with one repeat, the record is as before. Pairs never give `held`, and a stopped repeat gives `not tested`. See MANIFEST.md, `limits`.

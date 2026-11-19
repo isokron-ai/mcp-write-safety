@@ -8,7 +8,7 @@ import { Capture, verifyCapture } from '../../src/core/capture.js';
 import { evaluate } from '../../src/core/conditions.js';
 import { assertEgress, egressFor, EgressBlocked, lockGlobalFetch } from '../../src/core/egress.js';
 import { Ledger, openRuns, readLedger, refuseIfOpen } from '../../src/core/ledger.js';
-import { defaultWriteBudget, parseManifestText } from '../../src/core/manifest.js';
+import { parseManifestText } from '../../src/core/manifest.js';
 import { guardProblem } from '../../src/core/safety.js';
 import { deleteArgs } from '../../src/core/driver.js';
 import { adjustResults } from '../../src/checks/coverage.js';
@@ -118,11 +118,12 @@ test('capture: redacted blobs, and the closing hash detects an edited file', () 
 
 test('manifest: the minimum loads; guessed markers, unknown keys and unsafe choices are refused', () => {
   const m = parseManifestText(MIN, 'm.yaml');
-  // why: F5: undeclared, the write budget is sized to fit the pair budget (2 × 1500 barrier pairs) the run will send.
-  assert.equal(m.limits.write_budget, defaultWriteBudget(m.resources, m.limits.pairs, m.limits.pair_repeats));
-  assert.deepEqual([m.limits.pairs, m.limits.pair_repeats], [1500, 2]);
+  // why: review S2: the pair budget is opt-in; a manifest with no limits keeps the defaults (and its plan hash).
+  assert.equal(m.limits.write_budget, 500);
+  assert.equal(m.limits.pair_repeats, undefined);
+  assert.equal(m.limits.pair_budget, undefined);
   assert.equal(m.limits.writes_per_second, 5);
-  assert.ok(m.limits.pairs >= 40, 'enough runs to reach 30 overlapped pairs');
+  assert.equal(m.limits.pairs, 40, 'enough runs to reach 30 overlapped pairs');
   assert.equal(m.resources[0]!.update!.mode, 'field_patch');
   assert.throws(() => parseManifestText(MIN.replace('cleanup: delete', 'cleanup: delete # guessed'), 'm.yaml'), /guessed/);
   assert.throws(() => parseManifestText(MIN.replace('cleanup: delete', 'cleanup: delete\n    colour: red'), 'm.yaml'), /unknown key colour/);

@@ -27,8 +27,8 @@ export interface ResultsDoc {
   manifest: { path: string; sha256: string };
   plan: { hash: string };
   results: Result[];
-  /** One entry per cell (MUST requirement × declared write tool, plus the server-level requirements): docs/CELLS.md. Not an aggregate: no total, no percentage. */
-  cells: Cell[];
+  /** One entry per cell (MUST requirement × declared write tool, plus the server-level requirements): docs/CELLS.md. Not an aggregate: no total, no percentage. Optional in mws-results/1 (absent in files written before the cell pass). */
+  cells?: Cell[];
   not_built: NotRun[];
   measurements: Measurements | null;
   leftovers: Leftover[];

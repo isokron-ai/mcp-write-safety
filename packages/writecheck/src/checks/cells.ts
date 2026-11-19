@@ -58,8 +58,39 @@ const schemaProps = (t: Tool | undefined): string[] => {
 };
 const mentionsVersion = (args: unknown): boolean => /\{\{\s*\??\s*version\s*\}\}/.test(JSON.stringify(args ?? null));
 
+/** Argument names that carry the version the caller read (S1: schema heuristic, in doubt applicable). */
+const VERSION_ARG = /version|etag|revision|^rev$|_rev$|if_?match|if_?unmodified|precondition|sha$|^lock_?token$/i;
+/** Argument names that usually name a scope or container (S1: schema heuristic for MWS-TGT-1, in doubt applicable). */
+const SCOPE_ARG = /^(project|workspace|namespace|org|organization|organisation|team|tenant|space|scope|parent|container|folder|board|repo|repository|database|db|schema|collection|bucket|account|site|environment|env|cluster|zone|region|index|table)(_?(id|key|name|slug))?$/i;
+
+/**
+ * The tools that are cells: the declared write tools (coverage.ts), and every tool the manifest gives a write role, whatever its
+ * annotations say. A write tool marked readOnlyHint: true keeps its cells, so a violation through it is never dropped (review B3).
+ */
+export function cellTools(m: Manifest, tools: Tool[]): Map<string, string> {
+  const out = new Map(declaredWriteTools(m, tools));
+  const add = (tool: string | undefined, res: string) => { if (tool && !out.has(tool)) out.set(tool, res); };
+  for (const res of m.resources) {
+    add(res.create?.tool, res.name);
+    add(res.update?.tool, res.name);
+    add(res.delete?.tool, res.name);
+    add(res.archive?.tool, res.name);
+    add(res.selector?.tool, res.name);
+    add(res.list_edit?.tool, res.name);
+    add(res.list_edit?.insert.tool, res.name);
+    add(res.idempotency?.tool, res.name);
+    for (const x of res.versioned) add(x.tool, res.name);
+    for (const x of res.no_version_check) add(x, res.name);
+    for (const x of res.multi) add(x.tool, res.name);
+    for (const x of res.creates) add(x.tool, res.name);
+    for (const x of res.input_required) add(x.tool, res.name);
+  }
+  // A read tool of a resource stays out unless a write role above named it.
+  return out;
+}
+
 export function toolRoles(m: Manifest, tools: Tool[]): Map<string, ToolRoles> {
-  const writes = declaredWriteTools(m, tools);
+  const writes = cellTools(m, tools);
   const out = new Map<string, ToolRoles>();
   const get = (tool: string): ToolRoles | null => {
     if (!writes.has(tool)) return null;
@@ -98,7 +129,10 @@ export function toolRoles(m: Manifest, tools: Tool[]): Map<string, ToolRoles> {
     if (!r.resources.length) r.resources.push(resource);
     const res = m.resources.find((x) => r.resources.includes(x.name));
     if (res?.version?.arg && r.args.includes(res.version.arg)) r.versioned = true;
+    if (r.args.some((a) => VERSION_ARG.test(a))) r.versioned = true;
     if (res?.scope && r.args.includes(res.scope.arg)) r.scope_arg = true;
+    // why: review S1: a scope argument of any resource, or a name that usually names a container, makes MWS-TGT-1 apply.
+    if (r.args.some((a) => m.resources.some((x) => x.scope?.arg === a) || SCOPE_ARG.test(a))) r.scope_arg = true;
     if (r.args.some((a) => /idempoten/i.test(a))) r.idempotency_key = true;
     if (!r.create && !r.append_create && !r.patch && !r.replace && !r.delete && !r.list_edit && !r.input_required && !r.multi) r.other = true;
   }
@@ -232,6 +266,14 @@ export function dedupe(results: Result[]): Result[] {
 }
 
 function decide(recs: Result[], rule: NotApplicable | null): { verdict: Verdict; deciding: Result; rule: string | null } {
+  // why: review M1: a violated record whose evidence does not count ranks below held; a counted one decides.
+  const suspect = (r: Result) => r.verdict === 'violated' && r.validity?.counts === false;
+  const counted = recs.filter((r) => r.verdict === 'violated' && !suspect(r));
+  if (counted.length) return { verdict: 'violated', deciding: counted[0]!, rule: null };
+  for (const v of ['platform', 'held'] as Verdict[]) {
+    const hit = recs.filter((r) => r.verdict === v);
+    if (hit.length) return { verdict: v, deciding: hit[0]!, rule: null };
+  }
   for (const v of RANK) {
     const hit = recs.filter((r) => r.verdict === v);
     if (hit.length) return { verdict: v, deciding: hit[0]!, rule: null };
