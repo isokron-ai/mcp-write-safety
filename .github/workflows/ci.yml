@@ -1,0 +1,164 @@
+# Tests every pull request and every push to main on GitHub's runners.
+#
+#   writecheck-unit     typecheck and unit tests of packages/writecheck
+#   tiny-tracker        examples/tiny-tracker's own `npm test`, by file over 3 shards (TT_GATE=1: a
+#                       missing python3 or jsonschema fails its tests instead of skipping them)
+#   cli                 the rest of packages/writecheck's `npm test` (integration and regression, the CLI
+#                       against tiny-tracker and the fakes), over 6 shards; the long
+#                       test/integration/tiny-tracker.test.ts is split by top-level test
+#   coverage            checks from the shards' manifests that every test file, and every top-level test of
+#                       a split file, ran in exactly one shard (scripts/ci/test-shard.mjs verify)
+#   spec                the issue form is the one scripts/gen-comment-form.mjs generates from spec/mws.md
+#
+# The commands are those of release-npm.yml's check job. No secrets, read-only token, no
+# pull_request_target: a pull request from a fork runs with the same permissions as any other.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  writecheck-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/writecheck
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - name: Unit tests
+        run: npm run test:unit
+
+  tiny-tracker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      TT_GATE: "1"
+    defaults:
+      run:
+        working-directory: examples/tiny-tracker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: python3 with jsonschema (the schema and digest checks)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/py"
+          "$RUNNER_TEMP/py/bin/pip" install --disable-pip-version-check --quiet jsonschema==4.26.0 referencing==0.37.0
+          echo "$RUNNER_TEMP/py/bin" >> "$GITHUB_PATH"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+        if: matrix.shard == 1
+      - run: npm run build
+      - name: Tests (shard ${{ matrix.shard }}/3)
+        run: >-
+          node ../../scripts/ci/test-shard.mjs run --shard ${{ matrix.shard }}/3
+          --dir dist/test --manifest "$RUNNER_TEMP/tiny-tracker-${{ matrix.shard }}.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: shard-tiny-tracker-${{ matrix.shard }}
+          path: ${{ runner.temp }}/tiny-tracker-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build tiny-tracker (the CLI's self-test runs against it)
+        working-directory: examples/tiny-tracker
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Build writecheck
+        working-directory: packages/writecheck
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Tests (shard ${{ matrix.shard }}/6)
+        working-directory: packages/writecheck
+        env:
+          TINY_TRACKER_DIR: ${{ github.workspace }}/examples/tiny-tracker
+        run: >-
+          node ../../scripts/ci/test-shard.mjs run --shard ${{ matrix.shard }}/6
+          --dir dist/test --exclude dist/test/unit
+          --split dist/test/integration/tiny-tracker.test.js
+          --weights ../../scripts/ci/weights-writecheck.json
+          --manifest "$RUNNER_TEMP/cli-${{ matrix.shard }}.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: shard-cli-${{ matrix.shard }}
+          path: ${{ runner.temp }}/cli-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  coverage:
+    needs: [tiny-tracker, cli]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: shard-*
+          path: ${{ runner.temp }}/shards
+          merge-multiple: true
+      - name: tiny-tracker shards cover every test file once
+        working-directory: examples/tiny-tracker
+        run: node ../../scripts/ci/test-shard.mjs verify --dir dist/test --src test "$RUNNER_TEMP"/shards/tiny-tracker-*.json
+      - name: cli shards cover every test file and every top-level test of a split file once
+        working-directory: packages/writecheck
+        run: >-
+          node ../../scripts/ci/test-shard.mjs verify --dir dist/test --src test
+          --exclude dist/test/unit --exclude test/unit "$RUNNER_TEMP"/shards/cli-*.json
+
+  spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: The issue form matches spec/mws.md (Annex C and section 9 list the same requirement IDs)
+        run: node scripts/gen-comment-form.mjs --check
