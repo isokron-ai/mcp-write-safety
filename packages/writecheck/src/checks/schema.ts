@@ -32,7 +32,8 @@ import { searchesUpdate } from './in5search.js';
 import { mcpDefinedError, notRun, toolByName, wp, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext, type Tool } from './types.js';
 
 const ID = 'schema-probes';
-const VERSION = '1';
+// why: version 2: the MWS-IN-2 misspelled argument is chosen from the sorted names, not from the schema's property order.
+const VERSION = '2';
 
 export const RAW_ERROR = /(panic:|goroutine \d+|runtime error|json: cannot unmarshal|unexpected end of JSON input|invalid character '.' looking for|Traceback \(most recent call last\)|TypeError:|ReferenceError:|\bat Object\.|\bat async |NullPointerException|SyntaxError: Unexpected token|undefined method)/;
 const STATUS_IN_TEXT = /("status"\s*:\s*(4|5)\d\d\b|"code"\s*:\s*(4|5)\d\d\b|\bHTTP (4|5)\d\d\b|\b(4|5)\d\d (Not Found|Bad Request|Conflict|Unprocessable|Forbidden|Unauthorized)\b)/;
@@ -160,13 +161,19 @@ function itemFor(s: unknown, i: number): unknown {
   return t === 'integer' || t === 'number' ? i + 1 : t === 'boolean' ? i % 2 === 0 : `mwsc${i}`;
 }
 
-/** A name one letter away from a real argument (the first non-id argument), for MWS-IN-2. */
-function misspelling(props: string[]): string | null {
-  const p = props.find((x) => x.length > 3 && !ID_LIKE.test(x)) ?? props.find((x) => x.length > 3);
+/**
+ * The argument MWS-IN-2 misspells, and the misspelling: a name one letter away from the first non-id argument in sorted order (the
+ * order of the schema's properties is not part of the test, so it must not choose the target). Null where none is long enough.
+ */
+export function misspelledArgument(props: string[]): { arg: string; as: string } | null {
+  const sorted = [...props].sort();
+  const p = sorted.find((x) => x.length > 3 && !ID_LIKE.test(x)) ?? sorted.find((x) => x.length > 3);
   if (!p) return null;
   const m = p.slice(0, 1) + p.slice(2);
-  return props.includes(m) ? null : m;
+  return props.includes(m) ? null : { arg: p, as: m };
 }
+
+const misspelling = (props: string[]): string | null => misspelledArgument(props)?.as ?? null;
 
 /** The invalid cases a tool's input schema implies (one property at a time), plus the undefined arguments. */
 export function probeCases(schema: unknown, skip: Set<string>): ProbeCase[] {

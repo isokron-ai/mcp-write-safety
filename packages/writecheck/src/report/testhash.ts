@@ -1,85 +1,124 @@
 /**
- * The per-record test_hash (`mws-test-hash/1`): a hash of exactly what defines one record's test, so that two runs of the same
- * test on two server builds can be compared record by record even when the builds offer different tool lists. It is
- * `sha256:` + sha256 of the RFC 8785 canonical JSON of:
+ * The per-record test_hash (`mws-test-hash/2`): a hash of exactly what defines one record's test, so that two runs of the same
+ * test on two server builds can be compared record by record even when the builds offer different tool lists. Each record also
+ * carries `test_inputs`, the parts the hash is made of, so that compare can apply owner rule A (a fix after which the same call
+ * is accepted by both builds is the same test) where two hashes differ. test_hash is `sha256:` + sha256 of the RFC 8785
+ * canonical JSON of { format, tester, rest, tools, probed?, subject?, extras? }:
  *
- *   format        "mws-test-hash/1"
- *   tester        { name, version, commit }  (the build stamp; commit null when the build was not stamped)
- *   spec          the MWS version the requirements come from
- *   requirement, level
- *   scenario      { id, version }  (the procedure and its version)
- *   write_path    { resource, tool, arm }
- *   tools         for the write path's tool and every tool the record's resource block names: the narrowed input schema
- *                 (narrowSchema: `type`, the subschemas of the arguments the test uses, `required` restricted to those, and
- *                 the names of any other required argument), or null where the catalog has no such tool. Descriptions,
- *                 titles, annotations, output schemas, icons and `_meta` are left out, and so are optional arguments the test
- *                 does not use: a fix that only adds optional arguments, or bounds an argument the test does not send, keeps
- *                 the hash.
- *   subject       only for a requirement that judges part of the tool entry itself (SUBJECT_FACETS): that part of the write
- *                 path tool's entry, whole (the input schema for MWS-IN-2/3/5/6/7, the annotations for MWS-ANN-*, the
- *                 description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3). Such a record also carries test_hash_core, the
- *                 hash without `subject`, so compare can tell a changed subject from a changed test.
- *   resource      the record's resource block as loaded, or null for (server), (catalog) and (declaration) records
- *   declaration   every other top-level member except `server`, `target`, `resources`, `limits`, `prefix` and `source`
- *   guard         target.guard, where declared (it decides whether the run goes on between checks)
- *   limits        every limit except `write_budget`, and except `writes_per_second` but for MWS-CONC-* records
- *   extras        settings a tester build reads from its command line that change a verdict, where present (the
- *                 MWS-IN-5 reading, `in5_reading`, for MWS-IN-5 records)
+ *   format   "mws-test-hash/2"
+ *   tester   { name, version, commit, dirty } of the build that judged the record (commit null when unstamped)
+ *   rest     `sha256:` of the canonical JSON of: spec, requirement, level, scenario { id, version }, write_path, case (where
+ *            the procedure makes several records on one write path), the record's resource block as loaded (paths relative to
+ *            the manifest), the declaration (every top-level member except server, target, resources, limits, prefix; with
+ *            `review` the answers in force, a `--review` file included; and `server` restricted to restart, processes, decode,
+ *            extract and protocol), target.guard, and every limit except write_budget (writes_per_second only for MWS-CONC-*
+ *            and MWS-RETRY-2)
+ *   tools    for the write path's tool and every tool the resource block names: a ToolShape of the arguments the test sends
+ *            (`p`: per argument a Shape, `r`: their required names, `ro`: the other required names, `h`: the keywords that
+ *            constrain the arguments together), or null for a tool the catalog does not list
+ *   probed   MWS-IN-1 to IN-7 only: a ToolShape of every argument of the write path's tool (the schema probes probe each)
+ *   subject  the judged part of the entry other than the schema, hashed: the annotations for MWS-ANN-*, the description for
+ *            MWS-IN-5, MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3
+ *   extras   MWS-IN-5 only: the tester's reading (`in5_reading`) and the sha256 of each in5.docs document (`in5_docs`)
  *
- * Not included, on purpose: the rest of the tool list, the catalog fingerprint, the manifest sha256 and the plan hash, the
- * server block and the rest of the target block (they name the build under test, not the test), target.provenance, and
- * anything the run measured.
+ * A Shape is `h`, the hash of the argument's schema without `properties`, `required` and a single-schema `items` (with every
+ * local `$ref` reachable from it resolved), `p`, a Shape per nested property, `r`, the nested required names, and `i`, the
+ * Shape of the array items. Annotation keywords (description,
+ * title, examples, $comment, deprecated) are left out of every schema, except for MWS-IN-5, whose search reads descriptions.
+ * A top-level `$ref` (the argument object behind a definition), `$anchor` references and draft-07 `dependencies` are followed.
+ *
+ * test_hash_core, on a record whose requirement judges part of the entry, is the same without `subject` (and without `probed`
+ * for MWS-IN-2/3/5/6/7). Not included, on purpose: the rest of the tool list, the catalog fingerprint, the manifest sha256 and
+ * the plan hash, the server block other than the members above, the rest of the target block, target.provenance, and anything
+ * the run measured. MANIFEST.md (test_hash) is the reference.
  */
 
+import { readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 
-import type { Manifest } from '../core/manifest.js';
-import { canonical, isObj, sha256 } from '../core/util.js';
+import type { Manifest, ResourceSpec } from '../core/manifest.js';
+import { furtherProbes } from '../checks/readback.js';
+import { versionLeftOutRuns } from '../checks/stale.js';
+import { ID_LIKE, misspelledArgument } from '../checks/schema.js';
+import { canonical, isObj, parsePath, sha256 } from '../core/util.js';
 import { TEST_HASH_FORMAT } from '../core/identity.js';
 import { SPEC_VERSION } from '../requirements.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import type { Result } from './verdicts.js';
 
-/** Manifest members that never enter a test hash (see the header). */
+/** Manifest members that never enter a test hash as a whole (see the header; four members of `server` do, SERVER_HASHED). */
 export const HASH_EXCLUDED_TOP = ['server', 'target', 'resources', 'limits', 'prefix', 'source'] as const;
 export const HASH_EXCLUDED_LIMITS = ['write_budget', 'writes_per_second'] as const;
+/** The members of `server` that change what a test does (M6): the stop kind of a restart, a second process, how answers are read, the protocol revision. */
+export const SERVER_HASHED = ['restart', 'processes', 'decode', 'extract', 'protocol'] as const;
 
-/** The part of the tool entry a requirement judges, which then enters its hash whole. */
+/** The part of the tool entry a requirement judges. */
 export type Facet = 'schema' | 'annotations' | 'description';
 export function subjectFacets(requirement: string): Facet[] {
-  if (/^MWS-IN-[23567]$/.test(requirement)) return ['schema'];
+  if (requirement === 'MWS-IN-5') return ['schema', 'description'];
+  if (/^MWS-IN-[2367]$/.test(requirement)) return ['schema'];
   if (/^MWS-ANN-\d+$/.test(requirement)) return ['annotations'];
   if (['MWS-CONC-5', 'MWS-RETRY-2', 'MWS-TGT-3'].includes(requirement)) return ['description'];
   return [];
 }
 
-/** Command-line settings of a tester build that change a verdict (set by the run before stamping; see the header). */
+/** The schema-probe requirements (MWS-IN-1 to IN-7): their records are about every argument of the write path tool (`probed`). */
+export const isSchemaProbe = (requirement: string): boolean => /^MWS-IN-[1-7]$/.test(requirement);
+
+/** Command-line settings of a tester build that change a verdict, and inputs read from outside the manifest (set by the run before stamping; see the header). */
 export interface HashExtras {
   in5_reading?: string;
+  /** sha256 of each document MWS-IN-5 reads (in5.docs), by its path relative to the manifest. */
+  in5_docs?: Record<string, string | null>;
 }
 
 /**
  * The extras of this build, where its modules define them: the MWS-IN-5 reading (checks/in5search.ts, IN5_READING) is read
- * when that module exists, so a build without the MWS-IN-5 search hashes nothing for it.
+ * when that module exists, so a build without the MWS-IN-5 search hashes nothing for it. With a manifest, the content of the
+ * documents MWS-IN-5 reads (`in5.docs`).
  */
-export async function hashExtras(): Promise<HashExtras> {
+export async function hashExtras(m?: Manifest): Promise<HashExtras> {
+  const out: HashExtras = {};
+  if (m?.in5?.docs?.length) {
+    const docs: Record<string, string | null> = {};
+    for (const d of m.in5.docs) {
+      const k = relativized(d, baseOf(m)) as string;
+      try {
+        docs[k] = sha256(readFileSync(d));
+      } catch {
+        docs[k] = null;
+      }
+    }
+    out.in5_docs = docs;
+  }
   const spec = '../checks/in5search.js';
   try {
-    const m = (await import(spec)) as { IN5_READING?: { value?: unknown } };
-    return typeof m.IN5_READING?.value === 'string' ? { in5_reading: m.IN5_READING.value } : {};
+    const mod = (await import(spec)) as { IN5_READING?: { value?: unknown } };
+    if (typeof mod.IN5_READING?.value === 'string') out.in5_reading = mod.IN5_READING.value;
   } catch (e) {
-    if ((e as { code?: string }).code === 'ERR_MODULE_NOT_FOUND') return {};
-    // why: re-review: a build that has the module but cannot load it must not hash IN-5 records as if it had no reading.
-    process.stderr.write(`warning: the MWS-IN-5 reading could not be read (${(e as Error).message}); MWS-IN-5 test hashes do not include it\n`);
-    return {};
+    if ((e as { code?: string }).code !== 'ERR_MODULE_NOT_FOUND') {
+      // why: re-review: a build that has the module but cannot load it must not hash IN-5 records as if it had no reading.
+      process.stderr.write(`warning: the MWS-IN-5 reading could not be read (${(e as Error).message}); MWS-IN-5 test hashes do not include it\n`);
+    }
   }
+  return out;
+}
+
+/** The tester build that judged a record: name, version, git commit (null when unstamped) and whether its tree was dirty. */
+export interface TesterId {
+  name: string;
+  version: string;
+  commit: string | null;
+  dirty?: boolean | null;
 }
 
 export interface TestHashContext {
   manifest: Manifest;
   tools: { name: string; [k: string]: unknown }[];
-  tester?: { name: string; version: string; commit: string | null };
+  tester?: TesterId;
   extras?: HashExtras;
+  /** The review answers in force (a `--review` file replaces the manifest's block); default the manifest's. */
+  review?: unknown;
 }
 
 /** JSON-only copy (drops undefined and functions the way JSON does), so canonical() never meets a non-JSON value. */
@@ -122,7 +161,8 @@ export function usedArgs(t: string, res: unknown, underTest: boolean): Set<strin
     else if (isObj(v)) {
       const mine = typeof v['tool'] === 'string' ? v['tool'] === t : own;
       for (const [k, x] of Object.entries(v)) {
-        if (mine && k === 'args' && isObj(x)) for (const a of Object.keys(x)) if (!a.includes('{{')) out.add(a);
+        // why: review F3: selector.narrow is merged into the selector's args (checks/targeting.ts).
+        if (mine && (k === 'args' || k === 'narrow') && isObj(x)) for (const a of Object.keys(x)) if (!a.includes('{{')) out.add(a);
         argsKeys(x, mine);
       }
     }
@@ -140,57 +180,233 @@ export function usedArgs(t: string, res: unknown, underTest: boolean): Set<strin
   return out;
 }
 
-/** Top-level schema keywords that constrain the arguments as a whole: they enter whole (re-review 3). */
-export const SCHEMA_WHOLE = ['allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'dependentRequired', 'dependentSchemas', 'additionalProperties', 'patternProperties', 'propertyNames', 'unevaluatedProperties', 'minProperties', 'maxProperties'] as const;
+/** Top-level schema keywords that constrain the arguments as a whole: they enter whole (re-review 3; `dependencies` is draft-07's spelling of dependentRequired and dependentSchemas). */
+export const SCHEMA_WHOLE = ['allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else', 'dependentRequired', 'dependentSchemas', 'dependencies', 'additionalProperties', 'patternProperties', 'propertyNames', 'unevaluatedProperties', 'minProperties', 'maxProperties'] as const;
 
-/** Resolve a local JSON Pointer (`#/$defs/X`, `#/definitions/X`) in a schema; undefined when it does not resolve. */
-function pointer(root: unknown, ref: string): unknown {
-  if (!ref.startsWith('#')) return undefined;
-  let v: unknown = root;
-  for (const raw of ref.slice(1).split('/').filter((x) => x !== '')) {
-    const k = decodeURIComponent(raw).replace(/~1/g, '/').replace(/~0/g, '~');
-    if (Array.isArray(v)) v = v[Number(k)];
-    else if (isObj(v)) v = v[k];
-    else return undefined;
+/**
+ * Keywords that only annotate a schema: left out of every hashed schema, except for MWS-IN-5, whose search reads bounds stated
+ * in descriptions (checks/in5gen.ts). A keyword is left out only where it stands as a keyword of a schema object, never where it
+ * is the name of an argument (`properties.description`).
+ */
+export const ANNOTATION_KEYWORDS = ['description', 'title', 'examples', '$comment', 'deprecated'] as const;
+
+/** Schema keywords whose value is a map of names to schemas. */
+const SCHEMA_MAPS = ['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'];
+/** Schema keywords whose value is a schema or a list of schemas. */
+const SCHEMA_SUBS = ['items', 'additionalItems', 'prefixItems', 'contains', 'additionalProperties', 'unevaluatedProperties', 'unevaluatedItems', 'propertyNames', 'not', 'if', 'then', 'else', 'allOf', 'anyOf', 'oneOf'];
+
+/** An object without a prototype, so that a member named `constructor` or `__proto__` is only ever a member. */
+const dict = <T = unknown>(): Record<string, T> => Object.create(null) as Record<string, T>;
+const own = (o: unknown, k: string): boolean => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
+
+/** A schema with the annotation keywords left out (schema-aware: argument names are kept), as plain JSON. */
+export function stripAnnotations(schema: unknown, keep = false): unknown {
+  if (keep) return plain(schema);
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (!isObj(v)) return plain(v);
+    const out = dict();
+    for (const k of Object.keys(v)) {
+      const x = v[k];
+      if ((ANNOTATION_KEYWORDS as readonly string[]).includes(k)) continue;
+      if (SCHEMA_MAPS.includes(k) && isObj(x)) {
+        const m = dict();
+        for (const n of Object.keys(x)) m[n] = walk(x[n]);
+        out[k] = m;
+      } else if (k === 'dependencies' && isObj(x)) {
+        const m = dict();
+        for (const n of Object.keys(x)) m[n] = Array.isArray(x[n]) ? plain(x[n]) : walk(x[n]);
+        out[k] = m;
+      } else if (SCHEMA_SUBS.includes(k)) out[k] = walk(x);
+      else out[k] = plain(x);
+    }
+    return out;
+  };
+  return walk(schema);
+}
+
+/** Percent-decode a JSON Pointer token; a token that is not valid percent-encoding is taken as written. */
+function decodeToken(raw: string): string {
+  let k = raw;
+  try {
+    k = decodeURIComponent(raw);
+  } catch {
+    k = raw;
   }
-  return v;
+  return k.replace(/~1/g, '/').replace(/~0/g, '~');
 }
 
 /**
- * The part of an input schema a test depends on: `type`; the subschemas of the arguments the test uses; `required` restricted
- * to them and `required_other`, the names of the other required arguments; every top-level keyword that constrains the
- * arguments together (SCHEMA_WHOLE), whole; and `refs`, every local `$ref` (`#/$defs/…`, `#/definitions/…`) reachable from
- * those, resolved, by pointer (Pydantic and FastMCP put argument types there). A remote `$ref` enters as written.
+ * Resolve a local reference in a schema: a JSON Pointer (`#/$defs/X`, `#/definitions/X`, `#`) or a plain-name fragment
+ * (`#Name`, an `$anchor`, or a draft-07 `$id: "#Name"`). Undefined when it does not resolve.
  */
-export function narrowSchema(schema: unknown, used: Set<string>): unknown {
-  if (!isObj(schema)) return plain(schema);
-  const props = isObj(schema['properties']) ? schema['properties'] : {};
-  const req = Array.isArray(schema['required']) ? schema['required'].filter((x): x is string => typeof x === 'string') : [];
-  const keep: Record<string, unknown> = {};
-  for (const u of [...used].sort()) if (u in props) keep[u] = plain(props[u]);
-  const whole: Record<string, unknown> = {};
-  for (const k of SCHEMA_WHOLE) if (k in schema) whole[k] = plain(schema[k]);
-  const refs: Record<string, unknown> = {};
+export function resolveRef(root: unknown, ref: string): unknown {
+  if (!ref.startsWith('#')) return undefined;
+  const frag = ref.slice(1);
+  if (frag === '' || frag.startsWith('/')) {
+    let v: unknown = root;
+    for (const raw of frag.split('/').slice(1)) {
+      const k = decodeToken(raw);
+      if (Array.isArray(v)) v = /^\d+$/.test(k) ? v[Number(k)] : undefined;
+      else if (isObj(v)) v = own(v, k) ? v[k] : undefined;
+      else return undefined;
+    }
+    return v;
+  }
+  let hit: unknown;
+  const find = (v: unknown): void => {
+    if (hit !== undefined) return;
+    if (Array.isArray(v)) v.forEach(find);
+    else if (isObj(v)) {
+      if (v['$anchor'] === frag || v['$id'] === `#${frag}`) {
+        hit = v;
+        return;
+      }
+      for (const k of Object.keys(v)) find(v[k]);
+    }
+  };
+  find(root);
+  return hit;
+}
+
+/** Every local `$ref` reachable from `node`, resolved against `root` (annotations left out unless `keep`), by its text. */
+function reachableRefs(node: unknown, root: unknown, keep: boolean): Record<string, unknown> {
+  const refs = dict();
   const walk = (v: unknown): void => {
     if (Array.isArray(v)) v.forEach(walk);
     else if (isObj(v)) {
-      for (const [k, x] of Object.entries(v)) {
-        if (k === '$ref' && typeof x === 'string' && x.startsWith('#') && !(x in refs)) {
-          const t = pointer(schema, x);
-          refs[x] = t === undefined ? null : plain(t);
+      for (const k of Object.keys(v)) {
+        const x = v[k];
+        if (k === '$ref' && typeof x === 'string' && x.startsWith('#')) {
+          if (own(refs, x)) continue;
+          const t = resolveRef(root, x);
+          refs[x] = t === undefined ? null : stripAnnotations(t, keep);
           walk(t);
         } else walk(x);
       }
     }
   };
-  walk(keep);
-  walk(whole);
-  return { type: plain(schema['type']), properties: keep, required: req.filter((r) => used.has(r)).sort(), required_other: req.filter((r) => !used.has(r)).sort(), ...(Object.keys(whole).length ? { whole } : {}), ...(Object.keys(refs).length ? { refs } : {}) };
+  walk(node);
+  return refs;
 }
 
-function toolPart(tools: TestHashContext['tools'], name: string, used: Set<string>): unknown {
-  const t = tools.find((x) => x.name === name);
-  return t ? narrowSchema(t['inputSchema'], used) : null;
+/**
+ * The schema whose `properties` describe the arguments: the input schema itself, or, where it is a top-level `$ref` (the
+ * whole argument object behind a definition, as some schema generators write it), the definition it points at, merged under the
+ * schema's own other members (followed up to 8 references deep).
+ */
+export function effectiveSchema(schema: unknown): unknown {
+  let cur = schema;
+  for (let i = 0; i < 8 && isObj(cur) && typeof cur['$ref'] === 'string' && !isObj(cur['properties']); i++) {
+    const t = resolveRef(schema, cur['$ref'] as string);
+    if (!isObj(t)) break;
+    const { $ref: _r, ...rest } = cur;
+    cur = { ...t, ...rest };
+  }
+  return cur;
+}
+
+const shortHash = (v: unknown): string => sha256(canonical(v)).slice(0, 32);
+
+/**
+ * One argument's schema as compare needs it for rule A: `h`, a hash of the schema with its `properties` and `required` left
+ * out (and every local `$ref` reachable from the rest, resolved); `p`, the same for each nested property; `r`, the nested
+ * required names. Annotation keywords are left out unless `keep`.
+ */
+export interface Shape {
+  h: string;
+  p?: Record<string, Shape>;
+  r?: string[];
+  /** The shape of an array's items, where `items` is one schema. */
+  i?: Shape;
+}
+
+export function shapeOf(schema: unknown, root: unknown, keep = false): Shape {
+  if (!isObj(schema)) return { h: shortHash({ s: plain(schema) }) };
+  const s = stripAnnotations(schema, keep) as Record<string, unknown>;
+  const core = dict();
+  const items = isObj(schema['items']) ? schema['items'] : null;
+  for (const k of Object.keys(s)) if (k !== 'properties' && k !== 'required' && !(k === 'items' && items)) core[k] = s[k];
+  const props = isObj(schema['properties']) ? schema['properties'] : null;
+  const req = Array.isArray(schema['required']) ? [...new Set(schema['required'].filter((x): x is string => typeof x === 'string'))].sort() : null;
+  const out: Shape = { h: shortHash({ s: core, refs: reachableRefs(core, root, keep) }) };
+  if (props) {
+    const p = dict<Shape>();
+    for (const n of Object.keys(props).sort()) p[n] = shapeOf(props[n], root, keep);
+    out.p = p;
+  }
+  if (req) out.r = req;
+  if (items) out.i = shapeOf(items, root, keep);
+  return out;
+}
+
+/** A tool's input schema as compare needs it for rule A: the arguments the test sends (`p`), their required names (`r`), the other required names (`ro`), and `h`, the keywords that constrain the arguments together. */
+export interface ToolShape {
+  h: string;
+  p: Record<string, Shape>;
+  r: string[];
+  ro: string[];
+  /** true where the schema allows no undeclared argument (additionalProperties: false). */
+  x?: true;
+}
+
+/** `used`: the arguments the test sends (null: every declared argument, for the schema probes, which probe each of them). */
+export function toolShape(schema: unknown, used: Set<string> | null, keep = false): ToolShape {
+  const eff = effectiveSchema(schema);
+  if (!isObj(eff)) return { h: shortHash({ s: plain(schema) }), p: dict(), r: [], ro: [] };
+  const props = isObj(eff['properties']) ? eff['properties'] : dict();
+  const req = Array.isArray(eff['required']) ? [...new Set(eff['required'].filter((x): x is string => typeof x === 'string'))].sort() : [];
+  const whole = dict();
+  whole['type'] = plain(eff['type']);
+  for (const k of SCHEMA_WHOLE) if (own(eff, k)) whole[k] = stripAnnotations(eff[k], keep);
+  const args = Object.keys(props).filter((a) => !used || used.has(a)).sort();
+  const p = dict<Shape>();
+  for (const a of args) p[a] = shapeOf(props[a], schema, keep);
+  const inArgs = new Set(args);
+  return { h: shortHash({ s: whole, refs: reachableRefs(whole, schema, keep) }), p, r: req.filter((x) => inArgs.has(x)), ro: req.filter((x) => !inArgs.has(x)), ...(eff['additionalProperties'] === false ? { x: true as const } : {}) };
+}
+
+/**
+ * The part of an input schema a test depends on, for a reader (testHashInput shows the shapes that enter the hash): `type`; the
+ * subschemas of the arguments the test uses; `required` restricted to them and `required_other`, the names of the other required
+ * arguments; every top-level keyword that constrains the arguments together (SCHEMA_WHOLE), whole; and `refs`, every local
+ * `$ref` reachable from those, resolved. Annotation keywords are left out unless `keep`. A top-level `$ref` is followed.
+ */
+export function narrowSchema(schema: unknown, used: Set<string>, keep = false): unknown {
+  const eff = effectiveSchema(schema);
+  if (!isObj(eff)) return plain(schema);
+  const props = isObj(eff['properties']) ? eff['properties'] : dict();
+  const req = Array.isArray(eff['required']) ? eff['required'].filter((x): x is string => typeof x === 'string') : [];
+  const keepProps = dict();
+  for (const u of [...used].sort()) if (own(props, u)) keepProps[u] = stripAnnotations(props[u], keep);
+  const whole = dict();
+  for (const k of SCHEMA_WHOLE) if (own(eff, k)) whole[k] = stripAnnotations(eff[k], keep);
+  const refs = { ...reachableRefs(keepProps, schema, keep), ...reachableRefs(whole, schema, keep) };
+  return { type: plain(eff['type']), properties: keepProps, required: req.filter((r) => used.has(r)).sort(), required_other: req.filter((r) => !used.has(r)).sort(), ...(Object.keys(whole).length ? { whole } : {}), ...(Object.keys(refs).length ? { refs } : {}) };
+}
+
+/** What compare reads to decide whether two records are the same test (rule A; MANIFEST.md, test_hash). Stored on each record. */
+export interface TestInputs {
+  scheme: string;
+  tester: TesterId;
+  /** Hash of every input other than the tester, the tool shapes, the probed arguments, the subject and the extras. */
+  rest: string;
+  /** Hash of the part of `rest` that is not the record itself: spec, resource block, declaration, guard and limits (compare's set-up rule reads it). */
+  context?: string;
+  /** Per tool the record's resource block names (and the write path's tool): the arguments the test sends, or null for a tool the catalog does not list. */
+  tools: Record<string, ToolShape | null>;
+  /** Schema probes (MWS-IN-1 to IN-7): every argument of the write path's tool, or null where the catalog does not list it. */
+  probed?: ToolShape | null;
+  /**
+   * What the procedure chose from the schemas, where that choice changes the calls it sends (review F1, F2): `further`, the
+   * MWS-UPD-1 further probes of the update tool (case, argument, value, the alternatives); `address`, per list-edit tool,
+   * whether it declares the by-id and by-position address arguments. Equal on both builds or another test.
+   */
+  chosen?: Record<string, unknown>;
+  /** Hashes of the judged parts of the entry other than the schema (annotations, description). */
+  subject?: Record<string, string | null>;
+  /** Settings of the tester build and inputs read from outside the manifest that change a verdict (MWS-IN-5: the reading, the documents' sha256). In clear, so a recheck can say its own. */
+  extras?: Record<string, unknown>;
 }
 
 function facetPart(tools: TestHashContext['tools'], name: string, f: Facet): unknown {
@@ -200,52 +416,187 @@ function facetPart(tools: TestHashContext['tools'], name: string, f: Facet): unk
 }
 
 /** The members of the manifest every record's hash includes (computed once per run). */
-export function sharedInputs(m: Manifest): { declaration: unknown; limits: unknown; guard: unknown; rate: number } {
-  const declaration = Object.fromEntries(Object.entries(m).filter(([k]) => !(HASH_EXCLUDED_TOP as readonly string[]).includes(k)));
+export function sharedInputs(m: Manifest, review?: unknown): { declaration: unknown; limits: unknown; guard: unknown; rate: number } {
+  const decl: Record<string, unknown> = Object.fromEntries(Object.entries(m).filter(([k]) => !(HASH_EXCLUDED_TOP as readonly string[]).includes(k)));
+  if (review !== undefined) decl['review'] = review;
+  // why: review M6: these members of `server` change what a test does, not which build it runs on.
+  const sv = m.server as unknown as Record<string, unknown>;
+  decl['server'] = Object.fromEntries(SERVER_HASHED.filter((k) => sv?.[k] !== undefined).map((k) => [k, sv[k]]));
   const limits = Object.fromEntries(Object.entries(m.limits).filter(([k]) => !(HASH_EXCLUDED_LIMITS as readonly string[]).includes(k)));
-  return { declaration: relativized(plain(declaration), baseOf(m)), limits: plain(limits), guard: m.target.guard ? plain(m.target.guard) : null, rate: m.limits.writes_per_second };
+  return { declaration: relativized(plain(decl), baseOf(m)), limits: plain(limits), guard: m.target.guard ? plain(m.target.guard) : null, rate: m.limits.writes_per_second };
 }
 
-/** What the hash is computed over, for one record (exported so a reader can see exactly what entered it). `core`: without the subject. */
-export function testHashInput(r: Pick<Result, 'requirement' | 'level' | 'scenario' | 'write_path'>, ctx: TestHashContext, shared = sharedInputs(ctx.manifest), core = false): Record<string, unknown> {
+type RecordKey = Pick<Result, 'requirement' | 'level' | 'scenario' | 'write_path'> & { case?: string };
+
+/** Requirements whose verdict depends on the pace of writes: the concurrency checks and MWS-RETRY-2's simultaneous pairs. */
+const paced = (req: string): boolean => /^MWS-CONC-/.test(req) || req === 'MWS-RETRY-2';
+
+/** The records of the read-after-write procedure that rest on its further probes (checks/readback.ts, the same conditions). */
+const furtherProbed = (r: RecordKey, res: ResourceSpec): boolean =>
+  ['MWS-UPD-1', 'MWS-RES-1', 'MWS-RES-2'].includes(r.requirement) && r.scenario.id === 'read-after-write' && !!res.update && r.write_path.tool === res.update.tool && res.update.mode !== 'full_replace' && !!res.create && !!res.cleanup && res.cleanup !== 'leave';
+
+/** The first segment of an argument path (`a.b` → `a`, `a[0]` → `a`). */
+const topName = (path: string): string => {
+  try {
+    const first = parsePath(path)[0];
+    return typeof first === 'string' ? first : path;
+  } catch {
+    return path;
+  }
+};
+
+/** The declared top-level properties of an input schema. */
+const declaredProps = (schema: unknown): Record<string, unknown> => (isObj(schema) && isObj(schema['properties']) ? schema['properties'] : {});
+
+/** Requirements whose records name no resource block but whose procedure acts on every resource (the launch checks). */
+export const acrossResources = (req: string): boolean => /^MWS-CFG-/.test(req);
+
+/** The record's test inputs (mws-test-hash/2), from the manifest and the tool list. */
+export function testInputs(r: RecordKey, ctx: TestHashContext, shared = sharedInputs(ctx.manifest, ctx.review)): TestInputs {
   const res = ctx.manifest.resources.find((x) => x.name === r.write_path.resource) ?? null;
-  const names = new Set<string>([r.write_path.tool, ...(res ? toolsNamedIn(res) : [])]);
-  const tools: Record<string, unknown> = {};
-  const underTest = new Set([r.write_path.tool, res?.update?.tool, res?.create?.tool].filter((x): x is string => !!x));
-  for (const n of [...names].sort()) tools[n] = toolPart(ctx.tools, n, usedArgs(n, res ? plain(res) : null, underTest.has(n)));
-  const facets = subjectFacets(r.requirement);
-  const limits = /^MWS-CONC-/.test(r.requirement) ? { ...(shared.limits as Record<string, unknown>), writes_per_second: shared.rate } : shared.limits;
+  // why: review p16 F: the launch checks (MWS-CFG-*) have no resource block of their own; in the read-only and deny modes
+  // they call every declared write tool on objects of every resource, so every resource block and its tools are their test.
+  const all = !res && acrossResources(r.requirement) ? ctx.manifest.resources : null;
+  const blocks = res ? [res] : (all ?? []);
+  // why: review p16 E: a tool the manifest's `calls` declares is called with those args (annotation effects, the launch checks).
+  const calls = (ctx.manifest.calls ?? {}) as Record<string, { args?: unknown } | undefined>;
+  const names = new Set<string>([r.write_path.tool, ...blocks.flatMap((b) => [...toolsNamedIn(b)]), ...(all ? Object.keys(calls) : [])]);
+  const keep = r.requirement === 'MWS-IN-5';
+  const further = res && furtherProbed(r, res) ? furtherProbes(ctx.tools.find((x) => x.name === res.update!.tool)?.['inputSchema'], res) : null;
+  const tools: Record<string, ToolShape | null> = {};
+  for (const n of [...names].sort()) {
+    const t = ctx.tools.find((x) => x.name === n);
+    if (!t) {
+      tools[n] = null;
+      continue;
+    }
+    const used = new Set<string>();
+    for (const b of blocks.length ? blocks : [null]) {
+      const underTest = n === r.write_path.tool || n === b?.update?.tool || n === b?.create?.tool;
+      for (const a of usedArgs(n, b ? plain(b) : null, underTest)) used.add(a);
+    }
+    const declared = Object.prototype.hasOwnProperty.call(calls, n) ? calls[n]?.args : undefined;
+    if (isObj(declared)) for (const a of Object.keys(declared)) if (!a.includes('{{')) used.add(a);
+    // why: review F2: a list-edit tool is addressed by whichever address argument its schema declares.
+    for (const b of blocks) if (b.list_edit?.tool === n) for (const a of [b.list_edit.address.by_id, b.list_edit.address.by_position]) if (a) used.add(topName(a));
+    // why: review F1: the further probes send arguments of the update tool that the schema, not the manifest, picks.
+    if (further && n === res!.update!.tool) for (const q of further) for (const a of [q.prop, ...q.alts.map((x) => x.prop)]) used.add(a);
+    tools[n] = toolShape(t['inputSchema'], used, keep);
+  }
+  const chosen: Record<string, unknown> = {};
+  if (further) chosen['further'] = further.map((q) => ({ case: q.name, arg: q.prop, value: plain(q.value), named: q.named, alts: q.alts.map((x) => x.prop) }));
+  const address: Record<string, unknown> = {};
+  for (const b of blocks) {
+    const le = b.list_edit;
+    if (!le || !names.has(le.tool)) continue;
+    const props = declaredProps(ctx.tools.find((x) => x.name === le.tool)?.['inputSchema']);
+    address[le.tool] = { by_id: !!le.address.by_id && Object.hasOwn(props, topName(le.address.by_id)), by_position: !!le.address.by_position && Object.hasOwn(props, topName(le.address.by_position)) };
+  }
+  if (Object.keys(address).length) chosen['address'] = address;
+  // MWS-IN-2 misspells one argument of the probed tool: which one follows from the names, the skipped ones and the closed schema.
+  if (res && r.requirement === 'MWS-IN-2' && r.scenario.id === 'schema-probes') {
+    const sc = ctx.tools.find((x) => x.name === r.write_path.tool)?.['inputSchema'];
+    const closed = !(isObj(sc) && (sc['additionalProperties'] === true || isObj(sc['additionalProperties'])));
+    if (closed) {
+      const props = Object.keys(declaredProps(sc));
+      const skip = new Set<string>();
+      // (as checks/schema.ts protectedProps: on the update tool, every argument of the base call but the field's, and id-like ones)
+      if (res.update?.tool === r.write_path.tool) {
+        const fieldArg = res.fields?.[0]?.arg;
+        const base = isObj(res.update.args) ? Object.keys(res.update.args).filter((k) => !k.includes('{{')) : [];
+        for (const k of base) if (k !== fieldArg) skip.add(k);
+        for (const k of props) if (!base.includes(k) && k !== fieldArg && ID_LIKE.test(k)) skip.add(k);
+      }
+      chosen['misspelled'] = misspelledArgument(props.filter((k) => !skip.has(k)));
+    }
+  }
+  // why: review F4: MWS-CONC-2 adds a run that leaves the version argument out only where the tool's schema does not require it.
+  if (res && r.requirement === 'MWS-CONC-2' && res.version?.arg) {
+    const runs = versionLeftOutRuns(res).filter((x) => !res.no_version_check.includes(x.tool));
+    // (read as checks/stale.ts reads it: the input schema's own `required`)
+    const requires = (tool: string): boolean => {
+      const sc = ctx.tools.find((x) => x.name === tool)?.['inputSchema'];
+      return isObj(sc) && Array.isArray(sc['required']) && sc['required'].includes(res.version!.arg!);
+    };
+    if (runs.length) chosen['version_left_out'] = runs.map((x) => ({ tool: x.tool, runs: !requires(x.tool) }));
+  }
+  const limits = paced(r.requirement) ? { ...(shared.limits as Record<string, unknown>), writes_per_second: shared.rate } : shared.limits;
   const extras: Record<string, unknown> = {};
-  if (r.requirement === 'MWS-IN-5' && ctx.extras?.in5_reading !== undefined) extras['in5_reading'] = ctx.extras.in5_reading;
-  return {
-    format: TEST_HASH_FORMAT,
-    tester: ctx.tester ?? { name: SUITE_NAME, version: SUITE_VERSION, commit: null },
+  if (r.requirement === 'MWS-IN-5') {
+    if (ctx.extras?.in5_reading !== undefined) extras['in5_reading'] = ctx.extras.in5_reading;
+    if (ctx.extras?.in5_docs !== undefined) extras['in5_docs'] = ctx.extras.in5_docs;
+  }
+  const restInput = {
     spec: SPEC_VERSION,
     requirement: r.requirement,
     level: r.level,
     scenario: { id: r.scenario.id, version: r.scenario.version },
     write_path: { resource: r.write_path.resource, tool: r.write_path.tool, arm: r.write_path.arm },
-    tools,
-    ...(facets.length && !core ? { subject: Object.fromEntries(facets.map((f) => [f, facetPart(ctx.tools, r.write_path.tool, f)])) } : {}),
-    resource: res ? relativized(plain(res), baseOf(ctx.manifest)) : null,
+    ...(r.case !== undefined ? { case: r.case } : {}),
+    resource: res ? relativized(plain(res), baseOf(ctx.manifest)) : all ? relativized(plain(all), baseOf(ctx.manifest)) : null,
     declaration: shared.declaration,
     ...(shared.guard !== null ? { guard: shared.guard } : {}),
     limits,
-    ...(Object.keys(extras).length ? { extras } : {}),
+  };
+  const contextInput = { spec: restInput.spec, resource: restInput.resource, declaration: restInput.declaration, guard: shared.guard, limits: shared.limits };
+  const wt = ctx.tools.find((x) => x.name === r.write_path.tool);
+  const facets = subjectFacets(r.requirement).filter((f) => f !== 'schema');
+  const t = ctx.tester ?? { name: SUITE_NAME, version: SUITE_VERSION, commit: null };
+  return {
+    scheme: TEST_HASH_FORMAT,
+    tester: { name: t.name, version: t.version, commit: t.commit, dirty: t.dirty ?? null },
+    rest: `sha256:${sha256(canonical(restInput))}`,
+    context: `sha256:${sha256(canonical(contextInput))}`,
+    tools,
+    ...(isSchemaProbe(r.requirement) ? { probed: wt ? toolShape(wt['inputSchema'], null, keep) : null } : {}),
+    ...(Object.keys(chosen).length ? { chosen: plain(chosen) as Record<string, unknown> } : {}),
+    ...(facets.length ? { subject: Object.fromEntries(facets.map((f) => [f, wt ? `sha256:${sha256(canonical(facetPart(ctx.tools, r.write_path.tool, f)))}` : null])) } : {}),
+    ...(Object.keys(extras).length ? { extras: plain(extras) as Record<string, unknown> } : {}),
   };
 }
 
-export function testHash(r: Pick<Result, 'requirement' | 'level' | 'scenario' | 'write_path'>, ctx: TestHashContext, shared?: ReturnType<typeof sharedInputs>, core = false): string {
-  return `sha256:${sha256(canonical(testHashInput(r, ctx, shared, core)))}`;
+/** The member that is the record's subject (the judged schema) when the requirement judges the schema. */
+const subjectIsProbed = (requirement: string): boolean => subjectFacets(requirement).includes('schema');
+
+/** What test_hash is the sha256 of (canonical JSON), from stored inputs. `core`: without the judged part of the entry. */
+export function hashBody(requirement: string, i: TestInputs, core = false): Record<string, unknown> {
+  return {
+    format: i.scheme,
+    tester: i.tester,
+    rest: i.rest,
+    tools: i.tools,
+    ...(i.probed !== undefined && !(core && subjectIsProbed(requirement)) ? { probed: i.probed } : {}),
+    ...(i.chosen !== undefined ? { chosen: i.chosen } : {}),
+    ...(i.subject !== undefined && !core ? { subject: i.subject } : {}),
+    ...(i.extras !== undefined ? { extras: i.extras } : {}),
+  };
 }
 
-/** Stamp `test_hash` on every record (in place; the member is added last, so the other members keep their order). */
+export const hashOfInputs = (requirement: string, i: TestInputs, core = false): string => `sha256:${sha256(canonical(hashBody(requirement, i, core)))}`;
+
+/** What the hash is computed over, for one record, with the parts behind `rest` written out (so a reader can see exactly what entered it). */
+export function testHashInput(r: RecordKey, ctx: TestHashContext, shared = sharedInputs(ctx.manifest, ctx.review), core = false): Record<string, unknown> {
+  const i = testInputs(r, ctx, shared);
+  return hashBody(r.requirement, i, core);
+}
+
+export function testHash(r: RecordKey, ctx: TestHashContext, shared?: ReturnType<typeof sharedInputs>, core = false): string {
+  return hashOfInputs(r.requirement, testInputs(r, ctx, shared ?? sharedInputs(ctx.manifest, ctx.review)), core);
+}
+
+/** Set test_hash, test_hash_core (subject requirements) and test_inputs on a record from its inputs (in place; added last). */
+export function applyInputs(r: Result, i: TestInputs): void {
+  const x = r as Result & { test_hash?: string; test_hash_core?: string; test_inputs?: TestInputs };
+  delete x.test_hash;
+  delete x.test_hash_core;
+  delete x.test_inputs;
+  x.test_hash = hashOfInputs(r.requirement, i);
+  if (subjectFacets(r.requirement).length) x.test_hash_core = hashOfInputs(r.requirement, i, true);
+  x.test_inputs = i;
+}
+
+/** Stamp `test_hash` (and test_hash_core, test_inputs) on every record (in place; the members are added last, so the other members keep their order). */
 export function stampTestHashes(results: Result[], ctx: TestHashContext): void {
-  const shared = sharedInputs(ctx.manifest);
-  for (const r of results) {
-    const x = r as Result & { test_hash?: string; test_hash_core?: string };
-    x.test_hash = testHash(r, ctx, shared);
-    if (subjectFacets(r.requirement).length) x.test_hash_core = testHash(r, ctx, shared, true);
-    else delete x.test_hash_core;
-  }
+  const shared = sharedInputs(ctx.manifest, ctx.review);
+  for (const r of results) applyInputs(r, testInputs(r as RecordKey, ctx, shared));
 }

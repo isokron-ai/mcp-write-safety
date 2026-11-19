@@ -165,7 +165,7 @@ export const gatedCheck: CheckModule = {
       `MWS-RES-2: fail ${res.update!.tool}'s last mutating backend request (status 500); ${res.read.tool}`,
       ...(res.update!.mode === 'composite' ? ['MWS-ATOM-1/2: fail the second and the last mutating backend request of the composite update; read back'] : []),
     ];
-    // why: every write path the plan lists for MWS-CONC-1 gets a record (gate-2 Grafana N3): a field patch with no version is the
+    // why: every write path the plan lists for MWS-CONC-1 gets a record (gate-2 N3): a field patch with no version is the
     // gated check's alone (the stale-write check defers to it), so a missing control.write is reported here, never dropped.
     const nr = !res.version?.arg && res.update!.mode !== 'full_replace' && !hasControl(res, 'read', 'patch', 'write') ? [result('MWS-CONC-1', w, { id: ID, version: VERSION }, 'not tested', `${res.update!.tool} takes no version, so MWS-CONC-1 is tested by holding its write; the control arm, which shows whether the platform's API refuses a write from outdated state, needs a control block with read, patch and write (missing: ${(['read', 'patch', 'write'] as const).filter((k) => !hasControl(res, k)).map((k) => `control.${k}`).join(', ')})`)] : [];
     return { ...base, runs: true, calls, writes: 4 + n * 2 * 6 + n * 4 + n * 4 + 4 + 6, notRun: nr };
@@ -195,7 +195,7 @@ export const gatedCheck: CheckModule = {
     // The control arm of the held-request procedure (spec 7.4): A's write, carrying what A read, sent to the platform API after B's
     // write has been applied. The two writers match the tool arm's: there both are calls through the same server, so here both are
     // the same declared write. For a whole-object tool each is control.write from the read before either wrote, with its own change
-    // (gate-2 K8s B3: a partial patch for B is another kind of writer, and where the platform's control is field ownership it is
+    // (gate-2 B3: a partial patch for B is another kind of writer, and where the platform's control is field ownership it is
     // refused for a reason the tool arm does not have); for a field patch each is control.patch of its field. Forced like the tool
     // arm, never left to timing. A whole-object tool with no control.write has no like-for-like control: kind 'patch' below, and
     // the verdict keeps the attribution unresolved.
@@ -336,7 +336,7 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
   }
   // MWS-CONC-1 (proxy-assisted)
   if (!o.conc1 && !res.version?.arg && hasControl(res, 'read', 'patch', 'write')) {
-    // why: planned but not run: the record says why (gate-2 Grafana N3), never dropped.
+    // why: planned but not run: the record says why (gate-2 N3), never dropped.
     const la = o.learned[0];
     const why = o.independent === false ? o.skipped ?? 'the two fields are not independent one after the other; see MWS-UPD-1' : la && !la.hold ? `${res.update!.tool} sent no mutating request to the backend in the learning pass, so its write could not be held` : 'the held-request procedure did not run';
     out.push(result('MWS-CONC-1', w, sc, 'not tested', `held request: ${why}`, { notes: [route] }));
