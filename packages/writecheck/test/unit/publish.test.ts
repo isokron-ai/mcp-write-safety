@@ -75,7 +75,7 @@ const CASES: Record<Transition, { before: Rec[]; after: Rec[] }> = {
   'subject-changed': { before: [R('subject', 'violated', 'a1', { req: 'MWS-IN-2', core: 'c1' })], after: [R('subject', 'not observed', 'b1', { req: 'MWS-IN-2', core: 'c1' })] },
   'schema-fixed': { before: [R('schema', 'violated', 'a1', { req: 'MWS-IN-3', core: 'c1' })], after: [R('schema', 'held', 'b1', { req: 'MWS-IN-3', core: 'c1' })] },
   // Hashed under another scheme on one side.
-  'scheme-changed': { before: [withInputs(R('scheme', 'violated', null), { scheme: 'mws-test-hash/1', hash: h('a1') })], after: [R('scheme', 'held', 'a1')] },
+  'scheme-changed': { before: [withInputs(R('scheme', 'violated', null))], after: [R('scheme', 'held', 'a1')] },
   // A stored test_hash that does not follow from the record's own test inputs.
   'hash-mismatch': { before: [withInputs(R('mismatch', 'violated', null), { hash: h('a1') })], after: [withInputs(R('mismatch', 'held', null), { hash: h('a1') })] },
   // violated → held on one test, judged by a build that states no commit: no fix is claimed.
@@ -96,7 +96,8 @@ const resultsDoc = (results: Rec[], cells: { key: string; verdict: string }[]) =
   results,
   cells,
   evidence: { capture: null, checksums: 'SHA256SUMS', signature: null },
-  identity: { test_hash: TEST_HASH_FORMAT, tester: { commit: 'a'.repeat(40) }, tools_fingerprint: 't1', server: { repo: 'https://example.invalid/server', commit: 'b'.repeat(40) }, backend: [{ name: 'db', image: null, version: null }], gaps: ['server.image: not stated'] },
+  // (most records carry a bare test_hash, as files of mws-test-hash/1 do; the ones built by withInputs carry /2 inputs)
+  identity: { test_hash: 'mws-test-hash/1', tester: { commit: 'a'.repeat(40) }, tools_fingerprint: 't1', server: { repo: 'https://example.invalid/server', commit: 'b'.repeat(40) }, backend: [{ name: 'db', image: null, version: null }], gaps: ['server.image: not stated'] },
 });
 
 /** compare.json and compare.md as `mcp-writecheck compare` writes them for the cases above. */

@@ -208,7 +208,8 @@ const miniDoc = (results: Result[], over: Record<string, unknown> = {}) => ({
   plan: { hash: 'p1' },
   results,
   evidence: { capture: null, checksums: 'SHA256SUMS', signature: null },
-  identity: { test_hash: TEST_HASH_FORMAT, tester: { commit: 'a'.repeat(40) }, tools_fingerprint: 't1', server: { repo: 'r', commit: null }, backend: [], gaps: [] },
+  // (these records carry a test_hash without test inputs, as files of mws-test-hash/1 do: a /2 file must carry them)
+  identity: { test_hash: 'mws-test-hash/1', tester: { commit: 'a'.repeat(40) }, tools_fingerprint: 't1', server: { repo: 'r', commit: null }, backend: [], gaps: [] },
   ...over,
 });
 

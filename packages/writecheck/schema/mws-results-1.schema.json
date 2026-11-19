@@ -421,7 +421,7 @@
               },
               "chosen": {
                 "type": "object",
-                "description": "What the procedure chose from the schemas where that choice changes its calls: further (the MWS-UPD-1 further probes), address (per list-edit tool, which address arguments it declares), version_left_out (MWS-CONC-2: per tool, whether the run without the version argument is made)."
+                "description": "What the procedure chose from the schemas where that choice changes its calls: further (the MWS-UPD-1 further probes), address (per list-edit tool, which address arguments it declares), version_left_out (MWS-CONC-2: per tool, whether the run without the version argument is made), misspelled (MWS-IN-2: the argument the probe misspells and the misspelling)."
               }
             }
           },

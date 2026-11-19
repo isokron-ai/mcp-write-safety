@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { firstWriteOf, postEvaluate } from '../../src/checks/coverage.js';
 import { createsVerdicts } from '../../src/checks/creates.js';
-import { recheckCommand } from '../../src/cli/commands.js';
+import { recheckCommand, reviewCommand } from '../../src/cli/commands.js';
 import { compareCommand, finishRecheck, originalSignature } from '../../src/cli/compare.js';
 import { TEST_HASH_FORMAT } from '../../src/core/identity.js';
 import { parseManifestText, type Manifest } from '../../src/core/manifest.js';
@@ -22,9 +22,9 @@ import { Redactor } from '../../src/core/redact.js';
 import { canonical, WritecheckError } from '../../src/core/util.js';
 import { compareDocs, RELAXED_REQUIRED_IS_SAME_TEST, summarize, UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST, type CompareDoc } from '../../src/report/compare.js';
 import { signResults, verifyResults } from '../../src/report/sign.js';
-import { narrowSchema, stampTestHashes, testHash, testInputs, usedArgs, type TesterId } from '../../src/report/testhash.js';
+import { hashOfInputs, narrowSchema, stampTestHashes, testHash, testInputs, usedArgs, type TesterId } from '../../src/report/testhash.js';
 import { furtherProbes } from '../../src/checks/readback.js';
-import { probeCases } from '../../src/checks/schema.js';
+import { misspelledArgument, probeCases } from '../../src/checks/schema.js';
 import { result, type Result } from '../../src/report/verdicts.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -546,7 +546,7 @@ test('review F4: a required argument the test does not send, no longer required,
   const x = cellOf(cmp(doc(stamped([viol(r0)], m, closedB)), doc(stamped([r0], m, closedA))), 'MWS-CONC-1@update_ticket');
   assert.equal(UNDECLARED_IN_CLOSED_SCHEMA_IS_SAME_TEST, true);
   assert.equal(x.label, 'fixed');
-  assert.ok(x.same_test_because?.some((t) => /allowed no undeclared argument: check that the before build accepted the call/.test(t)));
+  assert.ok(x.same_test_because?.some((t) => /allows? no undeclared argument: check that the before build accepted the call/.test(t)));
   // open schemas: still rule A (an optional argument the test sends, added)
   const openB = toolsFor(m, onTool('update_ticket', (s) => without(s, 'expected_version')));
   assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, openB)), doc(stamped([r0], m, toolsFor(m)))), 'MWS-CONC-1@update_ticket').label, 'fixed');
@@ -640,6 +640,127 @@ test('review F5 with p08: recheck --pubkey reads the original through the strict
       writeFileSync(join(dir, 'results.json'), bad);
       assert.throws(() => originalSignature(dir, { key: privateKey, pubkey: publicKey }), (e: unknown) => e instanceof WritecheckError && e.code === 3);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+// ---- Final review of d261dd3 (N1-N5) ----
+
+const inSc = { id: 'schema-probes', version: '2' };
+const reqPriority = toolsFor(load(), onTool('update_ticket', (s) => ({ ...s, required: ['id', 'priority'] })));
+
+test('final N1: MWS-IN-3 sends missing_required only for a required argument: relaxing one is a change of the judged schema (schema-fixed, said as a relaxation), never fixed', () => {
+  const m = load();
+  const after = toolsFor(m);
+  const missing = (ts: Tool[]) => probeCases(ts.find((t) => t.name === 'update_ticket')!['inputSchema'], new Set()).filter((c) => c.prop === 'priority' && c.name === 'missing_required').length;
+  assert.equal(missing(reqPriority), 1);
+  assert.equal(missing(after), 0, 'the probe is no longer sent');
+  const x = cellOf(cmp(doc(stamped([rec('MWS-IN-3', 'violated', { scenario: inSc })], m, reqPriority)), doc(stamped([rec('MWS-IN-3', 'held', { scenario: inSc })], m, after))), 'MWS-IN-3@update_ticket');
+  assert.equal(x.label, 'schema-fixed', x.why);
+  assert.match(x.why, /no longer requires an argument it required before \(update_ticket\.priority\): the constraint the before run found was taken out of the schema, not enforced/);
+  // MWS-IN-6 judges the schema too (a null treated as not sent counts only for an optional argument): the same
+  const x6 = cellOf(cmp(doc(stamped([rec('MWS-IN-6', 'violated', { scenario: inSc })], m, reqPriority)), doc(stamped([rec('MWS-IN-6', 'held', { scenario: inSc })], m, after))), 'MWS-IN-6@update_ticket');
+  assert.equal(x6.label, 'schema-fixed', x6.why);
+  // MWS-IN-4 (the call without the argument is the counterpart of a null probe only for an optional one) does not judge the schema: another test
+  const y = cellOf(cmp(doc(stamped([rec('MWS-IN-4', 'violated', { scenario: inSc })], m, reqPriority)), doc(stamped([rec('MWS-IN-4', 'held', { scenario: inSc })], m, after))), 'MWS-IN-4@update_ticket');
+  assert.equal(y.transition, 'test-changed');
+  // a tightening of another kind keeps the usual wording
+  const capped = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { labels: { type: 'array', maxItems: 5, items: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } } })));
+  const z = cellOf(cmp(doc(stamped([rec('MWS-IN-3', 'violated', { scenario: inSc })], m, after)), doc(stamped([rec('MWS-IN-3', 'held', { scenario: inSc })], m, capped))), 'MWS-IN-3@update_ticket');
+  assert.equal(z.label, 'schema-fixed', z.why);
+  assert.match(z.why, /now declares the constraint the before run found/);
+});
+
+test('final N2: in a file hashed under mws-test-hash/2, a record without test_inputs or with inputs of another scheme is hash-mismatch: (a) inputs deleted and the hash copied; (b) a foreign scheme on both sides', () => {
+  const m = load();
+  const before = toolsFor(m);
+  const after = toolsFor(m, onTool('update_ticket', (s) => withProps(s, { expected_version: { type: 'string' } })));
+  const b = stamped([viol(rec('MWS-CONC-1', 'held'))], m, before);
+  const a = stamped([rec('MWS-CONC-1', 'held')], m, after);
+  const a1 = JSON.parse(JSON.stringify(a)) as (Result & { test_hash: string })[];
+  delete a1[0]!.test_inputs;
+  a1[0]!.test_hash = (b[0] as Result & { test_hash: string }).test_hash;
+  const xa = cellOf(cmp(doc(b), doc(a1)), 'MWS-CONC-1@update_ticket');
+  assert.equal(xa.transition, 'hash-mismatch');
+  assert.match(xa.why, /carries no test_inputs in a file hashed under mws-test-hash\/2/);
+  const foreign = (rs: Result[]) => rs.map((r) => {
+    const i = { ...r.test_inputs!, scheme: 'mws-test-hash/9' };
+    return { ...r, test_inputs: i, test_hash: hashOfInputs(r.requirement, i) };
+  });
+  const xb = cellOf(cmp(doc(foreign(b)), doc(foreign(a))), 'MWS-CONC-1@update_ticket');
+  assert.equal(xb.transition, 'hash-mismatch');
+  assert.match(xb.why, /name the scheme "mws-test-hash\/9", which this release does not read/);
+  // inputs of /1 in a /2 file
+  const one = (rs: Result[]) => rs.map((r) => ({ ...r, test_inputs: { ...r.test_inputs!, scheme: 'mws-test-hash/1' } }));
+  assert.equal(cellOf(cmp(doc(one(b)), doc(one(a))), 'MWS-CONC-1@update_ticket').transition, 'hash-mismatch');
+});
+
+test('final N3: a hash-mismatch cell makes compare exit 3 and names the cell, with the outputs written', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    const m = load();
+    const tools = toolsFor(m);
+    const b = stamped([viol(rec('MWS-CONC-1', 'held'))], m, tools);
+    const a = stamped([rec('MWS-CONC-1', 'held')], m, tools);
+    (a[0] as Result & { test_hash: string }).test_hash = `sha256:${'0'.repeat(64)}`;
+    const put = (n: string, rs: Result[]) => {
+      mkdirSync(join(dir, n));
+      writeFileSync(join(dir, n, 'results.json'), JSON.stringify(doc(rs)));
+      return join(dir, n);
+    };
+    const lines: string[] = [];
+    const r = compareCommand({ before: put('b', b), after: put('a', a), out: join(dir, 'o'), allowUnsigned: true, log: (l) => lines.push(l) });
+    assert.equal(r.exit, 3);
+    assert.ok(lines.some((l) => /^error: MWS-CONC-1@update_ticket: .*test_hash does not follow from its test_inputs/.test(l)), lines.join('\n'));
+    assert.match(readFileSync(join(dir, 'o', 'compare.md'), 'utf8'), /hash-mismatch/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('final N4: the MWS-IN-2 misspelled argument does not follow the order of the schema properties, and the choice is in chosen.misspelled', () => {
+  const m = load();
+  const names = ['title', 'status', 'assignee', 'priority'];
+  assert.deepEqual(misspelledArgument(names), misspelledArgument([...names].reverse()));
+  assert.deepEqual(misspelledArgument(names), { arg: 'assignee', as: 'asignee' });
+  const closed = (order: string[]) => toolsFor(m, onTool('update_ticket', (s) => ({ ...s, properties: Object.fromEntries(order.map((k) => [k, (s['properties'] as Record<string, unknown>)[k]])), additionalProperties: false })));
+  const fwd = closed(['id', 'title', 'status', 'assignee', 'priority', 'expected_version', 'labels']);
+  const rev = closed(['labels', 'expected_version', 'priority', 'assignee', 'status', 'title', 'id']);
+  const miss = (ts: Tool[]) => probeCases(ts.find((t) => t.name === 'update_ticket')!['inputSchema'], new Set()).find((c) => c.name === 'misspelled_argument')!.prop;
+  assert.equal(miss(fwd), miss(rev));
+  const r0 = rec('MWS-IN-2', 'held', { scenario: inSc });
+  assert.equal(testHash(r0, { manifest: m, tools: fwd, tester }), testHash(r0, { manifest: m, tools: rev, tester }));
+  assert.ok(testInputs(r0, { manifest: m, tools: fwd, tester }).chosen?.['misspelled']);
+  // a build that renames the argument the probe misspells sends another probe: never fixed
+  const renamed = toolsFor(m, onTool('update_ticket', (s) => {
+    const p = { ...(s['properties'] as Record<string, unknown>) };
+    p['asignee_name'] = p['assignee'];
+    delete p['assignee'];
+    return { ...s, properties: p, additionalProperties: false };
+  }));
+  assert.notEqual(cellOf(cmp(doc(stamped([viol(r0)], m, fwd)), doc(stamped([r0], m, renamed))), 'MWS-IN-2@update_ticket').label, 'fixed');
+});
+
+test('final N5: the closed-schema note names the closed side; a probed relaxation does not say the test sends it; review and rerun read results strictly', () => {
+  const m = load();
+  const r0 = rec('MWS-CONC-1', 'held');
+  const closedB = toolsFor(m, onTool('update_ticket', (s) => ({ ...without(s, 'expected_version'), additionalProperties: false })));
+  const closedA = toolsFor(m, onTool('update_ticket', (s) => ({ ...s, additionalProperties: false })));
+  const openA = toolsFor(m);
+  const x = cellOf(cmp(doc(stamped([viol(r0)], m, closedB)), doc(stamped([r0], m, closedA))), 'MWS-CONC-1@update_ticket');
+  assert.ok(x.same_test_because?.some((t) => /the before and after schemas allow no undeclared argument: check that the before build accepted the call/.test(t)), JSON.stringify(x.same_test_because));
+  // (opening or closing the schema is itself a change of a keyword on the arguments as a whole: another test)
+  assert.equal(cellOf(cmp(doc(stamped([viol(r0)], m, closedB)), doc(stamped([r0], m, openA))), 'MWS-CONC-1@update_ticket').transition, 'test-changed');
+  // a probed argument relaxed for a schema probe that does not act on required
+  const z = cellOf(cmp(doc(stamped([viol(rec('MWS-IN-7', 'held', { scenario: inSc }))], m, reqPriority)), doc(stamped([rec('MWS-IN-7', 'held', { scenario: inSc })], m, openA))), 'MWS-IN-7@update_ticket');
+  assert.ok(z.same_test_because?.some((t) => /priority: relaxed from required to optional \(a probed argument\)/.test(t)), JSON.stringify(z.same_test_because));
+  // review reads the file as verify-results does: a repeated member is refused
+  const dir = mkdtempSync(join(tmpdir(), 'mwsc-f10-'));
+  try {
+    writeFileSync(join(dir, 'results.json'), JSON.stringify(doc([rec('MWS-ANN-4', 'held')]), null, 2).replace('{\n', '{\n  "format": "mws-results/1",\n'));
+    assert.throws(() => reviewCommand({ dir, log: () => {} }), (e: unknown) => e instanceof WritecheckError && e.code === 3);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
