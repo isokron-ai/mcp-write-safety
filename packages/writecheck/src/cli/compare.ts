@@ -22,7 +22,7 @@ import { readCatalogFile } from './commands.js';
 import type { ProvenanceFlags } from '../core/identity.js';
 import { WritecheckError } from '../core/util.js';
 import { compareDocs, CompareRefused, renderCompareMarkdown, summarize, type CompareDoc } from '../report/compare.js';
-import { duplicateKey, publicKeyFrom, verifyResults, type VerifyOutcome } from '../report/sign.js';
+import { parseResultsBytes, publicKeyFrom, verifyResults, type VerifyOutcome } from '../report/sign.js';
 
 /** Flags `run` and `rerun` take for the run identity and the results signature (main.ts adds them to both commands). */
 export const IDENTITY_FLAGS = ['--provenance', '--server-repo', '--server-commit', '--server-tag', '--server-image', '--backend-image', '--sign-key'];
@@ -63,15 +63,7 @@ function resultsFile(p: string): string {
 
 function readDoc(f: string): { bytes: Buffer; doc: Record<string, unknown> } {
   const bytes = readFileSync(f);
-  let doc: unknown;
-  try {
-    doc = JSON.parse(bytes.toString('utf8'));
-  } catch (e) {
-    throw new WritecheckError(`${f}: not JSON (${(e as Error).message})`, 2);
-  }
-  // why: review: JSON.parse keeps the last of two equal member names; another reader may keep the first. Such a file is refused.
-  const dup = duplicateKey(bytes.toString('utf8'));
-  if (dup) throw new WritecheckError(`${f}: the member ${dup} appears twice; a signed or compared file has each member once`, 3);
+  const doc = parseResultsBytes(bytes, f);
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) throw new WritecheckError(`${f}: not a results document`, 2);
   return { bytes, doc: doc as Record<string, unknown> };
 }

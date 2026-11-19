@@ -792,7 +792,19 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     if (inputs) r.test_inputs = JSON.parse(JSON.stringify(inputs)) as typeof inputs;
   });
   // why: F8: the signature covers the file as written (after redaction), with evidence.signature null.
-  if (signKey) safe.evidence.signature = signResults(safe, signKey, o.sign ? 'SHA256SUMS.sig' : null);
+  let signRefused = false;
+  if (signKey) {
+    try {
+      safe.evidence.signature = signResults(safe, signKey, o.sign ? 'SHA256SUMS.sig' : null);
+    } catch (e) {
+      // why: p08: a document RFC 8785 refuses (a lone surrogate in a captured answer, nesting deeper than the limit) is not
+      // signed; the evidence is still written, unsigned, and the run exits 4 so the missing signature is not missed.
+      if (!(e instanceof WritecheckError)) throw e;
+      safe.evidence.signature = o.sign ? 'SHA256SUMS.sig' : null;
+      signRefused = true;
+      o.log(`error: results.json is not signed: ${e.message}`);
+    }
+  }
   // why: literal server.env values may hold secrets; the copies are redacted like everything else.
   // why: review S1: the copy stays YAML (a flow mapping such as `{ env: X, prefix: "Bearer " }` is not cut by the header rule).
   writeFileSync(join(outDir, doc.manifest.path), red.manifestText(manifestText));
@@ -815,7 +827,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   }
   finished = true;
   // why: problem 14 in the GitHub Action's NOTES.md: an incomplete run (stopped, or clean-up not finished) exits 4 whatever its verdicts say.
-  return { exit: interrupted ? 130 : stopped ? 4 : exitCodeFor(baseline) === 1 ? 1 : 0, outDir, doc: safe, baseline };
+  return { exit: interrupted ? 130 : stopped || signRefused ? 4 : exitCodeFor(baseline) === 1 ? 1 : 0, outDir, doc: safe, baseline };
 }
 
 /** One canary read: the result (at `path`, without the ignored fields), or undefined when the call failed. */
