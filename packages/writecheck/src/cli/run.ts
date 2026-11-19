@@ -91,14 +91,21 @@ export function secretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
   return [...names].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v.length >= 6);
 }
 
-/** Every value a session.init call takes from the environment: secrets however short (connection settings, a password). */
-export function initSecretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
-  return [...new Set((m.session?.init ?? []).flatMap((c) => c.env))].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v !== '');
+/**
+ * The values session.init calls take from the environment, all secrets: `short`, those given under a secret-like name (masked
+ * from three characters); `long`, the rest (masked from six, like every other secret).
+ */
+export function initSecretsOf(m: Manifest, env: NodeJS.ProcessEnv): { short: string[]; long: string[] } {
+  const inits = m.session?.init ?? [];
+  const named = new Set(inits.flatMap((c) => c.secret_env));
+  const val = (ns: Iterable<string>) => [...new Set(ns)].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v !== '');
+  return { short: val(named), long: val(inits.flatMap((c) => c.env).filter((n) => !named.has(n))) };
 }
 
 export function redactorFor(m: Manifest, env: NodeJS.ProcessEnv): Redactor {
   const paths: ScrubPath[] = [{ prefix: resolve(process.cwd()), role: 'WORKSPACE' }, { prefix: homedir(), role: 'HOME' }];
-  return new Redactor(secretsOf(m, env), { paths, short: initSecretsOf(m, env) });
+  const init = initSecretsOf(m, env);
+  return new Redactor([...secretsOf(m, env), ...init.long], { paths, short: init.short });
 }
 
 export function egressOf(m: Manifest, env: NodeJS.ProcessEnv) {

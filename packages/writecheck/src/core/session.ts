@@ -230,9 +230,12 @@ export interface RestartResult {
   t_ready_ms: number | null;
   started: boolean;
   reason: string | null;
+  /** The server started again, but its session.init call failed: the step is not tested. */
+  init_failed?: string;
 }
 
-export type LaunchResult = { started: true; protocol: string | null } | { started: false; exit_code: number | null; reason: string; stderr_tail: string };
+/** `init_failed`: the server started, but its session.init call failed (a harness reason: what depends on that server is not tested). */
+export type LaunchResult = { started: true; protocol: string | null } | { started: false; exit_code: number | null; reason: string; stderr_tail: string; init_failed?: string };
 
 const RATE_TEXT = /\bHTTP 429\b|\b429 Too Many|too many requests|rate[- ]limit(ed| exceeded)/i;
 
@@ -644,7 +647,14 @@ export class Session {
     const t1 = nowMs();
     const used: 'graceful' | 'kill' = stop === 'kill' || ended === 'SIGKILL' ? 'kill' : 'graceful';
     const out: RestartResult = { stop_requested: stop, stop_used: used, ended_by: ended, t_stop_ms: t0, t_stopped_ms: t1, t_ready_ms: null, started: false, reason: null };
-    const r = await this.launch({ label, env });
+    let r: LaunchResult;
+    try {
+      r = await this.launch({ label, env });
+    } catch (e) {
+      // why: follow-up to PR #14 (A): an init failure after the restart makes only this step not tested.
+      if (e instanceof LaunchInitFailed) return { ...out, reason: `it started again, but ${e.message}`, init_failed: e.message };
+      throw e;
+    }
     if (!r.started) return { ...out, reason: `it did not start again: ${r.reason}` };
     try {
       await this.listTools(label);
