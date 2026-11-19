@@ -52,6 +52,11 @@ import { createGate, type Gate } from '../gate/gate.js';
 import { SPEC_VERSION } from '../requirements.js';
 import { applyBaseline, exitCodeFor, loadBaseline, type BaselineOutcome } from '../report/baseline.js';
 import { signChecksums, writeChecksums } from '../report/evidence.js';
+import { buildIdentity, buildStamp, manifestProvenance, resolveProvenance } from '../core/identity.js';
+import { catalogFingerprint as toolsFingerprintOf } from '../checks/catalog.js';
+import { loadSigningKey, signResults } from '../report/sign.js';
+import { hashExtras, stampTestHashes } from '../report/testhash.js';
+import type { IdentityOptions } from './compare.js';
 import { renderJunit } from '../report/junit.js';
 import { renderMarkdown } from '../report/markdown.js';
 import { adjustResults, coverageRows } from '../checks/coverage.js';
@@ -69,6 +74,8 @@ export interface RunOptions {
   planHash?: string;
   baseline?: string;
   sign?: string;
+  /** The run identity flags and the results signing key (`--provenance`, `--server-*`, `--backend-image`, `--sign-key`). */
+  identity?: IdentityOptions;
   interactive: boolean;
   env: NodeJS.ProcessEnv;
   ask?: (q: string) => Promise<string>;
@@ -131,6 +138,9 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   useShapes(manifest);
   checkTarget(manifest, o.env);
   refuseIfOpen(o.stateDir);
+  // why: F8: the stated build and the signing key are read before anything is written, so a bad --server-commit or key refuses the run.
+  const prov = resolveProvenance(manifestProvenance(o.manifest), o.identity?.provenance);
+  const signKey = loadSigningKey(o.identity?.signKey, o.env);
   const red = redactorFor(manifest, o.env);
   const egress = egressOf(manifest, o.env);
   const unlock = lockGlobalFetch(egress);
@@ -440,7 +450,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         }
         // why: spec R15-4: an object that could not be put back after an MWS-IN-4 control is used in no later test.
         if (d.unusable) {
-          results.push(...notRun(mod, rest, w, 'not tested', d.unusable));
+          // why: review of lane F7 (one record per requirement and write path): a requirement an earlier check of this resource
+          // already recorded for the same write path (MWS-IN-5 of a halted update tool) gets no second, generic record.
+          const had = (id: string) => results.some((r) => r.requirement === id && r.write_path.resource === w.resource && r.write_path.tool === w.tool);
+          results.push(...notRun(mod, rest.filter((id) => !had(id)), w, 'not tested', d.unusable));
           continue;
         }
         o.log(`${res.name}: ${c.check}…`);
@@ -765,9 +778,15 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     evidence: { capture: cap, checksums: 'SHA256SUMS', signature: null },
     safety: { canaries, fixtures_restored: fixturesRestored, gate: gate ? { route: gate.route, description: gate.describe() } : null, protocol, rerun_of: o.rerunOf ?? null, ...(plan?.warnings?.length ? { warnings: plan.warnings } : {}), ...(runLosses.length ? { run_losses: runLosses } : {}) },
   };
+  // why: F8 (before/after pages): each record says which test it is; the run says which tester, test and build it was.
+  const stamp = buildStamp();
+  stampTestHashes(doc.results, { manifest, tools, tester: { name: SUITE_NAME, version: SUITE_VERSION, commit: stamp.commit }, extras: await hashExtras() });
+  doc.identity = buildIdentity({ manifestSha256: manifest.source.sha256, planHash: hash, toolsFingerprint: tools.length ? toolsFingerprintOf(tools) : 'sha256:unknown', launch: serverLabel(manifest), transport: mcp.transport, provenance: prov.provenance, sources: prov.sources, overridden: prov.overridden, started: doc.run.started, finished: iso(Date.now()), env: o.env, stamp });
   const baseline = applyBaseline(results, o.baseline ? loadBaseline(o.baseline) : []);
   if (o.sign) doc.evidence.signature = 'SHA256SUMS.sig';
   const safe = red.value(doc);
+  // why: F8: the signature covers the file as written (after redaction), with evidence.signature null.
+  if (signKey) safe.evidence.signature = signResults(safe, signKey, o.sign ? 'SHA256SUMS.sig' : null);
   // why: literal server.env values may hold secrets; the copies are redacted like everything else.
   writeFileSync(join(outDir, doc.manifest.path), red.text(manifestText));
   // why: dogfood C9: the whole catalog the fingerprint covers, so a plan from this file gives the same hash.

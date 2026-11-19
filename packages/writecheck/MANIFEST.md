@@ -23,6 +23,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `patterns` | no | How the tester decides what a result says (spec 7.3, rule 11); below |
 | `outcome_field` | no | A structured outcome field in the result: `{ path, applied, not_applied, unknown }` (below) |
 | `results` | no | `{ shape, tools: { <tool>: { shape } } }`: a result shape adopted by name and version (spec 7.3, rule 11; draft Annex B-9). Known: `write-result/0.1`. A tool's own entry overrides the top level; `shape: null` adopts none for it. An unknown name or version is refused at load. See [results](#results) |
+| `in5` | no | `{ docs: [paths] }`: documents (relative to this file) the MWS-IN-5 search reads for bounds stated in words; see [in5](#in5) |
 | `session` | no | `{ init: [{ tool, args, read_only }] }`: calls made on every MCP session before its first other tools/call; see [session](#session) |
 | `async_operations` | no | Tools whose operation the backend completes asynchronously (spec NF-19, Annex E): a result that says "accepted" or "pending" is then not read as a report of success. For any other tool it is |
 
@@ -52,6 +53,7 @@ Templates: a string value may carry `{{name}}` placeholders. `{{marker}}` is a f
 | `guard` | `{ tool, args, path, pattern, read_only, decode }`: a read whose result at `path` must match `pattern`, or the run stops before any write. The tool must declare `readOnlyHint: true`; for a server that annotates no tool, `read_only: true` declares that it only reads (a tool that declares `readOnlyHint: false` or `destructiveHint: true` is refused either way). For a server whose only tool is a dispatcher (PostHog's `cli` mode, `exec`), `read_only_call: true` declares that this exact call (arguments written out in full, no templates) only reads: the guard then rests on the operator's declaration, which the results say; before any other write the same call is made three times and must answer identically, and the canaries and every declared list that needs no object must read the same before the first call and after the third; any error or difference refuses the run. Each of the three calls counts against `write_budget` and is recorded in the ledger and the results. Between checks the run asks `tools/list`, never the declared call. `plan` warns when the run would refuse the guard. `decode: json` or `none`: see [Wrapped results](#wrapped-results-decode) |
 | `allow_hosts` | Hosts besides the server that the tester may reach (the control arm's API) |
 | `refuse_fingerprints` | Catalog fingerprints the tester refuses to run against (a production server) |
+| `provenance` | Optional. `{ repo, commit, tag, image, recipe, backend: [{ name, image, version }] }`: the server build under test and its backend images, copied into `results.identity` (see [Run identity](#run-identity)). `commit` must be a full 40- or 64-character git commit; an image is pinned only with `@sha256:<digest>`. Unknown keys are refused. It is part of the manifest bytes, so it changes `manifest.sha256` and the plan hash (never a test hash): for a before/after pair run one byte-identical manifest on both builds and give each build with `--server-commit`, `--server-image` or `--provenance` instead |
 
 Target hosts are listed on the plan's "Hosts reached or given to the server" line, and one that looks like production is refused unless listed in `allow_hosts`. They are the server URL, the control bases, any URL in the server's environment or command line, and a host given without a URL. Where in doubt a host is read: a false refusal is cleared with `allow_hosts`, a missed host is never checked.
 
@@ -73,6 +75,9 @@ Target hosts are listed on the plan's "Hosts reached or given to the server" lin
 | `gate_reps` | 2 | Repetitions of each held-request schedule |
 | `timeout_ms` | 30000 | Per call |
 | `max_fuzz_cases` | 200 | Schema probes per tool; a list cut at this limit gives `not tested`, never `held` |
+| `in5_probes` | 80 | MWS-IN-5 search: calls per tool at most (the base call, the probes, the bisection and the repeats). The record says when the search was cut. Applied where used: an undeclared default is not written into the plan |
+| `in5_creates` | 10 | MWS-IN-5 search: calls to a create tool at most, the base create included; each accepted call makes an object of the run, which cleanup removes |
+| `in5_payload_bytes` | 65536 | MWS-IN-5 search: the largest value sent, in bytes (a string's UTF-8 bytes, otherwise its JSON form), checked before the value is built |
 
 ## backend.gate
 
@@ -101,6 +106,19 @@ A list of `{ name, tool, args, path, ignore }`: a read-only call made before and
 ## calls
 
 `{ tool_name: { resource, args } }`: arguments for a tool the annotation checks call on a scratch object of `resource` (MWS-ANN-1 to ANN-3, ANN-5). The read-only check (MWS-CFG-3) uses them too: it calls every declared write tool, listed or not, and a write tool with no call of its own (for example one named only under `failures`) leaves MWS-CFG-3 `not tested`; its record names the tool and this key. It also calls each tool that is marked read-only (`readOnlyHint: true` in `tools/list`, or a declared read tool) and has an entry here whose arguments name an object of the run (`{{id}}`, `{{prefix}}`, `{{marker}}` or `{{object}}`), with that entry's arguments and resource, as the annotation checks do, because read-only mode must refuse a write tool whatever its annotations declare. If the object changes through such a tool, MWS-CFG-3 is `violated` and the record names the tool and says it is marked read-only; an object deleted is a change too. A refusal, or a final answer with no change to the watched object, counts toward `held`; a call that could not be made (no resource to bind it to, no scratch object) or failed without a refusal (a timeout, a lost connection, an error MCP defines for the case), an `input_required` or task answer, or an object that could not be read back leaves MWS-CFG-3 `not tested`, and the record names the tool and why. The deny-list trial of MWS-CFG-2 calls the same tools; MWS-CFG-1 compares the declared write tools only. A tool marked read-only with no entry here is not called (there are no safe arguments for it).
+
+## in5
+
+The MWS-IN-5 search runs with no declaration. For each argument of each tool it starts from (a resource's read call, its declared list calls, its create tool and its update tool), after a base call that succeeded, it sends values valid by the input schema that commonly meet a limit the schema does not declare: string lengths 0, 1, 255, 256, 1024, 4096 and 65536 within the declared bounds; eight character classes, each beside a plain value of the same UTF-16 length (a class whose UTF-16 length passes a declared maxLength is not sent); format extremes; numbers 0, ±1 and the declared minimum and maximum only (within an `int32`/`int64` format), and fractions for `number`; and arrays of 0, 1, 100 and 1000 items on a read tool, 0, 1, 2 and a declared maxItems of at most 100 on a write tool. On a write tool an argument named like a quantity that may cost (`replicas`, `size`, `amount`, `count`, `quantity`, `instances`, `price`, `budget`, `gb`, `cpu`, `memory`, in any case style) is not probed unless `in5.allow_args` names it. A bound stated in words in a description, or in a document listed here, that names the tool and the argument ("up to 100 characters", "between 1 and 50") adds probes at N and N+1. No value larger than `limits.in5_payload_bytes` is built. Probes are sent interleaved over the arguments, in a fixed scrambled order, not in ascending order. Read probes are paced like writes. The update tool is searched only on scratch objects the tester creates; a create tool gets at most `limits.in5_creates` calls, each accepted create cleaned up by the resource's policy (a resource whose policy is `leave` gets no write probe; its declared `try_values` are then sent on the object under test, as before). An identifier, the scope, the version, its override, the caller's key and an idempotency key are never probed; enums, booleans, objects and array items with a format or an encoding are not searched.
+
+A refusal counts as a fixed constraint where the declaration states it (`fixed_constraints`), or by the tester's differential reading: at least two neighbouring values of the same argument were accepted in the same context (for an upper bound on a length or a count, one of them not empty: an empty value is often read as "not given"); the refusal repeats in a fresh context (a second scratch object with another field varied, a fresh create, or for a read tool the call with another argument set to a value accepted in the search; a read tool with no other argument to vary confirms nothing), and in that context the accepted neighbour, the refused value, the neighbour again and the refused value again are sent (N-R-N-R): every neighbour must be accepted, every refusal must repeat with the same text as in the search (apart from numbers and quoted values), and the varied argument must take a value other than the base call's; and on an order every accepted value lies on one side, with the boundary found by bisection (the record gives it, for example `maxLength 100`; exact on numbers only for an integer). A refusal that names a rate limit, the size of the whole request (413), the state of the backend or the caller's permissions, and an unknown outcome, are left out.
+
+Until MWS 0.10 accepts the differential reading, a constraint that only it confirms is recorded in a `not observed` record as "Candidate constraint, seen, not judged", with the boundary; `--in5-reading=tester` (on `run`, `rerun` and `recheck`) records it as `violated` where it refused twice in the fresh context and the refusal names the argument and the kind of rule; any other stays a candidate. The record is `violated` or `not observed` (spec 8.2, rule 8), or `not tested` where no call was judged, with the scope in `numbers`: `args_total`, `args_searchable` (leaving out the arguments not searchable by rule), `args_judged` (and `args_probed`, the same), `args_complete`, `args_skipped` (`{ reason: count }`), `probes`, `judged`, `refusals`, `confirmed`, `candidates` and `constraints`.
+
+| Key | Meaning |
+|---|---|
+| `docs` | Paths of documents (a README, an API reference) to read for bounds stated in words. Read when the plan is built; nothing is fetched |
+| `allow_args` | Arguments of write tools named like a quantity that may cost that the search may probe anyway (`arg`, or `tool.arg`) |
 
 ## review
 
@@ -300,6 +318,81 @@ Each resource is one kind of object. Only `name` and `read` are required; every 
 | `versioned` | A list of `{ tool, args }` whose `args` carry `{{version}}`: other tools that get the stale-write test (MWS-CONC-2, CONC-4, CONC-6) |
 | `no_version_check` | Tools for which the backend has no version check (MWS-CONC-2 is `not applicable`; MWS-CONC-5 asks about the description) |
 | `input_required` | A list of `{ tool, args, answers, client_capabilities, effect }`: a tool that answers `input_required` (revision 2026-07-28) and the `inputResponses` to send on the retry (MWS-RETRY-3). `client_capabilities` defaults to `{ elicitation: { form: {} } }`. `effect` (`{ path, value }`) is what the write puts into effect; a change before the retry that is not the effect may be staged state, and is not judged |
-| `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5) |
+| `try_values` | A list of `{ arg, value }` or `{ arg, length }`: values valid by the update tool's schema to try (MWS-IN-5). Optional: the IN-5 search sends its own values; these are sent beside them, on the search's scratch objects |
 | `fixed_constraints` | A list of `{ arg, pattern, reason }` (R10-8): refusals of the update tool that rest on a fixed constraint; MWS-IN-5 is `violated` only for a refusal whose text matches one, otherwise each refusal is listed, "seen, not judged", and the verdict is `not observed` |
 | `server_managed` | A list of fields the server sets itself (a timestamp, a revision). A field that `read.ignore` or a list's `ignore` names and that the tool under test can set (from its input schema) is warned in the plan and the report, and refused for a selector tool in opt-in mode, unless it is listed here: an ignored field must not hide a bystander change |
+
+## Run identity
+
+Every `results.json` this release writes carries `identity` (`mws-identity/1`) and a `test_hash` on every record, so two runs of one test on two builds can be compared, and a published file can be checked. All of it is optional in `mws-results/1`; files written before it still validate.
+
+`identity` states:
+
+| Member | Source |
+|---|---|
+| `tester` | name, version, and the git `commit` and `dirty` flag stamped into `dist/src/build-info.json` by `npm run build` (`scripts/build-stamp.mjs`); `commit` is null for a build made outside a git checkout |
+| `spec`, `manifest_sha256`, `plan_hash` | as in `spec`, `manifest` and `plan` |
+| `tools_fingerprint` | sha256 over the canonical, name-sorted tools/list entries (tools only; `target.catalog_fingerprint` also covers prompts and resource templates) |
+| `test_hash` | the algorithm of the records' `test_hash`, `mws-test-hash/1` |
+| `server` | `repo`, `commit`, `tag`, `image`, `recipe` from the provenance below; `launch` (the server command or URL, redacted) and `transport` from the run |
+| `backend` | `[{ name, image, version }]` from the provenance below |
+| `runner` | OS, architecture, Node.js version, and the GitHub Actions run (id, attempt, URL, workflow) where the environment names one; never a host name |
+| `started`, `finished` | the run's start, and when the identity was written |
+| `provenance` | which sources stated the build, and any value a later source replaced |
+| `gaps` | every member not stated or not pinned, with why: an unstamped or dirty tester (or a stamp that does not say, or is older than the compiled code), no server repo, commit or image, an image or backend image without a digest, a replaced value. Empty only for a fully pinned run |
+
+The provenance comes, in this order, each replacing what the one before set: the manifest's `target.provenance`, a `--provenance FILE` (YAML or JSON, the same keys), and the flags `--server-repo`, `--server-commit`, `--server-tag`, `--server-image` and `--backend-image name=REF` (repeatable) on `run` and `rerun`. A bad commit or an unknown key refuses the run before anything is written. The tester never infers a build.
+
+### test_hash
+
+`test_hash` is `sha256:` and the sha256 of the RFC 8785 canonical JSON of exactly these members:
+
+| Member | What |
+|---|---|
+| `format` | `mws-test-hash/1` |
+| `tester` | `{ name, version, commit }` of the tester build |
+| `spec` | the MWS version |
+| `requirement`, `level` | the record's requirement and level |
+| `scenario` | the procedure id and version |
+| `write_path` | `{ resource, tool, arm }` |
+| `tools` | for the write path's tool and every tool the record's resource block names (any `tool` member in it), the narrowed input schema, or null for a tool the catalog does not list. Narrowed: `type`; the subschemas, whole, of the arguments the test uses; `required` restricted to those; `required_other`, the names of any other required argument; every top-level keyword that constrains the arguments together (`allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `dependentRequired`, `dependentSchemas`, `additionalProperties`, `patternProperties`, `propertyNames`, `unevaluatedProperties`, `min`/`maxProperties`), whole; and every local `$ref` (`#/$defs/…`, `#/definitions/…`) reachable from those, resolved (Pydantic and FastMCP put argument types there). The arguments the test uses are the keys of every `args` template in the block for that tool (keys that are themselves templates excepted) and, for the write path's tool and the resource's update and create tools, every `arg` the block declares (fields, version, key, scope, idempotency) and every `restorable` argument |
+| `subject` | only where the requirement judges part of the tool entry, that part of the write path tool's entry, whole: the input schema for MWS-IN-2, IN-3, IN-5, IN-6 and IN-7; the annotations for MWS-ANN-*; the description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3. Such a record also carries `test_hash_core`, the hash without `subject` |
+| `resource` | the record's resource block as loaded (argument templates, fields, version, control, clean-up …); null for `(server)`, `(catalog)` and `(declaration)` records. A path the loader made absolute against the manifest's folder enters relative to it |
+| `declaration` | every other top-level member of the manifest except `server`, `target`, `resources`, `limits` and `prefix` (backend, calls, settings, secrets, canaries, review, patterns, …) |
+| `guard` | `target.guard`, where declared |
+| `limits` | every limit except `write_budget`; `writes_per_second` only for MWS-CONC-* records |
+| `extras` | the tester's MWS-IN-5 reading (`in5_reading`), for MWS-IN-5 records, in a build that has the MWS-IN-5 search |
+
+So a fix that only adds optional arguments keeps every hash it does not judge: descriptions, titles, annotations, output schemas, icons and `_meta` are left out, and so is any optional argument the test does not use, or a bound declared on one. A changed type or bound of an argument the test uses, a new required argument, another tester build, another procedure version, another argument template, guard or limit gives another hash. An argument a template already sends but the before build's schema did not declare enters as soon as a build declares it: that is a change of a used argument. Also left out: the rest of the tool list, the catalog fingerprint, `manifest.sha256` and the plan hash, `server` and the rest of `target` (they name the build, not the test), and anything measured.
+
+For a requirement that judges the schema, a schema change is a change of what is judged: `compare` reports it as `subject-changed` (not comparable) or, where the cell was violated before and is held after, `test_hash_core` is equal, and every slot violated before (judged-part slots and the others) is held after, `schema-fixed`. compare cannot read the schemas; check that the after build's schema declares the constraint the before run found.
+
+### Signed results
+
+`--sign-key FILE` (or `MWSC_SIGN_KEY`, a path or the PEM itself) signs `results.json` with an Ed25519 key: a PKCS#8 PEM key, or an unencrypted OpenSSH `ed25519` key. The key is never written anywhere and never printed: an error names `--sign-key`'s path, and for `MWSC_SIGN_KEY` says only that it is not a key or an existing path. `evidence.signature` becomes `mws-results-signature/1`:
+
+- the body is the document with `evidence.signature` replaced by its bound members `{ format, alg, key_id, sums }`, as RFC 8785 canonical JSON (UTF-8);
+- `digest` is `sha256:` and the sha256 of the body;
+- `value` is the standard base64 of the pure Ed25519 signature of `mcp-writecheck/results-signature/1` and a newline, followed by the body;
+- `key_id` is `ed25519-` and the first 16 hex characters of the sha256 of the public key's SPKI DER, and `public_key_pem` the public key (read as text only, never as a path);
+- `sums` names the ssh signature of `SHA256SUMS` where `--sign` made one too; it is signed.
+
+This follows the kronicle-lite evidence-bundle conventions (canonical JSON, a domain line, pure Ed25519, the same key id), so one key can sign a results.json and the Evidence Pack that wraps it, and `openssl pkeyutl -verify -rawin` checks it with nothing of ours. `mcp-writecheck verify-results <file> --pubkey KEY` (a PEM public key, an `ssh-ed25519` line or a file holding one) exits 0 only for a file signed by that key and unchanged; 1 for an unsigned file, a file with only the ssh signature of `SHA256SUMS`, or no `--pubkey` (the key embedded in the file says which key signed, not who); 2 for a key that cannot be read; 3 for a changed file, another key, or a file in which an object repeats a member name (JSON readers disagree on which copy counts). Unsigned results stay allowed; `compare` and `verify-results` flag them.
+
+`recheck` writes new verdicts into `<run>/recheck/`, which the original signature does not cover: its copy is unsigned, or signed again with `recheck --sign-key FILE` (or `MWSC_SIGN_KEY`; the key is read before recheck writes anything); every record it re-evaluated gets a `test_hash` from the rechecking build, and `identity.rechecked_by` names that build, the time and how many records it hashed.
+
+### compare
+
+`mcp-writecheck compare <before> <after> [--out DIR] [--pubkey KEY] [--fail-on-slot-regression true|false]` reads two results.json files (or run folders) and writes `compare.json` (`schema/mws-compare-1.schema.json`) and `compare.md`.
+
+- **Cells:** `<requirement>@<tool>` (a record's `cell` where the run stamped one). Each side's verdict is rolled up from the cell's records by MWS section 8.2 rule 13: violated, then platform, then held, then not observed, then not tested. A `violated` record whose validity does not count ranks below held and shows as `violated?`; `self-attested` ranks above not tested; not applicable is last. Where the run's own `cells` give another tested verdict than this roll-up, the cell is `rollup-mismatch` and not compared.
+- **Join, slot by slot:** a record's slot is its requirement, resource, tool and procedure id. A slot on both sides must have equal test hashes (else `test-changed`, naming the procedure versions where they differ, or `subject-changed` where only the judged part differs). A slot with a tested verdict on one side and none on the other, whether the other side has no record for it or only `not tested` or `not applicable`, makes the cell `coverage-change`. A record without `test_hash` makes the cell `no-test-hash`.
+- **Labels:** `fixed` only for violated → held where every slot violated (or `violated?`) before is held after on an equal hash and no slot is `violated?` after (otherwise `partly-held`, labelled `changed`); `schema-fixed` as above; `regressed` for held or not observed → violated; `unchanged` for the same verdict; `changed` for any other move between tested verdicts (violated → not observed, to or from platform, held → not observed), never a fix; `not comparable` for a changed test or subject, a coverage change, a cell on one side only, an unstable `violated?`, or a roll-up mismatch. `transition` gives the finer class.
+- **Slots inside a cell:** `slot_moves` lists every slot whose verdict moved; `slot_regressions` every slot that went from held or not observed to violated in a cell whose own label is not `regressed` (two slots that swap leave the roll-up `unchanged`), including a cell that is not comparable because another of its slots changed. Each is also a warning.
+- **Refused** (exit 2): a file that is not `mws-results/1`, different MWS versions, a test-hash algorithm other than `mws-test-hash/1`, a file whose records carry no `test_hash`, or a `--pubkey` that cannot be read. A file that repeats a member name is refused with exit 3. Different tester builds are not refused, but every test hash then differs and nothing is compared.
+- **Flagged** in `warnings`: an unsigned or unpinned file, a run that is not `complete`, identity gaps, different manifests, slot regressions.
+- With `--pubkey`, both files must be signed by that key (exit 3). Exit 1 when a cell regressed, or a slot regressed inside a cell (unless `--fail-on-slot-regression false`), else 0. `rating` is always null, and cells are listed, never counted.
+
+### Compatibility
+
+`identity`, `test_hash`, `test_hash_core` and the object form of `evidence.signature` are additions to `mws-results/1`, all optional: a file written before them still validates against this schema, and the format name stays `mws-results/1`. A reader that validates against the schema of an earlier release (which allows no other top-level member) rejects `identity`; use this release's schema.
