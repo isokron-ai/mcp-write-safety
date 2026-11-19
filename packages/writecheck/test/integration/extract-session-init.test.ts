@@ -26,6 +26,9 @@ const SERVER = `
 const rl = (await import('node:readline')).createInterface({ input: process.stdin });
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const ro = { readOnlyHint: true };
+const fs = await import('node:fs');
+const second = !!process.env.FLAG && fs.existsSync(process.env.FLAG);
+if (process.env.FLAG && !second) fs.writeFileSync(process.env.FLAG, '1');
 const tools = [
   { name: 'connect', inputSchema: { type: 'object', properties: { host: { type: 'string' }, user: { type: 'string' }, password: { type: 'string' } } } },
   { name: 'whoami', inputSchema: { type: 'object' }, annotations: ro },
@@ -44,6 +47,7 @@ rl.on('line', (l) => {
     const { name, arguments: a = {} } = m.params;
     const text = (t, isError = false) => send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: t }], isError } });
     if (name === 'connect') {
+      if (second) return text('connect failed after the restart', true);
       if (a.password !== process.env.EXPECT_PW) return text('connect failed: authentication refused for ' + a.user + ' with password ' + a.password, true);
       connected = a.host + '/' + a.user;
       return text('connected to ' + connected);
@@ -249,5 +253,18 @@ test('once armed, a new connection runs its init in connect(), before any call (
 test('the tenant guard hints at session.init when the server says it is not connected', async () => {
   await withServer(manifestText({}), ENV, async (s, m) => {
     await assert.rejects(tenantGuard(m, s, 'MAIN'), /not connected.*declare that call under session\.init/);
+  });
+});
+
+test('a restarted server whose session.init fails: restart() reports it (that step not tested), the run is not aborted', async () => {
+  await withServer(manifestText({ init: INIT }), ENV, async (s, _m, dir) => {
+    const started = await s.launch({ label: 'IDEMR', env: { FLAG: join(dir, 'started.flag') } });
+    assert.equal(started.started, true);
+    const r = await s.restart('IDEMR', 'graceful');
+    assert.equal(r.started, false);
+    assert.match(r.init_failed ?? '', /session\.init\[0\] \(connect\) failed on session IDEMR.*connect failed after the restart/);
+    assert.match(r.reason ?? '', /^it started again, but session\.init/);
+    assert.equal(s.initFailure, null);
+    assert.equal((await s.call('MAIN', 'whoami', {}, { write: false })).ok, true, 'the run goes on');
   });
 });

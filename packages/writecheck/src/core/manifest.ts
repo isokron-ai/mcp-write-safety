@@ -195,10 +195,82 @@ export interface SessionInit {
   read_only: boolean;
   /** Every environment variable the arguments name (`{{env.NAME}}`). */
   env: string[];
+  /** Those given under a secret-like name: their values are secrets however short (from three characters). */
+  secret_env: string[];
 }
 
-/** Argument names that carry a credential or a connection string (session.init: their values must come from the environment). */
-const SECRET_ARG = /^(?:pass(?:word|wd|phrase)?|pwd|secret|.*[_-]secret|client[_-]?secret|token|.*[_-]token|auth|authorization|api[_-]?key|apikey|key|.*[_-]key|private[_-]?key|access[_-]?key|dsn|connection[_-]?string|conn[_-]?str(?:ing)?|connection[_-]?url|database[_-]?url|db[_-]?url|uri|url|credentials?|cookie)$/i;
+/** Name parts that mark a credential on their own. */
+const SECRET_PARTS = new Set(['password', 'passwd', 'passphrase', 'pass', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'credential', 'credentials', 'creds', 'cookie', 'cookies', 'dsn', 'auth', 'authorization', 'bearer', 'oauth', 'apikey', 'connstr']);
+/** The password-type parts: a numeric literal is refused only under these. */
+const PASSWORD_PARTS = new Set(['password', 'passwd', 'passphrase', 'pass', 'pwd', 'pin']);
+/** With `key`, these make it a credential (`api_key`, `privateKey`); `key` alone is one too. Any other `key` (primary, sort, cache) is not. */
+const KEY_QUALIFIERS = new Set(['api', 'private', 'access', 'secret', 'client', 'signing', 'encryption', 'master']);
+/** A last part that describes a setting rather than holding the credential (`token_type`, `auth_mode`, `secretName`, `password_policy`, `token_url`). */
+const DESCRIPTORS = new Set(['type', 'types', 'mode', 'scope', 'scopes', 'name', 'names', 'kind', 'policy', 'field', 'path', 'id', 'ids', 'length', 'len', 'size', 'format', 'url', 'uri', 'endpoint', 'host', 'file', 'dir', 'env', 'var', 'ttl', 'expiry', 'expires', 'lifetime', 'header', 'prefix', 'location', 'method', 'provider', 'version', 'enabled', 'required']);
+/** A first part that makes the name a limit or a count (`max_tokens`). */
+const COUNTERS = new Set(['max', 'min', 'num', 'count', 'n']);
+/** Lowercase compounds written as one word, split into their parts. */
+const COMPOUNDS: Record<string, string[]> = {
+  apikey: ['api', 'key'],
+  accesskey: ['access', 'key'],
+  privatekey: ['private', 'key'],
+  secretkey: ['secret', 'key'],
+  clientsecret: ['client', 'secret'],
+  accesstoken: ['access', 'token'],
+  authtoken: ['auth', 'token'],
+  refreshtoken: ['refresh', 'token'],
+  idtoken: ['id', 'token'],
+  connectionstring: ['connection', 'string'],
+};
+
+/** A name's parts: camelCase, `_`, `-`, `.`, digits; lowercased; known one-word compounds split. */
+export function nameParts(name: string): string[] {
+  return name
+    .replace(/^-+/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_.\-\d]+/)
+    .map((p) => p.toLowerCase())
+    .filter(Boolean)
+    .flatMap((p) => COMPOUNDS[p] ?? [p]);
+}
+
+/**
+ * Is an argument name (or a command-line flag's name) secret-like, a name whose value is a credential? Matched on whole name
+ * parts, case ignored, camelCase and compounds included: a part `password`, `passwd`, `passphrase`, `pass`, `pwd`, `secret`,
+ * `token`, `credential(s)`, `creds`, `cookie`, `dsn`, `auth`, `authorization`, `bearer`, `oauth`; `connection` or `conn` with `string` or `str`;
+ * `key` alone or with `api`, `private`, `access`, `secret`, `client`, `signing`, `encryption` or `master`. Not secret-like: a name
+ * whose last part describes the setting (`token_type`, `auth_mode`, `oauth_scope`, `secretName`, `cookie_name`,
+ * `password_policy`, `token_url`), one whose first part makes it a limit (`max_tokens`), and a part that merely contains a
+ * marker (`bypass`, `passport`, `tokenizer`, `author`, `keyboard`).
+ */
+export function secretLikeName(name: string): boolean {
+  const parts = nameParts(name);
+  if (!parts.length) return false;
+  if (parts.length > 1 && DESCRIPTORS.has(parts[parts.length - 1]!)) return false;
+  if (COUNTERS.has(parts[0]!) && parts.length > 1) return false;
+  if (parts.some((p) => SECRET_PARTS.has(p))) return true;
+  if ((parts.includes('connection') || parts.includes('conn')) && (parts.includes('string') || parts.includes('str'))) return true;
+  if (parts.includes('key')) return parts.length === 1 || parts.some((p) => KEY_QUALIFIERS.has(p));
+  return false;
+}
+
+/** A password-type name (`password`, `dbPass`, `pwd`): a numeric literal under it is refused too. */
+export const passwordLikeName = (name: string): boolean => secretLikeName(name) && nameParts(name).some((p) => PASSWORD_PARTS.has(p));
+
+/** A literal URL that carries a credential: a user-info password (`user:pass@`) or a query parameter with a secret-like name. */
+export function urlCarriesSecret(v: string): boolean {
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v.trim())) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/\s@?#]*:[^/\s@?#]*@/i.test(v.trim())) return true;
+  const q = /\?([^#]*)/.exec(v);
+  if (!q) return false;
+  return q[1]!.split('&').some((kv) => {
+    const k = decodeURIComponent(kv.split('=')[0] ?? '');
+    return !!k && secretLikeName(k) && (kv.split('=')[1] ?? '') !== '' && !/^\{\{/.test(decodeURIComponent(kv.split('=').slice(1).join('=')));
+  });
+}
+
+const envOnly = (x: string): string | null => /^\{\{\s*\??env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(x)?.[1] ?? null;
 
 function sessionOf(v: unknown): { init: SessionInit[] } | null {
   if (v === undefined) return null;
@@ -223,18 +295,62 @@ function sessionOf(v: unknown): { init: SessionInit[] } | null {
       else if (isObj(s)) for (const [k, x] of Object.entries(s)) (walk(k), walk(x));
     };
     walk(t.args);
-    // why: review of PR #14 (8): a credential is never written in the manifest; under a secret-like name it must come from {{env.NAME}}.
+    // why: review of PR #14 (8) and its follow-up (B, re-review): a credential is never written in the manifest. Under a secret-like
+    // name (an object key, a `--flag` or `-p` in a list, `name=value` in a list, a `{ name, value }` header pair) the value must be
+    // exactly one {{env.NAME}}, whose value is then a secret however short (secret_env). A literal URL anywhere must not carry a
+    // credential (user-info or a secret-like query parameter). A number is refused only under a password-type name.
+    const secretEnv = new Set<string>();
+    const why = 'a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest';
+    const check = (x: unknown, at: string, name: string): void => {
+      if (x === null || x === undefined || x === '' || typeof x === 'boolean') return;
+      if (typeof x === 'number') {
+        if (passwordLikeName(name)) throw fail(`${w}.args${at}`, why);
+        return;
+      }
+      if (Array.isArray(x)) return x.forEach((y, j) => (typeof y === 'string' || typeof y === 'number' ? check(y, `${at}[${j}]`, name) : lit(y, `${at}[${j}]`)));
+      if (isObj(x)) return lit(x, at);
+      const n = typeof x === 'string' ? envOnly(x) : null;
+      if (!n) throw fail(`${w}.args${at}`, why);
+      secretEnv.add(n);
+    };
+    const urlOk = (x: unknown, at: string): void => {
+      if (typeof x === 'string' && urlCarriesSecret(x)) throw fail(`${w}.args${at}`, 'a literal URL that carries a credential (user-info or a secret-like query parameter) is given as {{env.NAME}}, never written in the manifest');
+    };
     const lit = (v: unknown, at: string): void => {
-      if (Array.isArray(v)) return v.forEach((x, j) => lit(x, `${at}[${j}]`));
+      if (Array.isArray(v)) {
+        v.forEach((x, j) => {
+          const here = `${at}[${j}]`;
+          if (typeof x !== 'string') return lit(x, here);
+          urlOk(x, here);
+          const kv = /^(-{0,2}[A-Za-z][\w.-]*)=(.*)$/s.exec(x);
+          if (kv && secretLikeName(kv[1]!)) return check(kv[2], here, kv[1]!);
+          const flag = /^-{1,2}([A-Za-z][\w.-]*)$/.exec(x);
+          const next = v[j + 1];
+          const isLit = j + 1 < v.length && (typeof next === 'string' || typeof next === 'number') && !/^-{1,2}[A-Za-z]/.test(String(next));
+          if (flag && isLit && (secretLikeName(flag[1]!) || (/^-[pP]$/.test(x) && typeof next === 'string' && !/^\d+$/.test(next)))) check(next, `${at}[${j + 1}] (after ${x})`, /^-[pP]$/.test(x) ? 'password' : flag[1]!);
+        });
+        return;
+      }
       if (isObj(v)) {
+        // A header pair { name: "Authorization", value: "…" } (also key/header in place of name).
+        const pairName = ['name', 'key', 'header'].map((k) => v[k]).find((x): x is string => typeof x === 'string');
+        const pair = pairName !== undefined && Object.hasOwn(v, 'value');
+        if (pair && secretLikeName(pairName)) check(v['value'], `${at}.value`, pairName);
         for (const [k, x] of Object.entries(v)) {
-          if (SECRET_ARG.test(k) && (typeof x === 'number' || (typeof x === 'string' && x !== '' && !/^\{\{\s*\??env\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$/.test(x)))) throw fail(`${w}.args${at}.${k}`, `a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest`);
-          lit(x, `${at}.${k}`);
+          if (pair && (k === 'value' || ['name', 'key', 'header'].includes(k))) {
+            if (k === 'value' && !secretLikeName(pairName)) lit(x, `${at}.${k}`), urlOk(x, `${at}.${k}`);
+            continue;
+          }
+          if (secretLikeName(k)) check(x, `${at}.${k}`, k);
+          else {
+            urlOk(x, `${at}.${k}`);
+            lit(x, `${at}.${k}`);
+          }
         }
       }
     };
     lit(t.args, '');
-    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env] };
+    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env], secret_env: [...secretEnv] };
   });
   return { init };
 }
