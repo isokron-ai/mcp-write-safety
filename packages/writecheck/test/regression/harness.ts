@@ -15,6 +15,7 @@
  * safety guard that must keep passing.
  */
 
+import { assertPublishable } from '../publish-lint.js';
 import { assertViolationsHaveSteps } from '../steps-lint.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ import type { Result } from '../../src/report/verdicts.js';
 import { ShapeBackend, type BackendOptions } from './backend.js';
 
 export const SERVER_JS = join(dirname(fileURLToPath(import.meta.url)), 'server.js');
-export const CONFIRM = 'gate2-regression';
+export const CONFIRM = 'regression-fixture';
 
 /** The top of every manifest: the fixture server over stdio, the target, the guard and the limits. */
 export function head(o: { guard: string; gate?: boolean; limits?: string }): string {
@@ -97,6 +98,8 @@ export async function runFixture(f: Fixture, o: { log?: (s: string) => void } = 
   const r = await runCommand({ manifest: f.manifest, outRoot: join(f.dir, 'out'), stateDir: join(f.dir, 'state'), confirmTarget: CONFIRM, planHash: hash, interactive: false, env: f.env, log: o.log ?? quiet, noSignals: true });
   // why: review R2 (lane F1): no violated record without its trace steps, unless its evidence is not a call trace.
   assertViolationsHaveSteps(r.doc);
+  // why: what a run wrote matches the published schema member for member, and names no product and no review.
+  assertPublishable(r.outDir);
   return r;
 }
 

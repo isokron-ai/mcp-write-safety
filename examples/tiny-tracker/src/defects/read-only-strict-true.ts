@@ -10,7 +10,7 @@
 // tool available, and nothing says so.
 //
 // Mirrors: GitHub GH-08 (`GITHUB_READ_ONLY=yes` leaves read-only mode off).
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 

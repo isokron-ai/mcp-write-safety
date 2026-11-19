@@ -14,8 +14,8 @@
 //
 // Mirrors: GitHub GH-01 (issue fields lost in 19 of 30 concurrent pairs) and
 // Grafana GF-01 (30 of 30).
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
-//   https://isokron.ai/research/grafana-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
+//   https://isokron.ai/research/grafana-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

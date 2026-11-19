@@ -11,7 +11,7 @@
 //
 // Mirrors: Payload PAY-12 (the schemas omitted field limits, so values valid
 // by the schema were refused).
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
