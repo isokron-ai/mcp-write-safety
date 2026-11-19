@@ -25,6 +25,8 @@ export type LedgerEntry =
   | { kind: 'abandoned'; resource: string; id: unknown; intent: number | null; reason: string; t_ms: number }
   /** review B2: each call of the tenant guard's tool, before it is sent (a call that rests on the operator's declaration may write). */
   | { kind: 'guard_call'; step: string; tool: string; phase: string; basis: string; context?: 'run' | 'cleanup'; t_ms: number }
+  /** review F4 on 1b7e1e1: each read of the state compared around a declared guard call, before it is sent (it goes out before the tenant check matches). */
+  | { kind: 'guard_state_read'; step: string; tool: string; phase: string; what: string; context?: 'run' | 'cleanup'; t_ms: number }
   | { kind: 'run_end'; status: string; t_ms: number };
 
 export interface OpenObject {

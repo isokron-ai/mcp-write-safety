@@ -10,7 +10,7 @@
 //
 // Mirrors: Kubernetes K8S-08 (`vm_create` overwrites an existing VM and
 // answers "created successfully").
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

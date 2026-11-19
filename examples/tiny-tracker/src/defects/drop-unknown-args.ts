@@ -10,7 +10,7 @@
 //
 // Mirrors: GitHub GH-06 (misspelled parameters dropped, success), Payload
 // PAY-11, Kubernetes K8S-09.
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 

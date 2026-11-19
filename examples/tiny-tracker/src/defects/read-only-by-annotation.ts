@@ -11,7 +11,7 @@
 // server still writes.
 //
 // Mirrors: PostHog R6 (read-only mode decided by an annotation).
-//   https://isokron.ai/research/posthog-mcp-server-audit#findings-register
+//   https://isokron.ai/research/posthog-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 

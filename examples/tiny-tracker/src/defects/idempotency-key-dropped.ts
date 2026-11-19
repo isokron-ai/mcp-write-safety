@@ -10,7 +10,7 @@
 //
 // Mirrors: the same retry findings as MWS-RETRY-1; writesafe's
 // `replayed: true` is the passing reference.
-//   https://isokron.ai/research/github-mcp-server-audit#other-observations
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#other-observations
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
