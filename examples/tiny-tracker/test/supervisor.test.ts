@@ -127,6 +127,29 @@ describe("arming stores (unit)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("in the state folder: firings in the same millisecond from two stores are all kept (none replaces another)", (t) => {
+    // CI once ran the test above inside one millisecond: two stores each counted their firings from 1, so the second
+    // store's first firing got the name of the first store's, and replaced it. The clock is pinned here so the
+    // collision is not left to timing.
+    const now = Date.now();
+    t.mock.method(Date, "now", () => now);
+    const dir = mkdtempSync(join(tmpdir(), "tt-sup-arm-ms-"));
+    try {
+      const sup = folderArming(dir);
+      const childA = folderArming(dir);
+      const childB = folderArming(dir);
+      sup.arm({ point: CRASH_POINTS.backendAfterCommit, once: true });
+      sup.arm({ point: CRASH_POINTS.mcpAfterBackendReply, once: false });
+      assert.ok(childA.take(CRASH_POINTS.backendAfterCommit, { at: "t1", boot_id: "aaaaaaaaaaaaaaaa", seq: 3 }));
+      assert.equal(childB.take(CRASH_POINTS.backendAfterCommit, { at: "t2", boot_id: "bbbbbbbbbbbbbbbb", seq: 4 }), undefined);
+      assert.ok(childB.take(CRASH_POINTS.mcpAfterBackendReply, { at: "t3", boot_id: null, seq: null }));
+      assert.ok(childA.take(CRASH_POINTS.mcpAfterBackendReply, { at: "t4", boot_id: null, seq: null }));
+      assert.deepEqual(sup.firings().map((f) => f.at), ["t1", "t3", "t4"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("crash points through the fault hooks (unit, with a stand-in for exit)", () => {

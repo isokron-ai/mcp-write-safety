@@ -28,6 +28,7 @@ import { answerOf, questionId, reviewResult, type Question } from './review.js';
 import { ruleNote } from './rules.js';
 import { fromDeclaration, saidBy, says, withoutEcho } from './says.js';
 import { rejectSignal } from './signals.js';
+import { searchesUpdate } from './in5search.js';
 import { mcpDefinedError, notRun, toolByName, wp, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext, type Tool } from './types.js';
 
 const ID = 'schema-probes';
@@ -285,7 +286,7 @@ export function in5Verdicts(obs: In5Obs[], res: ResourceSpec, tools: Tool[]): Re
   const tool = res.update?.tool;
   if (!tool || !toolByName(tools, tool)) return [];
   const w = wp(res.name, tool);
-  const scope = 'Only the values the declaration lists (try_values) were searched; the run-wide search of every refused call is not built in this preview.';
+  const scope = 'Only the values the declaration lists (try_values) were tried, on the object under test: the MWS-IN-5 search (scenario in5-search) does not search this update tool, and its record says why.';
   if (!res.try_values.length) return [result('MWS-IN-5', w, sc, 'not tested', `the declaration lists no values to try for ${tool} (try_values), and the run-wide search is not built in this preview`)];
   const sent = obs.filter((o) => o.valid && !o.indeterminate);
   // why: spec 96d3691 (R10-8): a call was refused when its result is an error, or, for a listed value, a success after which the
@@ -298,6 +299,17 @@ export function in5Verdicts(obs: In5Obs[], res: ResourceSpec, tools: Tool[]): Re
   if (bad.length) return [result('MWS-IN-5', w, sc, 'violated', `${tool} refused ${bad.length} value(s) valid by its input schema, under a fixed constraint the schema does not declare (the declaration states it is fixed): ${bad.map((x) => `${x.o.arg}=${x.o.value} (${short(x.o.text ?? '', 100)}; ${x.fc!.reason})`).join('; ')}.`, { steps: bad.map((x) => x.o.step!).filter(Boolean), notes })];
   if (!sent.length) return [result('MWS-IN-5', w, sc, 'not tested', 'no declared value to try was valid by the schema, or every call had an unknown outcome', { notes })];
   return [result('MWS-IN-5', w, sc, 'not observed', seen.length ? `${tool} refused ${seen.length} of the ${sent.length} declared value(s) valid by its schema; each refusal is listed, seen, not judged (no declared fixed constraint). This is a search (spec 8.2, rule 8).` : `${tool} accepted the ${sent.length} declared value(s) valid by its schema. This is a search (spec 8.2, rule 8).`, { notes })];
+}
+
+/**
+ * MWS-IN-5 for an update tool this check halted (spec R15-4): the IN-5 search (src/checks/in5search.ts) runs after this check
+ * and sends nothing to a halted tool, and where the object under test is unusable it does not run for the resource at all, so
+ * the record that says why comes from here. Evidence from before the search recorded `in5` and is judged by in5Verdicts.
+ */
+function in5Halted(halted: Record<string, string>, res: ResourceSpec, tools: Tool[]): Result[] {
+  const tool = res.update?.tool;
+  if (!tool || !toolByName(tools, tool) || !halted[tool]) return [];
+  return [result('MWS-IN-5', wp(res.name, tool), { id: `${ID}.in5`, version: VERSION }, 'not tested', `${tool} was not probed further after a failed put-back (spec R15-4): ${short(halted[tool]!, 300)}. The MWS-IN-5 search sends nothing to it.`)];
 }
 
 export interface ProbeObs {
@@ -444,7 +456,7 @@ export const schemaCheck: CheckModule = {
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const d = ctx.driver;
     const out: ProbeObs[] = [];
-    const in5: In5Obs[] = [];
+    let in5: In5Obs[] | undefined;
     const cut: Record<string, { sent: number; total: number }> = {};
     const noObject: string[] = [];
     // why: writesafe self-test T1: a tool whose probes could not start (the reset or the read before them failed) is not tested
@@ -739,9 +751,12 @@ export const schemaCheck: CheckModule = {
           stale = true;
         }
       }
-      // MWS-IN-5: the declared values to try, each valid by the schema, through the update tool.
+      // MWS-IN-5: the declared values to try (try_values) are sent by the IN-5 search (src/checks/in5search.ts), on a scratch
+      // object of the tester's. Where the search does not search this update tool (a resource with a fixture only, or a cleanup
+      // policy of leave), they are sent here, on the object under test, as before (review of lane F7, S5).
       // spec R15-4: after a put-back that failed, nothing more is sent to the tool.
-      if (role === 'update' && !halted) {
+      if (role === 'update' && !halted && res.try_values.length && !searchesUpdate(ctx.manifest, ctx.tools, res)) {
+        in5 ??= [];
         const props = isObj(t.inputSchema) && isObj(t.inputSchema['properties']) ? (t.inputSchema['properties'] as Obj) : {};
         for (const tv of res.try_values) {
           const value = tv.value !== undefined ? render(tv.value, d.vars()) : named.has(tv.arg) ? `${ctx.prefix}${'x'.repeat(Math.max(0, tv.length! - ctx.prefix.length))}` : 'x'.repeat(tv.length!);
@@ -765,7 +780,7 @@ export const schemaCheck: CheckModule = {
         }
       }
     }
-    return { check: ID, version: VERSION, resource: res.name, data: { probes: out, in5, cut, no_object: noObject, protected: protectedBy, not_probed: notProbed, halted: Object.fromEntries([...haltedIn(ctx.session)].filter(([k]) => toolsOf(res).some((x) => x.tool === k))) } };
+    return { check: ID, version: VERSION, resource: res.name, data: { probes: out, ...(in5 ? { in5 } : {}), cut, no_object: noObject, protected: protectedBy, not_probed: notProbed, halted: Object.fromEntries([...haltedIn(ctx.session)].filter(([k]) => toolsOf(res).some((x) => x.tool === k))) } };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;
@@ -773,7 +788,7 @@ export const schemaCheck: CheckModule = {
     const np = data.not_probed ?? {};
     const none = [...(data.no_object ?? []), ...Object.keys(np)];
     const skipped = none.flatMap((tool) => (['MWS-IN-1', 'MWS-IN-2', 'MWS-IN-3', 'MWS-IN-4', 'MWS-IN-6', 'MWS-IN-7'] as const).map((id) => result(id, wp(res.name, tool), { id: ID, version: VERSION }, 'not tested', `${tool} was not probed: ${np[tool] ?? 'the resource has no object of the run to read (no update tool declared)'}`)));
-    const all = [...schemaVerdicts(data.probes, res, ctx.tools, ctx, data.cut ?? {}, data.protected ?? {}).filter((r) => !none.includes(r.write_path.tool)), ...skipped, ...in5Verdicts(data.in5 ?? [], res, ctx.tools)];
+    const all = [...schemaVerdicts(data.probes, res, ctx.tools, ctx, data.cut ?? {}, data.protected ?? {}).filter((r) => !none.includes(r.write_path.tool)), ...skipped, ...(data.in5 !== undefined ? in5Verdicts(data.in5, res, ctx.tools) : in5Halted(data.halted ?? {}, res, ctx.tools))];
     // why: spec R15-4, review of 3283a69 (2): after a failed put-back no further probe, control or value goes to the tool, and each
     // probe not sent for that reason is treated as one not judged: no record of the tool's MWS-IN-1 to IN-7 is held or not observed.
     const halted = { ...(data.halted ?? {}), ...Object.fromEntries((data.probes ?? []).filter((p) => p.halted).map((p) => [p.tool, p.not_sent ?? 'a put-back failed'])) };
@@ -834,7 +849,7 @@ export function restorableTool(res: ResourceSpec, all: ResourceSpec[] = [res]): 
 
 /** Spec R15-4: the update tools a failed put-back halted, run-wide (by session), with the reason: no further probe or control goes to them. */
 const haltedTools = new WeakMap<object, Map<string, string>>();
-const haltedIn = (session: object): Map<string, string> => {
+export const haltedIn = (session: object): Map<string, string> => {
   let m = haltedTools.get(session);
   if (!m) haltedTools.set(session, (m = new Map()));
   return m;

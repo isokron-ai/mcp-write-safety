@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
+import { IN5_READING } from '../../src/checks/in5search.js';
 import { REQUIREMENTS } from '../../src/requirements.js';
 import { writePathKey, type Result } from '../../src/report/verdicts.js';
 import { runTT, startTinyTracker, tinyTrackerDir } from '../tiny-tracker/harness.js';
@@ -195,6 +196,10 @@ for (const protocol of [undefined, '2025-11-25']) {
       assert.equal(v('MWS-CFG-3', '(server):TRACKER_READ_ONLY'), 'held');
       assert.equal(v('MWS-SEC-1', '(server):get_ticket'), 'not observed');
       assert.ok(!rs.some((x) => ['MWS-ANN-1', 'MWS-ANN-2', 'MWS-ANN-3', 'MWS-ANN-5', 'MWS-SEC-1', 'MWS-IN-5'].includes(x.requirement) && x.verdict === 'held'), 'spec 8.2 rule 8: never held');
+      // MWS-IN-5, the scoped search: the update tool searched on scratch objects, the scope in numbers, nothing confirmed.
+      const in5 = rs.find((x) => x.requirement === 'MWS-IN-5' && x.scenario.id === 'in5-search' && x.write_path.tool === 'update_ticket')!;
+      assert.equal(in5.verdict, 'not observed');
+      assert.ok(Number(in5.numbers['args_probed']) >= 3 && Number(in5.numbers['probes']) > 20 && in5.numbers['confirmed'] === 0, JSON.stringify(in5.numbers));
       assert.ok(rs.filter((x) => x.verdict === 'violated' || x.verdict === 'platform').every((x) => x.attribution !== undefined), 'spec 8.2 rule 3: every record carries the attribution field');
       assert.ok(!rs.some((x) => x.scenario.id === 'barrier-pairs' && x.verdict === 'held'), 'spec 8.2 rule 5: pairs are never held');
       assert.ok(rs.filter((x) => x.verdict === 'self-attested').every((x) => x.numbers['answer'] === true));
@@ -243,6 +248,36 @@ for (const [defect, expect] of Object.entries(EXPECT)) {
     }
   });
 }
+
+// MWS-IN-5 with no declaration (lane F7): the shipped manifest's try_values and fixed_constraints are removed, and the search
+// still finds the hidden title limit by itself, with the boundary found by bisection and the reading recorded as the tester's.
+test('--defect undeclared-title-limit with no try_values or fixed_constraints: the IN-5 search finds maxLength 100 (a candidate by default, violated with --in5-reading=tester)', { skip }, async () => {
+  const bare = (text: string) => text.replace(/\n    try_values:\n(      - .*\n)+/, '\n').replace(/\n    fixed_constraints:\n(      - .*\n)+/, '\n');
+  const t = await startTinyTracker(dir!, { defects: ['undeclared-title-limit'], pairs: 10, gateReps: 1, edit: (x) => {
+    const y = bare(x);
+    assert.ok(!/try_values|fixed_constraints/.test(y.replace(/#.*$/gm, '')), 'the declaration is removed');
+    return y;
+  } });
+  try {
+    const d = await runTT(t);
+    const cand = d.doc.results.find((x) => x.requirement === 'MWS-IN-5' && x.scenario.id === 'in5-search' && x.write_path.tool === 'update_ticket')!;
+    assert.equal(cand.verdict, 'not observed', 'by default the differential reading alone gives no violated (draft 0.10)');
+    assert.ok(cand.notes.some((n) => /^Candidate constraint, seen, not judged: title: maxLength 100/.test(n)), cand.notes.join('\n'));
+    assert.deepEqual(violatedIds(d.doc.results), []);
+    IN5_READING.value = 'tester';
+    const r = await runTT(t).finally(() => (IN5_READING.value = 'declaration'));
+    assert.deepEqual(violatedIds(r.doc.results), ['MWS-IN-5']);
+    const rec = r.doc.results.find((x) => x.requirement === 'MWS-IN-5' && x.verdict === 'violated')!;
+    assert.equal(rec.write_path.tool, 'update_ticket');
+    assert.equal(rec.scenario.id, 'in5-search');
+    assert.match(rec.reason, /title: maxLength 100 \(100 characters accepted, 101 characters refused\)/);
+    assert.ok(rec.notes.some((n) => /Reading by: tester \(differential probe\)/.test(n)));
+    assert.ok(rec.steps.length >= 3);
+    assert.deepEqual(r.doc.leftovers, []);
+  } finally {
+    await t.close();
+  }
+});
 
 // With every defect on, ignore-project-scope makes MWS-TGT-1 violated, so the selector probes of MWS-TGT-2 are not sent (spec 7.3:
 // only after MWS-TGT-1 is held on the scope-named container); TGT-2 is then not tested, by the tester's own safety rule. For the

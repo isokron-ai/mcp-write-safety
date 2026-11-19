@@ -4,6 +4,7 @@ import { annotationsCheck } from './annotations.js';
 import { createsCheck } from './creates.js';
 import { gatedCheck } from './gated.js';
 import { idempotencyCheck } from './idempotency.js';
+import { in5SearchCheck } from './in5search.js';
 import { inputRequiredCheck } from './inputrequired.js';
 import { inputWritesCheck } from './inputwrites.js';
 import { launchCheck } from './launch.js';
@@ -17,7 +18,7 @@ import { staleCheck } from './stale.js';
 import { targetingCheck } from './targeting.js';
 import type { CheckModule, GlobalCheck } from './types.js';
 
-export const CHECKS: CheckModule[] = [readbackCheck, staleCheck, pairsCheck, gatedCheck, schemaCheck, annotationsCheck, idempotencyCheck, targetingCheck, multiCheck, listEditCheck, createsCheck, inputRequiredCheck, inputWritesCheck];
+export const CHECKS: CheckModule[] = [readbackCheck, staleCheck, pairsCheck, gatedCheck, schemaCheck, annotationsCheck, idempotencyCheck, targetingCheck, multiCheck, listEditCheck, createsCheck, inputRequiredCheck, inputWritesCheck, in5SearchCheck];
 
 /** Launch settings restart the server and the credential scan reads everything before it: both run last. */
 export const GLOBAL_CHECKS: GlobalCheck[] = [launchCheck, secretsCheck];
