@@ -127,7 +127,9 @@ const EXPECT: Record<string, string[]> = {
 const ON_WRITE_TOOLS: Record<string, [string, string[]]> = {
   'coerce-types': ['MWS-IN-1', ['ticket:create_ticket', 'ticket:bulk_update_tickets']],
   'drop-unknown-args': ['MWS-IN-2', ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project']],
-  'skip-limits': ['MWS-IN-3', ['ticket:create_ticket', 'ticket:close_ticket', 'ticket:delete_tickets', 'project:create_project']],
+  // close_ticket is not listed: its old MWS-IN-3 violation came only from reading the intermediate input_required
+  // answer as acceptance. With the declared answers the final result refuses the invalid id (owner-approved, 19 Nov 2026).
+  'skip-limits': ['MWS-IN-3', ['ticket:create_ticket', 'ticket:delete_tickets', 'project:create_project']],
   'vague-validation-error': ['MWS-IN-4', ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project']],
 };
 
