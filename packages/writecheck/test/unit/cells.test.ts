@@ -16,6 +16,7 @@ import { buildPlan, durationText, planHash, renderPlan } from '../../src/core/pl
 import { renderMarkdown } from '../../src/report/markdown.js';
 import type { ResultsDoc } from '../../src/report/results.js';
 import { cutShortOf, STEPS_EXEMPT, SYNTHETIC_SCENARIO } from '../../src/report/validity.js';
+import { withLoss } from '../../src/checks/targeting.js';
 import { pairsBudgetVerdicts } from '../../src/checks/pairs.js';
 import { staleCheck } from '../../src/checks/stale.js';
 import { wp, type Tool } from '../../src/checks/types.js';
@@ -254,7 +255,7 @@ test('F6 (review B1): only a cut-short stop (write budget, 429, interrupt) fails
   assert.ok(cutShortOf('stopped: update_ticket would exceed the write budget of 500'));
   assert.ok(cutShortOf('stopped: the target answered 429 (rate limited) to x; nothing after it was run'));
   assert.ok(cutShortOf('interrupted by SIGINT'));
-  assert.ok(cutShortOf('clean-up did not finish: x; stopped: y would exceed the write budget of 9'), 'a cut-short part anywhere in the reason');
+  assert.ok(cutShortOf('the fixture x could not be put back as it was; stopped: y would exceed the write budget of 9'), 'a top-level cut-short part after another part');
   for (const st of ['clean-up did not finish: delete failed; objects of this run may be left behind', 'the fixture ticket could not be put back as it was', "objects the tester did not create were lost outside any check's records (x)"]) {
     const r = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'lost field', { steps: ['s1'], attribution: 'server' });
     const v = validityOf(r, { stopped: st });
@@ -343,4 +344,35 @@ test('F1 (review M2): the cell pass re-derives its own rows; a stale cells row f
   const again = cellPass(tt(), TOOLS, stale.filter((r) => r.scenario.id !== CELLS_SCENARIO.id), { stopped: null });
   assert.ok(!again.results.some((r) => r.reason === 'stale'));
   assert.equal(again.results.length, first.results.length);
+});
+
+test('F6 (review R1): a 429 or "rate limited" inside clean-up or a server message never cuts the run short', () => {
+  const cleanup429 = 'clean-up did not finish: clean-up stopped (cleanup failed: stopped: the target answered 429 (rate limited) to tools/call delete_ticket (CLEANUP-3); nothing after it was run); objects of this run may be left behind';
+  assert.equal(cutShortOf(cleanup429), null);
+  assert.equal(cutShortOf('backend said: error 429 in parse'), null);
+  assert.equal(cutShortOf('clean-up did not finish: the server said interrupted by SIGTERM'), null);
+  assert.equal(cutShortOf('stopped: the server answered too many requests, 429'), null, 'only the tester\'s own message');
+  assert.ok(cutShortOf('stopped: the target answered 429 (rate limited) to tools/call update_ticket (MAIN); nothing after it was run'));
+  const r = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'lost', { steps: ['s1'], attribution: 'server' });
+  assert.equal(cellPass(tt(), TOOLS, [r], { stopped: cleanup429 }).results[0]!.validity!.class, 'valid');
+});
+
+test('F6 (review R1): with the order known, only records made after the cut fail V-RUN', () => {
+  const before = result('MWS-UPD-1', wp('ticket', 'update_ticket'), sc, 'violated', 'lost', { steps: ['s1'], attribution: 'server' });
+  const after = result('MWS-RES-1', wp('ticket', 'update_ticket'), sc, 'violated', 'not in effect', { steps: ['s2'], attribution: 'server' });
+  const stop = 'stopped: the target answered 429 (rate limited) to tools/call update_ticket (MAIN); nothing after it was run';
+  const { results } = cellPass(tt(), TOOLS, [before, after], { stopped: stop, late: (_r, i) => i >= 1 });
+  assert.deepEqual(results.slice(0, 2).map((x) => [x.requirement, x.validity!.failed]), [['MWS-UPD-1', []], ['MWS-RES-1', ['V-RUN']]]);
+  // Without the order, the tester's own cut-short message voids every violation (the conservative fallback).
+  assert.deepEqual(cellPass(tt(), TOOLS, [before], { stopped: stop }).results[0]!.validity!.failed, ['V-RUN']);
+});
+
+test('F6 (review R2): a targeting record turned into violated by a bystander loss carries the call\'s steps', () => {
+  const held = result('MWS-TGT-2', wp('ticket', 'delete_tickets'), { id: 'targeting', version: '1' }, 'held', 'no form removed anything', { notes: ['n'] });
+  const v = withLoss(held, [{ gone: ['other-1'], changed: [] } as never], true, [], ['tgt2.form.omitted.00042']);
+  assert.equal(v.verdict, 'violated');
+  assert.deepEqual(v.steps, ['tgt2.form.omitted.00042']);
+  assert.equal(validityOf(v, { stopped: null }).class, 'valid');
+  const own = result('MWS-TGT-1', wp('ticket', 'delete_tickets'), { id: 'targeting', version: '1' }, 'held', 'named scope only', { steps: ['own.1'] });
+  assert.deepEqual(withLoss(own, [{ gone: ['other-1'], changed: [] } as never], true, [], ['x']).steps, ['own.1'], 'a record\'s own steps are kept');
 });

@@ -182,7 +182,9 @@ export function recheckCommand(o: { dir: string; review?: string; log: (s: strin
   const changed = results.filter((r) => before.get(k(r)) !== r.verdict).map((r) => ({ key: k(r), before: before.get(k(r)) ?? '(none)', after: r.verdict }));
   // why: F1/F6: the cells and validity are re-derived from the rechecked records (docs/CELLS.md).
   // why: review M2: the cell pass's own rows are re-derived, never kept (a rule or a record that changed would leave a stale one).
-  const celled = cellPass(manifest, tools, results.filter((r) => r.scenario.id !== CELLS_SCENARIO.id), { stopped: doc.run.stopped_reason, input_required_tools: inputRequiredTools(doc.target.mcp) });
+  // why: review R1: a record made after the run was cut short is known from the recorded validity (V-RUN), not from the stop text.
+  const lateKeys = new Set(doc.results.filter((r) => r.validity?.failed.includes('V-RUN')).map(k));
+  const celled = cellPass(manifest, tools, results.filter((r) => r.scenario.id !== CELLS_SCENARIO.id), { stopped: doc.run.stopped_reason, late: (r) => lateKeys.has(k(r)), input_required_tools: inputRequiredTools(doc.target.mcp) });
   const out: ResultsDoc = { ...doc, results: celled.results, cells: celled.cells, scope: `${doc.scope} Rechecked offline with this release's rules.` };
   const dir = join(o.dir, 'recheck');
   mkdirSync(dir, { recursive: true });

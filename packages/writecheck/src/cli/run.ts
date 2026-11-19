@@ -146,6 +146,8 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   let ledger: Ledger | null = null;
   let cleanupDone: CleanupReport | null = null;
   let stopped: string | null = null;
+  /** Review R1: the index of the first record made after the run was cut short (write budget, rate limit, interrupt); only records from there on fail V-RUN. */
+  let cutAt: number | null = null;
   const results: Result[] = [];
   const firstWrite = new Map<string, string[]>();
   const observations: Observation[] = [];
@@ -223,6 +225,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
     interrupted = true;
     o.log(`\n${sig}: stopping; cleaning up this run's objects before exit…`);
     stopped = `interrupted by ${sig}`;
+    cutAt ??= results.length;
     session.abort(stopped);
     setTimeout(() => {
       if (finished) return;
@@ -389,7 +392,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         const dead = await targetStopped(manifest, session, 'MAIN', { onCall: onGuardCall });
         if (dead && !stopped) stopped = dead;
       } catch (e) {
-        if ((e instanceof RateLimited || e instanceof BudgetExhausted) && !stopped) stopped = e.message;
+        if ((e instanceof RateLimited || e instanceof BudgetExhausted) && !stopped) {
+          stopped = e.message;
+          cutAt ??= results.length;
+        }
       }
     };
     const runChecks = async (res: (typeof manifest.resources)[number], d: Driver) => {
@@ -437,9 +443,16 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           }
           results.push(...got.filter((r) => !c.notRun.some((n) => n.requirement === r.requirement && n.write_path.tool === r.write_path.tool)));
           const stop = (obs.data as { stopped?: string | null })?.stopped;
-          if (stop && /stopped:/.test(stop)) stopped = stop;
+          if (stop && /stopped:/.test(stop)) {
+            stopped = stop;
+            // why: review R1: the records of the check that was cut short come after the cut.
+            cutAt ??= start;
+          }
         } catch (e) {
-          if (e instanceof RateLimited || e instanceof BudgetExhausted) stopped = e.message;
+          if (e instanceof RateLimited || e instanceof BudgetExhausted) {
+            stopped = e.message;
+            cutAt ??= results.length;
+          }
           // the losses after a check that failed are compared at the next bracket (gapLoss), and named there
           results.push(...notRun(mod, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
         }
@@ -548,7 +561,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
           throw new WritecheckError('the baseline values did not read back');
         }
       } catch (e) {
-        if (e instanceof RateLimited || e instanceof BudgetExhausted) stopped = e.message;
+        if (e instanceof RateLimited || e instanceof BudgetExhausted) {
+          stopped = e.message;
+          cutAt ??= results.length;
+        }
         allNotRun(`setup failed: ${(e as Error).message}`);
         setupFailed.push(`${res.name}: ${short((e as Error).message, 120)}`);
         await alive();
@@ -596,7 +612,10 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
         }
         results.push(...got);
       } catch (e) {
-        if (e instanceof RateLimited || e instanceof BudgetExhausted) stopped = e.message;
+        if (e instanceof RateLimited || e instanceof BudgetExhausted) {
+          stopped = e.message;
+          cutAt ??= results.length;
+        }
         results.push(...notRun(g, rest, w, 'not tested', `the check failed: ${short((e as Error).message, 300)}`));
       }
       blockEarlier(losses, `server: ${g.id}`, start);
@@ -691,7 +710,7 @@ export async function runCommand(o: RunOptions): Promise<RunOutcome> {
   // why: writesafe self-test T5 (spec 5.3): every requirement has a record, if only `not tested` with the reason.
   results.push(...everyRequirement(results, plan?.not_built ?? [], stopped ?? null));
   // why: F1/F6 (docs/CELLS.md): every MUST cell gets a record, duplicates go, records are stamped with their cell and validity.
-  const celled = cellPass(manifest, tools, results, { stopped: stopped ?? null, input_required_tools: inputRequiredTools(mcp) });
+  const celled = cellPass(manifest, tools, results, { stopped: stopped ?? null, late: (_r, i) => cutAt !== null && i >= cutAt, input_required_tools: inputRequiredTools(mcp) });
   results.splice(0, results.length, ...celled.results);
   const doc: ResultsDoc = {
     format: RESULTS_FORMAT,

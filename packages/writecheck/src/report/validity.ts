@@ -50,19 +50,30 @@ export const STEPS_EXEMPT: { scenario: string; requirement: string; basis: strin
 ];
 const exemptOf = (r: Result) => STEPS_EXEMPT.find((x) => x.scenario === r.scenario.id && x.requirement === r.requirement) ?? null;
 
-/** The part of a run's stop reason that cut it short (write budget, rate limit, interrupt), or null: only that stop fails V-RUN. */
+/**
+ * The part of a run's stop reason that cut it short, or null. Only the tester's own stop messages count, each at the start of a
+ * top-level part (review R1): "stopped: the target answered 429 (rate limited) to …", "stopped: … would exceed the write budget
+ * of N", "interrupted by SIG…". Text inside another part (a clean-up that failed, a server's error message) never does, so a
+ * server cannot void its own violations by answering 429 or "too many requests" during clean-up.
+ * Used only where the order of the records is not known; the run and recheck say which records came after the stop (`late`).
+ */
 export function cutShortOf(stopped: string | null): string | null {
   if (!stopped) return null;
-  const hit = stopped.split(/;\s*/).find((x) => /would exceed the write budget|\(rate limited\)|\b429\b|^interrupted by\b/.test(x));
+  const parts = stopped.split(/; (?=stopped: |interrupted by |clean-up |the fixture |objects the tester )/);
+  const hit = parts.find((x) => /^stopped: the target answered 429 \(rate limited\) to /.test(x) || /^stopped: .* would exceed the write budget of \d+$/.test(x) || /^interrupted by SIG[A-Z]+$/.test(x));
   return hit ?? null;
 }
 
-export function validityOf(r: Result, run: { stopped: string | null }): Validity {
+/**
+ * `late`: the record was made after the run was cut short (run.ts records where; recheck carries it over). Only such a record
+ * fails V-RUN; a violation recorded before the stop keeps counting (review R1). Absent: decided from the stop reason alone.
+ */
+export function validityOf(r: Result, run: { stopped: string | null; late?: boolean }): Validity {
   const given: Evidence = r.validity?.evidence ?? {};
   const failed: ValidityRule[] = [];
   const exempt = exemptOf(r);
   if (!r.steps.length && !exempt) failed.push('V-STEPS');
-  if (cutShortOf(run.stopped)) failed.push('V-RUN');
+  if (run.late ?? !!cutShortOf(run.stopped)) failed.push('V-RUN');
   let ack = given.acknowledged ?? null;
   if (ack === null && r.scenario.id === 'barrier-pairs') {
     const both = Number(r.numbers['both_ok'] ?? NaN);
@@ -77,9 +88,9 @@ export function validityOf(r: Result, run: { stopped: string | null }): Validity
 }
 
 /** Stamp validity on every violated record (and take it off any other: a record adjusted away from violated keeps none). */
-export function withValidity(results: Result[], run: { stopped: string | null }): Result[] {
-  return results.map((r) => {
-    if (r.verdict === 'violated') return { ...r, validity: validityOf(r, run) };
+export function withValidity(results: Result[], run: { stopped: string | null; late?: (r: Result, i: number) => boolean }): Result[] {
+  return results.map((r, i) => {
+    if (r.verdict === 'violated') return { ...r, validity: validityOf(r, { stopped: run.stopped, ...(run.late ? { late: run.late(r, i) } : {}) }) };
     if (r.validity) {
       const { validity: _v, ...rest } = r;
       return rest;

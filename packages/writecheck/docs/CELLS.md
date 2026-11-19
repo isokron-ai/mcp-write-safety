@@ -87,7 +87,7 @@ Rules, all of which a record must meet:
 | Rule | The record must show |
 |---|---|
 | V-STEPS | the step ids of its trace (at least one), so the capture shows what happened. Exempt (`STEPS_EXEMPT` in `validity.ts`): evidence that is not a call trace. That is MWS-ANN-4 from the catalog, MWS-CFG-4 from the launch observation, and MWS-ANN-1 from the ledger (objects created through a tool marked read-only). An exempt record names its evidence in `evidence.basis` |
-| V-RUN | the run was not cut short by the write budget, a rate limit (429) or an interrupt (`cutShortOf` in `validity.ts`). A stop for another reason keeps the record's violations: clean-up not finished, a fixture not put back, or bystanders lost. Those stops are safety facts of their own and say nothing against evidence already recorded. The rating gives a stopped run no letter better than "Not rated yet" |
+| V-RUN | the record was not made after the run was cut short. Only the tester's own stop messages cut a run short, each at the start of a top-level part of the stop reason: "stopped: the target answered 429 (rate limited) to …", "stopped: … would exceed the write budget of N", or "interrupted by SIG…". The run records where the cut happened; only records from there on fail V-RUN, and recheck carries that over. Without the order, `cutShortOf` in `validity.ts` decides from the reason alone. A 429 or "too many requests" inside clean-up, or in a server's message, never cuts the run short, so a server cannot void its own violations that way. A stop for another reason keeps the violations: clean-up not finished, a fixture not put back, or bystanders lost. Those stops are safety facts of their own. The rating gives a stopped run no letter better than "Not rated yet" |
 | V-ACK | every write the violation rests on was acknowledged as a success: from `evidence.acknowledged`, or for barrier pairs from `numbers` (`both_ok >= lost >= 1`) |
 | V-READBACK | the final state was read back (`evidence.read_back`; not `false`) |
 
@@ -99,7 +99,10 @@ Classes:
 
 `synthetic_fault` is true where the violation was provoked with a status the gate injected. That covers MWS-RES-2 and MWS-ATOM-1 under the scenarios `held-request`, `write-faults` and `multi-item.res2`, or any record with `evidence.synthetic_fault`. A connection cut after the backend applied the write (`*.unknown-outcome`) is not synthetic, because a lost answer is a real-world event. The flag is printed. It does not disqualify the record, because what is tested is how the server reports a backend refusal.
 
-A test (`test/unit/cells.test.ts`) scans `src/checks` and fails on any `violated` producer that neither sets `steps` nor is an exemption.
+Two guards keep V-STEPS honest:
+
+- A test (`test/unit/cells.test.ts`) scans `src/checks` and fails on any `violated` producer that neither sets `steps` nor is an exemption.
+- The shared test harnesses (fake, regression, tiny-tracker) assert the same on every record of every fixture run (`test/steps-lint.ts`). That catches indirect producers too, such as a bystander loss that turns a targeting record into `violated`: `withLoss` gives such a record the steps of the calls the loss was around.
 
 ## Pair budget (opt-in)
 

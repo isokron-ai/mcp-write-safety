@@ -290,6 +290,12 @@ function decide(recs: Result[], rule: NotApplicable | null): { verdict: Verdict;
 
 export interface CellRun {
   stopped: string | null;
+  /**
+   * Which input records were made after the run was cut short (write budget, rate limit, interrupt): only those fail V-RUN
+   * (review R1). run.ts gives the index of the first such record; recheck the records that failed V-RUN before. Absent: the
+   * stop reason alone decides (validity.ts cutShortOf), for every record.
+   */
+  late?: (r: Result, i: number) => boolean;
   /** Tools that answered input_required during the run (spec 7.3 rule 10; results.target.mcp.input_requests). */
   input_required_tools?: string[];
 }
@@ -303,7 +309,14 @@ export function cellPass(m: Manifest, tools: Tool[], input: Result[], run: CellR
   const roles = toolRoles(m, tools);
   const offered = new Set(tools.map((t) => t.name));
   const seen = new Set(run.input_required_tools ?? []);
-  let results = dedupe(input.map(unstamped));
+  // why: review R1: whether a record came after the cut is decided on the input order, before duplicates go and records are added.
+  const lateSet = run.late ? new Set(input.filter((r, i) => run.late!(r, i))) : null;
+  const lateOf = new Map<Result, boolean>();
+  let results = dedupe(input.map((r) => {
+    const u = unstamped(r);
+    if (lateSet) lateOf.set(u, lateSet.has(r));
+    return u;
+  }));
   // why: the cells now carry these requirements per tool; the run-wide "no record" row for them would be a second, emptier answer.
   if (roles.size) results = results.filter((r) => !(r.write_path.resource === '(declaration)' && PER_TOOL_MUST.includes(r.requirement)));
   const added: Result[] = [];
@@ -320,7 +333,7 @@ export function cellPass(m: Manifest, tools: Tool[], input: Result[], run: CellR
     if (results.some((x) => x.requirement === req)) continue;
     added.push(result(req, { resource: SERVER_CELL, tool: '(all)', arm: 'mcp' }, CELLS_SCENARIO, 'not tested', run.stopped ? `no check made a record for ${req} before the run stopped (${run.stopped})` : `no check of this run made a record for ${req}: the declaration gives no settings block for it`));
   }
-  results = withValidity([...results, ...added], run);
+  results = withValidity([...results, ...added], { stopped: run.stopped, ...(lateSet ? { late: (r: Result) => lateOf.get(r) ?? false } : {}) });
   const keyOf = (r: Result): string | null => {
     if (r.level !== 'MUST') return null;
     if (SERVER_LEVEL.includes(r.requirement)) return cellKey(r.requirement, SERVER_CELL);
