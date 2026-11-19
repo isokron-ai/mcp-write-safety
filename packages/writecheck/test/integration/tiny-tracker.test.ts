@@ -137,6 +137,10 @@ const IN_NOT_HELD: Record<string, RegExp> = {
 const SAID_NO: Record<string, string[]> = {
   'stale-unannounced': ['MWS-CONC-5 project:delete_project'],
   'conflict-as-generic-error': ['MWS-CONC-6 ticket:set_labels'],
+  // B-GAP F2: the review-only reason clause of MWS-IN-4 is now asked on every write tool. Under these defects a value reaches the
+  // backend, whose refusal (a not-found after a converted key; a length or pattern refusal) is passed on without the reason.
+  'coerce-types': ['MWS-IN-4 project:delete_project'],
+  'skip-limits': ['MWS-IN-4 ticket:add_comment'],
 };
 
 test('the expectations cover every tiny-tracker defect', { skip }, async () => {
