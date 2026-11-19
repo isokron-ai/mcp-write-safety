@@ -370,6 +370,27 @@ test('p16 E: a tool called with the manifest\'s calls args (annotation effects) 
   assert.deepEqual(Object.keys(testInputs(ann, { manifest: m, tools, tester }).tools['add_label']!.p).sort(), ['id', 'name']);
 });
 
+test('p07 a, c: a self-attested answer that flips is changed; for not tested against not applicable the run\'s own cell decides', () => {
+  const m = load();
+  const tools = toolsFor(m);
+  const sa = (answer: boolean) => ({ ...rec('MWS-CONC-4', 'self-attested'), numbers: { answer } }) as Result;
+  const c1 = cmp(doc(stamped([sa(true)], m, tools)), doc(stamped([sa(false)], m, tools)));
+  assert.equal(cellOf(c1, 'MWS-CONC-4@update_ticket').label, 'changed');
+  assert.equal(cellOf(cmp(doc(stamped([sa(true)], m, tools)), doc(stamped([sa(true)], m, tools))), 'MWS-CONC-4@update_ticket').label, 'unchanged');
+  // beside a held record of the cell (the roll-up is held on both sides), the flip is still said
+  const held = rec('MWS-CONC-4', 'held');
+  const c2 = cmp(doc(stamped([held, { ...sa(true), scenario: { id: 'stale-write.review', version: '1' } }], m, tools)), doc(stamped([held, { ...sa(false), scenario: { id: 'stale-write.review', version: '1' } }], m, tools)));
+  assert.equal(cellOf(c2, 'MWS-CONC-4@update_ticket').label, 'changed');
+  const na = { cells: [{ key: 'MWS-UPD-1@update_ticket', verdict: 'not applicable' }] };
+  const b = doc(stamped([rec('MWS-UPD-1', 'not tested', { scenario: { id: 'read-after-write', version: '1' } })], m, tools), na);
+  const a = doc(stamped([rec('MWS-UPD-1', 'not applicable', { scenario: { id: 'read-after-write', version: '1' } })], m, tools), na);
+  assert.equal(cellOf(cmp(b, a), 'MWS-UPD-1@update_ticket').label, 'unchanged');
+  // without the run's cells the roll-up stands, and a move between the two is not comparable
+  const b2 = doc(stamped([rec('MWS-UPD-1', 'not tested', { scenario: { id: 'read-after-write', version: '1' } })], m, tools));
+  const a2 = doc(stamped([rec('MWS-UPD-1', 'not applicable', { scenario: { id: 'read-after-write', version: '1' } })], m, tools));
+  assert.equal(cellOf(cmp(b2, a2), 'MWS-UPD-1@update_ticket').label, 'not comparable');
+});
+
 test('scheme: records hashed under mws-test-hash/1 and /2 are never joined, and compare says so', () => {
   const m = load();
   const tools = toolsFor(m);

@@ -42,6 +42,7 @@ export const COMPARE_FORMAT = 'mws-compare/1';
 
 /** A cell's state on one side: the seven verdicts, plus `violated?` for a violated record that does not count. */
 export type CellState = 'violated' | 'platform' | 'held' | 'violated?' | 'not observed' | 'self-attested' | 'not tested' | 'not applicable';
+const UNTESTED: CellState[] = ['not tested', 'not applicable'];
 export const ROLLUP_ORDER: CellState[] = ['violated', 'platform', 'held', 'violated?', 'not observed', 'self-attested', 'not tested', 'not applicable'];
 
 export type Label = 'fixed' | 'schema-fixed' | 'regressed' | 'unchanged' | 'changed' | 'not comparable';
@@ -83,6 +84,8 @@ interface Rec {
   case?: string;
   validity?: { counts?: boolean; class?: string };
   attribution?: string | null;
+  /** A self-attested record's answer is in numbers.answer. */
+  numbers?: Record<string, unknown> | null;
   /** Set by compare (never written): the record's hash scheme and the tester the file states. */
   _scheme?: string;
   _doc_tester?: string | null;
@@ -221,7 +224,11 @@ function sides(doc: Record<string, unknown>): Map<string, { side: Side; recs: Re
   if (Array.isArray(doc['cells'])) for (const c of doc['cells'] as { key?: string; verdict?: string }[]) if (c.key && c.verdict) runCells.set(c.key, c.verdict);
   const out = new Map<string, { side: Side; recs: Rec[]; requirement: string; tool: string }>();
   for (const [k, g] of groups) {
-    const { verdict, deciding } = rollUp(g.recs);
+    const rolled = rollUp(g.recs);
+    const { deciding } = rolled;
+    const rc = runCells.get(k) as CellState | undefined;
+    // why: review p07c: for not tested against not applicable the run's own cell decides (only the run knows its applicability rules).
+    const verdict = UNTESTED.includes(rolled.verdict) && rc && UNTESTED.includes(rc) ? rc : rolled.verdict;
     out.set(k, {
       requirement: deciding.requirement,
       tool: deciding.write_path.tool,
@@ -241,7 +248,6 @@ function sides(doc: Record<string, unknown>): Map<string, { side: Side; recs: Re
   return out;
 }
 
-const UNTESTED: CellState[] = ['not tested', 'not applicable'];
 
 /** The run's own cell and this roll-up disagree on a tested verdict. */
 function mismatch(s: Side): string | null {
@@ -571,6 +577,13 @@ function verdictMove(b: Side, a: Side, slots: SlotMove[]): Classified {
   const v0 = b.verdict;
   const v1 = a.verdict;
   if (v0 === 'violated?' || v1 === 'violated?') return { transition: 'unstable', label: 'not comparable', why: 'a violated record on one side does not count (harness-suspect validity): re-run before claiming a change' };
+  if (v0 === v1) {
+    // why: review p07a: a cell whose self-attested answer flipped (deciding or beside a tested record) is not unchanged.
+    const answers = (s: Side) => [...new Set((s.recs ?? []).filter((r) => r.verdict === 'self-attested').map((r) => canonical(r.numbers?.['answer'] ?? null)))].sort().join(', ');
+    const x = answers(b);
+    const y = answers(a);
+    if (x && y && x !== y) return { transition: 'changed', label: 'changed', why: `${v0} on both builds, but a self-attested answer changed (${x} → ${y}); an answer, not a test` };
+  }
   if (v0 === v1) {
     const t: Transition = v0 === 'violated' ? 'still-violated' : v0 === 'held' ? 'held-both' : v0 === 'platform' ? 'platform-both' : 'same';
     return { transition: t, label: 'unchanged', why: `${v0} on both builds` };
