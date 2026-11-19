@@ -241,7 +241,7 @@ export function recheckLate(doc: Pick<ResultsDoc, 'run' | 'results'>, freshObs: 
 export function reviewCommand(o: { dir: string; log: (s: string) => void }): { open: number; answered: number } {
   const file = join(o.dir, 'results.json');
   if (!existsSync(file)) throw new WritecheckError(`${o.dir}: no results.json (give the folder a run wrote, e.g. mwsc-results/<run id>)`, 2);
-  const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
+  const doc = parseResultsBytes(readFileSync(file), file) as ResultsDoc;
   const qid = (r: Result) => r.notes.find((n) => n.startsWith('question id '))?.slice('question id '.length) ?? /\(question id ([^)]+)\)/.exec(r.reason)?.[1] ?? null;
   const open = doc.results.filter((r) => r.verdict === 'not tested' && r.reason.startsWith('review-only clause'));
   const answered = doc.results.filter((r) => r.verdict === 'self-attested');
@@ -274,7 +274,7 @@ export function reviewCommand(o: { dir: string; log: (s: string) => void }): { o
 export async function rerunCommand(o: Omit<RunOptions, 'rerunOf'> & { dir: string }): Promise<RunOutcome> {
   const file = join(o.dir, 'results.json');
   if (!existsSync(file)) throw new WritecheckError(`${o.dir}: no results.json (give the folder a run wrote, e.g. mwsc-results/<run id>)`, 2);
-  const doc = JSON.parse(readFileSync(file, 'utf8')) as ResultsDoc;
+  const doc = parseResultsBytes(readFileSync(file), file) as ResultsDoc;
   const m = loadManifest(o.manifest, { pairBudget: o.pairBudget ?? null });
   if (m.source.sha256 !== doc.manifest.sha256) throw new WritecheckError(`${o.manifest} is not the manifest run ${doc.run.id} used (sha256 ${m.source.sha256.slice(0, 16)}… now, ${doc.manifest.sha256.slice(0, 16)}… then); a rerun repeats a recorded run exactly, so it refuses. Use \`run\` for a new plan.`, 3);
   if (doc.suite.version !== SUITE_VERSION) o.log(`note: run ${doc.run.id} was made with ${doc.suite.name} ${doc.suite.version}; this is ${SUITE_VERSION}, so scenario versions may differ.`);
