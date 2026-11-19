@@ -11,7 +11,7 @@
 //
 // Mirrors: Payload PAY-01 (with the lock override off, the refusal came back
 // as plain text without isError, 3 of 3).
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

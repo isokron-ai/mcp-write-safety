@@ -44,7 +44,7 @@ const err = (text: string, data: unknown = null) => call({ ok: false, isError: t
 // free text decides nothing.
 test('conflict signals (strict): a structured 409/412, a Kubernetes Status, a conflict code or conflict: true; never text', () => {
   const k8s = { kind: 'Status', apiVersion: 'v1', status: 'Failure', message: 'Operation cannot be fulfilled on configmaps "x": the object has been modified', reason: 'Conflict', code: 409 };
-  assert.match(conflictSignal(err(JSON.stringify(k8s), k8s))!.source, /Kubernetes Status with reason Conflict/);
+  assert.match(conflictSignal(err(JSON.stringify(k8s), k8s))!.source, /^a status object with reason Conflict$/);
   assert.match(conflictSignal(err('refused', { error: { code: 'version_conflict', current_version: 7 } }))!.source, /conflict code "version_conflict"/);
   assert.match(conflictSignal(err('', { status: 409 }))!.source, /HTTP status 409 in the field status/);
   assert.match(conflictSignal(call({ text: 'ok', data: { conflict: true } }))!.source, /conflict: true/);
@@ -82,7 +82,7 @@ test('CONC-2: a structured conflict signal is counted and named; a quiet answer 
   const by = (rs: ReturnType<typeof deleteVerdicts>, id: string) => rs.find((r) => r.requirement === id)!;
   const held = deleteVerdicts({ tool: 'ticket_update', kind: 'write', positive: { ok: true, effect: true, step: 'p' }, control: null, reps: [rep(err('{"reason":"Conflict","code":409}', { reason: 'Conflict', code: 409 })), rep(err('stale version'))] }, res, ctx);
   assert.equal(by(held, 'MWS-CONC-2').verdict, 'held');
-  assert.ok(by(held, 'MWS-CONC-2').notes.some((n) => /1 of 2 refusal\(s\) carried a structured conflict signal: a Kubernetes Status with reason Conflict \(1\)/.test(n)));
+  assert.ok(by(held, 'MWS-CONC-2').notes.some((n) => /1 of 2 refusal\(s\) carried a structured conflict signal: a status object with reason Conflict \(1\)/.test(n)));
   // a success that applied nothing: a signal makes it a refusal returned as an ordinary result; built-in words alone do not
   const quietSig = deleteVerdicts({ tool: 'ticket_update', kind: 'write', positive: { ok: true, effect: true, step: 'p' }, control: null, reps: [rep(call({ text: 'Not saved.', data: { conflict: true } }))] }, res, ctx);
   assert.equal(by(quietSig, 'MWS-CONC-2').verdict, 'held');

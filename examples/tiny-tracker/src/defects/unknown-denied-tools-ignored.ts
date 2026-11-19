@@ -11,7 +11,7 @@
 //
 // Mirrors: GitHub GH-10 (misspelled entries in an exclusion list were silent)
 // and Kubernetes K8S-14.
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 

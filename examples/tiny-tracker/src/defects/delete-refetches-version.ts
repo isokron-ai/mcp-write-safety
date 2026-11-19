@@ -11,8 +11,8 @@
 //
 // Mirrors: GitHub GH-02 (`delete_file` takes no sha) and Grafana GF-19 (a
 // stale body replaced an edit, 3 of 3).
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
-//   https://isokron.ai/research/grafana-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
+//   https://isokron.ai/research/grafana-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

@@ -14,8 +14,8 @@
 //
 // Mirrors: Payload PAY-05 (bulk update reports success when some documents
 // failed) and Kubernetes K8S-01 (apply stops at the first refusal).
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

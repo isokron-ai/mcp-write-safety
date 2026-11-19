@@ -47,7 +47,7 @@ interface CommandSpec {
 const COMMANDS: Record<string, CommandSpec> = {
   demo: {
     usage: `mcp-writecheck demo [--defect NAME]... [--tiny-tracker DIR] [--out DIR] [--verbose]
-    Try the suite on tiny-tracker, the MWS sample server, on this machine (about two minutes):
+    Try the suite on tiny-tracker, the MWS sample server, on this machine (about a minute):
     starts its backend on 127.0.0.1, runs the shipped manifest against the correct build (or with
     --defect NAME, a broken one; --defect all for every defect), prints one line per requirement,
     and stops everything it started. Finds tiny-tracker with --tiny-tracker, TINY_TRACKER_DIR, a

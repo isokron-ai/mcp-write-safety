@@ -14,7 +14,7 @@
 // Mirrors: the guidance under MWS-CONC-2 and Annex B-8 (say what is not
 // protected); PostHog's versioned tool that ignored the version on some
 // objects (classed as a design gap).
-//   https://isokron.ai/research/posthog-mcp-server-audit#what-held-up
+//   https://isokron.ai/research/posthog-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#what-held-up
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

@@ -13,8 +13,8 @@
 //
 // Mirrors: Payload PAY-04 (fields not stored, success text returned) and
 // GitHub GH-06 (success with nothing changed), here in the structured shape.
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";
