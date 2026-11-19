@@ -28,6 +28,7 @@ import { answerOf, questionId, reviewResult, type Question } from './review.js';
 import { ruleNote } from './rules.js';
 import { fromDeclaration, saidBy, says, withoutEcho } from './says.js';
 import { rejectSignal } from './signals.js';
+import { searchesUpdate } from './in5search.js';
 import { mcpDefinedError, notRun, toolByName, wp, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext, type Tool } from './types.js';
 
 const ID = 'schema-probes';
@@ -285,7 +286,7 @@ export function in5Verdicts(obs: In5Obs[], res: ResourceSpec, tools: Tool[]): Re
   const tool = res.update?.tool;
   if (!tool || !toolByName(tools, tool)) return [];
   const w = wp(res.name, tool);
-  const scope = 'Only the values the declaration lists (try_values) were searched; the run-wide search of every refused call is not built in this preview.';
+  const scope = 'Only the values the declaration lists (try_values) were tried, on the object under test: the MWS-IN-5 search (scenario in5-search) does not search this update tool, and its record says why.';
   if (!res.try_values.length) return [result('MWS-IN-5', w, sc, 'not tested', `the declaration lists no values to try for ${tool} (try_values), and the run-wide search is not built in this preview`)];
   const sent = obs.filter((o) => o.valid && !o.indeterminate);
   // why: spec 96d3691 (R10-8): a call was refused when its result is an error, or, for a listed value, a success after which the
@@ -454,6 +455,7 @@ export const schemaCheck: CheckModule = {
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const d = ctx.driver;
     const out: ProbeObs[] = [];
+    let in5: In5Obs[] | undefined;
     const cut: Record<string, { sent: number; total: number }> = {};
     const noObject: string[] = [];
     // why: writesafe self-test T1: a tool whose probes could not start (the reset or the read before them failed) is not tested
@@ -747,9 +749,35 @@ export const schemaCheck: CheckModule = {
         }
       }
       // MWS-IN-5: the declared values to try (try_values) are sent by the IN-5 search (src/checks/in5search.ts), on a scratch
-      // object of the tester's, with the search's own values; this check sends none (lane F7).
+      // object of the tester's. Where the search does not search this update tool (a resource with a fixture only, or a cleanup
+      // policy of leave), they are sent here, on the object under test, as before (review of lane F7, S5).
+      // spec R15-4: after a put-back that failed, nothing more is sent to the tool.
+      if (role === 'update' && !halted && res.try_values.length && !searchesUpdate(ctx.manifest, ctx.tools, res)) {
+        in5 ??= [];
+        const props = isObj(t.inputSchema) && isObj(t.inputSchema['properties']) ? (t.inputSchema['properties'] as Obj) : {};
+        for (const tv of res.try_values) {
+          const value = tv.value !== undefined ? render(tv.value, d.vars()) : named.has(tv.arg) ? `${ctx.prefix}${'x'.repeat(Math.max(0, tv.length! - ctx.prefix.length))}` : 'x'.repeat(tv.length!);
+          const step = ctx.session.stepId(`in5.${tool}.${tv.arg}`);
+          if (!validFor(props[tv.arg], value)) {
+            in5.push({ tool, arg: tv.arg, value: short(value, 60), valid: false, ok: false, isError: false, names_arg: false, step: null, text: null });
+            continue;
+          }
+          if (!(await fresh())) break;
+          const r = await ctx.session.call(label, tool, { ...base, [tv.arg]: value }, { step, write: true });
+          // why: R10-8: a success after which the listed value is not stored counts as refused.
+          let stored: boolean | null = null;
+          if (r.ok && !r.timed_out && r.transport_error === null) {
+            const path = res.fields?.find((f) => f.arg === tv.arg)?.path ?? tv.arg;
+            const back = await d.readSettled(label, `in5.${tool}.${tv.arg}.read`, (o) => deepEqual(getPath(o, path), value));
+            stored = back.ok ? back.settled : null;
+            await d.reset();
+          }
+          in5.push({ tool, arg: tv.arg, value: short(value, 60), valid: true, ok: r.ok, isError: r.isError, names_arg: !r.ok && `${r.text ?? ''} ${r.rpc_error?.message ?? ''} ${JSON.stringify(r.data ?? null)}`.includes(tv.arg), step, text: ((t) => (t !== null && t.length > 2000 ? short(t, 2000) : t))(r.text ?? r.rpc_error?.message ?? null), stored, ...(r.timed_out || r.transport_error !== null ? { indeterminate: true } : {}) });
+          await d.reset();
+        }
+      }
     }
-    return { check: ID, version: VERSION, resource: res.name, data: { probes: out, cut, no_object: noObject, protected: protectedBy, not_probed: notProbed, halted: Object.fromEntries([...haltedIn(ctx.session)].filter(([k]) => toolsOf(res).some((x) => x.tool === k))) } };
+    return { check: ID, version: VERSION, resource: res.name, data: { probes: out, ...(in5 ? { in5 } : {}), cut, no_object: noObject, protected: protectedBy, not_probed: notProbed, halted: Object.fromEntries([...haltedIn(ctx.session)].filter(([k]) => toolsOf(res).some((x) => x.tool === k))) } };
   },
   evaluate(obs: Observation, ctx: PlanContext): Result[] {
     const res = ctx.manifest.resources.find((r) => r.name === obs.resource)!;

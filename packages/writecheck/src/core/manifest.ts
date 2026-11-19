@@ -322,6 +322,8 @@ export interface Manifest {
     in5_probes?: number;
     /** MWS-IN-5 search: the largest value sent, in bytes (a string's UTF-8 bytes, otherwise its JSON form); default 65536. */
     in5_payload_bytes?: number;
+    /** MWS-IN-5 search: calls to a create tool at most (each accepted one makes an object); default 10. */
+    in5_creates?: number;
   };
   /** backend.gate: exactly one route (rewrite_env: base-URL rewrite; node_import: the in-process hook). */
   backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
@@ -1128,7 +1130,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
-  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases', 'in5_probes', 'in5_payload_bytes'], 'limits');
+  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases', 'in5_probes', 'in5_payload_bytes', 'in5_creates'], 'limits');
   let backend: Manifest['backend'] = null;
   if (o['backend'] !== undefined) {
     const b = obj(o['backend'], 'backend');
@@ -1183,8 +1185,11 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
       gate_reps: num(lim['gate_reps'], 2, 1, 100, 'limits.gate_reps'),
       timeout_ms: num(lim['timeout_ms'], 30_000, 100, 600_000, 'limits.timeout_ms'),
       max_fuzz_cases: num(lim['max_fuzz_cases'], 200, 0, 1000, 'limits.max_fuzz_cases'),
-      in5_probes: num(lim['in5_probes'], 80, 0, 2000, 'limits.in5_probes'),
-      in5_payload_bytes: num(lim['in5_payload_bytes'], 65536, 64, 1_048_576, 'limits.in5_payload_bytes'),
+      // why: review S6: the MWS-IN-5 limits are kept only where declared, so the plan-hashed limits of a manifest that does not
+      // declare them are unchanged; the defaults are applied where they are used (src/checks/in5search.ts).
+      ...(lim['in5_probes'] !== undefined ? { in5_probes: num(lim['in5_probes'], 80, 0, 2000, 'limits.in5_probes') } : {}),
+      ...(lim['in5_payload_bytes'] !== undefined ? { in5_payload_bytes: num(lim['in5_payload_bytes'], 65536, 64, 1_048_576, 'limits.in5_payload_bytes') } : {}),
+      ...(lim['in5_creates'] !== undefined ? { in5_creates: num(lim['in5_creates'], 10, 0, 2000, 'limits.in5_creates') } : {}),
     },
     backend,
     calls,

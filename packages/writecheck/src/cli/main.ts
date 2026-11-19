@@ -22,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { IN5_READING } from '../checks/in5search.js';
 import { catalogCommand, cleanupCommand, planCommand, recheckCommand, rerunCommand, reviewCommand } from './commands.js';
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
@@ -78,15 +79,17 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     usage: `mcp-writecheck run -m manifest.yaml [--confirm-target T --plan-hash H] [--out mwsc-results]
                    [--state .mwsc] [--baseline baseline.yaml] [--review answers.yaml] [--sign ~/.ssh/key]
     Run the checks. Asks for the target and the plan hash (or takes them as flags in CI; there is no
-    --yes). Writes report.md, results.json, junit.xml, the capture and SHA256SUMS to --out/<run id>.`,
-    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review'],
+    --yes). Writes report.md, results.json, junit.xml, the capture and SHA256SUMS to --out/<run id>.
+    --in5-reading=tester: a constraint that only the tester's differential reading confirms gives
+    MWS-IN-5 violated (spec draft 0.10); by default it is a candidate, seen, not judged.`,
+    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--in5-reading'],
   },
   rerun: {
     usage: `mcp-writecheck rerun <results folder> -m manifest.yaml [--confirm-target T --plan-hash H] [same options as run]
     Run again what a recorded run ran. The manifest must be the one that run used (its sha256 is
     recorded); if today's plan differs (catalog, suite, hosts), that is printed and the new hash is
     the one to confirm. The new results say which run they repeat.`,
-    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review'],
+    flags: ['-m', '--manifest', '--confirm-target', '--plan-hash', '--out', '-o', '--state', '--baseline', '--sign', '--review', '--in5-reading'],
   },
   cleanup: {
     usage: `mcp-writecheck cleanup -m manifest.yaml [--confirm-target T] [--state .mwsc] [--run ID] [--abandon]
@@ -99,7 +102,7 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
     usage: `mcp-writecheck recheck <results folder> [--review answers.yaml]
     Re-apply this release's rules (and the review answers) to a recorded run, offline. Writes
     <folder>/recheck/; the original evidence is not changed.`,
-    flags: ['--review'],
+    flags: ['--review', '--in5-reading'],
   },
   review: {
     usage: `mcp-writecheck review <results folder>
@@ -170,6 +173,12 @@ const one = (a: Args, ...names: string[]): string | undefined => {
 export async function main(argv: string[]): Promise<number> {
   const log = (s: string) => process.stdout.write(s + '\n');
   const a = parse(argv);
+  // why: review of lane F7: until MWS 0.10 accepts the tester's differential reading, it gives MWS-IN-5 violated only on request.
+  const ir = one(a, '--in5-reading');
+  if (ir !== undefined) {
+    if (ir !== 'tester' && ir !== 'declaration') throw new WritecheckError('--in5-reading: tester or declaration', 2);
+    IN5_READING.value = ir;
+  }
   if (a.help && COMMANDS[a.cmd]) {
     log(`${HEAD}\n\n${COMMANDS[a.cmd]!.usage}`);
     return 0;

@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
+import { IN5_READING } from '../../src/checks/in5search.js';
 import { REQUIREMENTS } from '../../src/requirements.js';
 import { writePathKey, type Result } from '../../src/report/verdicts.js';
 import { runTT, startTinyTracker, tinyTrackerDir } from '../tiny-tracker/harness.js';
@@ -207,7 +208,7 @@ for (const [defect, expect] of Object.entries(EXPECT)) {
 
 // MWS-IN-5 with no declaration (lane F7): the shipped manifest's try_values and fixed_constraints are removed, and the search
 // still finds the hidden title limit by itself, with the boundary found by bisection and the reading recorded as the tester's.
-test('--defect undeclared-title-limit with no try_values or fixed_constraints: the IN-5 search finds maxLength 100', { skip }, async () => {
+test('--defect undeclared-title-limit with no try_values or fixed_constraints: the IN-5 search finds maxLength 100 (a candidate by default, violated with --in5-reading=tester)', { skip }, async () => {
   const bare = (text: string) => text.replace(/\n    try_values:\n(      - .*\n)+/, '\n').replace(/\n    fixed_constraints:\n(      - .*\n)+/, '\n');
   const t = await startTinyTracker(dir!, { defects: ['undeclared-title-limit'], pairs: 10, gateReps: 1, edit: (x) => {
     const y = bare(x);
@@ -215,7 +216,13 @@ test('--defect undeclared-title-limit with no try_values or fixed_constraints: t
     return y;
   } });
   try {
-    const r = await runTT(t);
+    const d = await runTT(t);
+    const cand = d.doc.results.find((x) => x.requirement === 'MWS-IN-5' && x.scenario.id === 'in5-search' && x.write_path.tool === 'update_ticket')!;
+    assert.equal(cand.verdict, 'not observed', 'by default the differential reading alone gives no violated (draft 0.10)');
+    assert.ok(cand.notes.some((n) => /^Candidate constraint, seen, not judged: title: maxLength 100/.test(n)), cand.notes.join('\n'));
+    assert.deepEqual(violatedIds(d.doc.results), []);
+    IN5_READING.value = 'tester';
+    const r = await runTT(t).finally(() => (IN5_READING.value = 'declaration'));
     assert.deepEqual(violatedIds(r.doc.results), ['MWS-IN-5']);
     const rec = r.doc.results.find((x) => x.requirement === 'MWS-IN-5' && x.verdict === 'violated')!;
     assert.equal(rec.write_path.tool, 'update_ticket');

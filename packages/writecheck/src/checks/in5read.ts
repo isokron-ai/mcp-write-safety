@@ -9,14 +9,18 @@
  *                   length, a number, an array's item count), a value on the other side of the refusal; for a character class,
  *                   a plain value of the same length;
  *   (b) repeat      the refusal repeats in a fresh context: on a fresh scratch object of the tester's (or a fresh create), with
- *                   another argument varied where the tool has one the tester may vary;
- *   (c) boundary    on an order, every accepted value lies on one side and every refused value on the other (monotonic), and the
- *                   boundary between them is found by bisection (exact where the last accepted and the first refused value are
- *                   neighbours, otherwise a range).
+ *                   another argument varied (a read tool: another argument set to a value accepted in the search; with none to
+ *                   vary there is no confirmation), and the accepted neighbour, sent there after the refusal, is accepted again
+ *                   (so a failure that began during the run, such as a rate limit or a quota, is not read as a bound);
+ *   (c) boundary    on an order, every accepted value lies on one side and every refused value on the other (monotonic), at
+ *                   least two values were accepted on the other side, and for an upper bound on a length or a count one of them is
+ *                   not empty (an empty value is often read as "not given"); the boundary is found by bisection (exact where the
+ *                   last accepted and the first refused value are neighbours, on numbers only for an integer; otherwise a range).
  *
  * Excluded before the reading (never a fixed constraint): an unknown outcome (a timeout, a broken connection, a task), a
- * JSON-RPC error the MCP specification defines for the case, and a refusal whose text names a rate limit, the state of the
- * backend (not found, exists, conflict, version, in progress, not empty) or the caller's identity (permission, forbidden).
+ * JSON-RPC error the MCP specification defines for the case, and a refusal whose text names a rate limit, a limit on the size
+ * of the whole request (413), the state of the backend (not found, exists, conflict, version, in progress, not empty) or the
+ * caller's identity (permission, forbidden).
  * These text patterns can only take a refusal out of the reading; they never make one count.
  *
  * Each refusal is also classified as EmRest does (error-message analysis): whether it names the argument, what kind of rule it
@@ -51,6 +55,12 @@ export interface In5Call {
   indeterminate?: boolean;
   /** A value the declaration lists (try_values): whether a success left it stored (false counts as refused; spec R10-8). */
   stored?: boolean | null;
+  /** In context B: whether this call re-sends the refused value or its accepted neighbour (review M3). */
+  repeat_of?: 'refused' | 'neighbour';
+  /** In context B: false where the fresh context could not vary anything (a read tool with no other argument to vary; review M4). */
+  fresh?: boolean;
+  /** The argument is an integer (review S4: a boundary on numbers is exact only for an integer). */
+  integer?: boolean;
 }
 
 export interface FixedDecl {
@@ -97,6 +107,7 @@ export interface Reading {
 const RATE = /\b429\b|rate[ -]?limit|too many requests|throttl|quota exceeded|slow down/i;
 const STATE = /not[ _-]?found|no such|does not exist|doesn't exist|already exists|\bexists\b|duplicate|conflict|\b409\b|\b412\b|\b428\b|precondition|changed since|\bversion\b|in progress|\blocked\b|\bstale\b|not empty|still has/i;
 const IDENTITY = /permission|forbidden|unauthori[sz]ed|\b401\b|\b403\b|not allowed to|access denied|insufficient (scope|privilege|right)/i;
+const BODY_LIMIT = /\b413\b|payload too large|request entity too large|body (size )?limit|body too large|request too large|max(imum)? (request |body |payload )?size/i;
 const SERVER_FAIL = /\b5\d\d\b|internal (server )?error|panic:|Traceback|exception\b/i;
 
 const textOf = (c: Pick<In5Call, 'text' | 'rpc_error'>): string => `${c.text ?? ''} ${c.rpc_error?.message ?? ''}`.trim();
@@ -112,6 +123,8 @@ export function excludedWhy(c: In5Call): string | null {
   if (d) return `a JSON-RPC error that MCP defines for the case (${d})`;
   const t = textOf(c);
   if (RATE.test(t)) return 'the refusal names a rate limit';
+  // why: review S1: a limit on the size of the whole request is not a constraint on one argument's value.
+  if (BODY_LIMIT.test(t)) return 'the refusal names a limit on the size of the whole request, not of one argument';
   if (IDENTITY.test(t)) return "the refusal names the caller's identity or permissions";
   if (STATE.test(t)) return 'the refusal names the state of the backend (an object found or not, a version, a conflict)';
   return null;
@@ -236,18 +249,29 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
           refusedHere.forEach((c) => counted.add(c));
           continue;
         }
-        // (b) the refusal repeats in the fresh context, on the refused side.
-        const rep = repeats.filter((c) => c.n !== undefined && onRefusedSide(c.n));
-        const repRef = rep.find(refusedCall);
-        if (!rep.length || !repRef || rep.some((c) => !refusedCall(c))) {
-          const why = !rep.length ? 'the repeat in a fresh context was not sent (the per-tool budget, or no fresh context could be made)' : 'the refusal did not repeat in a fresh context, so it may depend on the state of the object or on another argument';
+        // review M1: an upper bound needs at least two accepted positions below the refusal, one of them not empty (an empty
+        // string or list is often read as "not given": a cursor `after`, a Go `since`); a lower bound two accepted above it.
+        const accSide = search.filter((c) => !refusedCall(c) && c.n !== undefined && (side === 'upper' ? c.n < cand.ref : c.n > cand.ref));
+        const accPos = new Set(accSide.map((c) => c.n));
+        if (accPos.size < 2 || (side === 'upper' && dim !== 'value' && cand.acc < 1)) {
+          const why = side === 'upper' && dim !== 'value' && cand.acc < 1 ? `only the empty value was accepted below it on ${dim}, and an empty value may be read as "not given", so the refusal is not shown to rest on a bound` : `fewer than two values were accepted on the other side of it on ${dim}, so the refusal is not shown to rest on a bound`;
           for (const c of refusedHere) if (!counted.has(c)) out.seen.push({ call: c, why });
           refusedHere.forEach((c) => counted.add(c));
           continue;
         }
-        const exact = Math.abs(cand.ref - cand.acc) === 1;
+        // (b) the refusal repeats in the fresh context, on the refused side, and its accepted neighbour, sent after it there, is
+        // accepted again (review M3: a failure that begins at some point of the run, such as a rate limit or a backend an earlier
+        // probe broke, refuses the neighbour too).
+        const fr = freshness(repeats, onRefusedSide, (n) => n === cand.acc);
+        if (fr.why) {
+          for (const c of refusedHere) if (!counted.has(c)) out.seen.push({ call: c, why: fr.why });
+          refusedHere.forEach((c) => counted.add(c));
+          continue;
+        }
+        // review S4: on numbers the boundary is exact only for an integer argument (between 1 and 2 a number may stop at 1.2).
+        const exact = Math.abs(cand.ref - cand.acc) === 1 && (dim !== 'value' || at.integer === true);
         const kw = KEYWORDS[dim][side];
-        out.confirmed.push({ arg, keyword: kw, bound: cand.acc, exact, accepted_at: cand.acc, refused_at: cand.ref, reading_by: 'tester (differential probe)', steps: [at.step, nb.step, repRef.step], text: quote(at), refusal: classify(at, cand.acc) });
+        out.confirmed.push({ arg, keyword: kw, bound: cand.acc, exact, accepted_at: cand.acc, refused_at: cand.ref, reading_by: 'tester (differential probe)', steps: [at.step, nb.step, fr.ref!.step, fr.nb!.step], text: quote(at), refusal: classify(at, cand.acc) });
         refusedHere.forEach((c) => counted.add(c));
       }
     }
@@ -260,13 +284,13 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
         out.seen.push({ call: c, why: `no plain value of the same length (${c.plain_len}) was accepted in the same context, so the refusal is not shown to rest on the characters` });
         continue;
       }
-      const rep = mine.filter((x) => x.context === 'B' && x.cls === c.cls);
-      const repRef = rep.find(refusedCall);
-      if (!rep.length || !repRef || rep.some((x) => !refusedCall(x))) {
-        out.seen.push({ call: c, why: !rep.length ? 'the repeat in a fresh context was not sent (the per-tool budget, or no fresh context could be made)' : 'the refusal did not repeat in a fresh context' });
+      const rep = mine.filter((x) => x.context === 'B' && (x.cls === c.cls || (x.cls === 'plain' && x.n === c.plain_len && x.repeat_of === 'neighbour')));
+      const fr = freshness(rep, () => true, () => true, c.cls);
+      if (fr.why) {
+        out.seen.push({ call: c, why: fr.why });
         continue;
       }
-      out.confirmed.push({ arg, keyword: 'pattern', bound: null, exact: false, accepted_at: c.plain_len ?? null, refused_at: null, cls: c.cls, reading_by: 'tester (differential probe)', steps: [c.step, nb.step, repRef.step], text: quote(c), refusal: classify(c) });
+      out.confirmed.push({ arg, keyword: 'pattern', bound: null, exact: false, accepted_at: c.plain_len ?? null, refused_at: null, cls: c.cls, reading_by: 'tester (differential probe)', steps: [c.step, nb.step, fr.ref!.step, fr.nb!.step], text: quote(c), refusal: classify(c) });
     }
     // Every other refusal of the search: listed, seen, not judged.
     for (const c of mine.filter((x) => refusedCall(x) && x.context === 'A' && !counted.has(x))) {
@@ -276,6 +300,23 @@ export function readIn5(calls: In5Call[], fixed: FixedDecl[] = []): Reading {
     }
   }
   return out;
+}
+
+/**
+ * Rule (b) of the reading, on the calls of context B (in the order sent): the refused value was refused again, its accepted
+ * neighbour was sent after it and accepted, and the context varied something (review M3, M4). `why` is null where it holds.
+ */
+function freshness(b: In5Call[], refusedSide: (n: number) => boolean, isNb: (n: number) => boolean, cls?: string): { why: string | null; ref?: In5Call; nb?: In5Call } {
+  const refs = b.filter((c) => c.repeat_of !== 'neighbour' && (cls ? c.cls === cls : c.n !== undefined && refusedSide(c.n)));
+  const ref = refs.find(refusedCall);
+  if (!refs.length) return { why: 'the repeat in a fresh context was not sent (the per-tool budget, or no fresh context could be made)' };
+  if (!ref || refs.some((c) => !refusedCall(c))) return { why: 'the refusal did not repeat in a fresh context, so it may depend on the state of the object or on another argument' };
+  if (ref.fresh === false) return { why: 'the fresh context could not vary another argument (a read tool with none the search may vary), so a constraint across arguments cannot be told from one on this argument' };
+  const nbs = b.filter((c) => c.repeat_of === 'neighbour' && (cls ? c.cls === 'plain' : c.n !== undefined && isNb(c.n)) && b.indexOf(c) > b.indexOf(ref));
+  if (!nbs.length) return { why: 'the accepted neighbour was not sent again after the repeat, so a failure that began during the run cannot be ruled out' };
+  const nb = nbs.find((c) => !refusedCall(c));
+  if (!nb || nbs.some(refusedCall)) return { why: 'the accepted neighbour was refused too when sent again after the repeat, so the refusals may come from a failure that began during the run (a rate limit, a quota, a backend an earlier call broke), not from the value' };
+  return { why: null, ref, nb };
 }
 
 function safeTest(pattern: string, text: string): boolean {

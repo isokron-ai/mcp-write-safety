@@ -102,20 +102,42 @@ export interface GenOptions {
   /** The run prefix, for an argument whose value names the object for cleanup: every string sent there starts with it. */
   keep_prefix?: string | null;
   hints?: Hint[];
+  /**
+   * Whether the tool reads or writes (default write). Safety defaults (review M8): on a read tool a number above 1 is sent only
+   * up to a declared maximum (a huge `limit`, `per_page` or `depth` is a load on the backend, not a probe); on a write tool an
+   * array has 0, 1 or 2 items, plus the declared maxItems (each item may be a write of its own).
+   */
+  role?: 'read' | 'write';
 }
+
+/** The integer range a `format` declares (int32, int64), or null (review S2: a value outside it is not valid by the format). */
+function intRange(s: Obj): [number, number] | null {
+  if (s['format'] === 'int32') return [-(2 ** 31), 2 ** 31 - 1];
+  if (s['format'] === 'int64') return [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
+  if (s['format'] === 'uint32') return [0, 2 ** 32 - 1];
+  return null;
+}
+
+/** An items schema whose values the tester's validator cannot check in full (a format, an encoding, a media type). */
+const opaqueItems = (it: Obj): boolean => ['format', 'contentEncoding', 'contentMediaType', 'contentSchema'].some((k) => Object.hasOwn(it, k));
+
+/** The most items an array probe has, whatever a schema or a text states (review M6). */
+export const MAX_ITEMS = 100_000;
 
 /**
  * The probes for one argument, each valid by the argument's schema and by the whole input schema with `base` as the other
- * arguments. `skipped` says why an argument gives none.
+ * arguments. `skipped` says why an argument gives none; `rule` is set where it is not searched by rule (an enum or const, a
+ * boolean, an object, an opaque format), so the record can count the arguments that are searchable.
  */
-export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: GenOptions = {}): { probes: In5Probe[]; skipped: string | null } {
+export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: GenOptions = {}): { probes: In5Probe[]; skipped: string | null; rule?: string } {
   const props = isObj(schema) && isObj(schema['properties']) ? (schema['properties'] as Obj) : {};
   const s = props[arg];
-  if (!isObj(s)) return { probes: [], skipped: 'the input schema gives no schema for it' };
+  if (!isObj(s)) return { probes: [], skipped: 'the input schema gives no schema for it', rule: 'no schema' };
   const cap = o.payload_bytes ?? DEFAULT_PAYLOAD_BYTES;
   const pre = o.keep_prefix ?? null;
+  const read = o.role === 'read';
   const types = typesOf(s);
-  if (Array.isArray(s['enum']) || Object.hasOwn(s, 'const')) return { probes: [], skipped: 'every value it may take is declared (enum or const)' };
+  if (Array.isArray(s['enum']) || Object.hasOwn(s, 'const')) return { probes: [], skipped: 'every value it may take is declared (enum or const)', rule: 'enum or const' };
   const t = types.find((x) => x !== 'null') ?? '';
   const out: In5Probe[] = [];
   const hints = (o.hints ?? []).filter((h) => h.arg === arg);
@@ -131,13 +153,16 @@ export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: Gen
     const fmt = typeof s['format'] === 'string' ? (s['format'] as string) : null;
     if (fmt) {
       const vals = FORMATS[fmt];
-      if (!vals) return { probes: [], skipped: `its format ${fmt} has no probe values valid by that format in this release` };
+      if (!vals) return { probes: [], skipped: `its format ${fmt} has no probe values valid by that format in this release`, rule: 'format' };
       for (const v of vals) add({ cls: `format.${fmt}`, value: v, source: 'generator', why: `an extreme valid by format ${fmt}` });
       return { probes: out, skipped: out.length ? null : 'no value of its format is valid by the rest of its schema' };
     }
+    if (opaqueItems(s)) return { probes: [], skipped: 'its content has an encoding or media type the tester does not check', rule: 'format' };
     const min = num(s, 'minLength') ?? 0;
     const max = num(s, 'maxLength');
+    // why: review M6: a length is checked against the payload cap before any string is built (the run prefix is ASCII).
     const str = (n: number): string | null => {
+      if (!Number.isSafeInteger(n) || n < 0 || n > cap) return null;
       if (pre) return n >= pre.length ? `${pre}${'x'.repeat(n - pre.length)}` : null;
       return 'x'.repeat(n);
     };
@@ -148,24 +173,37 @@ export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: Gen
       const v = str(L);
       if (v === null) continue;
       const fromHint = hints.find((h) => h.n !== undefined && (L === h.n || L === h.n + 1 || L === h.n - 1));
-      add({ cls: fromHint && !STRING_LENGTHS.includes(L as (typeof STRING_LENGTHS)[number]) ? 'hint' : 'length', value: v, dim: 'length', n: L, source: fromHint && !STRING_LENGTHS.includes(L as (typeof STRING_LENGTHS)[number]) ? 'hint' : 'generator', why: fromHint && !STRING_LENGTHS.includes(L as (typeof STRING_LENGTHS)[number]) ? `${L} characters, at a bound stated in ${fromHint.source} (${JSON.stringify(fromHint.quote)})` : `${L} characters` });
+      const hinted = !!fromHint && !STRING_LENGTHS.includes(L as (typeof STRING_LENGTHS)[number]);
+      add({ cls: hinted ? 'hint' : 'length', value: v, dim: 'length', n: L, source: hinted ? 'hint' : 'generator', why: hinted ? `${L} characters, at a bound stated in ${fromHint!.source} (${JSON.stringify(fromHint!.quote)})` : `${L} characters` });
     }
     for (const [cls, chars] of CHAR_CLASSES) {
       const v = pre ? `${pre}${chars}` : chars;
-      const len = [...v].length;
-      const plain = str(len);
+      // why: review S3: JSON Schema counts code points, many validators count UTF-16 units. A class whose two counts would fall
+      // on either side of a declared maxLength is not sent, and its plain neighbour has the larger count (the UTF-16 length), so
+      // that a refusal of the class cannot be a refusal of its length under either count.
+      const units = v.length;
+      if (max !== null && units > max) continue;
+      const plain = str(units);
       if (plain === null) continue;
       const before = out.length;
-      add({ cls, value: v, plain_len: len, source: 'generator', why: `${cls.slice(6).replace('_', ' ')} characters` });
+      add({ cls, value: v, plain_len: units, source: 'generator', why: `${cls.slice(6).replace('_', ' ')} characters` });
       // why: a character class is judged only beside a plain value of the same length (its neighbour, differential rule (a)).
-      if (out.length > before) add({ cls: 'plain', value: plain, dim: 'length', n: len, source: 'generator', why: `${len} plain characters (the neighbour of the character classes)` });
+      if (out.length > before) add({ cls: 'plain', value: plain, dim: 'length', n: units, source: 'generator', why: `${units} plain characters (the neighbour of the character classes)` });
     }
     return { probes: out, skipped: out.length ? null : 'no probe value is valid by its schema (a pattern, or a length the run prefix cannot meet)' };
   }
   if (t === 'integer' || t === 'number') {
-    const vals: number[] = [...NUMBERS, ...(t === 'number' ? FRACTIONS : [])];
+    const declMax = num(s, 'maximum') ?? (num(s, 'exclusiveMaximum') !== null ? num(s, 'exclusiveMaximum')! - (t === 'integer' ? 1 : 0.5) : null);
+    const declMin = num(s, 'minimum') ?? (num(s, 'exclusiveMinimum') !== null ? num(s, 'exclusiveMinimum')! + (t === 'integer' ? 1 : 0.5) : null);
+    const vals: number[] = read ? [0, 1, -1, ...(declMax !== null ? [declMax] : []), ...(declMin !== null ? [declMin] : [])] : [...NUMBERS, ...(t === 'number' ? FRACTIONS : [])];
+    if (!read && declMax !== null) vals.push(declMax);
+    if (t === 'number') vals.push(...FRACTIONS);
     for (const h of hints) if (h.n !== undefined && h.unit === 'value') vals.push(...(h.kind === 'max' ? [h.n, h.n + 1] : [h.n - 1, h.n]));
+    const range = intRange(s);
     for (const v of [...new Set(vals)].sort((a, b) => a - b)) {
+      if (range && (v < range[0] || v > range[1])) continue;
+      // why: review M8: on a read tool nothing above a declared maximum, and nothing above 1 where none is declared.
+      if (read && v > 1 && (declMax === null || v > declMax)) continue;
       const fromHint = hints.some((h) => h.n !== undefined && h.unit === 'value' && Math.abs(h.n - v) <= 1) && !(NUMBERS as readonly number[]).includes(v);
       add({ cls: fromHint ? 'hint' : 'number', value: v, dim: 'value', n: v, source: fromHint ? 'hint' : 'generator', why: fromHint ? `${v}, at a bound a text states` : String(v) });
     }
@@ -174,45 +212,57 @@ export function in5Probes(schema: unknown, base: Obj | null, arg: string, o: Gen
   if (t === 'array') {
     const items = isObj(s['items']) ? (s['items'] as Obj) : {};
     const it = itemMaker(items);
-    if (!it) return { probes: [], skipped: 'no item valid by its items schema could be made' };
+    if (!it) return { probes: [], skipped: opaqueItems(items) ? 'its items have a format or an encoding the tester does not check, so an item valid by the schema cannot be made' : 'no item valid by its items schema could be made', ...(opaqueItems(items) ? { rule: 'format' } : {}) };
     const min = num(s, 'minItems') ?? 0;
     const max = num(s, 'maxItems');
     const sizes = new Set<number>();
-    for (const n of ARRAY_SIZES) sizes.add(Math.max(min, max !== null ? Math.min(n, max) : n));
+    const grid = read ? ARRAY_SIZES : ([0, 1, 2] as const);
+    for (const n of grid) sizes.add(Math.max(min, max !== null ? Math.min(n, max) : n));
+    if (!read && max !== null) sizes.add(max);
     for (const h of hints) if (h.n !== undefined && h.unit === 'items') for (const n of h.kind === 'max' ? [h.n, h.n + 1] : [h.n - 1, h.n]) if (n >= 0) sizes.add(n);
+    // why: review M6: the size of an array is estimated from one item before it is built.
+    const per = bytes(it(0)) + 1;
     for (const n of [...sizes].sort((a, b) => a - b)) {
-      const v = Array.from({ length: n }, (_, i) => it(i));
-      add({ cls: 'items', value: v, dim: 'items', n, source: 'generator', why: `${n} items` });
+      if (!Number.isSafeInteger(n) || n > MAX_ITEMS || n * per + 2 > cap) continue;
+      add({ cls: 'items', value: Array.from({ length: n }, (_, i) => it(i)), dim: 'items', n, source: 'generator', why: `${n} items` });
     }
     return { probes: out, skipped: out.length ? null : 'no probe value is valid by its schema' };
   }
-  if (t === 'boolean') return { probes: [], skipped: 'a boolean: both values are declared' };
-  if (t === 'object') return { probes: [], skipped: 'an object: nested levels are not searched in this release' };
-  return { probes: [], skipped: t ? `type ${t} is not searched` : 'its schema declares no type' };
+  if (t === 'boolean') return { probes: [], skipped: 'a boolean: both values are declared', rule: 'boolean' };
+  if (t === 'object') return { probes: [], skipped: 'an object: nested levels are not searched in this release', rule: 'object' };
+  return { probes: [], skipped: t ? `type ${t} is not searched` : 'its schema declares no type', rule: t ? `type ${t}` : 'no type' };
 }
 
 /**
  * The value at position `n` of an order, for the bisection: a string of n characters (starting with the run prefix where the
- * argument must keep it), the number n, or an array of n items. Null where none can be made; the caller checks validity.
+ * argument must keep it), the number n, or an array of n items. Null where none can be made, or where it would be larger than
+ * the payload cap (checked before it is built); the caller checks validity.
  */
-export function orderedValue(argSchema: unknown, dim: Dim, n: number, keepPrefix: string | null = null): unknown {
+export function orderedValue(argSchema: unknown, dim: Dim, n: number, keepPrefix: string | null = null, cap = DEFAULT_PAYLOAD_BYTES): unknown {
   if (dim === 'value') return n;
+  if (!Number.isSafeInteger(n) || n < 0) return null;
   if (dim === 'length') {
+    if (n > cap) return null;
     if (keepPrefix) return n >= keepPrefix.length ? `${keepPrefix}${'x'.repeat(n - keepPrefix.length)}` : null;
     return 'x'.repeat(n);
   }
   const it = itemMaker(isObj(argSchema) && isObj(argSchema['items']) ? (argSchema['items'] as Obj) : {});
-  return it ? Array.from({ length: n }, (_, i) => it(i)) : null;
+  if (!it || n > MAX_ITEMS || n * (bytes(it(0)) + 1) + 2 > cap) return null;
+  return Array.from({ length: n }, (_, i) => it(i));
 }
 
 /** A maker of distinct items valid by an items schema (strings, numbers, enums), or null. */
 function itemMaker(items: Obj): ((i: number) => unknown) | null {
+  // why: review M2: the tester's validator does not check `format` or an encoding, so a plain item could pass it and still be
+  // refused by the server for its format: such items are not made, and the array is not searched.
+  if (opaqueItems(items)) return null;
   const types = typesOf(items);
   if (Array.isArray(items['enum']) && items['enum'].length) {
     const e = items['enum'] as unknown[];
     return items['uniqueItems'] ? null : (i) => e[i % e.length];
   }
   const t = types.find((x) => x !== 'null') ?? 'string';
+  if (t === 'object' || t === 'array') return null;
   const cand = (i: number): unknown => (t === 'integer' || t === 'number' ? i + 1 : `i${i.toString(36)}`);
   // why: only a maker whose first items are valid is used; a pattern the plain items do not meet gives no array probe.
   for (const i of [0, 1, 999]) if (validates(items, cand(i)) !== true) return null;

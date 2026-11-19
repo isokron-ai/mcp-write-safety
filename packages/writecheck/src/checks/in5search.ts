@@ -4,14 +4,19 @@
  * fixed_constraints are still used and merged); the record states the scope searched in its numbers.
  *
  *   1. probes      in5gen.ts: values valid by the schema that commonly meet an undeclared limit, per argument, plus bounds a
- *                  description or a declared document states in words; the declared try_values of the update tool
+ *                  description or a declared document states in words; the declared try_values of the update tool; sent
+ *                  interleaved over the arguments in a fixed scrambled order, never ascending (a failure that begins during the
+ *                  run then shows on both sides of an order)
  *   2. search      each probe in an otherwise valid call, after a base call that succeeded (as MWS-IN-1 sends its probes)
- *   3. boundary    between the last value accepted and the first refused on an order, bisection
- *   4. repeat      the refused value once more in a fresh context: a second scratch object with another argument varied (an
- *                  update tool), a fresh create (a create tool), the same call again later (a read tool)
- *   5. reading     in5read.ts, pure: a refusal is a fixed single-argument constraint only with a neighbour accepted, the repeat
- *                  refused, and on an order a monotonic boundary; the record says the reading is the tester's differential one
- *
+ *   3. boundary    between the last value accepted and the first refused on an order, bisection; it stops on an answer left out
+ *                  of the reading
+ *   4. repeat      in a fresh context (a second scratch object with another field varied, a fresh create, or a read call with
+ *                  another argument set to a value accepted in the search) the refused value, then its accepted neighbour
+ *   5. reading     in5read.ts, pure: a refusal is a fixed single-argument constraint only with neighbours accepted, the repeat
+ *                  refused and the neighbour accepted again after it, and on an order a monotonic boundary. Until MWS 0.10
+ *                  accepts that reading, a constraint it alone confirms is a candidate in a `not observed` record, unless
+ *                  --in5-reading=tester (IN5_READING); the declaration (fixed_constraints) gives `violated` either way
+
  * Where it searches, and how it stays safe (spec 7.3, rule 1; R15-4):
  *   read tools    the resource's read call (on the object under test) and its declared list calls: probed freely, never an
  *                 argument that names the object or the scope
@@ -21,9 +26,10 @@
  *                 run's own, named with the run prefix, which cleanup removes; never the scope, the caller's key or an
  *                 idempotency key
  *   other tools   not searched in this release (no base call is built for them here); the record says so
- * A resource whose cleanup policy is `leave` (or none) gets no write probe: the record is `not tested` with that reason. Each
- * tool gets at most limits.in5_probes calls (search, bisection and repeats), counted in the plan; the search stops short of
- * the write budget rather than exhaust it.
+ * A resource whose cleanup policy is `leave` (or none) gets no write probe: the record is `not tested` with that reason (its
+ * try_values are then sent by schema-probes on the object under test). Each tool gets at most limits.in5_probes calls, a create
+ * tool at most limits.in5_creates; read probes are paced like writes; the plan counts them; the search stops short of the
+ * writes the later checks plan.
  */
 
 import { readFileSync } from 'node:fs';
@@ -37,7 +43,7 @@ import { render, type Env } from '../core/template.js';
 import { deepEqual, getPath, isObj, short, type Obj } from '../core/util.js';
 import { result, type Result } from '../report/verdicts.js';
 import { declaredWriteTools } from './coverage.js';
-import { in5Probes, orderedValue, regexHints, type Dim, type Hint, type HintExtractor, type In5Probe } from './in5gen.js';
+import { DEFAULT_PAYLOAD_BYTES, in5Probes, orderedValue, regexHints, type Dim, type Hint, type HintExtractor, type In5Probe } from './in5gen.js';
 import { bisectNext, boundaryOf, describe, excludedWhy, readIn5, refusedCall, type Constraint, type FixedDecl, type In5Call, type Phase } from './in5read.js';
 import { carries, haltedIn, ID_LIKE } from './schema.js';
 import { scratch } from './scratch.js';
@@ -47,8 +53,19 @@ const ID = 'in5-search';
 const VERSION = '1';
 const SC = { id: ID, version: VERSION };
 export const IN5_DEFAULT_PROBES = 80;
-/** Bisection steps per boundary at most (2^20 covers every length and item count the generator sends). */
-const MAX_BISECT = 20;
+/** Review M8: objects a create tool's search may make (each accepted probe is one), unless limits.in5_creates says otherwise. */
+export const IN5_DEFAULT_CREATES = 10;
+/** Calls per tool at most: limits.in5_probes, and for a create tool also limits.in5_creates (the base create included). */
+export const capFor = (m: Manifest, role: Role): number => Math.min(m.limits.in5_probes ?? IN5_DEFAULT_PROBES, role === 'create' ? (m.limits.in5_creates ?? IN5_DEFAULT_CREATES) : Infinity);
+
+/**
+ * Review (until MWS 0.10 is accepted): whether a constraint that only the tester's differential reading confirms gives
+ * `violated` (`tester`, with --in5-reading=tester) or is recorded in a `not observed` record as a candidate constraint, seen,
+ * not judged (`declaration`, the default). A constraint the declaration states (fixed_constraints) gives `violated` either way.
+ */
+export const IN5_READING: { value: 'declaration' | 'tester' } = { value: 'declaration' };
+/** Bisection steps per boundary at most (2^64 covers every number the generator sends; the per-tool cap bounds them too). */
+const MAX_BISECT = 64;
 
 /** The extractors of hints in use; a model-based one may be added here (HintExtractor), with no dependency in this module. */
 export const HINT_EXTRACTORS: HintExtractor[] = [regexHints];
@@ -83,6 +100,11 @@ export function sourcesOf(m: Manifest, tools: Tool[], res: ResourceSpec): Source
     }
   }
   return [...all.values()].filter((x) => x.res === res.name).map((x) => x.s);
+}
+
+/** Does the search search this resource's update tool (on scratch objects)? Where not, schema-probes sends its try_values. */
+export function searchesUpdate(m: Manifest, tools: Tool[], res: ResourceSpec): boolean {
+  return sourcesOf(m, tools, res).some((s) => s.role === 'update' && s.tool === res.update?.tool && gate(m, tools, res, s) === null);
 }
 
 /** Declared write tools of the resource that the search does not cover in this release. */
@@ -158,6 +180,8 @@ export interface ArgPlan {
   probes: number;
   /** Why no probe is sent (never probed, or the generator gives none). */
   skipped?: string;
+  /** Set where the argument is not searchable by rule (an identifier, scope, version or key; enum or const; boolean; object; a format). */
+  rule?: string;
 }
 
 export interface ToolObs5 {
@@ -184,7 +208,6 @@ export const in5SearchCheck: CheckModule = {
   requirements: ['MWS-IN-5'],
   plan(ctx: PlanContext, res: ResourceSpec): PlannedCheck {
     const base: PlannedCheck = { check: ID, version: VERSION, resource: res.name, runs: false, calls: [], writes: 0, creates: 0, notRun: [] };
-    const cap = ctx.manifest.limits.in5_probes ?? IN5_DEFAULT_PROBES;
     const calls: string[] = [];
     const nr: Result[] = [];
     let writes = 0;
@@ -194,11 +217,12 @@ export const in5SearchCheck: CheckModule = {
       if (gate(ctx.manifest, ctx.tools, res, s)) continue;
       const never = neverProbed(ctx.manifest, ctx.tools, res, s);
       const { hints } = hintsFor(ctx.manifest, t);
-      const n = Object.keys(propsOf(t)).filter((a) => !never.has(a)).reduce((k, a) => k + in5Probes(t.inputSchema, null, a, { payload_bytes: ctx.manifest.limits.in5_payload_bytes, hints }).probes.length, 0);
+      const cap = capFor(ctx.manifest, s.role);
+      const n = Object.keys(propsOf(t)).filter((a) => !never.has(a)).reduce((k, a) => k + in5Probes(t.inputSchema, null, a, { payload_bytes: ctx.manifest.limits.in5_payload_bytes ?? DEFAULT_PAYLOAD_BYTES, hints, role: s.role === 'read' ? 'read' : 'write' }).probes.length, 0);
       const extra = s.role === 'update' ? res.try_values.length : 0;
       // the base call, each probe, the bisection of up to two boundaries and a repeat of each refusal, within the per-tool cap.
       const at = Math.min(cap, 1 + 2 * (n + extra) + 4 * MAX_BISECT);
-      calls.push(`${s.tool} (${s.role}, from ${s.from}): MWS-IN-5 search, ${n + extra} probe value(s) valid by the schema, with bisection and repeats, at most ${cap} call(s)${s.role === 'update' ? ' on two scratch objects of its own' : s.role === 'create' ? ', each accepted create cleaned up by the policy' : ''}`);
+      calls.push(`${s.tool} (${s.role}, from ${s.from}): MWS-IN-5 search, ${n + extra} probe value(s) valid by the schema, with bisection and repeats, at most ${cap} call(s)${s.role === 'update' ? ' on two scratch objects of its own' : s.role === 'create' ? ` (limits.in5_creates), each accepted create cleaned up by the policy` : ', paced like writes'}`);
       if (s.role === 'update') {
         // two scratch objects (the search's context and the fresh context of the repeats)
         writes += at + 2;
@@ -243,6 +267,9 @@ interface Ctx5 {
   probing?(arg: string): void;
   /** The object the context's calls act on (an update tool's scratch object). */
   obj_id?: unknown;
+  /** A read tool's context B: the other argument set to another value for a probe of `arg`, and how (review M4). */
+  vary?(arg: string): Obj;
+  variedFor?(arg: string): string[];
   why: string | null;
 }
 
@@ -250,8 +277,8 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
   const t = toolByName(ctx.tools, s.tool)!;
   const schema = t.inputSchema;
   const props = propsOf(t);
-  const cap = ctx.manifest.limits.in5_probes ?? IN5_DEFAULT_PROBES;
-  const payload = ctx.manifest.limits.in5_payload_bytes;
+  const cap = capFor(ctx.manifest, s.role);
+  const payload = ctx.manifest.limits.in5_payload_bytes ?? DEFAULT_PAYLOAD_BYTES;
   const { hints, missing } = hintsFor(ctx.manifest, t);
   const o: ToolObs5 = { tool: s.tool, role: s.role, from: s.from, args_total: Object.keys(props).length, args: [], calls: [], hints, cap, used: 0, cut: null, notes: missing.map((p) => `The document ${p} (in5.docs) could not be read; no hint was taken from it.`) };
   const halted = haltedIn(ctx.session).get(s.tool);
@@ -275,7 +302,17 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
       const ok = isObj(args) && !Object.values(args).some((v) => v === undefined);
       const needsId = /\{\{\s*(json:)?\??id\s*\}\}/.test(JSON.stringify(s.args));
       const why = !ok ? 'the declared call did not render to a mapping' : needsId && (d.id === null || d.id === undefined) ? 'the read call names the object under test, and this resource has none' : null;
-      return { name, varied: name === 'B' ? ['none: a read tool, the same call sent again after the search'] : [], why, base: async () => (why ? null : { ...(args as Obj) }), call: (a, step) => ctx.session.call(label, s.tool, a, { step, write: false }) };
+      // why: review M8: read probes are paced like writes (the shared rate limit), so a search of reads cannot flood the backend.
+      return {
+        name,
+        varied: [],
+        why,
+        base: async () => (why ? null : { ...(args as Obj) }),
+        call: async (a, step) => {
+          await ctx.session.pace();
+          return ctx.session.call(label, s.tool, a, { step, write: false });
+        },
+      };
     }
     if (s.role === 'create') {
       return {
@@ -306,6 +343,7 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
       name,
       obj_id: d.id,
       varied: name === 'B' ? [`a second scratch object`, `${f0.arg} = ${short(f0.values[1], 30)} (or ${f1.arg} = ${short(f1.values[1], 30)} where ${f0.arg} is the argument probed)`] : [],
+      variedFor: (arg) => (name === 'A' ? [] : ['a second scratch object', f0.arg !== arg ? `${f0.arg} = ${short(f0.values[1], 30)}` : `${f1.arg} = ${short(f1.values[1], 30)}`]),
       why: null,
       base: async () => {
         if (stale || !cur) {
@@ -338,12 +376,13 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
 
   const A = await mk('A');
   if (A.why) return { ...o, not_probed: A.why };
-  let B: Ctx5 | null = null;
+  let B: Ctx5 | null = null as Ctx5 | null;
 
-  // The base call, once (as MWS-IN-1 sends its probes: in a call that is otherwise valid, after a base call that succeeded).
+  // The base call, once (as MWS-IN-1 sends its probes: in a call that is otherwise valid, after a base call that succeeded); for
+  // a create tool, one create with the declared arguments (review S8: the spec's rule for every tool).
   const b0 = await A.base();
   if (!b0) return { ...o, not_probed: 'the base call could not be built (the object did not read back, or the arguments did not render)' };
-  if (s.role !== 'create') {
+  {
     const r0 = await A.call({ ...b0 }, ctx.session.stepId(`in5.${s.tool}.base_call`));
     o.used++;
     if (!r0.ok) return { ...o, not_probed: `the base call did not succeed (${short(r0.text ?? r0.rpc_error?.message ?? r0.transport_error ?? (r0.timed_out ? 'timed out' : 'error'), 160)}), so no probe would be sent in an otherwise valid call` };
@@ -363,12 +402,13 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
 
   type Planned = In5Probe & { phase: Phase };
   const perArg = new Map<string, Planned[]>();
+  const integer = (arg: string) => isObj(props[arg]) && (props[arg] as Obj)['type'] === 'integer';
   for (const arg of Object.keys(props)) {
     if (prot.has(arg)) {
-      o.args.push({ arg, probes: 0, skipped: `not probed: ${prot.get(arg)}` });
+      o.args.push({ arg, probes: 0, skipped: `not probed: ${prot.get(arg)}`, rule: 'names the object, scope, version or key' });
       continue;
     }
-    const g = in5Probes(schema, baseNow, arg, { payload_bytes: payload, keep_prefix: keep.has(arg) ? ctx.prefix : null, hints });
+    const g = in5Probes(schema, baseNow, arg, { payload_bytes: payload, keep_prefix: keep.has(arg) ? ctx.prefix : null, hints, role: s.role === 'read' ? 'read' : 'write' });
     const list: Planned[] = g.probes.map((p) => ({ ...p, phase: 'search' as Phase }));
     if (s.role === 'update') {
       for (const tv of res.try_values.filter((x) => x.arg === arg)) {
@@ -380,20 +420,21 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
         list.push({ arg, cls: 'declared', value, source: 'declared', why: 'a value the declaration lists (try_values)', phase: 'declared', ...(typeof value === 'string' ? { dim: 'length' as Dim, n: [...value].length } : typeof value === 'number' ? { dim: 'value' as Dim, n: value } : {}) });
       }
     }
-    o.args.push({ arg, probes: list.length, ...(list.length ? {} : { skipped: `no probe: ${g.skipped ?? 'none valid by the schema'}` }) });
+    o.args.push({ arg, probes: list.length, ...(list.length ? {} : { skipped: `no probe: ${g.skipped ?? 'none valid by the schema'}` }), ...(g.rule && !list.length ? { rule: g.rule } : {}) });
     if (list.length) perArg.set(arg, list);
   }
 
   // --- one call -----------------------------------------------------------------------------------------------------------
   const budget = ctx.manifest.limits.write_budget;
-  const reserve = Math.max(20, Math.floor(budget * 0.05));
-  const send = async (c: Ctx5, p: { arg: string; cls: string; value: unknown; dim?: Dim; n?: number; plain_len?: number }, phase: Phase): Promise<In5Call | null> => {
+  const reserve = await laterWrites(ctx, res);
+  const values = new Map<In5Call, unknown>();
+  const send = async (c: Ctx5, p: { arg: string; cls: string; value: unknown; dim?: Dim; n?: number; plain_len?: number }, phase: Phase, extra: Partial<In5Call> = {}): Promise<In5Call | null> => {
     if (o.used >= cap) {
-      o.cut ??= `the per-tool cap of ${cap} calls (limits.in5_probes) was reached`;
+      o.cut ??= `the per-tool cap of ${cap} calls (${s.role === 'create' ? 'limits.in5_creates for a create tool' : 'limits.in5_probes'}) was reached`;
       return null;
     }
     if (s.role !== 'read' && ctx.session.writes + 4 > budget - reserve) {
-      o.cut ??= `the search stopped ${reserve} writes short of the write budget (${budget}), so later checks can still run`;
+      o.cut ??= `the search stopped ${reserve} writes short of the write budget (${budget}): the writes the later checks plan`;
       return null;
     }
     c.probing?.(p.arg);
@@ -402,7 +443,7 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
       o.notes.push(`Context ${c.name}: the base call could not be built for ${p.arg}=${shown(p.value)}; not sent.`);
       return null;
     }
-    const args = { ...b, [p.arg]: p.value };
+    const args = { ...b, ...(c.vary?.(p.arg) ?? {}), [p.arg]: p.value };
     if (validates(schema, args) !== true) {
       o.notes.push(`${p.arg}=${shown(p.value)}: with the base call of context ${c.name} the arguments are not valid by the schema, so it was not sent.`);
       return null;
@@ -410,95 +451,244 @@ async function searchTool(ctx: RunContext, res: ResourceSpec, s: Source): Promis
     o.used++;
     const step = ctx.session.stepId(`in5.${s.tool}.${p.arg}.${p.cls}`);
     const r = await c.call(args, step);
-    const call: In5Call = { arg: p.arg, cls: p.cls, value: shown(p.value), ...(p.dim ? { dim: p.dim } : {}), ...(p.n !== undefined ? { n: p.n } : {}), ...(p.plain_len !== undefined ? { plain_len: p.plain_len } : {}), phase, context: c.name, ...(c.varied.length ? { varied: c.varied } : {}), ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? (r.rpc_error?.message ?? null) : short(r.text, 2000), step: r.step ?? step, ...(unknownOutcome(r) ? { indeterminate: true } : {}) };
+    const varied = c.variedFor?.(p.arg) ?? c.varied;
+    const call: In5Call = { arg: p.arg, cls: p.cls, value: shown(p.value), ...(p.dim ? { dim: p.dim } : {}), ...(p.n !== undefined ? { n: p.n } : {}), ...(p.plain_len !== undefined ? { plain_len: p.plain_len } : {}), ...(integer(p.arg) ? { integer: true } : {}), phase, context: c.name, ...(varied.length ? { varied } : {}), ...(c.name === 'B' ? { fresh: varied.length > 0 } : {}), ok: r.ok, isError: r.isError, rpc_error: r.rpc_error, text: r.text === null ? (r.rpc_error?.message ?? null) : short(r.text, 2000), step: r.step ?? step, ...(unknownOutcome(r) ? { indeterminate: true } : {}), ...extra };
     if (phase === 'declared' && r.ok && !call.indeterminate && c.stored) call.stored = await c.stored(p.arg, p.value);
     o.calls.push(call);
+    values.set(call, p.value);
     return call;
   };
 
+  const bOpen = async (): Promise<boolean> => {
+    if (B) return !B.why;
+    B = s.role === 'read' ? readB(A, o.calls, values, prot, keep) : await mk('B');
+    if (B.why) o.notes.push(`The fresh context for the repeats could not be made: ${B.why}.`);
+    return !B.why;
+  };
+  await searchPhases({
+    perArg,
+    props,
+    schema,
+    keepPrefix: (arg) => (keep.has(arg) ? ctx.prefix : null),
+    payload,
+    calls: o.calls,
+    values,
+    stopped: () => o.cut !== null,
+    send: (where, p, phase, extra) => (where === 'A' ? send(A, p, phase, extra) : send(B!, p, phase, extra)),
+    openB: bOpen,
+  });
+  return o;
+}
+
+type Probe5 = { arg: string; cls: string; value: unknown; dim?: Dim; n?: number; plain_len?: number };
+export interface SearchIO {
+  perArg: Map<string, (In5Probe & { phase: Phase })[]>;
+  props: Obj;
+  schema: unknown;
+  keepPrefix(arg: string): string | null;
+  payload: number;
+  /** Every call sent so far, in order (the send below appends to it). */
+  calls: In5Call[];
+  /** The value each call sent (for a neighbour sent again). */
+  values: Map<In5Call, unknown>;
+  stopped(): boolean;
+  send(where: 'A' | 'B', p: Probe5, phase: Phase, extra?: Partial<In5Call>): Promise<In5Call | null>;
+  /** Make context B; false where it cannot be made. */
+  openB(): Promise<boolean>;
+}
+
+/**
+ * The three phases of the search for one tool, apart from how a call is sent (so a test drives the same code with a simulated
+ * server): 1. the probes, interleaved; 2. the boundaries, by bisection; 3. the repeats in context B, each refused value followed
+ * by its accepted neighbour.
+ */
+export async function searchPhases(io: SearchIO): Promise<void> {
   // --- 1. the search ------------------------------------------------------------------------------------------------------
-  for (const [, list] of perArg) for (const p of list) if (!(await send(A, p, p.phase)) && o.cut) break;
+  // why: review M3: the probes are not sent in ascending order. A deterministic interleaving (round-robin over the arguments,
+  // each argument's probes in a fixed scrambled order) makes a failure that begins at some point of the run show as refusals on
+  // both sides of an order, which the reading does not take for a bound.
+  for (const p of interleave([...io.perArg.values()])) if (!(await io.send('A', p, p.phase)) && io.stopped()) break;
 
   // --- 2. the boundaries, by bisection ------------------------------------------------------------------------------------
-  for (const arg of perArg.keys()) {
+  for (const arg of io.perArg.keys()) {
     for (const dim of ['length', 'value', 'items'] as Dim[]) {
       for (const side of ['upper', 'lower'] as const) {
-        for (let i = 0; i < MAX_BISECT && !o.cut; i++) {
-          const b = boundaryOf(o.calls.filter((c) => c.arg === arg), dim)[side];
+        for (let i = 0; i < MAX_BISECT && !io.stopped(); i++) {
+          const b = boundaryOf(io.calls.filter((c) => c.arg === arg), dim)[side];
           const next = b ? bisectNext(b.acc, b.ref) : null;
           if (next === null) break;
-          const v = orderedValue(props[arg], dim, next, keep.has(arg) ? ctx.prefix : null);
-          if (v === null || validates(props[arg], v, schema) !== true) break;
-          if (!(await send(A, { arg, cls: `bisect.${dim}`, value: v, dim, n: next }, 'bisect'))) break;
+          const v = orderedValue(io.props[arg], dim, next, io.keepPrefix(arg), io.payload);
+          if (v === null || validates(io.props[arg], v, io.schema) !== true) break;
+          const c = await io.send('A', { arg, cls: `bisect.${dim}`, value: v, dim, n: next }, 'bisect');
+          // why: review M7: an answer left out of the reading (a rate limit, an unknown outcome) does not move the boundary, so
+          // the same value would be sent again: the bisection of this side stops.
+          if (!c || excludedWhy(c) !== null) break;
         }
       }
     }
   }
 
-  // --- 3. the repeats, in a fresh context ---------------------------------------------------------------------------------
-  const repeats: { arg: string; cls: string; value: unknown; dim?: Dim; n?: number; plain_len?: number }[] = [];
-  for (const arg of perArg.keys()) {
-    const mine = o.calls.filter((c) => c.arg === arg);
+  // --- 3. the repeats, in a fresh context: the refused value, then its accepted neighbour (review M3) ---------------------
+  const repeats: { p: Probe5; nb: Probe5 }[] = [];
+  for (const arg of io.perArg.keys()) {
+    const mine = io.calls.filter((c) => c.arg === arg);
     for (const dim of ['length', 'value', 'items'] as Dim[]) {
       const b = boundaryOf(mine, dim);
       for (const cand of [b.upper, b.lower]) {
         if (!cand) continue;
-        const v = orderedValue(props[arg], dim, cand.ref, keep.has(arg) ? ctx.prefix : null);
-        if (v !== null) repeats.push({ arg, cls: `repeat.${dim}`, value: v, dim, n: cand.ref });
+        const v = orderedValue(io.props[arg], dim, cand.ref, io.keepPrefix(arg), io.payload);
+        const nv = orderedValue(io.props[arg], dim, cand.acc, io.keepPrefix(arg), io.payload);
+        if (v !== null && nv !== null) repeats.push({ p: { arg, cls: `repeat.${dim}`, value: v, dim, n: cand.ref }, nb: { arg, cls: `repeat.${dim}`, value: nv, dim, n: cand.acc } });
       }
     }
     for (const c of mine.filter((x) => x.context === 'A' && x.cls.startsWith('chars.') && refusedCall(x) && excludedWhy(x) === null)) {
-      if (!mine.some((x) => x.cls === 'plain' && x.n === c.plain_len && !refusedCall(x))) continue;
-      const p = perArg.get(arg)!.find((x) => x.cls === c.cls);
-      if (p) repeats.push({ arg, cls: c.cls, value: p.value, ...(p.plain_len !== undefined ? { plain_len: p.plain_len } : {}) });
+      const plain = mine.find((x) => x.cls === 'plain' && x.n === c.plain_len && !refusedCall(x));
+      const p = io.perArg.get(arg)!.find((x) => x.cls === c.cls);
+      if (plain && p) repeats.push({ p: { arg, cls: c.cls, value: p.value, ...(p.plain_len !== undefined ? { plain_len: p.plain_len } : {}) }, nb: { arg, cls: 'plain', value: io.values.get(plain), dim: 'length', n: plain.n! } });
     }
   }
-  if (repeats.length && !o.cut) {
-    B = s.role === 'read' ? { ...A, name: 'B', varied: ['none: a read tool, the same call sent again after the search'] } : await mk('B');
-    if (B.why) o.notes.push(`The fresh context for the repeats could not be made: ${B.why}.`);
-    else for (const p of repeats) if (!(await send(B, p, 'repeat')) && o.cut) break;
+  if (repeats.length && !io.stopped() && (await io.openB())) {
+    for (const r of repeats) {
+      if (!(await io.send('B', r.p, 'repeat', { repeat_of: 'refused' }))) break;
+      if (!(await io.send('B', r.nb, 'repeat', { repeat_of: 'neighbour' }))) break;
+    }
   }
-  return o;
+}
+
+/**
+ * Context B of a read tool (review M4): the same call with another argument the search may probe set to a value of its own that
+ * was accepted in context A (the one sent first), so a constraint across two arguments (page and per_page) does not repeat as
+ * one on a single argument. Where no other argument can be varied, the repeat is still sent, and marked not fresh.
+ */
+function readB(A: Ctx5, calls: In5Call[], values: Map<In5Call, unknown>, prot: Map<string, string>, keep: Set<string>): Ctx5 {
+  const accepted = new Map<string, unknown>();
+  for (const c of calls) if (c.context === 'A' && c.ok && !c.indeterminate && !accepted.has(c.arg) && !prot.has(c.arg) && !keep.has(c.arg)) accepted.set(c.arg, values.get(c));
+  const pick = (arg: string): [string, unknown] | null => [...accepted].find(([k]) => k !== arg) ?? null;
+  return {
+    ...A,
+    name: 'B',
+    varied: [],
+    vary: (arg) => {
+      const v = pick(arg);
+      return v ? { [v[0]]: v[1] } : {};
+    },
+    variedFor: (arg) => {
+      const v = pick(arg);
+      return v ? [`${v[0]} = ${shown(v[1])} (another argument, a value accepted in the search)`] : [];
+    },
+  };
+}
+
+/** A fixed scramble of a list (FNV-1a of each item's class and position), so the order is the same on every run. */
+function scrambled<T extends { cls: string; n?: number; arg: string }>(xs: T[]): T[] {
+  const h = (x: T): number => {
+    let v = 0x811c9dc5;
+    for (const ch of `${x.arg}|${x.cls}|${x.n ?? ''}|${xs.indexOf(x)}`) v = Math.imul(v ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+    return v;
+  };
+  return [...xs].sort((a, b) => h(a) - h(b));
+}
+
+/** Round-robin over the arguments, each argument's probes scrambled (review M3). */
+export function interleave<T extends { cls: string; n?: number; arg: string }>(lists: T[][]): T[] {
+  const qs = lists.map((l) => scrambled(l));
+  const out: T[] = [];
+  for (let i = 0; qs.some((q) => i < q.length); i++) for (const q of qs) if (i < q.length) out.push(q[i]!);
+  return out;
+}
+
+/**
+ * The writes the checks after this one plan (review S7): the later resources' checks and set-up, and the server-wide checks.
+ * The search stops that many writes short of the budget (at least 20), so it never takes what a later check needs.
+ */
+async function laterWrites(ctx: RunContext, res: ResourceSpec): Promise<number> {
+  try {
+    const { CHECKS, GLOBAL_CHECKS } = await import('./index.js');
+    const pc: PlanContext = { manifest: ctx.manifest, tools: ctx.tools, ...(ctx.gated !== undefined ? { gated: ctx.gated } : {}) };
+    const i = ctx.manifest.resources.findIndex((r) => r.name === res.name);
+    let n = 0;
+    for (const r of ctx.manifest.resources.slice(i + 1)) {
+      n += r.update ? 4 : 0;
+      for (const c of CHECKS) if (c.id !== ID && (!c.needsUpdate || (r.update && r.fields))) n += c.plan(pc, r).writes;
+    }
+    for (const g of GLOBAL_CHECKS) n += g.plan(pc).writes;
+    return Math.max(20, n);
+  } catch {
+    return Math.max(20, Math.floor(ctx.manifest.limits.write_budget * 0.05));
+  }
 }
 
 /** The MWS-IN-5 record of one tool (spec 8.2, rule 8: `violated` or `not observed`, beyond `not tested` and `not applicable`). */
-export function in5SearchVerdict(o: ToolObs5, res: ResourceSpec): Result {
+export function in5SearchVerdict(o: ToolObs5, res: ResourceSpec, mode: 'declaration' | 'tester' = IN5_READING.value): Result {
   const w = wp(res.name, o.tool);
   if (o.halted) return result('MWS-IN-5', w, SC, 'not tested', `${o.tool} was not probed further after a failed put-back (spec R15-4): ${short(o.halted, 300)}. The MWS-IN-5 search sent nothing to it.`);
   if (!o.args_total) return result('MWS-IN-5', w, SC, 'not applicable', `the input schema of ${o.tool} declares no argument, so no constraint on an argument's value can be enforced`);
   const fixed: FixedDecl[] = o.role === 'update' ? res.fixed_constraints : [];
   const rd = readIn5(o.calls, fixed);
-  const sent = o.calls.length;
-  const probedArgs = new Set(o.calls.map((c) => c.arg));
+  const judgedCalls = o.calls.filter((c) => excludedWhy(c) === null);
+  // review M5: an argument counts as searched only with at least one judged call; the denominator leaves out the arguments not
+  // searchable by rule (an identifier, scope, version or key; enum or const; boolean; object; a format the tester cannot check).
+  const judgedArgs = new Set(judgedCalls.map((c) => c.arg));
+  const searchable = o.args.filter((a) => !a.rule);
+  const skippedBy: Record<string, number> = {};
+  for (const a of o.args.filter((x) => x.rule)) skippedBy[a.rule!] = (skippedBy[a.rule!] ?? 0) + 1;
+  const complete = searchable.filter((a) => {
+    const mine = o.calls.filter((c) => c.arg === a.arg && c.context === 'A' && (c.phase === 'search' || c.phase === 'declared'));
+    return a.probes > 0 && mine.length >= a.probes && mine.every((c) => excludedWhy(c) === null);
+  });
   const refusals = o.calls.filter((c) => refusedCall(c) && excludedWhy(c) === null);
-  const numbers = { args_total: o.args_total, args_probed: probedArgs.size, probes: o.used, refusals: refusals.length, confirmed: rd.confirmed.length, excluded: rd.excluded.length, cap: o.cap, ...(o.cut ? { cut: true } : {}) };
-  const scope = `Scope of the search: ${probedArgs.size} of ${o.args_total} argument(s) of ${o.tool} probed, ${o.used} call(s) (at most ${o.cap}, limits.in5_probes), from the declared call ${o.from}${o.role === 'update' ? ', on scratch objects of the tester\'s own' : o.role === 'create' ? ', each accepted create cleaned up' : ''}. Classes: string lengths 0, 1, 255, 256, 1024, 4096, 65536 within the declared bounds, eight character classes beside a plain value of the same length, format extremes, numbers 0, ±1, ±2^31, 2^53-1 and fractions, arrays of 0, 1, 100 and 1000 items, the bounds stated in words, and the declared try_values; enums, consts, booleans and objects are not searched.`;
+  const counted = rd.confirmed.filter((k) => k.reading_by === 'declaration' || mode === 'tester');
+  const candidates = rd.confirmed.filter((k) => !counted.includes(k));
+  const constraintsOf = (ks: Constraint[], candidate: boolean) => ks.map((k) => ({ arg: k.arg, keyword: k.keyword, bound: k.bound, exact: k.exact, accepted_at: k.accepted_at, refused_at: k.refused_at, ...(k.cls ? { class: k.cls } : {}), reading_by: k.reading_by, ...(candidate ? { candidate: true } : {}) }));
+  const numbers = {
+    args_total: o.args_total,
+    args_searchable: searchable.length,
+    args_judged: judgedArgs.size,
+    args_probed: judgedArgs.size,
+    args_complete: complete.length,
+    args_skipped: skippedBy,
+    probes: o.used,
+    judged: judgedCalls.length,
+    refusals: refusals.length,
+    confirmed: counted.length,
+    candidates: candidates.length,
+    excluded: rd.excluded.length,
+    cap: o.cap,
+    reading: mode,
+    ...(o.cut ? { cut: true } : {}),
+    ...(rd.confirmed.length ? { constraints: [...constraintsOf(counted, false), ...constraintsOf(candidates, true)] } : {}),
+  };
+  const scope = `Scope of the search: ${judgedArgs.size} of ${searchable.length} searchable argument(s) of ${o.tool} judged (${o.args_total} in all; ${complete.length} searched in full), ${o.used} call(s) (at most ${o.cap}), ${judgedCalls.length} judged, from the declared call ${o.from}${o.role === 'update' ? ", on scratch objects of the tester's own" : o.role === 'create' ? ', each accepted create cleaned up' : ', paced like writes'}. Classes: string lengths 0, 1, 255, 256, 1024, 4096, 65536 within the declared bounds, eight character classes beside a plain value of the same length (UTF-16 units), format extremes, numbers 0 and ±1 with the extremes on write tools (±2^31, 2^53-1, within an integer format) and up to a declared maximum on read tools, fractions for numbers, arrays of 0, 1, 100 and 1000 items on read tools and 0, 1, 2 and the declared maxItems on write tools, the bounds stated in words, and the declared try_values; enums, consts, booleans, objects and formatted items are not searched. Probes are sent interleaved, not in ascending order.`;
   const argNotes = o.args.filter((a) => a.skipped).map((a) => `${a.arg}: ${a.skipped}`);
+  const reading = (k: Constraint) => `${describe(k)}. Reading by: ${k.reading_by}${k.reading_by === 'declaration' ? ' (fixed_constraints)' : ' (a neighbour accepted in the same context, the refusal repeated in a fresh context with another argument varied and its neighbour accepted again after it, and on an order a monotonic boundary; spec MWS-IN-5, draft 0.10)'}. The refusal: ${JSON.stringify(k.text)} (names the argument: ${k.refusal.names_arg ? 'yes' : 'no'}; kind: ${k.refusal.kind}${k.refusal.states_bound === null ? '' : `; states the bound: ${k.refusal.states_bound ? 'yes' : 'no'}`}${k.refusal.server_failure ? '; a server failure, not a validation answer' : ''}).`;
   const notes = [
     scope,
     ...(argNotes.length ? [`Arguments not searched: ${argNotes.join('; ')}.`] : []),
-    ...(o.cut ? [`The search was cut: ${o.cut}. Raise limits.in5_probes to search further.`] : []),
+    ...(o.cut ? [`The search was cut: ${o.cut}. Raise the limit to search further.`] : []),
     ...(o.hints.length ? [`Bounds stated in words, probed at N and N+1: ${o.hints.slice(0, 8).map((h) => `${h.arg} ${h.kind}${h.n !== undefined ? ` ${h.n}` : ''}${h.text ? ` ${JSON.stringify(h.text)}` : ''} (${h.source}: ${JSON.stringify(short(h.quote, 80))})`).join('; ')}${o.hints.length > 8 ? '; …' : ''}.`] : []),
     ...o.notes,
     ...rd.excluded.filter((x) => refusedCall(x.call) || x.call.indeterminate).slice(0, 10).map((x) => `Excluded from the reading: ${x.call.arg}=${x.call.value} (${x.call.cls}, step ${x.call.step}): ${x.why}${x.call.text ? `: ${JSON.stringify(short(x.call.text, 160))}` : ''}.`),
   ];
+  const candNotes = candidates.map((k) => `Candidate constraint, seen, not judged: ${reading(k)} The tester's differential reading is a source of this verdict only in the draft for MWS 0.10; run with --in5-reading=tester to record it as violated.`);
+  const seen = rd.seen.map((x) => `Seen, not judged: ${x.call.arg}=${x.call.value} (${x.call.cls}, step ${x.call.step}) was refused${x.call.ok ? ' (answered as a success, and the value is not stored)' : ''}: ${JSON.stringify(x.call.text ?? '')}. ${x.why}; neither the declaration (fixed_constraints) nor the tester's differential reading states that the constraint is fixed.`);
   if (o.not_probed) return result('MWS-IN-5', w, SC, 'not tested', `${o.tool} was not searched: ${o.not_probed}`, { numbers, notes });
-  if (rd.confirmed.length) {
-    const ks = rd.confirmed;
-    const reading = (k: Constraint) => `${describe(k)}. Reading by: ${k.reading_by}${k.reading_by === 'declaration' ? ' (fixed_constraints)' : ' (a neighbour accepted in the same context, the refusal repeated in a fresh context, and on an order a monotonic boundary; spec MWS-IN-5, draft 0.10)'}. The refusal: ${JSON.stringify(k.text)} (names the argument: ${k.refusal.names_arg ? 'yes' : 'no'}; kind: ${k.refusal.kind}${k.refusal.states_bound === null ? '' : `; states the bound: ${k.refusal.states_bound ? 'yes' : 'no'}`}${k.refusal.server_failure ? '; a server failure, not a validation answer' : ''}).`;
-    const seenNotes = rd.seen.map((x) => `Seen, not judged: ${x.call.arg}=${x.call.value} (${x.call.cls}) was refused: ${JSON.stringify(x.call.text ?? '')}. ${x.why}.`);
+  if (counted.length) {
     const opts: NonNullable<Parameters<typeof result>[5]> & { evidence?: { acknowledged?: boolean | null; read_back?: boolean | null; synthetic_fault?: boolean | null } } = {
-      numbers: { ...numbers, constraints: ks.map((k) => ({ arg: k.arg, keyword: k.keyword, bound: k.bound, exact: k.exact, accepted_at: k.accepted_at, refused_at: k.refused_at, ...(k.cls ? { class: k.cls } : {}), reading_by: k.reading_by })) },
-      steps: ks.flatMap((k) => k.steps),
-      notes: [...ks.map(reading), ...notes, ...seenNotes],
+      numbers,
+      steps: counted.flatMap((k) => k.steps),
+      notes: [...counted.map(reading), ...notes, ...candNotes, ...seen],
       // why: lane F1 (docs/CELLS.md, rule 4): the evidence the check knows. The violation rests on refusals, not on writes the
       // server acknowledged, and nothing was injected by the gate.
       evidence: { synthetic_fault: false, ...(o.calls.some((c) => c.phase === 'declared' && c.stored === false) ? { read_back: true } : {}) },
     };
-    return result('MWS-IN-5', w, SC, 'violated', `${o.tool} refused value(s) valid by its input schema under a fixed constraint on one argument that the schema does not declare: ${ks.map(describe).join('; ')}.`, opts);
+    return result('MWS-IN-5', w, SC, 'violated', `${o.tool} refused value(s) valid by its input schema under a fixed constraint on one argument that the schema does not declare: ${counted.map(describe).join('; ')}.`, opts);
   }
-  if (!sent) return result('MWS-IN-5', w, SC, 'not tested', `no probe could be sent to ${o.tool}: ${argNotes.length ? argNotes.join('; ') : 'no argument the search may probe has a value valid by its schema'}`, { numbers, notes });
-  const seen = rd.seen.map((x) => `Seen, not judged: ${x.call.arg}=${x.call.value} (${x.call.cls}, step ${x.call.step}) was refused${x.call.ok ? ' (answered as a success, and the value is not stored)' : ''}: ${JSON.stringify(x.call.text ?? '')}. ${x.why}; neither the declaration (fixed_constraints) nor the tester's differential reading states that the constraint is fixed.`);
-  const judgedCalls = o.calls.filter((c) => excludedWhy(c) === null);
-  return result('MWS-IN-5', w, SC, 'not observed', `${refusals.length ? `${o.tool} refused ${refusals.length} of the ${judgedCalls.length} value(s) valid by its schema that the search sent; none was shown to rest on a fixed constraint, and each is listed, seen, not judged.` : `${o.tool} accepted all ${judgedCalls.length} value(s) valid by its schema that the search sent.`} This is a search (spec 8.2, rule 8): ${probedArgs.size} of ${o.args_total} argument(s) probed.`, { numbers, notes: [...notes, ...seen] });
+  // review M5: a search with no judged call examined nothing.
+  if (!judgedCalls.length) return result('MWS-IN-5', w, SC, 'not tested', o.calls.length ? `every call the search sent to ${o.tool} was left out of the reading (an unknown outcome, a rate limit, the backend's state), so nothing was examined` : `no probe could be sent to ${o.tool}: ${argNotes.length ? argNotes.join('; ') : 'no argument the search may probe has a value valid by its schema'}`, { numbers, notes });
+  const lead = candidates.length
+    ? `${o.tool} refused value(s) valid by its schema at ${candidates.length} candidate constraint(s) that only the tester's differential reading confirms (${candidates.map(describe).join('; ')}); in this release that reading alone does not give violated (spec MWS-IN-5, draft 0.10).`
+    : refusals.length
+      ? `${o.tool} refused ${refusals.length} of the ${judgedCalls.length} judged value(s) valid by its schema; none was shown to rest on a fixed constraint, and each is listed, seen, not judged.`
+      : `${o.tool} accepted all ${judgedCalls.length} judged value(s) valid by its schema that the search sent.`;
+  return result('MWS-IN-5', w, SC, 'not observed', `${lead} This is a search (spec 8.2, rule 8): ${judgedArgs.size} of ${searchable.length} searchable argument(s) judged.`, { numbers, notes: [...notes, ...candNotes, ...seen] });
 }
