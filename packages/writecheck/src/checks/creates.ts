@@ -22,7 +22,7 @@ import type { CreateSpec, ResourceSpec } from '../core/manifest.js';
 import { createVerified, goneByAnswer, goneFrom } from '../core/objects.js';
 import { render, templateRoots } from '../core/template.js';
 import { deepEqual, diff, getPath, isObj, short, sleep, withoutIgnored, type Obj } from '../core/util.js';
-import { lastMutating, MUTATING } from '../gate/gate.js';
+import { isMutating, lastMutating } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { saidBy, says } from './says.js';
@@ -334,7 +334,9 @@ async function oneCreate(ctx: RunContext, res: ResourceSpec, c: CreateTool, labe
   }
   // MWS-RES-3, second clause: a create that makes several backend writes; fail the last one.
   if (gate) {
-    const muts = learned.filter((q) => MUTATING.has(q.method));
+    // why: B1 review: the gate's own classification (the wire gate's verbs are not HTTP methods); by method alone a database
+    // create that writes twice counted 0 writes and its late failure was skipped as a single-step create.
+    const muts = learned.filter((q) => isMutating(q));
     const last = lastMutating(learned);
     if (muts.length < 2 || !last) o.late_failure = { skipped: `${c.tool} made ${muts.length} mutating backend request(s): a single-step create has no later step to fail`, mutating: muts.length, call: null, found: [] };
     else {

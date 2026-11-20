@@ -59,8 +59,9 @@ export interface WriteCall {
   input?: { answers: Record<string, unknown>; caps: Record<string, unknown> } | null;
 }
 
-type Req = { seq: number; method: string; path: string; status: number | null };
-const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status });
+// why: `mutating` is the gate's own classification (the wire gate's verbs are not HTTP methods).
+type Req = { seq: number; method: string; path: string; status: number | null; mutating?: boolean };
+const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status, mutating: r.mutating });
 const showReq = (r: Req) => `#${r.seq} ${r.method} ${r.path}`;
 
 /** The declared write calls of one resource, in the order above (the first call declared for a tool is kept). */

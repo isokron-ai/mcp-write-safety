@@ -30,7 +30,7 @@
 import { hasControl, needsBase, valueAt, type Driver } from '../core/driver.js';
 import type { FieldSpec, ResourceSpec } from '../core/manifest.js';
 import { deepEqual, diff, setPath, short, sleep, withoutIgnored } from '../core/util.js';
-import { lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
+import { isMutating, lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
 import { result, VIOLATED_CAVEAT, type Result, type WritePath } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { ruleNote } from './rules.js';
@@ -45,8 +45,9 @@ const ID = 'held-request';
 // where the gate shows the request sent again; both can change a verdict, and the version enters every record's test_hash.
 const VERSION = '2';
 
-type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null };
-const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status });
+type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null; mutating?: boolean };
+// why: `mutating` is the gate's own classification; the wire gate's verbs (UPDATE, SET, update) are not HTTP methods.
+const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status, mutating: r.mutating });
 const showReq = (r: Req) => `#${r.seq} ${r.method} ${r.path}`;
 
 export interface HeldTrial {
@@ -273,7 +274,7 @@ export const gatedCheck: CheckModule = {
       f.clear();
       const after = await d.readSettled('R', 'gate.res2.after', () => false);
       obs.res2 = { object: d.id, faulted: hit ? reqOf(hit) : null, call: brief(r), changed: before.ok && after.ok ? withoutIgnored(diff(before.obj, after.obj), ignoredPaths(res)).map((e) => e.path) : null, applied: after.ok ? deepEqual(valueAt(after.obj, f0.path), f0.values[1]) : null };
-      if (!hit) obs.res2.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
+      if (!hit) obs.res2.skipped = f.why ? `the fault was not applied: ${f.why}` : 'the fault was not applied (different backend requests than in the learning pass)';
       // Unknown outcome: the backend applies the request, and the connection closes before the server reads the answer.
       await d.reset();
       const b2 = await d.readOnce('R', ctx.session.stepId('gate.res2u.before'));
@@ -285,7 +286,8 @@ export const gatedCheck: CheckModule = {
       const reqsU = await gate.since(markU);
       const a2 = await d.readSettled('R', 'gate.res2u.after', () => false);
       obs.res2u = { object: d.id, faulted: hitu ? reqOf(hitu) : null, call: brief(ru), changed: b2.ok && a2.ok ? withoutIgnored(diff(b2.obj, a2.obj), ignoredPaths(res)).map((e) => e.path) : null, applied: a2.ok ? deepEqual(valueAt(a2.obj, f0.path), f0.values[1]) : null, requests: reqsU.map(reqOf), version_sent: b2.ok && res.version?.arg && !res.version.optional ? b2.version : null };
-      if (!hitu) obs.res2u.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
+      // why: the wire gate does not apply a lost-answer fault to a write that was refused or not kept (no trial), and says why.
+      if (!hitu) obs.res2u.skipped = fu.why ? `the fault was not applied: ${fu.why}` : 'the fault was not applied (different backend requests than in the learning pass)';
       // R10-11: the error names the version the call carried: send the call again once with that version, with no fault, and read
       // back. The first write was applied, so a repeat that is applied again shows that the version did not guard it.
       else if (a2.ok && obs.res2u.applied && obs.res2u.call && namesCarriedVersion(obs.res2u.call, res.version?.arg ?? null, obs.res2u.version_sent)) {
@@ -303,7 +305,7 @@ export const gatedCheck: CheckModule = {
     }
     // A composite update: fail its second and its last mutating backend request.
     if (res.update!.mode === 'composite') {
-      const muts = la.requests.filter((q) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(q.method));
+      const muts = la.requests.filter((q) => isMutating(q));
       obs.atom = { trials: [] };
       if (muts.length < 2) obs.atom.skipped = `${res.update!.tool} made ${muts.length} mutating backend request(s) in the learning pass: there is no later step to fail`;
       else
@@ -605,7 +607,7 @@ export function lostAnswerVerdict(r: LostAnswerObs, x: { w: WritePath; sc: { id:
     // why: review (5): NF-19, an operation the declaration lists as completed asynchronously, is not such a statement.
     if (x.async) continue;
     if (!l.call || l.call.indeterminate || !l.requests.length || !l.requests.every(delivered) || !unknownIn(l.call)) continue;
-    const mut = l.requests.filter((q) => !/^(GET|HEAD|OPTIONS)$/i.test(q.method));
+    const mut = l.requests.filter((q) => isMutating(q));
     const allDone = mut.length > 0 && mut.every((q) => q.status! < 300);
     const allRefused = mut.length > 0 && mut.every((q) => q.status! >= 400);
     const agrees = (allDone && l.applied === true) || (allRefused && l.applied === false);

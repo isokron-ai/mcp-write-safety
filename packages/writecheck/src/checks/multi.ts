@@ -21,7 +21,7 @@ import type { MultiSpec, ResourceSpec } from '../core/manifest.js';
 import { goneFrom } from '../core/objects.js';
 import { render, templateRoots } from '../core/template.js';
 import { deepEqual, getPath, isObj, short } from '../core/util.js';
-import { lastMutating, MUTATING } from '../gate/gate.js';
+import { isMutating, lastMutating } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { listScope, newScope, scratch } from './scratch.js';
 import { tgt1HeldFor } from './targeting.js';
@@ -65,9 +65,9 @@ export interface MultiObs {
   /** MWS-RES-1: a call on good items only (the learning pass where the gate runs one), and the items that hold the effect after it (null: a read-back with an unknown outcome). */
   clean?: { call: CallBrief | null; items: unknown[]; applied: unknown[] | null; skipped?: string };
   /** MWS-RES-2, the lost answer (with the gate): the last mutating request of the learning pass applied and its answer cut; absent in older evidence. */
-  lost?: MultiTrial & { requests: { seq: number; method: string; path: string; status: number | null }[]; faulted: { seq: number; method: string; path: string; status: number | null } | null };
+  lost?: MultiTrial & { requests: { seq: number; method: string; path: string; status: number | null; mutating?: boolean }[]; faulted: { seq: number; method: string; path: string; status: number | null } | null };
   /** The learning pass, for the clause on a settled outcome (R9-1); absent in older evidence. */
-  learn?: { call: CallBrief; requests: { seq: number; method: string; path: string; status: number | null }[]; applied: boolean | null };
+  learn?: { call: CallBrief; requests: { seq: number; method: string; path: string; status: number | null; mutating?: boolean }[]; applied: boolean | null };
 }
 
 const cleanable = (res: ResourceSpec) => !!res.cleanup && res.cleanup !== 'leave';
@@ -282,11 +282,13 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
       const mark = gate.mark();
       const lc = await call(ds, ds.map((d) => d.id), batch, 'learn');
       const reqs = await gate.since(mark);
-      const muts = reqs.filter((r) => MUTATING.has(r.method));
+      // why: B1 review: the gate's own classification; on the wire gate the verbs (UPDATE, SET) are not HTTP methods, and a count
+      // by method gave 0 writes while lastMutating found one, so the trials were armed with nth 0 and never applied.
+      const muts = reqs.filter((r) => isMutating(r));
       o.mutating_in_learning = muts.length;
       const la = await appliedOf(ctx, m, ds, label);
       o.clean = { call: lc, items: ds.map((d) => d.id), applied: la };
-      o.learn = { call: lc, requests: reqs.map((q) => ({ seq: q.seq, method: q.method, path: q.path, status: q.status })), applied: la === null ? null : la.length === ds.length };
+      o.learn = { call: lc, requests: reqs.map((q) => ({ seq: q.seq, method: q.method, path: q.path, status: q.status, mutating: q.mutating })), applied: la === null ? null : la.length === ds.length };
       if (lastMutating(reqs))
         for (const k of [...new Set([2, muts.length])].filter((k) => k <= muts.length)) {
           const b2 = ctx.marker('mf');
@@ -317,7 +319,7 @@ async function runMulti(ctx: RunContext, res: ResourceSpec, m: MultiSpec): Promi
           const b = await call(fresh, fresh.map((d) => d.id), b3, 'lost');
           const hit = await f.waitHit(1000);
           f.clear();
-          const rq = (await gate.since(mk)).map((q) => ({ seq: q.seq, method: q.method, path: q.path, status: q.status }));
+          const rq = (await gate.since(mk)).map((q) => ({ seq: q.seq, method: q.method, path: q.path, status: q.status, mutating: q.mutating }));
           const applied = await appliedOf(ctx, m, fresh, label);
           o.lost = { kind: 'failed backend write', position: hit ? `mutating request ${muts.length} of ${muts.length} (${hit.method} ${hit.path}) applied by the backend, its answer cut` : 'lost answer: the fault was not applied', call: b, items: fresh.map((d) => d.id), applied: applied ?? [], reported: reportedOf(m, b), order: fresh.map((d) => d.id), requests: rq, faulted: hit ? { seq: hit.seq, method: hit.method, path: hit.path, status: hit.status } : null, ...(!hit ? { skipped: 'the fault was not applied (different backend requests than in the learning pass)' } : applied === null ? { skipped: "an item's read-back has an unknown outcome" } : {}) };
         }
