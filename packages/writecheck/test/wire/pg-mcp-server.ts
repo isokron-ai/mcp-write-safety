@@ -111,7 +111,8 @@ async function call(name: string, a: Record<string, unknown>, p?: Record<string,
   if (IR && name === 'delete_item') {
     if (typeof a['id'] !== 'string') return text('id must be a string', true);
     let n = 0;
-    for (const f of FIELDS) {
+    // why: merge of b1 with F4: the write-faults trials fail a delete part-way; status goes first so that the title (what get_item reads) outlasts a half-done delete and cleanup sees the object and retries.
+    for (const f of [...FIELDS].reverse()) {
       const r = await exec('DELETE FROM kv WHERE k = $1', [`${f}:${a['id']}`]);
       if (r.error) return text(`the item was not deleted (database error ${r.error})`, true);
       if (r.tags[0] === 'DELETE 1') n++;
