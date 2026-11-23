@@ -57,8 +57,10 @@ export interface OperationRecord {
 }
 
 /**
- * "journal-unavailable": a write whose journal append failed (nothing applied; status 503; a RefusedTransaction with
- * code journal_unavailable). "run-reset": from the run reset's CommittedTransaction (kind "run-reset", tx.reset).
+ * "journal-unavailable": a write whose journal append failed (status 503; a RefusedTransaction with code
+ * journal_unavailable). It records the answer, not the outcome: nothing was applied in this process, but an append that
+ * failed once its write had begun, and one answered 503 lease_lost (also recorded here), may be applied by the next
+ * start (0.4.0, G3 note 26 item 1). "run-reset": from the run reset's CommittedTransaction (kind "run-reset", tx.reset).
  */
 export type LedgerKind = "start" | "execution" | "replay" | "refusal" | "journal-unavailable" | "fault-armed" | "fault-fired" | "run-allocated" | "run-reset";
 

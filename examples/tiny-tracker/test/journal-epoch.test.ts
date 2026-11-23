@@ -13,11 +13,13 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSy
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tempDir } from "./support/durable.js";
+import { tempDir, TOKEN } from "./support/durable.js";
 import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LEASE_OWNER, LOCK_FILE, acquireLease, leaseFs, leaseTiming, loadHooks, prepareDataDir, readJournal, releaseLease, splitJoined, type CrashHook } from "../src/backend/journal.js";
 import { openDurability } from "../src/backend/durability.js";
 import { Store } from "../src/backend/store.js";
 import { FixtureClock, memoryOffset } from "../src/fixture/clock.js";
+import { RunRegistry } from "../src/fixture/control.js";
+import { startBackend } from "../src/start.js";
 
 const child = fileURLToPath(new URL("./support/durable-child.js", import.meta.url));
 
@@ -250,6 +252,58 @@ describe("nothing is cut from the file (G3 note 26 item 1a; pause note 3.3 remai
     } finally {
       t.cleanup();
     }
+  });
+
+  // Integration pass, g3a open question 1: an append that failed once its write had begun keeps the code
+  // journal_unavailable (the ledger's schema is unchanged; the MCP layer answers every 5xx as outcome unknown), but no
+  // route says "nothing was fenced", "the clock did not move" or "nothing was applied": the next start may apply the line.
+  it("an append that failed once its write began: the fence, run and clock routes say the outcome is unknown, and the next start applies the whole line", async () => {
+    const t = tempDir("ep-broken-routes");
+    try {
+      let fail: string | undefined = "lookup-fence";
+      const features = ["durable", "inflight", "retention"];
+      const crash: CrashHook = (point, at) => {
+        if (fail !== undefined && point === "after-write" && at.line === fail) {
+          fail = undefined;
+          throw Object.assign(new Error("EIO: fsync failed"), { code: "EIO" });
+        }
+      };
+      const up = () => startBackend({ token: TOKEN, port: 0, features, bootId: "e0e0e0e0e0e0e0e0", durability: { features, dataDir: t.dataDir, crash, log: () => {} } });
+      const fence = async (url: string) => {
+        const r = await fetch(`${url}/operations/unknown-key-0001/fence`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: "{}" });
+        return { status: r.status, body: await r.json() as any };
+      };
+      const b = await up();
+      try {
+        const first = await fence(b.url);
+        assert.deepEqual([first.status, first.body.error], [503, "journal_unavailable"]);
+        assert.match(first.body.message, /failed once its write had begun: .*the line may be in the file, so whether a restart keeps the fence is unknown/);
+        assert.doesNotMatch(first.body.message, /nothing was fenced/);
+        const later = await fence(b.url);
+        assert.deepEqual([later.status, later.body.error], [503, "journal_unavailable"]);
+        assert.match(later.body.message, /stopped after an append that failed once it had begun.*nothing was fenced/, "a later call wrote nothing: that one is not applied");
+      } finally {
+        await b.close();
+      }
+      const again = await up();
+      try {
+        const state = await fence(again.url);
+        assert.deepEqual([state.status, state.body.state], [200, "fenced"], "the whole fence line was in the file: the next start applied it");
+      } finally {
+        await again.close();
+      }
+    } finally {
+      t.cleanup();
+    }
+    // The run and clock routes, with the error the journal throws (code append_failed).
+    const appendFailed = () => Object.assign(new Error("EIO: fsync failed"), { code: "append_failed" });
+    const reg = new RunRegistry("0011223344556677");
+    reg.onAllocate = () => { throw appendFailed(); };
+    assert.throws(() => reg.allocate(null), (e: any) => e.code === "journal_unavailable" && /could not be recorded: .*; whether a restart keeps it is unknown/.test(e.message));
+    const c = new FixtureClock(memoryOffset(), () => 1_000_000);
+    c.beforeMove = () => { throw appendFailed(); };
+    assert.throws(() => c.advance(5000), (e: any) => e.status === 503 && e.code === "journal_unavailable" && /whether a restart keeps the move is unknown/.test(e.message) && !/the clock did not move/.test(e.message));
+    assert.equal(c.offsetMs(), 0, "the offset here was put back");
   });
 });
 

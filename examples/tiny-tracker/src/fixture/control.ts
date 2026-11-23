@@ -95,8 +95,10 @@ export class RunRegistry {
       this.onAllocate?.({ ...run });
     } catch (e) {
       // lease_lost (G3 note 26 item 1c): the run-alloc line was written, then the lease was found taken over.
-      const lost = (e as { code?: unknown } | null)?.code === "lease_lost";
-      throw new ControlError(503, lost ? "lease_lost" : "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}${lost ? "; whether a restart keeps it is unknown" : ""}`);
+      // append_failed: the write had begun when it failed, so the line may be in the file and the next start decides it.
+      const code = (e as { code?: unknown } | null)?.code;
+      const lost = code === "lease_lost";
+      throw new ControlError(503, lost ? "lease_lost" : "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}${lost || code === "append_failed" ? "; whether a restart keeps it is unknown" : ""}`);
     }
     this.runs.push(run);
     return { ...run };

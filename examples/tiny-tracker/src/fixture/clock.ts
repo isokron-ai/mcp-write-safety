@@ -129,10 +129,15 @@ export class FixtureClock implements Clock {
         } catch (r) {
           rollback = `; the offset could not be put back (${(r as Error)?.message ?? String(r)}), so it stays at ${to} ms without a journal line`;
         }
-        const lost = (e as { code?: unknown } | null)?.code === "lease_lost";
+        const code = (e as { code?: unknown } | null)?.code;
+        const lost = code === "lease_lost";
+        // append_failed: the write had begun when it failed, so the line may be in the file and the next start decides
+        // it (the journal takes nothing more). The code stays journal_unavailable; the message does not say "did not move".
         throw new ClockError(503, lost ? "lease_lost" : "journal_unavailable", lost
           ? `the clock move was journalled, then the data-dir lease was found taken over: ${(e as Error).message}; whether a restart keeps the move is unknown${rollback || "; the offset here was put back"}`
-          : `the clock move could not be journalled: ${(e as Error).message}${rollback || "; the clock did not move"}`);
+          : code === "append_failed"
+            ? `the clock move's journal line failed once its write had begun: ${(e as Error).message}; the line may be in the file, so whether a restart keeps the move is unknown; this server appends nothing more: restart it${rollback || "; the offset here was put back"}`
+            : `the clock move could not be journalled: ${(e as Error).message}${rollback || "; the clock did not move"}`);
       }
     }
     for (const l of this.listeners) l(move);

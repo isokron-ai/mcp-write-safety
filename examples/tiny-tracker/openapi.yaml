@@ -721,8 +721,9 @@ paths:
         `clock_offset_ms`; an A5 run that counts shows offset 0 with control off. Without the `clock` feature: 501.
         With `durable` the move is journalled (a `clock` line) once the offset is stored and before it is answered, and
         the offset is restored at the next start; if the line cannot be written the offset is put back (503
-        `journal_unavailable`); if the line was written and the data-dir lease was then found taken over, the answer is
-        503 `lease_lost` and whether a restart keeps the move is unknown.
+        `journal_unavailable`; if the write had begun when it failed, the line may be in the file and whether a restart
+        keeps the move is unknown); if the line was written and the data-dir lease was then found taken over, the answer
+        is 503 `lease_lost` and whether a restart keeps the move is unknown.
       security: [{ controlToken: [] }]
       requestBody:
         required: true
@@ -1042,8 +1043,9 @@ components:
             journal_unavailable and lease_lost (503). `lease_lost` (durable, 0.4.0): the journal line was written and
             flushed, then the data-dir lease was found taken over by another start, so the outcome is unknown (the new
             holder decides it; a keyed repeat to it tells which); this server appends nothing more and must be restarted.
-            `journal_unavailable`: nothing was appended, or the append failed (if it failed once its write had begun, the
-            line may be in the file and the next start decides it).
+            `journal_unavailable`: nothing was appended, or the append failed. If it failed once its write had begun, the
+            line may be in the file and the next start decides it: the outcome is unknown, and the message says so.
+            Read the code as "not applied by this process", never as "never applied".
         message: { type: string }
     NotBuilt:
       type: object
