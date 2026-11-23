@@ -34,8 +34,11 @@ export interface StartStdioOptions {
   defects?: string[];
   features?: readonly string[];
   extras?: ServerExtras;
-  /** The configured key retention, stated with the retention feature (as StartServerOptions.retentionMs). */
-  retentionMs?: number;
+  /**
+   * The configured key retention, stated with the retention feature (as StartServerOptions.retentionMs); null when it
+   * is not known (stdio with --backend-url whose backend states none, 0.3.0 follow-up F2).
+   */
+  retentionMs?: number | null;
   /** Default: this process's stdin and stdout. */
   stdin?: Readable;
   stdout?: Writable;

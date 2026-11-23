@@ -24,8 +24,12 @@ export interface StartServerOptions {
   features?: readonly string[];
   /** What the fixture layer adds (attribution, the build descriptor mirror). */
   extras?: ServerExtras;
-  /** The backend's key retention in ms (feature retention; --key-retention), stated in the tools and (0.4.0) the instructions. Default: 7 days. */
-  retentionMs?: number;
+  /**
+   * The backend's key retention in ms (feature retention; --key-retention), stated in the tools and (0.4.0) the
+   * instructions. Default: 7 days. null: not known (a `tiny-tracker server` whose backend states none); the tools and
+   * instructions say so instead of a number.
+   */
+  retentionMs?: number | null;
   /**
    * Where the MCP listener accepts connections and whether /mcp needs a bearer token. Default: from `env`
    * (TRACKER_CONTAINER, TRACKER_MCP_TOKEN or _FILE; src/transport.ts), which is loopback with no token when unset.

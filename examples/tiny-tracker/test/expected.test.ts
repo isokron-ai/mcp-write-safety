@@ -43,6 +43,24 @@ describe("known-answer generator (expected/)", () => {
     assert.deepEqual(doc.builds.map((b: any) => b.label).sort(), [...labels].sort());
   });
 
+  it("the 0.3.0 known answers name the defects they cannot tell from the correct build (follow-up F1)", () => {
+    const list = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.3.0.json"), "utf8"));
+    const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.3.0.json"), "utf8"));
+    const md = readFileSync(join(ROOT, "expected", "0.3.0.md"), "utf8");
+    const undetected = ["backend defect key-expires-early", "defect in-progress-reported-not-applied", "defect settle-miss-reported-not-applied"];
+    assert.equal(doc.not_detected, list.not_detected, "the generator carries the build list's statement");
+    assert.ok(md.split("\n## ")[0].includes(list.not_detected), "the table states it in its header");
+    for (const name of ["key-expires-early", "in-progress-reported-not-applied", "settle-miss-reported-not-applied", "FX-KEY-1", "MWS-RES-1", "MWS-RES-2"]) {
+      assert.ok(list.not_detected.includes(name), name);
+    }
+    // The statement is true of the file: these rows are exactly the correct build's answers.
+    const row = (label: string) => doc.builds.find((b: any) => b.label === label);
+    const answers = (b: any) => ({ fixture: b.fixture, contract: b.contract?.answers });
+    for (const label of undetected) assert.deepEqual(answers(row(label)), answers(row("correct build")), label);
+    // The 0.2.0 list has no such statement, so its file is unchanged.
+    assert.equal(JSON.parse(readFileSync(join(ROOT, "expected", "0.2.0.json"), "utf8")).not_detected, undefined);
+  });
+
   it("generates schema-valid, time-free answers keyed by build_hash, the same on every run", { skip: needJsonschema }, async () => {
     assert.ok(jsonschema, "TT_GATE=1 needs python3 with jsonschema and referencing");
     const gen = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);

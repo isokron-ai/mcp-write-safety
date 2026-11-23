@@ -29,8 +29,11 @@ export function correctTools(features: readonly string[] = []): ToolDef[] {
   return [...CORRECT_TOOLS, ...(features.includes("lookup") ? LOOKUP_TOOLS : [])];
 }
 
-/** `retentionMs`: the key retention the backend was configured with (--key-retention), stated by every key-accepting tool. */
-export function createBuild(defectNames: string[] = [], features: readonly string[] = [], retentionMs?: number): Build {
+/**
+ * `retentionMs`: the key retention the backend was configured with (--key-retention), stated by every key-accepting
+ * tool; null when it is not known (the tools then say so).
+ */
+export function createBuild(defectNames: string[] = [], features: readonly string[] = [], retentionMs?: number | null): Build {
   const build: Build = {
     tools: new Map(correctTools(features).map((t) => [t.name, { ...t }])),
     validation: { ...correctValidation },

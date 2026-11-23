@@ -19,7 +19,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { ApiResponse } from "./api.js";
 import type { Build } from "./types.js";
 import { applied, fail, notApplied, ok, unknownOutcome, type WriteContext } from "./results.js";
-import { DEFAULT_RETENTION_MS, retentionSentence } from "../backend/expiry.js";
+import { DEFAULT_RETENTION_MS, retentionSentence, UNKNOWN_RETENTION_SENTENCE } from "../backend/expiry.js";
 
 /** The answer for a keyed state, or undefined when the response is not one. */
 export function keyedStateResult(res: ApiResponse, what: string, w?: WriteContext): CallToolResult | undefined {
@@ -48,15 +48,17 @@ export function keyedStateResult(res: ApiResponse, what: string, w?: WriteContex
 
 /**
  * With the retention feature, every key-accepting tool states the retention (FX-KEY-2), and so do the server instructions
- * (0.4.0). `retentionMs` is the configured retention when the process knows it (`all`, `stdio`, or `server` given
- * --key-retention); otherwise the default.
+ * (0.4.0). `retentionMs` is the configured retention when the process knows it (`all`, `stdio`, or the retention a
+ * `server`'s backend states, follow-up F2); null: the retention is not known (a `server` whose backend states none), and
+ * the tools and instructions say that rather than name a default.
  */
-export function applyRetentionStatement(build: Build, features: readonly string[], retentionMs: number = DEFAULT_RETENTION_MS): void {
+export function applyRetentionStatement(build: Build, features: readonly string[], retentionMs: number | null = DEFAULT_RETENTION_MS): void {
   if (!features.includes("retention")) return;
-  build.retention = retentionSentence(retentionMs);
+  const sentence = retentionMs === null ? UNKNOWN_RETENTION_SENTENCE : retentionSentence(retentionMs);
+  build.retention = sentence;
   for (const [name, tool] of build.tools) {
     const props = (tool.input as { properties?: Record<string, unknown> }).properties ?? {};
     if (!("idempotency_key" in props)) continue;
-    build.tools.set(name, { ...tool, description: `${tool.description} ${retentionSentence(retentionMs)}` });
+    build.tools.set(name, { ...tool, description: `${tool.description} ${sentence}` });
   }
 }

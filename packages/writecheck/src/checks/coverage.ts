@@ -45,6 +45,30 @@ export function declaredWriteTools(m: Manifest, tools: Tool[]): Map<string, stri
   return out;
 }
 
+/** Arguments that point at the run's own object or prefix: the only `calls` entries the annotation checks make (annotations.ts). */
+export const namesRunObject = (args: unknown): boolean => /\{\{\s*(id|prefix|marker|object)[.}\s]/.test(JSON.stringify(args));
+
+/**
+ * The tools the launch checks (MWS-CFG-2, MWS-CFG-3) call besides the declared write tools: each tool with an entry in the
+ * manifest's `calls` that declaredWriteTools leaves out because it is marked read-only (readOnlyHint: true in tools/list, or a
+ * read tool of a resource), where the entry's arguments name an object of the run, as the annotation checks require. A read-only
+ * mode that lets such a tool write is the case MWS-CFG-3 is for ("whatever that tool's annotations declare"). A tool marked
+ * read-only with no `calls` entry is not called: there are no safe arguments for it. The value says how the tool is marked.
+ * Kept apart from declaredWriteTools, which the coverage rows and the other checks use.
+ */
+export function readOnlyMarkedCalls(m: Manifest, tools: Tool[]): Map<string, string> {
+  const declared = declaredWriteTools(m, tools);
+  const out = new Map<string, string>();
+  const calls = (m as unknown as Record<string, unknown>)['calls'];
+  if (!isObj(calls)) return out;
+  for (const [t, c] of Object.entries(calls)) {
+    if (declared.has(t) || !isObj(c) || !namesRunObject(c['args'])) continue;
+    const tool = tools.find((x) => x.name === t);
+    out.set(t, tool && annotations(tool)['readOnlyHint'] === true ? 'annotated readOnlyHint: true' : 'a read tool of the manifest');
+  }
+  return out;
+}
+
 export function coverageRows(m: Manifest, tools: Tool[], results: Result[]): Result[] {
   const out: Result[] = [];
   const offered = new Set(tools.map((t) => t.name));

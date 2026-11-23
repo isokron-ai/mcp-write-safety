@@ -515,7 +515,9 @@ paths:
         Settle a lost answer by lookup (feature `inflight`; the `settle-by-lookup` variant uses it). In one synchronous
         step the backend returns the key's record or, when it has none, closes the key for the caller's principal, so
         the original request is refused (409 `key_fenced`) if it arrives later. Body `{"fence": false}` looks without
-        closing. The fence is journalled with `durable` and survives a restart; fences never expire.
+        closing. The fence is journalled with `durable` and survives a restart; fences never expire. With `retention`,
+        every answer of this route (any status) carries `retention_ms`, the configured key retention (0.3.0 follow-up
+        F2: `tiny-tracker server` reads it at start with a `{"fence": false}` peek and states it).
       parameters:
         - { name: key, in: path, required: true, schema: { $ref: "#/components/schemas/IdempotencyKey" } }
         - $ref: "#/components/parameters/Run"
@@ -535,6 +537,9 @@ paths:
                 properties:
                   key: { type: string }
                   state: { type: string, enum: [completed, expired, fenced] }
+                  principal: { type: string, description: "completed and expired: the caller's principal (G2 fold-in 1)" }
+                  fingerprint_hash: { type: string, description: "completed and expired: the hash of the request the key was used for (G2 fold-in 1)" }
+                  retention_ms: { type: integer, minimum: 1, description: "With retention: the configured key retention (0.3.0 follow-up F2)" }
                   execution_id: { type: string }
                   status: { type: integer }
                   body: {}

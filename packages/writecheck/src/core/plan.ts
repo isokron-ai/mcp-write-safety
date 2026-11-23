@@ -159,7 +159,7 @@ export const planHash = (p: Plan): string => sha256(canonical(p)).slice(0, 16);
 export function renderPlan(p: Plan, hash: string): string {
   const L: string[] = [];
   L.push(`Plan ${hash} for target ${p.target.confirm} (environment: ${p.target.environment})`);
-  L.push(`Hosts reached or given to the server: ${p.target.hosts.join(', ') || 'none (a local stdio server with no URL in its environment)'}`);
+  L.push(`Hosts reached or given to the server: ${p.target.hosts.join(', ') || 'none (a local stdio server with no URL or host in its environment or command line)'}`);
   L.push(`${p.suite.name} ${p.suite.version}, requirements ${p.spec.version}, manifest sha256 ${p.manifest_sha256.slice(0, 16)}…, catalog ${p.catalog_fingerprint.slice(0, 23)}…`);
   L.push(`At most ${p.writes_at_most} writes and ${p.creates_at_most} created objects (write budget ${p.limits.write_budget}, ${p.limits.writes_per_second} writes per second).`);
   L.push('No tool call was made to build this plan.');

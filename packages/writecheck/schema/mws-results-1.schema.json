@@ -173,6 +173,13 @@
             "patterns": {
               "type": "object"
             },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Facts about the connection that are not verdicts, such as a server that failed on server/discover and was then used with initialize only."
+            },
             "result_shapes": {
               "type": "object",
               "description": "Spec 7.3, rule 11: the result shape the declaration adopts by name and version (shape: the top level; tools: per tool, null for none).",

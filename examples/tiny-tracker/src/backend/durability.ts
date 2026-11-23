@@ -84,7 +84,8 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
   const has = (f: string) => options.features.includes(f);
   const features = { durable: has("durable"), inflight: has("inflight"), retention: has("retention") };
   const defects = options.defects ?? [];
-  const retentionMs = Math.max(1, Math.floor((options.retentionMs ?? DEFAULT_RETENTION_MS) / (defects.includes("key-expires-early") ? 1000 : 1)));
+  const statedRetentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
+  const retentionMs = Math.max(1, Math.floor(statedRetentionMs / (defects.includes("key-expires-early") ? 1000 : 1)));
   const keys = new DurableKeyRecords({ clock: store.clock, expiry: features.retention ? keyExpiry(retentionMs) : undefined, policy: options.policy });
   keys.log = options.log ?? ((m) => process.stderr.write(`${m}\n`));
   if (options.afterEffect) {
@@ -166,44 +167,52 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
   return {
     keys, seam, journal, features, retentionMs,
     route(method, parts, principal, run, body): Reply | undefined {
-      if (!features.inflight || method !== "POST" || parts.length !== 3 || parts[0] !== "operations" || parts[2] !== "fence") return undefined;
-      const key = parts[1];
-      if (!KEY_PATTERN.test(key)) return { status: 400, body: { error: "bad_idempotency_key", message: "the key must be 8 to 128 characters from A-Z a-z 0-9 . _ : -" } };
-      // G2 fold-in 2: under the forget policy a missing record may be a forgotten applied write, so a miss is never
-      // fenced (nobody can tell the two apart; the outcome stays open). CMP-55 refuses settle-by-lookup with forget
-      // where it sees both; this covers a backend started apart from its MCP server.
-      const forgets = features.retention && keys.policy === "forget";
-      const write = (body as { fence?: unknown } | null | undefined)?.fence !== false && !forgets;
-      let s;
-      try {
-        s = keys.fence({ principal }, key, run, write);
-      } catch (e) {
-        // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed. lease_lost
-        // (G3 note 26 item 1c): it was written, then the lease was found taken over, so whether it holds is unknown.
-        if ((e as { code?: unknown } | null)?.code === "lease_lost") return { status: 503, body: { error: "lease_lost", message: `the fence line was written, then the data-dir lease was found taken over: ${(e as Error).message}; whether the key is fenced is unknown (ask the new holder)` } };
-        // append_failed: the write had begun, so the line may be in the file and the next start decides it.
-        if ((e as { code?: unknown } | null)?.code === "append_failed") return { status: 503, body: { error: "journal_unavailable", message: `the fence line failed once its write had begun: ${(e as Error).message}; the line may be in the file, so whether a restart keeps the fence is unknown; this server appends nothing more: restart it` } };
-        return { status: 503, body: { error: "journal_unavailable", message: `the fence could not be recorded: ${(e as Error).message}; nothing was fenced` } };
-      }
-      if (!s && forgets) {
-        return { status: 404, body: { error: "no_record", key, state: "unknown", fenced: false, message: "no record of this key now; under the forget key-expiry policy it may have been forgotten, so the key was not fenced and the outcome stays open" } };
-      }
-      if (!s) return { status: 404, body: { error: "no_record", key, state: "none", message: "no record of this key now" } };
-      switch (s.state) {
-        case "pending":
-          return { status: 409, headers: { "retry-after": "1" }, body: { error: "in_progress", key, state: "pending", message: "a request with this key is still being applied" } };
-        case "completed":
-          // principal and fingerprint_hash (G2 fold-in 1): the caller compares the request the key was used for with its
-          // own, so a lookup never settles another write as this one.
-          return { status: 200, body: { key, state: "completed", principal, fingerprint_hash: fingerprintHashOf(principal, s.reply.fingerprint), execution_id: `X-${s.reply.seq}`, status: s.reply.status, body: s.reply.body, committed_at: s.reply.committedAt } };
-        case "tombstone":
-          return { status: 200, body: { key, state: "expired", principal, fingerprint_hash: s.tomb.fingerprintHash, execution_id: s.tomb.executionId, result_digest: s.tomb.resultDigest, committed_at: s.tomb.committedAt, objects: s.tomb.objects } };
-        case "fenced":
-          return { status: 200, body: { key, state: "fenced", fenced_at: s.at } };
-      }
+      const reply = fenceRoute(method, parts, principal, run, body);
+      // 0.3.0 follow-up F2: with retention, every answer of this route states the configured retention (the stated one,
+      // never the one a defect shortens), so an MCP server started apart (`tiny-tracker server`) states the backend's.
+      if (reply && features.retention && reply.body !== null && typeof reply.body === "object") reply.body = { ...reply.body, retention_ms: statedRetentionMs };
+      return reply;
     },
     close() {
       journal?.close();
     },
   };
+
+  function fenceRoute(method: string, parts: string[], principal: string, run: string | null, body: unknown): Reply | undefined {
+    if (!features.inflight || method !== "POST" || parts.length !== 3 || parts[0] !== "operations" || parts[2] !== "fence") return undefined;
+    const key = parts[1];
+    if (!KEY_PATTERN.test(key)) return { status: 400, body: { error: "bad_idempotency_key", message: "the key must be 8 to 128 characters from A-Z a-z 0-9 . _ : -" } };
+    // G2 fold-in 2: under the forget policy a missing record may be a forgotten applied write, so a miss is never
+    // fenced (nobody can tell the two apart; the outcome stays open). CMP-55 refuses settle-by-lookup with forget
+    // where it sees both; this covers a backend started apart from its MCP server.
+    const forgets = features.retention && keys.policy === "forget";
+    const write = (body as { fence?: unknown } | null | undefined)?.fence !== false && !forgets;
+    let s;
+    try {
+      s = keys.fence({ principal }, key, run, write);
+    } catch (e) {
+      // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed. lease_lost
+      // (G3 note 26 item 1c): it was written, then the lease was found taken over, so whether it holds is unknown.
+      if ((e as { code?: unknown } | null)?.code === "lease_lost") return { status: 503, body: { error: "lease_lost", message: `the fence line was written, then the data-dir lease was found taken over: ${(e as Error).message}; whether the key is fenced is unknown (ask the new holder)` } };
+      // append_failed: the write had begun, so the line may be in the file and the next start decides it.
+      if ((e as { code?: unknown } | null)?.code === "append_failed") return { status: 503, body: { error: "journal_unavailable", message: `the fence line failed once its write had begun: ${(e as Error).message}; the line may be in the file, so whether a restart keeps the fence is unknown; this server appends nothing more: restart it` } };
+      return { status: 503, body: { error: "journal_unavailable", message: `the fence could not be recorded: ${(e as Error).message}; nothing was fenced` } };
+    }
+    if (!s && forgets) {
+      return { status: 404, body: { error: "no_record", key, state: "unknown", fenced: false, message: "no record of this key now; under the forget key-expiry policy it may have been forgotten, so the key was not fenced and the outcome stays open" } };
+    }
+    if (!s) return { status: 404, body: { error: "no_record", key, state: "none", message: "no record of this key now" } };
+    switch (s.state) {
+      case "pending":
+        return { status: 409, headers: { "retry-after": "1" }, body: { error: "in_progress", key, state: "pending", message: "a request with this key is still being applied" } };
+      case "completed":
+        // principal and fingerprint_hash (G2 fold-in 1): the caller compares the request the key was used for with its
+        // own, so a lookup never settles another write as this one.
+        return { status: 200, body: { key, state: "completed", principal, fingerprint_hash: fingerprintHashOf(principal, s.reply.fingerprint), execution_id: `X-${s.reply.seq}`, status: s.reply.status, body: s.reply.body, committed_at: s.reply.committedAt } };
+      case "tombstone":
+        return { status: 200, body: { key, state: "expired", principal, fingerprint_hash: s.tomb.fingerprintHash, execution_id: s.tomb.executionId, result_digest: s.tomb.resultDigest, committed_at: s.tomb.committedAt, objects: s.tomb.objects } };
+      case "fenced":
+        return { status: 200, body: { key, state: "fenced", fenced_at: s.at } };
+    }
+  }
 }

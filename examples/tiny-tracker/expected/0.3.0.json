@@ -4,6 +4,7 @@
     "name": "@mcp-write-safety/tiny-tracker",
     "version": "0.3.0"
   },
+  "not_detected": "Not detected in 0.3.0: key-expires-early, in-progress-reported-not-applied and settle-miss-reported-not-applied give exactly the correct build's answers here; neither fx-check nor the contract driver detects them in this release. key-expires-early trips FX-KEY-1, which needs the 0.4.0 fixture-clock work (it answers \"not checked\" here), and the two MCP-layer defects trip MWS-RES-1 and MWS-RES-2, which have no row here, so a \"held\" or \"pass\" on these rows does not mean the defect is absent.",
   "builds": [
     {
       "build_hash": "aad91aba57cfec22c029fa8b20efd8162ec6e7eafcec2dc513077577652dfabc",

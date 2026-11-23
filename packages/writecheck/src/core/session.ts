@@ -14,10 +14,10 @@ import type { CaptureSink } from './capture.js';
 import { BASE_ENV, HttpMcpClient, LaunchedServer, PROTOCOL_VERSION_META_KEY, rawHttp, StdioClient, type LaunchOutcome, type McpClient, type RpcOutcome } from './client.js';
 import { egressFor, type EgressPolicy } from './egress.js';
 import type { Gate } from '../gate/gate.js';
-import type { Manifest } from './manifest.js';
+import { declaredDecodes, type Manifest } from './manifest.js';
 import type { Redactor } from './redact.js';
 import { Throttle } from './throttle.js';
-import { getPath, isObj, nowMs, parseStructured, sha256, WritecheckError, type Obj } from './util.js';
+import { getPath, isObj, nowMs, parseStructured, sha256, sleep, WritecheckError, type Obj } from './util.js';
 import { SUITE_NAME, SUITE_VERSION } from '../version.js';
 import { captureShape, freeWordsOfBlock, type ShapeCapture } from '../checks/shape.js';
 
@@ -26,6 +26,13 @@ export const PROTOCOL_VERSION = '2025-11-25';
 export const MODERN_PROTOCOL = '2026-07-28';
 /** How long `auto` waits for server/discover before taking the 2025-11-25 path. */
 const DISCOVER_TIMEOUT_MS = 5_000;
+
+/**
+ * Whether a revision negotiated by initialize predates the one the tester offered (2025-11-25). Revisions are dates
+ * (YYYY-MM-DD), so they order as strings. A server that answers an older revision knows neither 2025-11-25 nor
+ * 2026-07-28, the revision that introduced server/discover, so it is not asked server/discover.
+ */
+export const predatesOffered = (rev: string | null): boolean => typeof rev === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rev) && rev < PROTOCOL_VERSION;
 
 /** What a call carried (B-9: same_key / same_version): true or false where the tester knows it, absent where it cannot tell (then the shape gives no held and no violated from it). */
 export type Carried = { key?: boolean; version?: boolean };
@@ -46,8 +53,16 @@ export interface CallResult {
   http_status: number | null;
   /** First text content (raw). */
   text: string | null;
-  /** structuredContent when present, else the text parsed as JSON or YAML. */
+  /** structuredContent when present, else the text parsed as JSON or YAML; for a wrapped result that was decoded, the parsed document (see `decoded`). */
   data: unknown;
+  /**
+   * Set where `data` is not structuredContent itself but the JSON document its only member `result` carried as a string (a
+   * wrapped result, as Python FastMCP returns): `basis` says why it was decoded (the tool's outputSchema marks a wrapped
+   * result, or the manifest declares `decode: json`). Absent for every other result.
+   */
+  decoded?: { from: 'structuredContent.result'; basis: DecodeBasis; text_mirrors?: 'structuredContent' };
+  /** Where the result was decoded: structuredContent as received (the wrapper and its string), kept beside the decoded `data`. */
+  raw_structured?: unknown;
   /** The shape fields of structuredContent and of each JSON text block that carry an `mws` field (spec 7.3, rule 11; src/checks/shape.ts), or null. */
   shape?: ShapeCapture | null;
   /** Whether the call carried an idempotency key and a version (B-9: same_key / same_version on a call that carried none is read as yes); set by the driver for the writes it builds, absent where not recorded. */
@@ -59,6 +74,43 @@ export interface CallResult {
   rpc_id: number | null;
   t_start_ms: number;
   t_end_ms: number;
+}
+
+/** Why a wrapped result is decoded: the tool's declared outputSchema marks it, or the manifest opts in (`decode: json`). */
+export type DecodeBasis = 'outputSchema' | 'manifest';
+
+/**
+ * Does a tool's outputSchema mark a wrapped result: an object schema whose only property is `result`, of type string or with no
+ * type, with or without Python FastMCP's `x-fastmcp-wrap-result: true` (the MCP Python SDK wraps a non-object return the same
+ * way, without the extension)? A `result` whose declared type excludes string never carries a JSON document as a string, so
+ * it does not count, whatever the extension says.
+ */
+export function marksWrappedResult(schema: unknown): boolean {
+  if (!isObj(schema)) return false;
+  const props = isObj(schema['properties']) ? schema['properties'] : null;
+  if (!props || Object.keys(props).length !== 1 || !Object.hasOwn(props, 'result')) return false;
+  const r = props['result'];
+  const t = isObj(r) ? r['type'] : undefined;
+  return t === undefined || t === 'string' || (Array.isArray(t) && t.includes('string'));
+}
+
+/**
+ * The JSON document a wrapped result carries: structuredContent is an object whose only member is `result`, a string that
+ * parses as a JSON object or array. Anything else (other members, a string that is not JSON, JSON that is a scalar) gives
+ * undefined, and the result is read as it is.
+ */
+export function unwrapResult(sc: unknown): unknown {
+  if (!isObj(sc)) return undefined;
+  const ks = Object.keys(sc);
+  if (ks.length !== 1 || ks[0] !== 'result' || typeof sc['result'] !== 'string') return undefined;
+  const s = sc['result'].trim();
+  if (!s.startsWith('{') && !s.startsWith('[')) return undefined;
+  try {
+    const v: unknown = JSON.parse(s);
+    return v !== null && typeof v === 'object' ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface HttpResult {
@@ -180,9 +232,23 @@ export class Session {
   private mainStart: Promise<LaunchOutcome> | null = null;
   /** Learned on the first connection: whether this server speaks 2026-07-28 (auto mode asks once). */
   private modern: boolean | null = null;
+  /** Facts about the connection that are not verdicts (for the results' `target.mcp.notes`): e.g. a server that failed on server/discover. */
+  readonly notes: string[] = [];
+  /** Tools whose wrapped results are decoded, and why: the manifest's `decode: json`, or an outputSchema in tools/list that marks one. */
+  private readonly decodeTools = new Map<string, DecodeBasis>();
+  /** Tools the manifest declares `decode: none` for: never decoded, whatever their outputSchema says. */
+  private readonly decodeOff = new Set<string>();
+  /** Tools whose outputSchema marks a wrapped result (to say so where `decode: none` keeps one as it is). */
+  private readonly schemaMarked = new Set<string>();
+  /** Tools a decode (or a decode switched off) was already noted for (one note per tool). */
+  private readonly decodeNoted = new Set<string>();
 
   constructor(readonly o: SessionOptions) {
     if (o.min_interval_ms > 0 && o.throttle_file) this.throttle = new Throttle(o.throttle_file, o.min_interval_ms);
+    for (const [tool, mode] of o.manifest ? declaredDecodes(o.manifest) : []) {
+      if (mode === 'json') this.decodeTools.set(tool, 'manifest');
+      else this.decodeOff.add(tool);
+    }
   }
 
   /** A new step id, unique in the run: `<prefix>.<seq>`. */
@@ -323,7 +389,7 @@ export class Session {
     if (!res) {
       // a server without initialize (stateless revisions): in `auto`, ask whether it speaks 2026-07-28; else calls go ahead uninitialised
       if (r.message && isObj(r.message['error'])) {
-        if (want === 'auto' && this.modern === null) await this.probeModern(conn, st);
+        if (want === 'auto' && this.modern === null) await this.probeModern(conn, label, st);
         return;
       }
       throw new WritecheckError(`server ${label} did not initialize: ${r.transport_error ?? (r.timed_out ? 'timed out' : 'no answer')}`, 4);
@@ -333,20 +399,99 @@ export class Session {
     conn.client.negotiated(conn.protocol);
     conn.initialized = true;
     await conn.client.notify(st, 'notifications/initialized', {});
-    if (want === 'auto' && this.modern === null) await this.probeModern(conn, st);
+    if (want === 'auto' && this.modern === null) {
+      // why: corpus run 3 (t05): a server on an older MCP Python SDK exits on any method it does not know. One that negotiated a
+      // revision older than the one offered cannot speak 2026-07-28, so server/discover is not sent to it at all.
+      if (predatesOffered(conn.protocol)) {
+        this.modern = false;
+        this.note(label, st, `server/discover was not sent: the server negotiated protocol revision ${conn.protocol}, which predates ${PROTOCOL_VERSION} (offered) and ${MODERN_PROTOCOL} (where server/discover was introduced); the session uses initialize only.`);
+        return;
+      }
+      await this.probeModern(conn, label, st);
+    }
+  }
+
+  /** A note about the connection (not a verdict): kept for the results and written to the capture. */
+  private note(label: string, step: string, text: string): void {
+    this.notes.push(`${label}: ${text}`);
+    this.o.capture.write({ label, step, dir: 'event', channel: 'process', event: 'note', note: text });
+  }
+
+  /** Whether a connection still answers after a failed request: the process has not exited, and it answers ping. */
+  private async alive(conn: Conn, st: string): Promise<boolean> {
+    if (conn.client instanceof StdioClient) {
+      await Promise.race([conn.client.whenClosed(), sleep(200)]);
+      if (conn.client.exitInfo.exited) return false;
+    }
+    const host = conn.own ?? (this.o.manifest.server.launch ? this.main : null);
+    if (host?.hasExited) return false;
+    const p = await conn.client.request(st, 'ping', {}, { timeout_ms: Math.min(DISCOVER_TIMEOUT_MS, this.timeout()) });
+    return !!p.message;
+  }
+
+  /**
+   * Start the server (or session) behind `conn` again after it failed on server/discover, and initialize it. Called at most once
+   * per session: `modern` is settled to false first, so the new connection is never asked server/discover.
+   */
+  private async revive(conn: Conn, label: string, st: string): Promise<void> {
+    await conn.client.stop().catch(() => undefined);
+    if (conn.own) {
+      await conn.own.stop();
+      const own = this.launched(label, this.serverEnv(conn.launchEnv ?? {}));
+      const r = await own.start(st);
+      if (!r.ok) {
+        await own.stop();
+        throw new WritecheckError(`server ${label} did not start again after it failed on server/discover: ${r.reason}${r.stderr_tail ? `\n${r.stderr_tail}` : ''}`, 4);
+      }
+      this.allow(r.url);
+      conn.own = own;
+      conn.client = this.httpClient(label, r.url);
+    } else if (this.o.manifest.server.stdio) {
+      conn.client = conn.launchEnv ? this.stdioClient(label, this.serverEnv(conn.launchEnv)) : this.stdioClient(label, this.serverEnv());
+    } else {
+      // why: alive() already said no; a hung shared launch process is stopped and started again too, not reused (review, 17 Nov).
+      if (this.main) {
+        await this.main.stop();
+        this.main = null;
+        this.mainStart = null;
+      }
+      conn.client = await this.newClient(label);
+    }
+    this.started.push(label);
+    conn.initialized = false;
+    conn.protocol = null;
+    conn.capabilities = null;
+    await this.handshake(conn, label, st);
   }
 
   /**
    * `auto`, after the handshake (or after an initialize the server refused): does the server also speak 2026-07-28? Asked once per
    * session with server/discover; where it lists that revision, this connection and every later one speak it, else none does.
    */
-  private async probeModern(conn: Conn, st: string): Promise<boolean> {
+  private async probeModern(conn: Conn, label: string, st: string): Promise<boolean> {
     const r = await conn.client.request(st, 'server/discover', { _meta: this.envelope() }, { timeout_ms: Math.min(DISCOVER_TIMEOUT_MS, this.timeout()) });
     const res = r.message && isObj(r.message['result']) ? r.message['result'] : null;
     const versions = res && Array.isArray(res['supportedVersions']) ? (res['supportedVersions'] as unknown[]) : [];
     if (!versions.includes(MODERN_PROTOCOL)) {
-      // why: only a definite answer settles it for the session; a transport failure may be this process alone.
-      if (r.message) this.modern = false;
+      const err = r.message && isObj(r.message['error']) ? r.message['error'] : null;
+      if (r.message) {
+        this.modern = false;
+        if (err) this.note(label, st, `server/discover was answered with JSON-RPC error ${String(err['code'])}${err['code'] === -32601 ? ' (method not found)' : ''}; the session uses initialize (${conn.protocol ?? 'no revision'}) only.`);
+        return false;
+      }
+      // why: corpus run 3 (t05): a server that crashes or hangs on server/discover. It is not asked again in this session; if it
+      // died, it is started once more and initialized, and the run goes on. A note, not a violation.
+      this.modern = false;
+      const why = r.timed_out ? 'no answer within the discover timeout' : (r.transport_error ?? 'no answer');
+      if (await this.alive(conn, st)) {
+        this.note(label, st, `server/discover failed (${why}), but the server still answers; the session uses initialize (${conn.protocol ?? 'no revision'}) only.`);
+        return false;
+      }
+      const code = conn.client instanceof StdioClient ? conn.client.exitInfo.exit_code : null;
+      const tail = conn.client instanceof StdioClient ? conn.client.stderrTail() : (conn.own ?? this.main)?.stderrTail() ?? '';
+      const last = tail.split('\n').filter((l) => l.trim()).pop()?.slice(0, 200);
+      this.note(label, st, `the server failed on server/discover (${why}${code !== null ? `; exit code ${code}` : ''}${last ? `; last stderr line: ${JSON.stringify(last)}` : ''}). ${conn.own || this.main || this.o.manifest.server.stdio ? 'It was started again once' : 'A new session was opened'} and the session uses initialize only; server/discover is not sent again.`);
+      await this.revive(conn, label, st);
       return false;
     }
     this.modern = true;
@@ -407,7 +552,7 @@ export class Session {
         await this.handshake(conn, o.label, step);
       } catch (e) {
         await this.release([o.label]);
-        return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: own.stderrTail() };
+        return { started: false, exit_code: null, reason: `it printed its URL but the handshake failed: ${(e as Error).message}`, stderr_tail: (conn.own ?? own).stderrTail() };
       }
       return { started: true, protocol: conn.protocol };
     }
@@ -420,12 +565,14 @@ export class Session {
     } catch (e) {
       failed = (e as Error).message;
     }
+    // why: the handshake may have started the server again after a failed server/discover (revive): judge the live process.
+    const live = conn.client instanceof StdioClient ? conn.client : client;
     // why: a server that refuses its settings usually exits at once; one that answered initialize and then exits did not start either.
-    if (!failed) await Promise.race([client.whenClosed(), new Promise((r) => setTimeout(r, 150))]);
-    if (failed || client.exitInfo.exited) {
-      await Promise.race([client.whenClosed(), new Promise((r) => setTimeout(r, 2_000))]);
-      const tail = client.stderrTail();
-      const code = client.exitInfo.exit_code;
+    if (!failed) await Promise.race([live.whenClosed(), new Promise((r) => setTimeout(r, 150))]);
+    if (failed || live.exitInfo.exited) {
+      await Promise.race([live.whenClosed(), new Promise((r) => setTimeout(r, 2_000))]);
+      const tail = live.stderrTail();
+      const code = live.exitInfo.exit_code;
       await this.release([o.label]);
       return { started: false, exit_code: code, reason: failed ?? `exited (${code ?? 'signal'}) right after starting`, stderr_tail: tail };
     }
@@ -489,7 +636,16 @@ export class Session {
       const res = r.message && isObj(r.message['result']) ? r.message['result'] : null;
       if (!res && optional && i === 0 && r.message && isObj(r.message['error']) && r.message['error']['code'] === -32601) return [];
       if (!res) throw new WritecheckError(`${method} failed on ${label}: ${r.transport_error ?? JSON.stringify(r.message).slice(0, 300)}`, 4);
-      out.push(...((res[key] as Record<string, unknown>[] | undefined) ?? []));
+      const page = (res[key] as Record<string, unknown>[] | undefined) ?? [];
+      out.push(...page);
+      // why: t17: a tool whose outputSchema marks a wrapped result has its structuredContent.result decoded where it is JSON.
+      // `decode: none` in the manifest keeps them as they are.
+      if (method === 'tools/list')
+        for (const t of page)
+          if (isObj(t) && typeof t['name'] === 'string' && marksWrappedResult(t['outputSchema'])) {
+            this.schemaMarked.add(t['name']);
+            if (!this.decodeTools.has(t['name']) && !this.decodeOff.has(t['name'])) this.decodeTools.set(t['name'], 'outputSchema');
+          }
       cursor = res['nextCursor'];
       if (!cursor) return out;
       const k = JSON.stringify(cursor);
@@ -560,7 +716,14 @@ export class Session {
         /* a scanner failure never changes the call's outcome */
       }
     }
-    const out = toCallResult(r, step, label, tool);
+    const out = toCallResult(r, step, label, tool, this.decodeTools.get(tool) ?? null);
+    if (out.decoded && !this.decodeNoted.has(tool)) {
+      this.decodeNoted.add(tool);
+      this.note(label, step, `${tool} answers a wrapped result (structuredContent {"result": "<JSON as a string>"}); every reading of its structured answer (paths, outcome fields, signals, the text searched) uses the decoded JSON document (basis: ${out.decoded.basis === 'manifest' ? 'the manifest declares decode: json' : "the tool's outputSchema marks a wrapped result"}); the call records keep structuredContent as received in raw_structured, and the capture keeps the whole answer.`);
+    } else if (this.decodeOff.has(tool) && this.schemaMarked.has(tool) && !this.decodeNoted.has(tool) && unwrapResult(isObj(r.message?.['result']) ? r.message['result']['structuredContent'] : undefined) !== undefined) {
+      this.decodeNoted.add(tool);
+      this.note(label, step, `${tool}'s outputSchema marks a wrapped result and it answered one, but the manifest declares decode: none: its structured answer is read as received, the string not decoded.`);
+    }
     if (out.result_type === 'input_required') this.inputRequests.push({ step, tool, method: 'input_required result', answer: 'not answered in this call: only the MWS-RETRY-3 check retries, with the answers the declaration gives; elsewhere the call is judged as an unknown outcome' });
     this.hist({ op, phase: out.ok ? 'ok' : out.timed_out || out.transport_error ? 'info' : 'fail', kind: 'call', label, step, name: tool, write, ...(out.timed_out ? { detail: 'client timeout: the outcome is unknown' } : out.transport_error ? { detail: out.transport_error } : {}) });
     if (out.http_status === 429 || (!out.ok && RATE_TEXT.test(out.text ?? out.rpc_error?.message ?? ''))) throw new RateLimited(`tools/call ${tool} (${step})`);
@@ -630,7 +793,7 @@ export class Session {
   }
 }
 
-export function toCallResult(r: RpcOutcome, step: string, label: string, tool: string): CallResult {
+export function toCallResult(r: RpcOutcome, step: string, label: string, tool: string, decode: DecodeBasis | null = null): CallResult {
   const body = r.message ?? {};
   const res = isObj(body['result']) ? body['result'] : null;
   const err = isObj(body['error']) ? { code: Number(body['error']['code']), message: String(body['error']['message']) } : null;
@@ -639,19 +802,30 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   const texts: string[] = [];
   for (const c of (res?.['content'] as Record<string, unknown>[] | undefined) ?? []) if (isObj(c) && c['type'] === 'text' && typeof c['text'] === 'string') texts.push(c['text']);
   const text: string | null = texts.length ? texts.join('\n') : null;
-  const data = res && res['structuredContent'] !== undefined ? res['structuredContent'] : texts.length ? parseStructured(texts[0]!) : null;
+  let data = res && res['structuredContent'] !== undefined ? res['structuredContent'] : texts.length ? parseStructured(texts[0]!) : null;
+  // why: t17: a wrapped result carries its data as a JSON document in a string; decoded only where the tool is marked (its
+  // outputSchema, or the manifest's decode: json) and the value is exactly {"result": "<JSON object or array>"}.
+  const unwrapped = decode && res ? unwrapResult(res['structuredContent']) : undefined;
+  if (unwrapped !== undefined) data = unwrapped;
   // why: an adopted result shape is read at evaluation, from what is captured here for every call (cheap; null for most servers).
-  const shape = res ? captureShape(res['structuredContent'], texts) : null;
+  // For a decoded wrapped result the shape is captured from the decoded document, as every other reading of it is (patternData
+  // reads `data`): the tool's structured answer is that document, so the shape and the patterns read the same thing.
+  const read = unwrapped !== undefined ? unwrapped : res ? res['structuredContent'] : undefined;
+  const shape = res ? captureShape(read, texts) : null;
   // why: B-9 v2 ("Free words and the serialized block"): where the result carries a shape, the text the patterns read leaves out
   // a block whose whole text is the serialized structuredContent, and a JSON block that carries the shape; `text` itself is kept
   // whole for every other use (identifiers, fingerprints, quotes). Whether the tool adopts the shape is decided at reading.
-  const sc = res ? res['structuredContent'] : undefined;
+  const sc = read;
+  // why: PR #7 round 3: a text block that repeats a wrapped result is the serialized wrapper (structuredContent as received),
+  // not the decoded document; for a decoded call it is the mirror too, and its free words are those of the decoded document.
+  const rawSc = unwrapped !== undefined ? res!['structuredContent'] : undefined;
+  const mirrors = (t: string): boolean => (sc !== undefined && sc !== null && isMirrorOf(t, sc)) || (rawSc !== undefined && isMirrorOf(t, rawSc));
   // The free words of each block left out (the mirror's shape, or the shape a JSON block carries) are kept, one per line, so a
   // reader of the text still reads them, as B-9 asks ("declared text patterns are applied to the other text blocks, and to
   // those free words"); member names and fixed values are not.
   const prose = shape
     ? texts.flatMap((t) => {
-        const mirror = sc !== undefined && sc !== null && isMirrorOf(t, sc);
+        const mirror = mirrors(t);
         if (!mirror && !carriesShape(t)) return [t];
         return freeWordsOfBlock(mirror ? (sc as Record<string, unknown>)['mws'] : (JSON.parse(t.trim()) as Record<string, unknown>)['mws']);
       })
@@ -659,7 +833,7 @@ export function toCallResult(r: RpcOutcome, step: string, label: string, tool: s
   // why: an input_required result (2026-07-28), or any other non-complete result type, is neither a success nor an error (spec MWS-RES-2).
   const resultType = res && typeof res['resultType'] === 'string' ? res['resultType'] : null;
   const pending = resultType !== null && resultType !== 'complete';
-  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
+  return { kind: 'call', step, label, tool, ok: !err && !isError && res !== null && !pending && !r.timed_out && !r.transport_error, isError, result_type: resultType, input_required: resultType === 'input_required' ? { inputRequests: res!['inputRequests'] ?? null, requestState: typeof res!['requestState'] === 'string' ? res!['requestState'] : null } : null, rpc_error: err, http_status: r.http_status, text, data, ...(unwrapped !== undefined ? { decoded: { from: 'structuredContent.result' as const, basis: decode!, ...(texts.length === 1 && isMirrorOf(texts[0]!, rawSc) ? { text_mirrors: 'structuredContent' as const } : {}) }, raw_structured: rawSc } : {}), shape, ...(prose ? { prose_text: prose.length ? prose.join('\n') : null } : {}), timed_out: r.timed_out, transport_error: r.transport_error, rpc_id: r.rpc_id, t_start_ms: r.t_start_ms, t_end_ms: r.t_end_ms };
 }
 
 /** Is a text block a JSON object that carries an `mws` member (the shape, B-9 v2)? */
