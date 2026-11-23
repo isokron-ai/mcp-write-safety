@@ -25,6 +25,10 @@ To see the test tool run against the sample server, on your own machine only (No
 npx -y -p @mcp-write-safety/writecheck@0.1.0 -p @mcp-write-safety/tiny-tracker@0.1.0 mcp-writecheck demo --defect all
 ```
 
+## Defect matrix (T0 worker)
+
+[`.github/workflows/defect-matrix.yml`](.github/workflows/defect-matrix.yml) runs on `workflow_dispatch` only. It builds `examples/tiny-tracker`, starts each requested build and compares its fixture answers with the committed row in `examples/tiny-tracker/expected/0.3.0.json`, using the same generator (`expected/generate.mjs`) that wrote that file. Inputs: `shard_id`, `attempt_id`, `fence` and `run_key` (required strings), and `defects`, a comma-separated list of defect names such as `lookup-reexecutes`. With `defects` empty it runs two control builds: the correct build, and one build with a known defect that the fixture answers can tell apart from the correct one. The workflow does nothing unless the repository variable `LOOP_ENABLED` is exactly `true`. It writes `t0-manifest.json` (`attempt_id`, `fence`, `run_key`, `conclusion`) and uploads it as artifact `t0-<attempt_id>` for 3 days. It uses no secrets. Only the fixture answers are compared; the contract-driver and `mcp-writecheck` rows of the known-answer files are not.
+
 ## Related repositories
 
 - [isokron-ai/mcp-writecheck-action](https://github.com/isokron-ai/mcp-writecheck-action): a GitHub Action that runs `mcp-writecheck` in CI and reports the result in the job summary.
