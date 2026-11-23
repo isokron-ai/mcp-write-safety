@@ -45,6 +45,7 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 ### 0.4.0 integration pass (g3a and g3b merged; on the 0.3.0 release)
 - An append that fails once its write has begun is answered 503 `journal_unavailable` with its outcome unknown, as `lease_lost` is: the line may be in the file and the next start decides it. The code stays `journal_unavailable` (the ledger's schema is unchanged; the MCP layer answers every backend 5xx as outcome `unknown`), and the fence, run and clock routes no longer say "nothing was fenced" or "the clock did not move" for it. INTERFACES, decision 0003, FIXTURE and `openapi.yaml` say that `journal_unavailable` means "not applied by this process", never "never applied".
 - `fx-check` FX-DUR-2 reads a journal line that a later write joined onto a torn fragment (0.4.0 never cuts the file): it takes the line's whole part, as the server's reader does, instead of skipping the physical line.
+- Racing starts over a killed holder's lease: a start whose new lease could not be renamed into place because a lease was there (ENOTEMPTY or EEXIST) looks again, even if another start has moved that lease aside meanwhile. It was refused with a message for a Windows file lock (and before 0.4.0's Windows mapping, with a raw ENOTEMPTY error).
 - CONTRIBUTING and STABILITY: a release's known answers reproduce at its own tag (`expected/0.3.0.json` at `tiny-tracker-v0.3.0`); a release regenerates and checks only its own file.
 
 ### 0.4.0 additions (coordinator note 19)

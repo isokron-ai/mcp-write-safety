@@ -626,8 +626,12 @@ function createLease(path: string, text: string): number | false {
     try {
       leaseFs.renameSync(tmp, path);
     } catch (e) {
-      // A lease is there (ENOTEMPTY or EEXIST on POSIX, EPERM or EACCES on Windows): not ours.
-      if (existsSync(path)) return false;
+      // A lease is there (ENOTEMPTY or EEXIST on POSIX, EPERM or EACCES on Windows): not ours. On POSIX the code alone
+      // says so: another start may have moved that lease aside since the rename failed, so it may be gone by now, and
+      // the caller looks again (integration pass: racing starts over a killed holder's lease read ENOTEMPTY as a
+      // Windows refusal). On Windows the code is ambiguous, so the lease must still be there.
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === "ENOTEMPTY" || code === "EEXIST" || existsSync(path)) return false;
       throw leaseFsRefusal(e, join(path, ".."), `rename its new lease ${tmp} into place`);
     }
     return ino;

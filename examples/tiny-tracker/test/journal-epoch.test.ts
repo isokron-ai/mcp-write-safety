@@ -504,6 +504,33 @@ describe("availability (G3 note 26 item 5)", () => {
     });
   }
 
+  // Integration pass (g3a open question 3, the racing-starts test): a start's rename of its new lease onto lock.d fails
+  // with ENOTEMPTY because a lease is there, and another start moves that lease aside before this one looks again. That
+  // is a lost race, not a Windows refusal: this start looks again and takes the free name.
+  it("a new lease's rename that fails with ENOTEMPTY while another start moves the old lease aside: this start looks again and takes the lease", () => {
+    const t = tempDir("ep-enotempty");
+    const saved = { ...leaseFs };
+    try {
+      fakeLease(t.dataDir, "elsewhere", leaseTiming.selfFenceMs - 4000); // held: another host's, fresh
+      let raced = 0;
+      leaseFs.renameSync = ((from: string, to: string) => {
+        if (String(from).includes(".new-") && raced === 0) {
+          raced++;
+          saved.rmSync(String(to), { recursive: true, force: true }); // the other start moved it aside (and removed it)
+          throw Object.assign(new Error("ENOTEMPTY: directory not empty, rename"), { code: "ENOTEMPTY" });
+        }
+        return saved.renameSync(from, to);
+      }) as typeof leaseFs.renameSync;
+      acquireLease(t.dataDir, () => {});
+      assert.equal(raced, 1);
+      assert.equal(JSON.parse(readFileSync(join(t.dataDir, LEASE_DIR, LEASE_OWNER), "utf8")).pid, process.pid, "this start holds the lease");
+      releaseLease(t.dataDir);
+    } finally {
+      Object.assign(leaseFs, saved);
+      t.cleanup();
+    }
+  });
+
   it("(d) a clock offset kept ahead of the journal (a crash between storing it and its line, under --supervise): the journal catches up before serving", () => {
     const t = tempDir("ep-clock");
     try {
