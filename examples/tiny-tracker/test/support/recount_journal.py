@@ -2,7 +2,8 @@
 
 Reads the journal with Python's own JSON parser and the Python RFC 8785
 canonicalizer (verify/python/tt_digest.py), checks every line's jseq and
-checksum, and rebuilds the tickets and projects from the header's seed and the
+checksum (the lines a start applies: from 0.4.0 the lease epochs and joined torn
+fragments are decided by verify/python/tt_recount.py's scan_journal), and rebuilds the tickets and projects from the header's seed and the
 commit lines' post-state. Prints one JSON object:
   {"tickets": {id: [version, title]}, "projects": [keys], "commits": n,
    "keyed_effects": {"principal key": count}}
@@ -18,14 +19,15 @@ import sys
 def main(argv):
     sys.path.insert(0, argv[1])
     import tt_digest  # noqa: E402
+    import tt_recount  # noqa: E402
 
-    lines = open(argv[2], encoding="utf-8").read().split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
+    applied, _superseded, problems = tt_recount.scan_journal(open(argv[2], encoding="utf-8").read())
+    if problems:
+        raise SystemExit("; ".join(problems))
     projects, tickets, effects = {}, {}, {}
     commits = 0
-    for i, text in enumerate(lines):
-        line = tt_digest.loads(text)
+    for i, line in enumerate(applied):
+        line = dict(line)
         checksum = line.pop("checksum")
         if hashlib.sha256(tt_digest.canonicalize(line).encode("utf-8")).hexdigest() != checksum:
             raise SystemExit(f"line {i}: checksum mismatch")

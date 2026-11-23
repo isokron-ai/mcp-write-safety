@@ -597,7 +597,8 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       await sendCommitted(committedWrite.reply, committedWrite.tx);
     } catch (error) {
       if (error instanceof JournalError) {
-        send(503, { error: "journal_unavailable", message: error.message });
+        // journal_unavailable, or lease_lost (G3 note 26 item 1c: the line was written, then the lease was found taken over).
+        send(503, { error: error.code, message: error.message });
       } else if (error instanceof CommitSinkError) {
         send(503, { error: "stopped", message: error.message });
       } else if (error instanceof ApiError) {

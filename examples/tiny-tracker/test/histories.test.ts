@@ -173,13 +173,27 @@ describe("T2: seeded random histories", () => {
 
 // ---------------------------------------------------------------- T3
 
+/** A physical journal line as plain JSON: the line itself, or the whole line that joined a torn fragment (undefined: a torn last line). */
+function parseJoined(text: string): any {
+  for (let i = 0; i >= 0; i = text.indexOf('{"jseq":', i + 1)) {
+    try {
+      return JSON.parse(text.slice(i));
+    } catch {
+      // not a whole line from here
+    }
+  }
+  return undefined;
+}
+
 /** The recount written a second time: plain JSON over the journal file, no code from src/. */
 function recount(file: string) {
   const tickets = new Map<string, { version: number; title: string }>();
   const effects = new Map<string, number>();
   let commits = 0;
   for (const text of readFileSync(file, "utf8").split("\n").filter(Boolean)) {
-    const l = JSON.parse(text);
+    // 0.4.0 (G3a): a torn write is never cut, so the next line may join it; the whole line is the suffix that parses.
+    const l = parseJoined(text);
+    if (l === undefined) continue;
     if (l.line !== "commit") continue;
     commits++;
     for (const tk of l.tx.post.upserts.tickets) tickets.set(tk.id, { version: tk.version, title: tk.title });

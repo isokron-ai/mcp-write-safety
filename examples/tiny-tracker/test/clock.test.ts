@@ -180,18 +180,30 @@ describe("the clock feature on the command line", () => {
 });
 
 describe("the fixture clock with the durable journal (0.4.0, note 19 item 7)", () => {
-  it("a move is handed to beforeMove before the offset is stored; a failed journal append leaves the clock where it was (503)", async () => {
+  it("a move is stored, then handed to beforeMove (the journal line) before it is answered; a failed line rolls the offset back (503) (G3 note 26 item 5)", async () => {
     const seen: number[] = [];
     const c = new FixtureClock(memoryOffset(), () => 1_000_000);
-    c.beforeMove = (m) => { seen.push(c.offsetMs(), m.to_ms); };
+    c.beforeMove = (m) => { seen.push(c.offsetMs(), m.from_ms, m.to_ms); };
     c.advance(5000);
-    assert.deepEqual(seen, [0, 5000], "beforeMove sees the old offset: the journal line comes first");
+    assert.deepEqual(seen, [5000, 0, 5000], "beforeMove sees the stored offset: a store that cannot keep it never leaves a journal line ahead of the answer");
     c.beforeMove = () => { throw new Error("disk full"); };
-    assert.throws(() => c.advance(5000), (e: any) => e.status === 503 && e.code === "journal_unavailable");
-    assert.equal(c.offsetMs(), 5000);
+    assert.throws(() => c.advance(5000), (e: any) => e.status === 503 && e.code === "journal_unavailable" && /the clock did not move/.test(e.message));
+    assert.equal(c.offsetMs(), 5000, "rolled back");
     const answer = await clockRoute(c, "POST", async () => ({ advance_ms: 1 }));
     assert.equal(answer!.status, 503);
     assert.equal(c.offsetMs(), 5000);
+    // The line was written, then the lease was found taken over (G3 note 26 item 1c): outcome unknown, 503 lease_lost.
+    c.beforeMove = () => { throw Object.assign(new Error("taken over"), { code: "lease_lost" }); };
+    const lost = await clockRoute(c, "POST", async () => ({ advance_ms: 7 }));
+    assert.deepEqual([lost!.status, (lost!.body as any).error], [503, "lease_lost"]);
+    assert.match((lost!.body as any).message, /whether a restart keeps the move is unknown/);
+    assert.equal(c.offsetMs(), 5000);
+    // A store that cannot put the offset back says so.
+    let fail = false;
+    const store = { v: 5000, get() { return this.v; }, set(n: number) { if (fail) throw new Error("read-only"); this.v = n; } };
+    const c2 = new FixtureClock(store, () => 1_000_000);
+    c2.beforeMove = () => { fail = true; throw new Error("disk full"); };
+    assert.throws(() => c2.advance(10), (e: any) => e.code === "journal_unavailable" && /could not be put back \(read-only\), so it stays at 5010 ms/.test(e.message));
   });
 
   it("restore puts back a recorded offset, forward only, within the cap", () => {

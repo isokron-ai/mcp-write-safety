@@ -24,20 +24,27 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
     const t = tempDir("fmt");
     try {
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
-      await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("fmt-key-00001"));
-      await b.api.send("PATCH", "/tickets/T-1", { title: "b" });
-      await b.close();
+      try {
+        await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("fmt-key-00001"));
+        await b.api.send("PATCH", "/tickets/T-1", { title: "b" });
+      } finally {
+        await b.close();
+      }
       const { lines, tornLast } = readJournal(join(t.dataDir, JOURNAL_FILE));
       assert.equal(tornLast, false);
-      assert.deepEqual(lines.map((l) => [l.jseq, l.line]), [[0, "header"], [1, "pending"], [2, "commit"], [3, "commit"]]);
+      // 0.4.0 (G3 note 26 item 1b): every start writes a lease line first; every line after it carries its epoch.
+      assert.deepEqual(lines.map((l) => [l.jseq, l.line]), [[0, "header"], [1, "lease"], [2, "pending"], [3, "commit"], [4, "commit"]]);
       const h = lines[0] as any;
       assert.equal(h.journal, "journal-format/1");
       assert.equal(h.seed.projects[0].key, "inbox");
-      const c1 = lines[2] as JournalCommitLine;
+      assert.ok(!("epoch" in h), "the header carries no epoch");
+      assert.deepEqual(lines.slice(1).map((l) => (l as any).epoch), [1, 1, 1, 1]);
+      assert.deepEqual([(lines[1] as any).pid, typeof (lines[1] as any).nonce], [process.pid, "string"]);
+      const c1 = lines[3] as JournalCommitLine;
       assert.equal(c1.commit_seq, 1);
-      assert.equal(c1.pending_jseq, 1, "the commit names the pending line it completes");
-      assert.equal((lines[3] as JournalCommitLine).pending_jseq, null);
-      assert.ok(!("commit_seq" in lines[1]), "a pending line has no commit_seq");
+      assert.equal(c1.pending_jseq, 2, "the commit names the pending line it completes");
+      assert.equal((lines[4] as JournalCommitLine).pending_jseq, null);
+      assert.ok(!("commit_seq" in lines[2]), "a pending line has no commit_seq");
       for (const l of lines) assert.equal(lineChecksum(l as any), l.checksum);
       assert.equal(decodeLine(encodeLine({ jseq: 5, line: "aborted", pending_jseq: 1, reason: "refused" } as any))!.jseq, 5);
     } finally {
@@ -82,21 +89,25 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
     try {
       let fail = false;
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
-      // A plain I/O error at before-append (not a simulated crash): the journal cuts the file back and throws.
-      const j = b.backend.durability!.journal! as any;
-      const orig = j.options.crash;
-      j.options.crash = (p: string, at: any) => { if (fail && p === "before-append" && at.line === "commit") { fail = false; throw new Error("disk full"); } return orig?.(p, at); };
-      fail = true;
-      const r = await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("fail-key-0001"));
-      assert.equal(r.status, 503);
-      assert.equal(r.body.error, "journal_unavailable");
-      assert.deepEqual((await b.api.export()).tickets, []);
-      const ok = await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("fail-key-0001"));
-      assert.equal(ok.status, 201, "the key was not held");
-      assert.equal(ok.body.ticket.id, "T-1");
-      await b.close();
+      try {
+        // A plain I/O error at before-append (not a simulated crash): nothing of the line is written, the journal throws
+        // and carries on.
+        const j = b.backend.durability!.journal! as any;
+        const orig = j.options.crash;
+        j.options.crash = (p: string, at: any) => { if (fail && p === "before-append" && at.line === "commit") { fail = false; throw new Error("disk full"); } return orig?.(p, at); };
+        fail = true;
+        const r = await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("fail-key-0001"));
+        assert.equal(r.status, 503);
+        assert.equal(r.body.error, "journal_unavailable");
+        assert.deepEqual((await b.api.export()).tickets, []);
+        const ok = await b.api.send("POST", "/tickets", { project: "inbox", title: "a" }, keyed("fail-key-0001"));
+        assert.equal(ok.status, 201, "the key was not held");
+        assert.equal(ok.body.ticket.id, "T-1");
+      } finally {
+        await b.close();
+      }
       const lines = readJournal(join(t.dataDir, JOURNAL_FILE)).lines.map((l: any) => [l.line, l.reason ?? l.commit_seq ?? null]);
-      assert.deepEqual(lines, [["header", null], ["pending", null], ["aborted", "journal_unavailable"], ["pending", null], ["commit", 1]]);
+      assert.deepEqual(lines, [["header", null], ["lease", null], ["pending", null], ["aborted", "journal_unavailable"], ["pending", null], ["commit", 1]]);
     } finally {
       t.cleanup();
     }
@@ -121,7 +132,7 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
       } finally {
         await b.close();
       }
-      assert.deepEqual(readJournal(join(t.dataDir, JOURNAL_FILE)).lines.map((l) => l.line), ["header", "pending", "commit"], "the failed line was cut back");
+      assert.deepEqual(readJournal(join(t.dataDir, JOURNAL_FILE)).lines.map((l) => l.line), ["header", "lease", "pending", "commit"], "nothing of the failed line was written");
     } finally {
       t.cleanup();
     }
@@ -140,12 +151,16 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       await b.close();
       assert.equal(readJournal(file).lines[0].line, "header", "a torn header starts a new journal");
+      // G3a: never cut; the new header and lease line go in one write, joined to the torn bytes.
+      assert.ok(readFileSync(file, "utf8").startsWith(`${notHeader.slice(0, 25)}{"jseq":0,"line":"header"`), "the torn bytes stay in front of the new header");
+      assert.deepEqual(readJournal(file).lines.map((l) => l.line), ["header", "lease"]);
+      assert.equal(readJournal(file).fragments, 1);
     } finally {
       t.cleanup();
     }
   });
 
-  it("only a torn last line is tolerated: it is dropped and cut; a bad line in the middle stops the start", async () => {
+  it("only a torn last line is tolerated: it is left out, never cut (G3a: the next start's lease line joins it); a bad line in the middle stops the start", async () => {
     const t = tempDir("torn");
     try {
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
@@ -154,14 +169,29 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
       await b.close();
       const file = join(t.dataDir, JOURNAL_FILE);
       const good = readFileSync(file, "utf8");
-      appendFileSync(file, '{"jseq":3,"line":"commit","commit_s');
+      const torn = '{"jseq":4,"line":"commit","commit_s';
+      appendFileSync(file, torn);
       const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
-      assert.equal(b2.backend.durability!.journal!.report!.droppedTornLine, true);
-      assert.equal((await b2.api.export()).tickets.length, 2);
-      await b2.close();
-      assert.equal(readFileSync(file, "utf8"), good, "the torn bytes are cut from the file");
+      try {
+        assert.equal(b2.backend.durability!.journal!.report!.droppedTornLine, true);
+        assert.equal((await b2.api.export()).tickets.length, 2);
+      } finally {
+        await b2.close();
+      }
+      const after = readFileSync(file, "utf8");
+      assert.ok(after.startsWith(good + torn + '{"jseq":4,"line":"lease","epoch":2,'), "the torn bytes stay; this start's lease line joins them on their line");
+      assert.deepEqual(readJournal(file).lines.map((l) => l.line), ["header", "lease", "commit", "commit", "lease"]);
+      assert.equal(readJournal(file).fragments, 1);
+      const b3 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      try {
+        assert.deepEqual([b3.backend.durability!.journal!.report!.droppedTornLine, b3.backend.durability!.journal!.report!.fragments], [false, 1], "a later start leaves the joined fragment out again");
+        assert.equal((await b3.api.export()).tickets.length, 2);
+      } finally {
+        await b3.close();
+      }
       const lines = good.split("\n");
-      lines[1] = lines[1].replace('"title":"a"', '"title":"z"');
+      const ia = lines.findIndex((l) => l.includes('"title":"a"'));
+      lines[ia] = lines[ia].replace('"title":"a"', '"title":"z"');
       writeFileSync(file, lines.join("\n"));
       await assert.rejects(durableBackend({ dataDir: t.dataDir, clock: movableClock() }), JournalCorruptError);
       assert.ok(!existsSync(join(t.dataDir, LOCK_FILE)), "a refused start releases the lock");
@@ -182,11 +212,14 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
       const lines = readJournal(file).lines as any[];
       const last = lines[lines.length - 1];
       // Each case, checksummed (so it decodes), with and without its newline; and an undecodable line with its newline.
-      const unknownKind = encodeLine({ jseq: 3, line: "future-kind", principal: "p-default" } as any);
-      const forged = encodeLine({ ...last, jseq: 3, commit_seq: last.commit_seq + 5, tx: { ...last.tx, seq: last.commit_seq + 5 }, checksum: undefined } as any);
+      const unknownKind = encodeLine({ jseq: 4, line: "future-kind", principal: "p-default", epoch: 1 } as any);
+      const noEpoch = encodeLine({ jseq: 4, line: "future-kind", principal: "p-default" } as any);
+      const forged = encodeLine({ ...last, jseq: 4, commit_seq: last.commit_seq + 5, tx: { ...last.tx, seq: last.commit_seq + 5 }, checksum: undefined } as any);
       const cases: Array<[string, string]> = [
         ["a checksummed unknown-kind line, terminated", `${unknownKind}\n`],
         ["a checksummed unknown-kind line, unterminated", unknownKind],
+        ["a checksummed unknown-kind line with no epoch (it would read as a superseded line), terminated", `${noEpoch}\n`],
+        ["a checksummed unknown-kind line of an older epoch (superseded lines are still checked), terminated", `${encodeLine({ jseq: 4, line: "future-kind", principal: "p-default", epoch: 0 } as any)}\n`],
         ["a forged commit_seq+5 line, terminated", `${forged}\n`],
         ["a forged commit_seq+5 line, unterminated", forged],
         ["a line with a bad checksum, terminated", `${unknownKind.replace("future-kind", "future-kinx")}\n`],
@@ -198,13 +231,14 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
         assert.ok(!existsSync(join(t.dataDir, LOCK_FILE)), `${what}: the lock is released`);
         assert.throws(() => readJournal(file), JournalCorruptError, `${what}: the reader refuses it too`);
       }
-      // The torn write: unterminated and not decodable. Dropped, cut, logged.
+      // The torn write: unterminated and not decodable. Left out and logged; it stays, joined by the lease line.
       writeFileSync(file, good + unknownKind.slice(0, 20));
       assert.equal(readJournal(file).tornLast, true);
       const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       assert.equal(b2.backend.durability!.journal!.report!.droppedTornLine, true);
       await b2.close();
-      assert.equal(readFileSync(file, "utf8"), good);
+      assert.ok(readFileSync(file, "utf8").startsWith(good + unknownKind.slice(0, 20) + '{"jseq":4,"line":"lease"'));
+      assert.equal(readJournal(file).fragments, 1);
     } finally {
       t.cleanup();
     }
@@ -226,8 +260,8 @@ describe("the journal (decision 0003, INTERFACES 1.9)", () => {
       assert.equal(again.headers.get("idempotent-replayed"), null);
       await b2.close();
       const ls = readJournal(join(t.dataDir, JOURNAL_FILE)).lines as any[];
-      assert.deepEqual(ls.map((l) => l.line), ["header", "pending", "aborted", "pending", "commit"]);
-      assert.deepEqual([ls[2].pending_jseq, ls[2].reason], [1, "orphan_at_start"]);
+      assert.deepEqual(ls.map((l) => l.line), ["header", "lease", "pending", "lease", "aborted", "pending", "commit"]);
+      assert.deepEqual([ls[4].pending_jseq, ls[4].reason, ls[4].epoch], [2, "orphan_at_start", 2], "the orphan's aborted line is the new start's (epoch 2), after its lease line");
     } finally {
       t.cleanup();
     }
@@ -729,8 +763,8 @@ describe("in-flight keys (rule 4, R5)", () => {
       assert.equal(okk.status, 201);
       await b.close();
       const ls = readJournal(join(t.dataDir, JOURNAL_FILE)).lines as any[];
-      assert.deepEqual(ls.map((l) => l.line), ["header", "pending", "aborted", "pending", "commit"]);
-      assert.equal(ls[2].reason, "refused");
+      assert.deepEqual(ls.map((l) => l.line), ["header", "lease", "pending", "aborted", "pending", "commit"]);
+      assert.equal(ls[3].reason, "refused");
     } finally {
       t.cleanup();
     }
@@ -951,8 +985,8 @@ describe("seams v2.1 shapes, built ahead of the rebase (coordinator note 7)", ()
       assert.equal(b.backend.durability!.keys.get(s, "v21-run-key02")!.state, "pending");
       await b.crash();
       const lines = readJournal(join(t.dataDir, JOURNAL_FILE)).lines as any[];
-      assert.deepEqual(lines.map((l) => l.line), ["header", "pending", "pending", "commit", "fence"]);
-      assert.deepEqual([lines[4].pending_jseq, lines[4].reset_seq, lines[4].run, lines[4].key], [1, lines[3].commit_seq, "run-v-1", "v21-run-key01"]);
+      assert.deepEqual(lines.map((l) => l.line), ["header", "lease", "pending", "pending", "commit", "fence"]);
+      assert.deepEqual([lines[5].pending_jseq, lines[5].reset_seq, lines[5].run, lines[5].key], [2, lines[4].commit_seq, "run-v-1", "v21-run-key01"]);
       const b2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       try {
         assert.equal(b2.backend.durability!.journal!.report!.abortedOrphans, 1, "only run-v-2's pending record is an orphan");
@@ -983,7 +1017,8 @@ describe("the data-dir lease (0.4.0, note 19 item 11)", () => {
       const old = new Date(Date.now() - leaseTiming.staleMs - 5000);
       utimesSync(path, old, old);
       const logs: string[] = [];
-      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), {}, "another host's pid is never fenced through the pid lock");
+      // G3 note 26 item 4: any takeover by age fences the old holder, whatever host it ran on, so its pid lock goes with the lease.
+      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), { fencedPid: 2 ** 22 + 777 });
       assert.match(logs.join(), /its heartbeat stopped/);
       assert.equal(JSON.parse(readFileSync(join(path, LEASE_OWNER), "utf8")).pid, process.pid);
       checkLease(t.dataDir);

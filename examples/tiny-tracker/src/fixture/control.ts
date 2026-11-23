@@ -94,7 +94,9 @@ export class RunRegistry {
     try {
       this.onAllocate?.({ ...run });
     } catch (e) {
-      throw new ControlError(503, "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}`);
+      // lease_lost (G3 note 26 item 1c): the run-alloc line was written, then the lease was found taken over.
+      const lost = (e as { code?: unknown } | null)?.code === "lease_lost";
+      throw new ControlError(503, lost ? "lease_lost" : "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}${lost ? "; whether a restart keeps it is unknown" : ""}`);
     }
     this.runs.push(run);
     return { ...run };
@@ -237,7 +239,7 @@ export async function startControl(options: ControlOptions): Promise<RunningCont
         dropped = backend.dropRun({ principal: run.principal }, run.run_id);
       } catch (e) {
         if (e instanceof ApiError) throw new ControlError(e.status, e.code, e.message);
-        if (e instanceof CommitSinkError || e instanceof JournalError) throw new ControlError(503, e instanceof JournalError ? "journal_unavailable" : "stopped", e.message);
+        if (e instanceof CommitSinkError || e instanceof JournalError) throw new ControlError(503, e instanceof JournalError ? e.code : "stopped", e.message);
         throw e;
       }
       const entry = ledger.list({ kind: "run-reset", run: run.run_id, principal: run.principal }).at(-1);
