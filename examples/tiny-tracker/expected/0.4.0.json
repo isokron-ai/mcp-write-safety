@@ -1888,67 +1888,6 @@
       }
     },
     {
-      "build_hash": "45a6e8e0af1f339ec01058ecea7dfb30d2098c8fd0624d60b6084c78b676c17d",
-      "label": "L2, defect conflict-as-generic-error, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "conflict-as-generic-error",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
       "build_hash": "6ba6fd29f9f6aca46d783cc3b7e55a847a3ff5b5461f4b93452a2d85d3840ea0",
       "label": "L2, defect conflict-as-generic-error, backend lookup-unscoped",
       "start": [
@@ -2058,67 +1997,6 @@
         ],
         "FX-LOOK-1": [
           "violated"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "4022e036ad86f8d55d50ff8796d6cf5487aa49387247664a6a4e173e3966f313",
-      "label": "L2, defect conflict-without-iserror, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "conflict-without-iserror",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
         ],
         "FX-LOOK-2": [
           "held"
@@ -2616,8 +2494,8 @@
       }
     },
     {
-      "build_hash": "322884b8defadf4e0f3176cccccace56ca3f4733895d80ef025d80aa3f822247",
-      "label": "L2, defect create-overwrites, backend key-expires-early",
+      "build_hash": "69dcf5eef6fdf1d98436461564fbc286d323129507aa21b73e6d645b50d68c7e",
+      "label": "L2, defect create-overwrites, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
         "all",
@@ -2626,7 +2504,7 @@
         "--defect",
         "create-overwrites",
         "--backend-defect",
-        "key-expires-early"
+        "lookup-wrong-record"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -2663,74 +2541,13 @@
           "not checked"
         ],
         "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "76c0787836db6edcfa7fd3479391659d8bf803c67cde21a43f276bcb69f1aa29",
-      "label": "L2, defect create-overwrites, backend lookup-unscoped",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "create-overwrites",
-        "--backend-defect",
-        "lookup-unscoped"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
           "violated"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
         ],
         "FX-LOOK-4": [
           "not applicable"
@@ -3221,15 +3038,75 @@
       }
     },
     {
-      "build_hash": "d3f104fcbef9b8a769bbda7686c30c26350c80a378947f80a11c75f2804389f7",
-      "label": "L2, defect empty-filter-deletes-all, backend lookup-wrong-record",
+      "build_hash": "861314b92a19bb85b5e1cf53eb4434533df5764810a1f3d005b96d7f9d91650e",
+      "label": "L2, defect empty-filter-deletes-all, variant settle-by-lookup",
+      "start": [
+        "TRACKER_VARIANTS=settle-by-lookup",
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "empty-filter-deletes-all"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not checked"
+        ]
+      }
+    },
+    {
+      "build_hash": "2e1b41312dec8cff1a1a062603b8e92f0a2e731db342b0d5584b6c079f596bd0",
+      "label": "L2, defect error-as-text, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
         "all",
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "empty-filter-deletes-all",
+        "error-as-text",
         "--backend-defect",
         "lookup-wrong-record"
       ],
@@ -3275,129 +3152,6 @@
         ],
         "FX-LOOK-3": [
           "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "96e562989988c26c9b7be3e905bf72d21adb7141377ed3df2226e8654fd748c0",
-      "label": "L2, defect empty-filter-deletes-all, backend lost-update, variant settle-by-lookup",
-      "start": [
-        "TRACKER_VARIANTS=settle-by-lookup",
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "empty-filter-deletes-all",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not checked"
-        ]
-      }
-    },
-    {
-      "build_hash": "2e87e2c976e8814a0fd884087047cd18ab370e1c861d0c31961107b5f6f1ca9f",
-      "label": "L2, defect error-as-text, backend lookup-unscoped",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "error-as-text",
-        "--backend-defect",
-        "lookup-unscoped"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "violated"
         ],
         "FX-LOOK-4": [
           "not applicable"
@@ -4056,65 +3810,6 @@
       }
     },
     {
-      "build_hash": "fb1f3e09c2fad115004bbfa377d8eed905c61c23fd64cb5b8dc86db4237a6656",
-      "label": "L2, defect ignore-project-scope",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "ignore-project-scope"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
       "build_hash": "2b764d9ce6ce53ff7bfa627d61f6bf369b007b12bdc5db52315f1b893023a0c2",
       "label": "L2, defect ignore-project-scope, backend lookup-unscoped",
       "start": [
@@ -4237,9 +3932,10 @@
       }
     },
     {
-      "build_hash": "8b11cddc47a02686665f5a8cf155144e8ddae020c0a676aefaeb78c7df220a4a",
-      "label": "L2, defect ignore-project-scope, backend replay-digest-mismatch",
+      "build_hash": "a1d97d69a04393f4d6be24523b024424f3b22638f79ceb51657a0ed32b7707f3",
+      "label": "L2, defect ignore-project-scope, backend lost-update, variant settle-by-lookup",
       "start": [
+        "TRACKER_VARIANTS=settle-by-lookup",
         "tiny-tracker",
         "all",
         "--features",
@@ -4247,7 +3943,7 @@
         "--defect",
         "ignore-project-scope",
         "--backend-defect",
-        "replay-digest-mismatch"
+        "lost-update"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -4257,7 +3953,7 @@
           "held"
         ],
         "FX-DIG-2": [
-          "violated"
+          "held"
         ],
         "FX-DIG-3": [
           "held"
@@ -4293,7 +3989,7 @@
           "held"
         ],
         "FX-LOOK-4": [
-          "not applicable"
+          "not checked"
         ]
       }
     },
@@ -4562,67 +4258,6 @@
         ],
         "FX-DIG-3": [
           "violated"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "bb7337bc62a35bc94fa90b1bd55e22b8ee2596c6cdf9c7faffb15e9f5182ef34",
-      "label": "L2, defect in-progress-reported-not-applied, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "in-progress-reported-not-applied",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
         ],
         "FX-DUR-1": [
           "not applicable"
@@ -4963,17 +4598,15 @@
       }
     },
     {
-      "build_hash": "6443d705ee123f6e5c778875e9463755e0302e45e9cd9ff3dc3a94b40184fcfb",
-      "label": "L2, defect label-by-position, backend key-expires-early",
+      "build_hash": "c1acace3e35e4e69467acefb1d892bdb9880360db0999aa25532a61c5015765b",
+      "label": "L2, defect label-by-position",
       "start": [
         "tiny-tracker",
         "all",
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "label-by-position",
-        "--backend-defect",
-        "key-expires-early"
+        "label-by-position"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -5253,67 +4886,6 @@
         ],
         "FX-DIG-3": [
           "violated"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "violated"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "ec9cbd75d3421b980ba1098d877d3144fea8f7caabc245af88de31760b53241d",
-      "label": "L2, defect lookup-reexecutes, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "lookup-reexecutes",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
         ],
         "FX-DUR-1": [
           "not applicable"
@@ -5844,67 +5416,6 @@
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
         "read-merge-put"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "5d5510a662bc423286857bdf0fd69695c04d46715b1b1943beee246ac64bf53e",
-      "label": "L2, defect read-merge-put, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "read-merge-put",
-        "--backend-defect",
-        "key-expires-early"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -7041,67 +6552,6 @@
       }
     },
     {
-      "build_hash": "53c86df537e09a76047375a47c1ae0d22c00e63ef5baf55a4524e5a3ca2e67d5",
-      "label": "L2, defect settle-miss-reported-not-applied, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "settle-miss-reported-not-applied",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
       "build_hash": "f6f28a7426ec761cc879d43eb46994d3a9390553e59e19abec64566b00a09b73",
       "label": "L2, defect settle-miss-reported-not-applied, backend lookup-unscoped",
       "start": [
@@ -7224,6 +6674,65 @@
       }
     },
     {
+      "build_hash": "fca06b6aea3a52053d2586cdfc5c7ec7bf5e7e787de0e3a8888bfa6b00f250bd",
+      "label": "L2, defect shape-claims-applied",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "shape-claims-applied"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "26079265cbfd48ee8779b87d2bf99a18d4e0153c094d58850924318102f68624",
       "label": "L2, defect shape-claims-applied, backend lookup-unscoped",
       "start": [
@@ -7281,127 +6790,6 @@
         ],
         "FX-LOOK-4": [
           "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "ea84ed18fa556f698426d0e8376588d442ec863986c6b6e7aa6e81a58ff6f59b",
-      "label": "L2, defect shape-claims-applied, backend lookup-wrong-record",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "lookup-wrong-record"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "violated"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "8b3f5a822d1ab85f1e5340b42a44a5389d966c58a70708d09311625cb400d2b1",
-      "label": "L2, defect shape-claims-applied, variant settle-by-lookup",
-      "start": [
-        "TRACKER_VARIANTS=settle-by-lookup",
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-claims-applied"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not checked"
         ]
       }
     },
@@ -8132,6 +7520,126 @@
       }
     },
     {
+      "build_hash": "c09ea815b78d7a33cd00db360f229ad3167eaacb0d097abc796c0c234a7116b7",
+      "label": "L2, defect shape-unknown-as-failed",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "shape-unknown-as-failed"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "81df72b44c8b6fdf05a67b8f3f0df498c4faaed2eb2a7448cb36fc01c044a1bf",
+      "label": "L2, defect shape-unknown-as-failed, backend lookup-unscoped",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "shape-unknown-as-failed",
+        "--backend-defect",
+        "lookup-unscoped"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "not checked"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "violated"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "b112cc799e97e128e96b3a3550b42182354a52183f801f8c432e35b1db87d39f",
       "label": "L2, defect shape-unknown-as-failed, backend lookup-wrong-record",
       "start": [
@@ -8189,66 +7697,6 @@
         ],
         "FX-LOOK-4": [
           "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "65c4ea7507f6d3910801d7080d0d60094098dbe766c32e97925d798f4f1d272e",
-      "label": "L2, defect shape-unknown-as-failed, variant settle-by-lookup",
-      "start": [
-        "TRACKER_VARIANTS=settle-by-lookup",
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-unknown-as-failed"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not checked"
         ]
       }
     },
@@ -8615,8 +8063,8 @@
       }
     },
     {
-      "build_hash": "0fecb3696c81f40e5376b4eaeba5be5394e00fb1cacc21cde6403407f7b85574",
-      "label": "L2, defect skip-null-assignee, backend key-expires-early",
+      "build_hash": "bac8f344e0e566b7c25f456136a7267812a3701f8b81643153635e0cdc6f3a50",
+      "label": "L2, defect skip-null-assignee, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
         "all",
@@ -8625,7 +8073,7 @@
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
-        "key-expires-early"
+        "lookup-unscoped"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -8668,7 +8116,7 @@
           "held"
         ],
         "FX-LOOK-3": [
-          "held"
+          "violated"
         ],
         "FX-LOOK-4": [
           "not applicable"
@@ -9703,67 +9151,6 @@
       }
     },
     {
-      "build_hash": "00452d02be91e2b2d637fafb44877c811983fecf5fffb75d31ba1997b8aff5c7",
-      "label": "L2, defect update-adds-defaults, backend key-expires-early",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "update-adds-defaults",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
       "build_hash": "1a856fb81484d323097d174accb5576f1c84f88cd9ff74cc990a4bf74ca14b08",
       "label": "L2, defect update-adds-defaults, backend lookup-unscoped",
       "start": [
@@ -10681,6 +10068,128 @@
       }
     },
     {
+      "build_hash": "eb0909c6b632e22cc493b69f1e7d81a9fcc33edf62d113e93917efeb77c0910f",
+      "label": "L3, defect conflict-as-generic-error, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "conflict-as-generic-error",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "df18bf8c3c798b2d18c7bdb455ff186d5185695186f66f5040d0a6ffdfc7ddbc",
+      "label": "L3, defect conflict-without-iserror, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "conflict-without-iserror",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "be8422ba76d84ab721db46fa123edc5ea09bfd1c69ce31f904d7d1e66a985c88",
       "label": "L3, defect conflict-without-iserror, backend lookup-unscoped, variant settle-by-lookup",
       "start": [
@@ -10928,6 +10437,67 @@
       }
     },
     {
+      "build_hash": "5dcfba01cfd3b09ca7d51fcc6ed292eebc74f81b7876ce6ccfd5d65817277822",
+      "label": "L3, defect create-overwrites, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "create-overwrites",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "9abd73953044769315c04ea60a82ad8711a5213687ec19b2107a31ba61036e2b",
       "label": "L3, defect delete-refetches-version, backend lost-update",
       "start": [
@@ -11051,8 +10621,8 @@
       }
     },
     {
-      "build_hash": "aaf7bbd6f49c723abbab7e82412ee16df1cd5ca690124516be4d3b39cb0f1e6d",
-      "label": "L3, defect empty-filter-deletes-all, backend digest-of-current-state",
+      "build_hash": "a571503e6f180bd8e0feece00bc4f1562034c11431cf905faefc2b689c8ca2c3",
+      "label": "L3, defect empty-filter-deletes-all, backend key-expires-early",
       "start": [
         "tiny-tracker",
         "all",
@@ -11061,14 +10631,75 @@
         "--defect",
         "empty-filter-deletes-all",
         "--backend-defect",
-        "digest-of-current-state"
+        "key-expires-early"
       ],
       "fixture": {
         "FX-BLD-1": [
           "held"
         ],
         "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
           "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "6fecd9b4dd7cbc4465b2815da9e0f33d55633b3872a6d23a3fda8c8d99ece5e5",
+      "label": "L3, defect empty-filter-deletes-all, backend lost-update",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
         ],
         "FX-DIG-2": [
           "held"
@@ -11358,8 +10989,8 @@
       }
     },
     {
-      "build_hash": "c240be637ec977e32748403549808f41b3871fe2b7d0d80f0d6f7591ac0e16ec",
-      "label": "L3, defect ignore-project-scope, backend key-expires-early",
+      "build_hash": "3ca67bb9b297186463a0f508b7ed45d46d96bd170dcfc449c446a4f6974e9ce7",
+      "label": "L3, defect ignore-project-scope, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
         "all",
@@ -11368,14 +10999,14 @@
         "--defect",
         "ignore-project-scope",
         "--backend-defect",
-        "key-expires-early"
+        "digest-of-current-state"
       ],
       "fixture": {
         "FX-BLD-1": [
           "held"
         ],
         "FX-DIG-1": [
-          "held"
+          "violated"
         ],
         "FX-DIG-2": [
           "held"
@@ -11396,7 +11027,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "violated"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -11477,6 +11108,67 @@
         ],
         "FX-LOOK-4": [
           "not checked"
+        ]
+      }
+    },
+    {
+      "build_hash": "0f81f2904fb0c3a1c81619929a08334b397d561545ecc6b3afd7780e7ce94dd7",
+      "label": "L3, defect in-progress-reported-not-applied, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "in-progress-reported-not-applied",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
         ]
       }
     },
@@ -11667,6 +11359,128 @@
       }
     },
     {
+      "build_hash": "1db4607fb30eb4f2a64489842df4c7d43a79fc3dd39af8a68d04dab4ba868cb8",
+      "label": "L3, defect label-by-position, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "label-by-position",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "6ae60d7c7e833383020c1e7ee252a4e98a354140a111fc083699e23aa476b70b",
+      "label": "L3, defect lookup-reexecutes, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "lookup-reexecutes",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "violated"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "67958a399045552c733457a8b719a6ba8bbcdb72341ae48bef94e1e06e0466b6",
       "label": "L3, defect lookup-reexecutes, backend lost-update, variant settle-by-lookup",
       "start": [
@@ -11849,6 +11663,67 @@
         ],
         "FX-LOOK-4": [
           "not checked"
+        ]
+      }
+    },
+    {
+      "build_hash": "a528c88c0d40df9ddf0e4eab7d1a0f73287e1987a7b6ea5290a56dc4434ec2f4",
+      "label": "L3, defect read-merge-put, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "read-merge-put",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
         ]
       }
     },
@@ -12225,6 +12100,67 @@
       }
     },
     {
+      "build_hash": "bc33909871a0014791e87150f5d0a1f44fb2dd0002d3513cd1b1a4b2c2ecda7a",
+      "label": "L3, defect settle-miss-reported-not-applied, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "settle-miss-reported-not-applied",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "66f8b14031e711c74d124efb1b1f990cce100cbd7b43dbf2d43dee2e181b9b3c",
       "label": "L3, defect settle-miss-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "start": [
@@ -12283,6 +12219,67 @@
         ],
         "FX-LOOK-4": [
           "not checked"
+        ]
+      }
+    },
+    {
+      "build_hash": "5f3815913287372ac73dc9c7da8880ccca0952e8a19b265eff5f66f1012ebbfd",
+      "label": "L3, defect shape-claims-applied, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "shape-claims-applied",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
         ]
       }
     },
@@ -12596,9 +12593,10 @@
       }
     },
     {
-      "build_hash": "e1445d5d81e27f790c3b442c3260aa5b068dc2749de71ca9241bc7ebe5e916ce",
-      "label": "L3, defect shape-unknown-as-failed, backend lost-update",
+      "build_hash": "85866cfb420e04c912708620ccd6ebdd582d087edf3712fc4b2363117534b9f8",
+      "label": "L3, defect shape-unknown-as-failed, backend lost-update, variant settle-by-lookup",
       "start": [
+        "TRACKER_VARIANTS=settle-by-lookup",
         "tiny-tracker",
         "all",
         "--features",
@@ -12652,7 +12650,7 @@
           "held"
         ],
         "FX-LOOK-4": [
-          "not applicable"
+          "not checked"
         ]
       }
     },
@@ -13151,15 +13149,17 @@
       }
     },
     {
-      "build_hash": "cafe5573f82d9f0df146357aa40950c4e7d9701b5d8dfbcad5fa98aa7950fd05",
-      "label": "L3, defect update-adds-defaults",
+      "build_hash": "d4eda0065cc5d9607e4b13766adeb2d7aa5c6866d8108c3ccd5083a61c1166f9",
+      "label": "L3, defect update-adds-defaults, backend key-expires-early",
       "start": [
         "tiny-tracker",
         "all",
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
-        "update-adds-defaults"
+        "update-adds-defaults",
+        "--backend-defect",
+        "key-expires-early"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -13187,7 +13187,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "held"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -15596,8 +15596,8 @@
       }
     },
     {
-      "build_hash": "f305e1b791626fc418450b1e837d91b8ebff012156d9f6767551ce7d67bdb6bc",
-      "label": "L3d, defect create-overwrites, backend lookup-wrong-record",
+      "build_hash": "e3814f889236a1b017d12ff3c21e2600cf9b4d924b30b965d10affd8264d0d45",
+      "label": "L3d, defect create-overwrites, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
         "all",
@@ -15608,7 +15608,7 @@
         "--defect",
         "create-overwrites",
         "--backend-defect",
-        "lookup-wrong-record"
+        "lookup-unscoped"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -15645,13 +15645,13 @@
           "not checked"
         ],
         "FX-LOOK-1": [
-          "violated"
+          "held"
         ],
         "FX-LOOK-2": [
           "held"
         ],
         "FX-LOOK-3": [
-          "held"
+          "violated"
         ],
         "FX-LOOK-4": [
           "not applicable"
@@ -15974,69 +15974,6 @@
       }
     },
     {
-      "build_hash": "8f4e79f83ec7dd334f1bbb9f5846946f29432c47dbf88e7f42f2b59fd9491682",
-      "label": "L3d, defect empty-filter-deletes-all, backend digest-not-canonical",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "empty-filter-deletes-all",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "violated"
-        ],
-        "FX-DUR-1": [
-          "held"
-        ],
-        "FX-DUR-2": [
-          "held"
-        ],
-        "FX-DUR-3": [
-          "not checked"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "held"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
       "build_hash": "f6a8a7cdb5afa53faf948e55231f049ff28ba2429ee3bc4da657daf063599e7c",
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-after-effect",
       "start": [
@@ -16150,6 +16087,69 @@
         ],
         "FX-LOOK-1": [
           "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "fb30f80ead44d7744f5cd3594781c341ff17c8698e341fd223713e38d682182b",
+      "label": "L3d, defect empty-filter-deletes-all, backend lookup-wrong-record",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "held"
+        ],
+        "FX-DUR-2": [
+          "held"
+        ],
+        "FX-DUR-3": [
+          "not checked"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "held"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "violated"
         ],
         "FX-LOOK-2": [
           "held"
@@ -16920,10 +16920,72 @@
       }
     },
     {
-      "build_hash": "b5a64f3dd5bc955cfb87954efc6814c807da272dfa8f4844bbfd4c1fe709698f",
-      "label": "L3d, defect ignore-project-scope, backend key-record-after-effect, variant settle-by-lookup",
+      "build_hash": "a656c2513d5948ec2ec6e28e1aa8b699fd7f42b46d738aa7f30edb4b362b188a",
+      "label": "L3d, defect ignore-project-scope, backend digest-not-canonical",
       "start": [
-        "TRACKER_VARIANTS=settle-by-lookup",
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "violated"
+        ],
+        "FX-DUR-1": [
+          "held"
+        ],
+        "FX-DUR-2": [
+          "held"
+        ],
+        "FX-DUR-3": [
+          "not checked"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "held"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "c20cf46795a97541b2e8331c10ff34db26ddb21cc02b14b026b54b32c1253b48",
+      "label": "L3d, defect ignore-project-scope, backend key-record-after-effect",
+      "start": [
         "tiny-tracker",
         "all",
         "--features",
@@ -16979,7 +17041,7 @@
           "held"
         ],
         "FX-LOOK-4": [
-          "not checked"
+          "not applicable"
         ]
       }
     },
@@ -17574,67 +17636,6 @@
         ],
         "FX-DIG-2": [
           "violated"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "held"
-        ],
-        "FX-DUR-2": [
-          "held"
-        ],
-        "FX-DUR-3": [
-          "not checked"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "held"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "e30476367d3fda49ac0e32676255965d2292390a7c586eeae9f0ae244e4e0432",
-      "label": "L3d, defect label-by-position",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "label-by-position"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
         ],
         "FX-DIG-3": [
           "held"
@@ -19691,72 +19692,10 @@
       }
     },
     {
-      "build_hash": "7ebdbf35778a52abd3e389222ce22ec753690e0cc386b1b8d1b02c7e00b5ad75",
-      "label": "L3d, defect shape-claims-applied, backend key-expires-early",
+      "build_hash": "aefeffc3bfa66a7e691b5a6b949c67ec8453451efa8ffe7333ae7a2610a34b9a",
+      "label": "L3d, defect shape-claims-applied, backend key-record-after-effect, variant settle-by-lookup",
       "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "held"
-        ],
-        "FX-DUR-2": [
-          "held"
-        ],
-        "FX-DUR-3": [
-          "not checked"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "violated"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "96e35683a513b0222a7860dabec5660b23b8d96f554a0190f6ade056f421572b",
-      "label": "L3d, defect shape-claims-applied, backend key-record-after-effect",
-      "start": [
+        "TRACKER_VARIANTS=settle-by-lookup",
         "tiny-tracker",
         "all",
         "--features",
@@ -19812,7 +19751,7 @@
           "held"
         ],
         "FX-LOOK-4": [
-          "not applicable"
+          "not checked"
         ]
       }
     },
@@ -21203,6 +21142,69 @@
       }
     },
     {
+      "build_hash": "777f909b68e86906ff6aa0d4b1c9f31ab82656f228b8689fbd398cf12eb1cd5c",
+      "label": "L3d, defect skip-null-assignee, backend key-expires-early",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "skip-null-assignee",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "held"
+        ],
+        "FX-DUR-2": [
+          "held"
+        ],
+        "FX-DUR-3": [
+          "not checked"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "5bf4266b5a4fbe431663c970c4c92aee738d848a6df2ce0511bdf8c5acb54a49",
       "label": "L3d, defect skip-null-assignee, backend key-record-after-effect",
       "start": [
@@ -21322,69 +21324,6 @@
         ],
         "FX-LOOK-3": [
           "held"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "7c7d605b459e2ba3871bb63d27efae60ea0e1a68a4dc8e3fae57685c090d11af",
-      "label": "L3d, defect skip-null-assignee, backend lookup-unscoped",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "skip-null-assignee",
-        "--backend-defect",
-        "lookup-unscoped"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "held"
-        ],
-        "FX-DUR-2": [
-          "held"
-        ],
-        "FX-DUR-3": [
-          "not checked"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "held"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
-          "violated"
         ],
         "FX-LOOK-4": [
           "not applicable"
@@ -22337,6 +22276,67 @@
       }
     },
     {
+      "build_hash": "e920bf5860ab7a9073c3ffc40f36d57f8cd5fc76d8c8eb868f72ec55d091cbd5",
+      "label": "L3d, defect update-adds-defaults",
+      "start": [
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "update-adds-defaults"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "held"
+        ],
+        "FX-DUR-2": [
+          "held"
+        ],
+        "FX-DUR-3": [
+          "not checked"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "held"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "held"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
       "build_hash": "da7deef161e630b0840d27eac0a0410a3726ef7edb86adf562e38024f98b8538",
       "label": "L3d, defect update-adds-defaults, backend key-record-after-effect",
       "start": [
@@ -22652,13 +22652,13 @@
       }
     },
     {
-      "build_hash": "f437ca65878fb1a54b07d1610220eeaed65487c0750ee2312f2aeea2965bb64a",
+      "build_hash": "3441053b95525487ed9d6b52817c19d78dbf14ca1df660e8ad72500eb7d81f15",
       "label": "Lv correct build",
       "start": [
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults"
+        "evidence,strict-input,ledger,faults,clock"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -22686,7 +22686,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -22709,7 +22709,7 @@
       }
     },
     {
-      "build_hash": "5303a831d0ebee407739c4e3a00f0f7e9cecbb58efa1f5d1a56a6598ee82eede",
+      "build_hash": "8a042f2c7d604203ab3b041abaa6d31e086a8ea81a252cd86f075fa634e840db",
       "label": "Lv, backend key-expires-early, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -22717,7 +22717,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--backend-defect",
         "key-expires-early"
       ],
@@ -22747,7 +22747,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -22770,7 +22770,7 @@
       }
     },
     {
-      "build_hash": "ece8733b23dda2921a2488f348d81a80df1c6a2caa54d3f3781ba1f1a5f08819",
+      "build_hash": "90366c367453470fc56179f5b3c8c83bb0095624a2ea1d903ec4f5599c3ec922",
       "label": "Lv, defect add-label-replaces-list, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -22778,7 +22778,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "add-label-replaces-list",
         "--backend-defect",
@@ -22810,7 +22810,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -22833,7 +22833,7 @@
       }
     },
     {
-      "build_hash": "113a062f4b85a7a4d3245ea65cdfb2b97c8f2699b5b272d56dd917277348fab0",
+      "build_hash": "f0f8490b4f808a3ac4239d4191034fb5ff2509076a2f8374f0cf7798196f90f3",
       "label": "Lv, defect add-label-replaces-list, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -22841,7 +22841,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "add-label-replaces-list",
         "--backend-defect",
@@ -22873,7 +22873,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -22896,14 +22896,14 @@
       }
     },
     {
-      "build_hash": "8ab17b61eafd1a4bf6093cbf88f6a365625f1b9c124080f86feecf68d0549842",
+      "build_hash": "7cabcd17051cf3af303a2e8538dceadc255501aa88526eb70a1c239e4bcd62ab",
       "label": "Lv, defect add-label-replaces-list, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "add-label-replaces-list",
         "--backend-defect",
@@ -22935,7 +22935,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -22958,7 +22958,7 @@
       }
     },
     {
-      "build_hash": "2042ee939a45d97b6aafbae0cf349fc6b2445438742e7d250ef154c6d05e3a3a",
+      "build_hash": "126118db26b2541d6456636ebcb8e623d554ffad9156fb1bcfd9fcd1d7d2faad",
       "label": "Lv, defect bulk-misreports-partial, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -22966,7 +22966,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-misreports-partial",
         "--backend-defect",
@@ -22998,7 +22998,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23021,7 +23021,7 @@
       }
     },
     {
-      "build_hash": "4fc889d63f69c967738ad6bc315d1926e1f3d43940c31a6d3023670b4d22732f",
+      "build_hash": "f8937e9fcd0da584acd20e273bed4bb514e4ac8dc7878bb5f9c7f82c29418776",
       "label": "Lv, defect bulk-misreports-partial, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23029,7 +23029,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-misreports-partial",
         "--backend-defect",
@@ -23061,7 +23061,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23084,14 +23084,14 @@
       }
     },
     {
-      "build_hash": "ddba91a14b4a1de1270bc3db4043aa74a9058cd0fd8e26045f91220fe8781ec6",
+      "build_hash": "6f093c1a1dc3f5c6e6e4915772939016d871862ebad38dbc9c00db7eb857cd4f",
       "label": "Lv, defect bulk-misreports-partial, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-misreports-partial",
         "--backend-defect",
@@ -23123,7 +23123,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -23146,7 +23146,7 @@
       }
     },
     {
-      "build_hash": "09141c853623ece981f1d0b8ad2366bcf3eb1fee52f8df6fec399a39d83eac52",
+      "build_hash": "45c5555efdf3d0ef6666dd175941e35bb56808d1a99437e0382d8a7a569e3140",
       "label": "Lv, defect bulk-without-transaction, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23154,7 +23154,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-without-transaction",
         "--backend-defect",
@@ -23186,7 +23186,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23209,7 +23209,7 @@
       }
     },
     {
-      "build_hash": "e5173cceda3b55fbc1079ccc00c19f3c9ee64cb58d05b81abb50d661bded6631",
+      "build_hash": "08dee085851d93c34c227d6f983e59b323719da0021775b0e59a9fddfc241afb",
       "label": "Lv, defect bulk-without-transaction, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23217,7 +23217,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-without-transaction",
         "--backend-defect",
@@ -23249,7 +23249,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23272,14 +23272,14 @@
       }
     },
     {
-      "build_hash": "5ffc989ccfa9cdd5fbf4add0dd06ab1be6ef1fa6c5e988f3d1984de2944876a9",
+      "build_hash": "5b27ed9fcb70b8ae53ed31588eac22361a4b3c8457f39416bfadd29e12f8347e",
       "label": "Lv, defect bulk-without-transaction, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-without-transaction",
         "--backend-defect",
@@ -23311,7 +23311,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -23334,7 +23334,7 @@
       }
     },
     {
-      "build_hash": "3429a792770168e66baa7e1abd558321f06d4a6bba379f052b022bb8c11c3a85",
+      "build_hash": "d87aa1ac81201a476d6eec5dab881d07db47583e377b8de5c03111937ab81607",
       "label": "Lv, defect close-before-confirm, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23342,7 +23342,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "close-before-confirm",
         "--backend-defect",
@@ -23374,7 +23374,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23397,7 +23397,7 @@
       }
     },
     {
-      "build_hash": "98b2f133cf263b1a1860b98b6fb6ae39a9e56a3af846b94ae5ae4e82c8036195",
+      "build_hash": "936375a4a333dd36d3b8092a391b5182006131dd38ecf027fe72afaa443ecfbf",
       "label": "Lv, defect close-before-confirm, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23405,7 +23405,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "close-before-confirm",
         "--backend-defect",
@@ -23437,7 +23437,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23460,14 +23460,14 @@
       }
     },
     {
-      "build_hash": "433d98c5b6b1319cfbbd3b966bdafe3a514cba05d790b62d8c7e0eea1390c116",
+      "build_hash": "2b5b9b2bf6f5b419d3894c0467971bf955037eecf8672981276f9e65b9cb5b5b",
       "label": "Lv, defect close-before-confirm, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "close-before-confirm",
         "--backend-defect",
@@ -23499,7 +23499,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -23522,7 +23522,7 @@
       }
     },
     {
-      "build_hash": "aa7f742100d66cbbdc5d6b1fd442a644e1af8946a3550b7fc0600fc6029a9db9",
+      "build_hash": "785f1a68867ea5c5604a2f57a2dd4f29455377bb4492fb42bed85360ce4f6e38",
       "label": "Lv, defect coerce-types, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23530,7 +23530,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "coerce-types",
         "--backend-defect",
@@ -23562,7 +23562,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23585,7 +23585,7 @@
       }
     },
     {
-      "build_hash": "d33e4d38769858d061895d8526013968db8cde7e15e38200c42f0a5c994b9589",
+      "build_hash": "7df04e15e1dc4967e51ccfd8e9c03650c5871164278038daf019c099f351c3a8",
       "label": "Lv, defect coerce-types, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23593,7 +23593,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "coerce-types",
         "--backend-defect",
@@ -23625,7 +23625,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23648,14 +23648,14 @@
       }
     },
     {
-      "build_hash": "c635f42246cd7291aa898f54f9091844f40106706d14942d1867258ade4591f9",
+      "build_hash": "29c3d6fcab0619b1176747978dceb2a6accfbd3832726f274582f81b278cb873",
       "label": "Lv, defect coerce-types, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "coerce-types",
         "--backend-defect",
@@ -23687,7 +23687,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -23710,7 +23710,7 @@
       }
     },
     {
-      "build_hash": "b292095a5ae85e5e1cf9089f06343e8980f5cdd127300e682e747efa7ef582f7",
+      "build_hash": "d89267426f0851678618f37021a48a3f41eb076d57bf1d774151a8ca5061309d",
       "label": "Lv, defect comment-id-dropped, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23718,7 +23718,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
@@ -23750,7 +23750,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23773,7 +23773,7 @@
       }
     },
     {
-      "build_hash": "62b35c91a44553c4d362fbcaea86a33b429d27f2b1836e73f184e0aa0aa9a202",
+      "build_hash": "4301f1fb8a38fe3d72235cea30971cc60a48cce3d8a990deb75db59f58bae940",
       "label": "Lv, defect comment-id-dropped, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23781,7 +23781,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
@@ -23813,7 +23813,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -23836,14 +23836,14 @@
       }
     },
     {
-      "build_hash": "47bfc3fffb74a6fb731f9d8f64d4afaebe88b04273be05b6ec5e9b4f9c6c700b",
+      "build_hash": "a243902e89e4bf03542b67cd8f366b8e8307e5202cda6681e8da489a670f8420",
       "label": "Lv, defect comment-id-dropped, backend lost-update, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
@@ -23875,7 +23875,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23898,7 +23898,7 @@
       }
     },
     {
-      "build_hash": "63c4733aae60dad25b78948810aeae5f4f8a7704634d8c45781a12a654053e2e",
+      "build_hash": "e90c7a9f895d234b90500937fcf6f92fac53816fd584b93b3c054a850a612700",
       "label": "Lv, defect comment-marked-read-only, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23906,7 +23906,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-marked-read-only",
         "--backend-defect",
@@ -23938,7 +23938,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -23961,7 +23961,7 @@
       }
     },
     {
-      "build_hash": "5cc9c5da67ec77c7f3a7c8088f0f2007c03a4990cb0b2a817f760bbe0a517767",
+      "build_hash": "0d6822d13e600029778378cc511492cecccf691afe780d85395bdb37fb7b9292",
       "label": "Lv, defect comment-marked-read-only, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23969,7 +23969,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-marked-read-only",
         "--backend-defect",
@@ -24001,7 +24001,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24024,14 +24024,14 @@
       }
     },
     {
-      "build_hash": "3478a25783bf608df7f6f09359d455ec6c95e66085b277967d341f9a76369d3f",
+      "build_hash": "d6a06c01a1c73a2c053e255f44952e114c48ace78679a0d2dba2602134f39294",
       "label": "Lv, defect comment-marked-read-only, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-marked-read-only",
         "--backend-defect",
@@ -24063,7 +24063,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -24086,14 +24086,14 @@
       }
     },
     {
-      "build_hash": "a1b47c2431a82b51786cba6d73754362efff95bed05635b8a47dd8b9e4f806be",
+      "build_hash": "644f402500ad807810492ef508d619eb9fdff7e6888c022cd11ac79732bddcff",
       "label": "Lv, defect conflict-as-generic-error, backend digest-of-current-state, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
@@ -24125,7 +24125,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24148,7 +24148,7 @@
       }
     },
     {
-      "build_hash": "6955dabf2d4fac7210fbf61b74cd7ef8798583985a2fbaed858abe8271403acf",
+      "build_hash": "2149805a2542b0ac6be0cd653cfdf70fd7001c1c21d5e5aeb600ebed8fdfd2df",
       "label": "Lv, defect conflict-as-generic-error, backend lost-update, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24156,7 +24156,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
@@ -24188,7 +24188,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24211,7 +24211,7 @@
       }
     },
     {
-      "build_hash": "f34681e3b81071225f229f080f102cca0e7b4b6fd174e43bf19f316ca2dd3f0e",
+      "build_hash": "500c26dd86ccc4e89276b6df3003310133f2e5b4812b59ad3e5a04b4033b1f88",
       "label": "Lv, defect conflict-as-generic-error, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24219,7 +24219,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
@@ -24251,7 +24251,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24274,14 +24274,14 @@
       }
     },
     {
-      "build_hash": "45c31062ac5e6b56087a3239ea0e6d0774a6e7578c263c9b59978ce04d0bcea8",
+      "build_hash": "70b86ee2346ce6d06f8425a6c2c900380863255b99f909cca2bb6f0a109aecad",
       "label": "Lv, defect conflict-without-iserror, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
@@ -24313,7 +24313,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24336,7 +24336,7 @@
       }
     },
     {
-      "build_hash": "303ee558360e3f5072f70ae913bc8bb579de725ecfc0f411dfe063a773745d64",
+      "build_hash": "da720af248d17d9b8a5baa299511678ae7581cfc1ec255931365fc0c75c6268c",
       "label": "Lv, defect conflict-without-iserror, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24344,7 +24344,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
@@ -24376,7 +24376,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24399,7 +24399,7 @@
       }
     },
     {
-      "build_hash": "a45831492db84aa3e222465d513f6a0c2f967b74e0b9f301430b5fe3b2037ea8",
+      "build_hash": "8c75a8b300ad665442dd0f5253bfe0e25b32bc533156d7d407f2ac2a0e1ba714",
       "label": "Lv, defect conflict-without-iserror, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24407,7 +24407,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-without-iserror"
       ],
@@ -24437,7 +24437,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24460,7 +24460,7 @@
       }
     },
     {
-      "build_hash": "3b5834fac5b4ab3d6e8d1b2d318f5bbd346024751afacf2fc720b81fcb404ced",
+      "build_hash": "9a3869b467a192f00aa63a14313ab0e45b8f919876212ca5036a11fc684182c4",
       "label": "Lv, defect convert-numeric-strings, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24468,7 +24468,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "convert-numeric-strings",
         "--backend-defect",
@@ -24500,7 +24500,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24523,7 +24523,7 @@
       }
     },
     {
-      "build_hash": "27e2b5cc1655262262a2a8993e05d33d29c4fe8bd1ae48c4cfa5ed97cc64b1f7",
+      "build_hash": "93f68841ce15c1583b8191230165c2e4e556f19e53d9d2d155fa67d94f2a24f7",
       "label": "Lv, defect convert-numeric-strings, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24531,7 +24531,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "convert-numeric-strings",
         "--backend-defect",
@@ -24563,7 +24563,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24586,14 +24586,14 @@
       }
     },
     {
-      "build_hash": "f01312c816f0790747111d37ec9815b3fc2511a2296c9e11813f66077dc4c5bd",
+      "build_hash": "9eb708834cd1462f33261ea3ecb80405ffea4fa6b56bbf2d81f95a1fed45ff6e",
       "label": "Lv, defect convert-numeric-strings, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "convert-numeric-strings",
         "--backend-defect",
@@ -24625,7 +24625,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -24648,7 +24648,7 @@
       }
     },
     {
-      "build_hash": "23ea1009d3a37ba24ff7b5fcdb72a6636543ac97e285a0770dab96ffaabeb434",
+      "build_hash": "a40c239d63d2eb44c56095eebcb990b14e987618dca9923627fd0251972d0a0c",
       "label": "Lv, defect create-marked-idempotent, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24656,7 +24656,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-marked-idempotent",
         "--backend-defect",
@@ -24688,7 +24688,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24711,7 +24711,7 @@
       }
     },
     {
-      "build_hash": "7fa3a9cf30d471b63b3c2ca7d0e6647d6c9e418e09cc8cdd0b5629178009d0ac",
+      "build_hash": "f12b7d700c01507923c0723d8bc0dfa872e098bc497732d80025c394748dc412",
       "label": "Lv, defect create-marked-idempotent, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24719,7 +24719,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-marked-idempotent",
         "--backend-defect",
@@ -24751,7 +24751,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24774,14 +24774,14 @@
       }
     },
     {
-      "build_hash": "d700388acdb529ec95443a6e4d2676b1352166cda1e739a70f7d772d36dc5a19",
+      "build_hash": "3aca5c44d593e1f87066312cf70829fc20e7902fd146942b0c2528c541dfb0dc",
       "label": "Lv, defect create-marked-idempotent, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-marked-idempotent",
         "--backend-defect",
@@ -24813,7 +24813,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -24836,14 +24836,14 @@
       }
     },
     {
-      "build_hash": "de729c2ce520ca310711b39497d128aa6c8ceac28bd2243cde91870176039dad",
+      "build_hash": "74bdc9084370a90394248b71d98106a176d2a6b30c51db9d05141d7321c0a209",
       "label": "Lv, defect create-overwrites, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
@@ -24875,7 +24875,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24898,7 +24898,7 @@
       }
     },
     {
-      "build_hash": "c08aec54da02fc4e540ff3be07abf7b69fc30c4e5bc579567397413d5416bcdd",
+      "build_hash": "f02fecfe8d69122a135123db0f23979b4a10433ad489306a97d9e92d43fa9151",
       "label": "Lv, defect create-overwrites, backend lost-update, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24906,7 +24906,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
@@ -24938,7 +24938,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -24961,7 +24961,7 @@
       }
     },
     {
-      "build_hash": "ebe9e36237464f1cbc7f4a4b694b6d760e669957a43c91fc44a851b36e3c3144",
+      "build_hash": "e9c85b363ad96d802a6405c21f31c5f68a31a5d631b72f7a3ae28000496e3a32",
       "label": "Lv, defect create-overwrites, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24969,7 +24969,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
@@ -25001,7 +25001,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25024,14 +25024,14 @@
       }
     },
     {
-      "build_hash": "c4a562d8120224bf540f413c3f813ba7b7abdeae8de235fcb20d896bdba0adcd",
+      "build_hash": "c02ac8f72d49a2ad7b175a2dc174ec55032bdbb41dede6439373fb4cdd446ab0",
       "label": "Lv, defect delete-refetches-version, backend digest-not-canonical, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -25063,7 +25063,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25086,7 +25086,7 @@
       }
     },
     {
-      "build_hash": "262201092a0cf345ce91f484ab1e7ef116be0ac6e77ff9ac6b5fa789ee3785e9",
+      "build_hash": "6e11c8d32974d880c220d9c8fc406848eb17f82035e49943693aba98a42f437a",
       "label": "Lv, defect delete-refetches-version, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25094,7 +25094,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -25126,7 +25126,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25149,14 +25149,14 @@
       }
     },
     {
-      "build_hash": "a70254d877357107716ed42d329e1ff9d6da68b361e4d25baa32688f3ae72477",
+      "build_hash": "3f4e29e97f698f1868721cebdb1d2023b0f51cb1db605711560da77edd5a7232",
       "label": "Lv, defect delete-refetches-version, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -25188,7 +25188,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -25211,7 +25211,7 @@
       }
     },
     {
-      "build_hash": "3cadb93c990481a86576f51a238c6537ad53df975a095d783514c0b13db171f5",
+      "build_hash": "6e4a68dd9204c4f368facb35e343e92f6d3b1a6d98c4f9854198b2e8bbe612d2",
       "label": "Lv, defect delete-refetches-version, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25219,7 +25219,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -25251,7 +25251,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25274,7 +25274,7 @@
       }
     },
     {
-      "build_hash": "7a07adc28e9f83932b6e0bfe790f0b46ef262ac21c2232e2ae88823b6f949bea",
+      "build_hash": "2dd74533c1c7be9877bcc5eccc4e5af6429e99642cb7c30081792bd7d353d70a",
       "label": "Lv, defect drop-unknown-args, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25282,7 +25282,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "drop-unknown-args",
         "--backend-defect",
@@ -25314,7 +25314,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25337,7 +25337,7 @@
       }
     },
     {
-      "build_hash": "62c4acf307ecba5fdc07eaeace35596c90bd7bb317da2d6e3bd1148ce1a8eaf8",
+      "build_hash": "2e0632bb9027e6aea7f441d3214e2e2b4445d1b0c506db4c3871bd9f98ca341f",
       "label": "Lv, defect drop-unknown-args, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25345,7 +25345,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "drop-unknown-args",
         "--backend-defect",
@@ -25377,7 +25377,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25400,14 +25400,14 @@
       }
     },
     {
-      "build_hash": "5cdf115a02254c91408906b68decd8dffc337ba2817f0fab66d597ceab3f91c2",
+      "build_hash": "fbdbfff4695619c8954ea3a837ed4d6654d60562397040584f2fd2a1180628f5",
       "label": "Lv, defect drop-unknown-args, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "drop-unknown-args",
         "--backend-defect",
@@ -25439,7 +25439,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -25462,18 +25462,19 @@
       }
     },
     {
-      "build_hash": "0f00e9a29d5f1773d26a93346e33bc83650a7e0d1a3e09bd459c5a78ad672077",
-      "label": "Lv, defect empty-filter-deletes-all, backend key-expires-early, variant settle-by-client-reference",
+      "build_hash": "7925e18194abc77bbb9e46d359837a26a3c5a369a712e8dea389f8c69a2a7c35",
+      "label": "Lv, defect empty-filter-deletes-all, backend digest-not-canonical, variant key-store-honest",
       "start": [
-        "TRACKER_VARIANTS=settle-by-client-reference",
+        "TRACKER_VARIANTS=key-store-honest",
+        "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "empty-filter-deletes-all",
         "--backend-defect",
-        "key-expires-early"
+        "digest-not-canonical"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -25481,6 +25482,69 @@
         ],
         "FX-DIG-1": [
           "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "violated"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "held"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "not applicable"
+        ],
+        "FX-LOOK-2": [
+          "not applicable"
+        ],
+        "FX-LOOK-3": [
+          "not applicable"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "101792f9dfe8b2c62f91651ada88075ac016b723f9f9084680a133bf064b3ad7",
+      "label": "Lv, defect empty-filter-deletes-all, backend digest-of-current-state, variant key-store-durable",
+      "start": [
+        "TRACKER_VARIANTS=key-store-durable",
+        "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,ledger,faults,clock",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "violated"
         ],
         "FX-DIG-2": [
           "held"
@@ -25501,7 +25565,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25524,15 +25588,14 @@
       }
     },
     {
-      "build_hash": "1eee6ced57781c3d5bf5153aca8b91b9bc9d5e36742c9fe3eff61646bb913c18",
-      "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant key-store-honest",
+      "build_hash": "46540bb113c3249ec5f3d796e03450e81a9fdd7818ff399d4f205146996976ff",
+      "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant settle-by-client-reference",
       "start": [
-        "TRACKER_VARIANTS=key-store-honest",
-        "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
+        "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "empty-filter-deletes-all",
         "--backend-defect",
@@ -25564,68 +25627,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
           "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "not applicable"
-        ],
-        "FX-LOOK-2": [
-          "not applicable"
-        ],
-        "FX-LOOK-3": [
-          "not applicable"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "5e6a295de376a145d14fe3997e41a168d787f551a50d8738e19061db36c0928f",
-      "label": "Lv, defect empty-filter-deletes-all, variant key-store-durable",
-      "start": [
-        "TRACKER_VARIANTS=key-store-durable",
-        "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "empty-filter-deletes-all"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
         ],
         "FX-KEY-2": [
           "held"
@@ -25648,7 +25650,7 @@
       }
     },
     {
-      "build_hash": "4ec3f9b2495209e2f95d3cd15eee93fd3c310169a2f86f9c4c97081968096350",
+      "build_hash": "44ba874f4e986813251168db9db7e2cb7f0c5eb90b3809db5fc487efbe942014",
       "label": "Lv, defect error-as-text, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25656,7 +25658,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
@@ -25688,7 +25690,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25711,14 +25713,14 @@
       }
     },
     {
-      "build_hash": "733d0b2531a41b80df65ab78a275613de3a3fb567a0f50b84eec50c77b9a4c87",
+      "build_hash": "826a047daaa94c3380aafc8a65691029abaa04f2107221e597173c9434b0dc1b",
       "label": "Lv, defect error-as-text, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
@@ -25750,7 +25752,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -25773,17 +25775,17 @@
       }
     },
     {
-      "build_hash": "2e1b41312dec8cff1a1a062603b8e92f0a2e731db342b0d5584b6c079f596bd0",
-      "label": "Lv, defect error-as-text, backend lookup-wrong-record",
+      "build_hash": "c80ec6651469b61cad7bcb67cf9316b48fa83283b5fdf850df7652bbaa6064fb",
+      "label": "Lv, defect error-as-text, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
-        "lookup-wrong-record"
+        "lookup-unscoped"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -25811,7 +25813,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25820,13 +25822,13 @@
           "not checked"
         ],
         "FX-LOOK-1": [
-          "violated"
+          "held"
         ],
         "FX-LOOK-2": [
           "held"
         ],
         "FX-LOOK-3": [
-          "held"
+          "violated"
         ],
         "FX-LOOK-4": [
           "not applicable"
@@ -25834,7 +25836,7 @@
       }
     },
     {
-      "build_hash": "241f2ca208b3bab9d3d65181d4569df2b99f375e42604c50d6e3a52e5685fe39",
+      "build_hash": "73ee6e26322e85d1cc2fb7a151534244136fee275a184714a82f0ffe78289e0d",
       "label": "Lv, defect error-as-text, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25842,7 +25844,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
@@ -25874,7 +25876,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25897,14 +25899,14 @@
       }
     },
     {
-      "build_hash": "4d335bf9ad4a71b8323c542cdebd5d9b6d0a8aa9fbbaea0b31ca513a023a85be",
+      "build_hash": "c464bb6f2118bd85f7c2b4f408bb1c9a9aa80c35ad3bdfd6f10be82ef1313920",
       "label": "Lv, defect force-by-default, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
@@ -25936,7 +25938,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -25959,7 +25961,7 @@
       }
     },
     {
-      "build_hash": "71dcd6f1f97277ffbba31aba2ea8fbd6d1d6010e5d5fce43ddda88adef2d838f",
+      "build_hash": "5745d92127fb000ef34db7446e486e41c263aa2aa30a29cf54ad117afe11068c",
       "label": "Lv, defect force-by-default, backend digest-of-current-state, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25967,7 +25969,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
@@ -25999,7 +26001,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26022,7 +26024,7 @@
       }
     },
     {
-      "build_hash": "e556b819a199c43d5ab717cde531cb6dcb36ba313f3da56ff26087482f70bcd2",
+      "build_hash": "605797bdac90f497f6801685f161843c47e95f2f9c52eb6a3850321546181945",
       "label": "Lv, defect force-by-default, backend key-expires-early, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26030,7 +26032,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
@@ -26062,7 +26064,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -26085,7 +26087,7 @@
       }
     },
     {
-      "build_hash": "9cfba9355b64386a20ccfecf2cd0ba3b0d8eb7a400d0e263c5bd15c989bd11bf",
+      "build_hash": "4fbc156a149268167cb9830ebab1653150faf8132b9fcd049f3020b5bc64bd7d",
       "label": "Lv, defect idempotency-key-dropped, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26093,7 +26095,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-dropped",
         "--backend-defect",
@@ -26125,7 +26127,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26148,7 +26150,7 @@
       }
     },
     {
-      "build_hash": "a7847c50186fec7193e23c0bea3614401dc89c1b5ff963712177d20a40f99ebb",
+      "build_hash": "1c63c1adbfeae871a53cf0f5e53f38c64b92f6fb7c042d36edb35119106b8d0e",
       "label": "Lv, defect idempotency-key-dropped, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26156,7 +26158,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-dropped",
         "--backend-defect",
@@ -26188,7 +26190,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26211,14 +26213,14 @@
       }
     },
     {
-      "build_hash": "c20dc95ac25f31bb5db05c031f3292ddd9db353f4ccce9410d623968e4ef5406",
+      "build_hash": "26a05b900f1493cb2b8021e683e51e2e44b1475e63dd71d1ecc9aefa6505262b",
       "label": "Lv, defect idempotency-key-dropped, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-dropped",
         "--backend-defect",
@@ -26250,7 +26252,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -26273,7 +26275,7 @@
       }
     },
     {
-      "build_hash": "63fd5678bc689ee42810437463b662dee81166247fa6b439e096870e210b07e0",
+      "build_hash": "68c85d8487af8796a95028bac339d3b8e2f24d062e33fd6984efa809081df760",
       "label": "Lv, defect idempotency-key-ignores-args, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26281,7 +26283,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-ignores-args",
         "--backend-defect",
@@ -26313,7 +26315,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26336,7 +26338,7 @@
       }
     },
     {
-      "build_hash": "b9893e0e8a6e74b9dbbcf851b3b3f4770c98244bbf0514e34731f933b3bc19fe",
+      "build_hash": "fe38eee7a26af7bed153b5e6fbd27ea4eff0d325d38d653bf01ae2646da4058c",
       "label": "Lv, defect idempotency-key-ignores-args, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26344,7 +26346,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-ignores-args",
         "--backend-defect",
@@ -26376,7 +26378,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26399,14 +26401,14 @@
       }
     },
     {
-      "build_hash": "96e0861bf78f2d5f252e694e9f50888f0d098b7bb5b75d4d8b3a01e349fc2b71",
+      "build_hash": "20fec1a6b6e3486390ca722c6f22f094df4fb4ee99f206464c63ad3592bc3641",
       "label": "Lv, defect idempotency-key-ignores-args, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-ignores-args",
         "--backend-defect",
@@ -26438,7 +26440,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -26461,19 +26463,81 @@
       }
     },
     {
-      "build_hash": "d25b829ef33329ebcba2a3d84d78afdbf2babf2918c9c006fd7ab4a5b8b3887b",
-      "label": "Lv, defect ignore-project-scope, backend digest-not-canonical, variant key-store-honest",
+      "build_hash": "8692643692beb67931a2b528a244457036c21a9e4907266f353d773f852573fe",
+      "label": "Lv, defect ignore-project-scope, backend key-expires-early, variant settle-by-client-reference",
+      "start": [
+        "TRACKER_VARIANTS=settle-by-client-reference",
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,ledger,faults,clock",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "violated"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not applicable"
+        ],
+        "FX-LOOK-1": [
+          "not applicable"
+        ],
+        "FX-LOOK-2": [
+          "not applicable"
+        ],
+        "FX-LOOK-3": [
+          "not applicable"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "ad4a03d69088f3de7e31948eeaafe9d566b5884c01809ebd7002e283a95e00e0",
+      "label": "Lv, defect ignore-project-scope, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
         "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-project-scope",
         "--backend-defect",
-        "digest-not-canonical"
+        "replay-digest-mismatch"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -26483,10 +26547,10 @@
           "held"
         ],
         "FX-DIG-2": [
-          "held"
+          "violated"
         ],
         "FX-DIG-3": [
-          "violated"
+          "held"
         ],
         "FX-DUR-1": [
           "not applicable"
@@ -26501,7 +26565,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26524,81 +26588,17 @@
       }
     },
     {
-      "build_hash": "6227f3e41ea4104a56802044bebab1162582fb28be4b3c051f9c39a6a236155d",
-      "label": "Lv, defect ignore-project-scope, backend digest-of-current-state, variant settle-by-client-reference",
-      "start": [
-        "TRACKER_VARIANTS=settle-by-client-reference",
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "violated"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not applicable"
-        ],
-        "FX-LOOK-1": [
-          "not applicable"
-        ],
-        "FX-LOOK-2": [
-          "not applicable"
-        ],
-        "FX-LOOK-3": [
-          "not applicable"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "08752460f53838f910394f8fba19bf5cbd601a39ca00189a4ef2a3e2f59228dd",
-      "label": "Lv, defect ignore-project-scope, backend lost-update, variant key-store-durable",
+      "build_hash": "0d777cdc0287ba377380cbfb8579fe6057760b7edacc6c89dad69f5a392c3a00",
+      "label": "Lv, defect ignore-project-scope, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
         "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "lost-update"
+        "ignore-project-scope"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -26626,7 +26626,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26649,7 +26649,7 @@
       }
     },
     {
-      "build_hash": "f4beec98f14cd48613e7344597481949ffd43c1f57c397db5fa0be2f97078189",
+      "build_hash": "825998bc466677b7df99d5de663d9ee3e51c8e414ec5addcd8299d7cc48e8c38",
       "label": "Lv, defect ignore-unknown-args-with-notice, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26657,7 +26657,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-unknown-args-with-notice",
         "--backend-defect",
@@ -26689,7 +26689,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26712,7 +26712,7 @@
       }
     },
     {
-      "build_hash": "d5f66f747dbd5f4a8642610e91942b7973efa97339584516ba684588ba8730b9",
+      "build_hash": "27e21b21d139ec5b941694359ed556b9f9d780180e9eced220f8623f2f6b3366",
       "label": "Lv, defect ignore-unknown-args-with-notice, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26720,7 +26720,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-unknown-args-with-notice",
         "--backend-defect",
@@ -26752,7 +26752,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26775,14 +26775,14 @@
       }
     },
     {
-      "build_hash": "7908697092031b7706eb5a5c17a6adc7a653ab1c6c5487db688f25899c3e05e2",
+      "build_hash": "021177ef2fc647af79345756b91f2dbb54b92f1e162c15e8f4b61442e3ab44a3",
       "label": "Lv, defect ignore-unknown-args-with-notice, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-unknown-args-with-notice",
         "--backend-defect",
@@ -26814,7 +26814,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -26837,7 +26837,7 @@
       }
     },
     {
-      "build_hash": "503fccbc474ed1fd085d1e211ab74fc6d59fe268f88589f35be156026a681058",
+      "build_hash": "77fd08202099f267ace6dec6817ff51646621ae8ecb5816db71669ea3623b82b",
       "label": "Lv, defect in-progress-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26845,7 +26845,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "in-progress-reported-not-applied",
         "--backend-defect",
@@ -26877,7 +26877,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26900,7 +26900,7 @@
       }
     },
     {
-      "build_hash": "350c421fea25975392e543f252376eb32e59b1b5d9be15d5aac2701ef9d63983",
+      "build_hash": "4c80214d897781dd5f2edbd75550b124264f2042fd69044e13f69fbd076b1875",
       "label": "Lv, defect key-store-in-memory, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26908,7 +26908,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "key-store-in-memory",
         "--backend-defect",
@@ -26940,7 +26940,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -26963,7 +26963,7 @@
       }
     },
     {
-      "build_hash": "f0b489dfcd7c76e4739b876f6b249df471d32bbb63693de9983f53ac0ad5318a",
+      "build_hash": "79f41734421696bfa9014c7d8489eeb6790676b001ca4280236cacefa4e668cc",
       "label": "Lv, defect key-store-in-memory, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26971,7 +26971,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "key-store-in-memory",
         "--backend-defect",
@@ -27003,7 +27003,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27026,14 +27026,14 @@
       }
     },
     {
-      "build_hash": "6e2620bb80319179751f888648bbc01b3976e9cafdcb3258b5c1a42467dbdd34",
+      "build_hash": "42be3595739f0c4161dbadacdcb31ac339ae900da8328d1d4df30b13f573df75",
       "label": "Lv, defect key-store-in-memory, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "key-store-in-memory",
         "--backend-defect",
@@ -27065,7 +27065,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -27088,14 +27088,14 @@
       }
     },
     {
-      "build_hash": "cb085ffb13d195d01b0cf6f49815313ceffad6e15cc3b41aacc6b53b2c0428c7",
+      "build_hash": "d4646420429d34dbf0081a37ebbff33201c078bd4e89c86aa89d2e4a62094db8",
       "label": "Lv, defect label-by-position, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -27127,7 +27127,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27150,7 +27150,7 @@
       }
     },
     {
-      "build_hash": "55155ea1888afb51336fd14444cb262b0043692b659b5bd3c3e8f4ca89e1a440",
+      "build_hash": "43e4ba85631968cd52599f502175bee7935b2d5cfc4321660c8bf8cab165750b",
       "label": "Lv, defect label-by-position, backend lost-update, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27158,7 +27158,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -27190,7 +27190,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27213,7 +27213,7 @@
       }
     },
     {
-      "build_hash": "775d0771abcf6423d105ad71064d4c2d72bc1e2c49eed21286efed0e513b092c",
+      "build_hash": "303316ca5211bdd5c3c407501a63eb2bc3f5d275398a128a170ce8aa07da88cc",
       "label": "Lv, defect label-by-position, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27221,7 +27221,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -27253,7 +27253,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27276,13 +27276,13 @@
       }
     },
     {
-      "build_hash": "35c6b58afb667efdf2bbf4b9556a81c5690ed03b3fea46ee2f8a546259c65640",
+      "build_hash": "4649320005af5ec2d2637e8251824d2e5074224eb9307bb8f4ffa85a5f12bcdf",
       "label": "Lv, defect lookup-reexecutes, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "lookup-reexecutes",
         "--backend-defect",
@@ -27314,7 +27314,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27337,7 +27337,7 @@
       }
     },
     {
-      "build_hash": "46215ebe76ed90db2a91fc9d4f456a7c6b24f01e12a3b190562edd393095158a",
+      "build_hash": "3e9f887e03ff7b92c1f090588e4b053df9de8fa4b0bb3ed316de9ebb84097440",
       "label": "Lv, defect missing-annotations, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27345,7 +27345,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "missing-annotations",
         "--backend-defect",
@@ -27377,7 +27377,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27400,7 +27400,7 @@
       }
     },
     {
-      "build_hash": "191c5c5a5751f7543359fd394e83bffab72f6669ec16e34db24707892bd302e2",
+      "build_hash": "4b84b26fb77fa0b1d382fd9ef0c7556412488ff5bea304d52606ad576142a6e1",
       "label": "Lv, defect missing-annotations, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27408,7 +27408,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "missing-annotations",
         "--backend-defect",
@@ -27440,7 +27440,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27463,14 +27463,14 @@
       }
     },
     {
-      "build_hash": "9910c79f6727e2fe663c551226390bbc5a67208acb573274fc1777529b22d5f9",
+      "build_hash": "124244ee7da987bf80fb3cd7c64d51160984f6572d3a102b84d3f40e92b51aab",
       "label": "Lv, defect missing-annotations, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "missing-annotations",
         "--backend-defect",
@@ -27502,7 +27502,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -27525,7 +27525,7 @@
       }
     },
     {
-      "build_hash": "35a078a8f5ff38f698ee1eed415ecb16e06b1306e1eacc6507ed41481e7ba1f8",
+      "build_hash": "27d1ac8d8d10f69ccc620ce29d99dd861fad379851599b038ff3f3e98e6f758a",
       "label": "Lv, defect no-idempotency-key, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27533,7 +27533,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "no-idempotency-key",
         "--backend-defect",
@@ -27565,7 +27565,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27588,7 +27588,7 @@
       }
     },
     {
-      "build_hash": "4a0dc74b68b363f15255a06bc36d3fc220da45f91223f0f8ce4673cfcedfaeb6",
+      "build_hash": "acf1a146796038f06fec315df65cbad8d55ac0baf5a6b5bdb63904c631efd6eb",
       "label": "Lv, defect no-idempotency-key, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27596,7 +27596,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "no-idempotency-key",
         "--backend-defect",
@@ -27628,7 +27628,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27651,14 +27651,14 @@
       }
     },
     {
-      "build_hash": "0d1a695cbc066f306f22a6bc957f747f472a019bea50602e04f572f524ae856c",
+      "build_hash": "829f6f6ca1d88e7e3ab76ae32d5481f5c6e4c5a9bab3df92a5cef881ad0ec9ce",
       "label": "Lv, defect no-idempotency-key, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "no-idempotency-key",
         "--backend-defect",
@@ -27690,7 +27690,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -27713,7 +27713,7 @@
       }
     },
     {
-      "build_hash": "0728fd45852ba003ee9c4e8c6ce91062a1aa0d3f420d36e1b2822f3a2e0426f7",
+      "build_hash": "35bbe01d751d2fe2588d39d919a95c56ab897521d8f8494d8a1f5997b7225832",
       "label": "Lv, defect read-merge-put, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27721,7 +27721,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
@@ -27753,7 +27753,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27776,7 +27776,7 @@
       }
     },
     {
-      "build_hash": "ce85320aac1db6570e7621e1a6ce4b5006c9c8b6964e9a3c116fc827ff70fcde",
+      "build_hash": "fae00387a02e832b9e74126dcc6364fa4ff425c403d307198f3bc1c8d3c615f1",
       "label": "Lv, defect read-merge-put, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27784,7 +27784,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
@@ -27816,7 +27816,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27839,14 +27839,14 @@
       }
     },
     {
-      "build_hash": "731bd7dbd5d5ba63012c38c0c50db08d478b2306169a4e2419077165812caf1c",
+      "build_hash": "d470ab15c53fc27ff42b185f5242fe8f2ecd7b12822c7b01df2563f636890077",
       "label": "Lv, defect read-merge-put, backend replay-digest-mismatch, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
@@ -27878,7 +27878,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27901,7 +27901,7 @@
       }
     },
     {
-      "build_hash": "392e5912a31993d92cff72223b0e6f2d7a158701d22a8989c1c743114caaf9d2",
+      "build_hash": "72a0bbd1f23fddb908a8a0d79909d36074008d3adeb0dd7e269285660967dc76",
       "label": "Lv, defect read-only-by-annotation, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27909,7 +27909,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-by-annotation",
         "--backend-defect",
@@ -27941,7 +27941,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -27964,7 +27964,7 @@
       }
     },
     {
-      "build_hash": "78a61ff6cd74bb5fe552e19dd62a2241fb91c06c1548f74ea443a2ca67bf555f",
+      "build_hash": "5c568b2b6aaa1907d7b6f6409359d6b6313c26e7a1bdbedab0d53125819da8ea",
       "label": "Lv, defect read-only-by-annotation, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27972,7 +27972,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-by-annotation",
         "--backend-defect",
@@ -28004,7 +28004,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28027,14 +28027,14 @@
       }
     },
     {
-      "build_hash": "33660079718333a847847e914b5bcc782763510592c2d89dd10dc7c53139d9c4",
+      "build_hash": "a1aff590ba22a460d8bc37ccaf4917d1a78ac01799e1460a9a60c94cd53d7812",
       "label": "Lv, defect read-only-by-annotation, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-by-annotation",
         "--backend-defect",
@@ -28066,7 +28066,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -28089,7 +28089,7 @@
       }
     },
     {
-      "build_hash": "a9ea218bd7f8b00e914638cf3281344850f7f02cb6b77c396e1e6d72bb0dea66",
+      "build_hash": "dad7b3ce8481fe5378cf664d5978f935413938b0065384caa56a7ad9cfd38e98",
       "label": "Lv, defect read-only-strict-true, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28097,7 +28097,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-strict-true",
         "--backend-defect",
@@ -28129,7 +28129,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28152,7 +28152,7 @@
       }
     },
     {
-      "build_hash": "c6f17a99d55338fe32d34b5f4d2c7f5418414da105b6407d007cdd64032f382f",
+      "build_hash": "738c29e76327ac9f12dec37e548e963f97dcdb2d876c4a585e16a8c9851023a4",
       "label": "Lv, defect read-only-strict-true, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28160,7 +28160,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-strict-true",
         "--backend-defect",
@@ -28192,7 +28192,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28215,14 +28215,14 @@
       }
     },
     {
-      "build_hash": "9c6290a0a5af97727e9d4c0cbd30673424b8b8ddf67bb46e13d2f959a5e1e148",
+      "build_hash": "02ce462389c44530c1b6506ecea3205de3c2b273655c789b01bbf539cbcf0511",
       "label": "Lv, defect read-only-strict-true, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-strict-true",
         "--backend-defect",
@@ -28254,7 +28254,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -28277,7 +28277,7 @@
       }
     },
     {
-      "build_hash": "f1735e9bddb1c0171064b750d98f023539c3bdef5960c0870e7b0cc43bf82277",
+      "build_hash": "019cd91f9b1bd0694f17ff5997372bbf6d223e4db782d8b6b6dd454815dbff4c",
       "label": "Lv, defect receipt-missing-version, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28285,7 +28285,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "receipt-missing-version",
         "--backend-defect",
@@ -28317,7 +28317,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28340,14 +28340,14 @@
       }
     },
     {
-      "build_hash": "a6a9678a2e085927bf8e2827ea49581111a798ecf82e9aff5d18125ee02340ab",
+      "build_hash": "d538994ee13e34abc9f237698df616baac6a97ff91ab82545bb3f33872ad1314",
       "label": "Lv, defect receipt-missing-version, backend digest-of-current-state, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "receipt-missing-version",
         "--backend-defect",
@@ -28379,7 +28379,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28402,7 +28402,7 @@
       }
     },
     {
-      "build_hash": "371acc06a5cc01ad8c493d959f2c1db9a35b386d989656354f970235c1469096",
+      "build_hash": "50a8e04d8be0768d56c4d745a2b95a4106f8af11e1bcf5925b05fb8a92247e03",
       "label": "Lv, defect receipt-missing-version, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28410,7 +28410,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "receipt-missing-version",
         "--backend-defect",
@@ -28442,7 +28442,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -28465,7 +28465,7 @@
       }
     },
     {
-      "build_hash": "3f379063d4d2a272c3808330b66dc0deb1b0e298e7e792944b9fb295e67efeb5",
+      "build_hash": "df858127823a97ed0b24bd3ed3668d88b430caa9149ded9ee30800f1a988a7cf",
       "label": "Lv, defect retry-without-key, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28473,7 +28473,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "retry-without-key",
         "--backend-defect",
@@ -28505,7 +28505,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28528,7 +28528,7 @@
       }
     },
     {
-      "build_hash": "804ac166113f49244ec781d4fef260b54c7f12db3582413dce7a7fe6ad9e063e",
+      "build_hash": "bd7409422ac6736824341cbddf6e0244853e7abfc11b5b13fc16066ead04b3c7",
       "label": "Lv, defect retry-without-key, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28536,7 +28536,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "retry-without-key",
         "--backend-defect",
@@ -28568,7 +28568,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28591,14 +28591,14 @@
       }
     },
     {
-      "build_hash": "710f58773ff50c4f3cc013f9bdc198104f396c4652da7f6ab9daad280fdee41e",
+      "build_hash": "e8d5c67b1ffdad843385441ff0556e2bcf9eabd4db9fea8c7c8dceeb4f520857",
       "label": "Lv, defect retry-without-key, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "retry-without-key",
         "--backend-defect",
@@ -28630,7 +28630,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -28653,7 +28653,7 @@
       }
     },
     {
-      "build_hash": "6572588c91d70b808bfd0135f48c61485395a5b87e8248892ad5c4fd9b23a94a",
+      "build_hash": "60a794549f04335cb016c1fd7a093c0421d8583f55550265ad1fbce678817162",
       "label": "Lv, defect set-labels-non-destructive, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28661,7 +28661,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "set-labels-non-destructive",
         "--backend-defect",
@@ -28693,7 +28693,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28716,7 +28716,7 @@
       }
     },
     {
-      "build_hash": "7023af8fbf09307ed2617679249121e33196434131b8fbd3c1e19c1237b58323",
+      "build_hash": "772ae26280169cd898be6044b329faa33de68ea5a57c80503a6f65ec0be9772e",
       "label": "Lv, defect set-labels-non-destructive, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28724,7 +28724,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "set-labels-non-destructive",
         "--backend-defect",
@@ -28756,7 +28756,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28779,14 +28779,14 @@
       }
     },
     {
-      "build_hash": "99c6afec82d7133e7f19e90298025d4c4beaa3f76542d8ccf4a0a001f0aad1bc",
+      "build_hash": "c21bddd5d20888c31fb7cdf1989ea383b134880d6a142c603c893b322718bfc0",
       "label": "Lv, defect set-labels-non-destructive, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "set-labels-non-destructive",
         "--backend-defect",
@@ -28818,7 +28818,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -28841,7 +28841,7 @@
       }
     },
     {
-      "build_hash": "35a3764e4876a10c1e87cbf7ae98cd1869b72e21375156be20c5679e5bcfc74f",
+      "build_hash": "9e4e0015cc2a9b1edcabf815371cb8403fbdf6f8e565028667d710c41651d736",
       "label": "Lv, defect settle-miss-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28849,7 +28849,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "settle-miss-reported-not-applied",
         "--backend-defect",
@@ -28881,7 +28881,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28904,15 +28904,14 @@
       }
     },
     {
-      "build_hash": "f16bfd8fad8ea665aa51296831cd7473ad71c35e80e5f8def11908cfeabbd8a3",
-      "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant key-store-durable",
+      "build_hash": "cc68766028fa95665fa2a9cfcb719229d6d3b18288a6bb92a9c1bc1aa60889b8",
+      "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
-        "TRACKER_VARIANTS=key-store-durable",
-        "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
+        "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-claims-applied",
         "--backend-defect",
@@ -28944,7 +28943,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -28967,7 +28966,7 @@
       }
     },
     {
-      "build_hash": "7c0d7c40f10c5a38896433abaf25a5da28e4a195a0bcbcee98e3b4dcc68e9e56",
+      "build_hash": "1f8b668776a6df1b379992618441b3b46b2e6d5820d5f9b867462b8db0537e3d",
       "label": "Lv, defect shape-claims-applied, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28975,7 +28974,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-claims-applied",
         "--backend-defect",
@@ -29007,7 +29006,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29030,14 +29029,76 @@
       }
     },
     {
-      "build_hash": "061599463a0fc068d8f894226d4c06c56e2c98a40492e4e41dbfb1d924a277ce",
-      "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant settle-by-client-reference",
+      "build_hash": "17a9c7bd5eb8e4bdb125294f6a071bc5c56228342918ff52e16e809d77fdec79",
+      "label": "Lv, defect shape-claims-applied, backend lookup-wrong-record",
       "start": [
-        "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
+        "--defect",
+        "shape-claims-applied",
+        "--backend-defect",
+        "lookup-wrong-record"
+      ],
+      "fixture": {
+        "FX-BLD-1": [
+          "held"
+        ],
+        "FX-DIG-1": [
+          "held"
+        ],
+        "FX-DIG-2": [
+          "held"
+        ],
+        "FX-DIG-3": [
+          "held"
+        ],
+        "FX-DUR-1": [
+          "not applicable"
+        ],
+        "FX-DUR-2": [
+          "not applicable"
+        ],
+        "FX-DUR-3": [
+          "not applicable"
+        ],
+        "FX-FLT-1": [
+          "held"
+        ],
+        "FX-KEY-1": [
+          "held"
+        ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not checked"
+        ],
+        "FX-LOOK-1": [
+          "violated"
+        ],
+        "FX-LOOK-2": [
+          "held"
+        ],
+        "FX-LOOK-3": [
+          "held"
+        ],
+        "FX-LOOK-4": [
+          "not applicable"
+        ]
+      }
+    },
+    {
+      "build_hash": "88b266236dbb5d661e231594b16616f3087509acbe330119d2ffa67d4cabdf28",
+      "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant key-store-durable",
+      "start": [
+        "TRACKER_VARIANTS=key-store-durable",
+        "TRACKER_KEY_JOURNAL={WORK}/keys.journal",
+        "tiny-tracker",
+        "all",
+        "--features",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-claims-applied",
         "--backend-defect",
@@ -29069,7 +29130,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29092,7 +29153,7 @@
       }
     },
     {
-      "build_hash": "cce1f8e604dfc5488f1061f70e0fdd6896e6e679766e2b188af6af74f0298329",
+      "build_hash": "d373ec3c9afe2e0713a9e6170cf733db09d72442482150b9d451f54849a2e3a4",
       "label": "Lv, defect shape-missing-failed, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29100,7 +29161,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-missing-failed",
         "--backend-defect",
@@ -29132,7 +29193,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29155,14 +29216,14 @@
       }
     },
     {
-      "build_hash": "9b4ddd445b8046542a804838fcb044447d8c6f2e4ce1f61932f8808faface27a",
+      "build_hash": "a0d7432b245efe6b18df4c69a8572b237eca4fcbfc133eb6bd08826141cd9b8e",
       "label": "Lv, defect shape-missing-failed, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-missing-failed",
         "--backend-defect",
@@ -29194,7 +29255,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -29217,7 +29278,7 @@
       }
     },
     {
-      "build_hash": "800b1edd6aa44b84d7a39c8dbb6255892ddc0b174c950e882567ee554937cbee",
+      "build_hash": "6bf01291e563f459045a1ff0fadb193ff0ac5f935ec04148e4685ea85e62365e",
       "label": "Lv, defect shape-missing-failed, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29225,7 +29286,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-missing-failed",
         "--backend-defect",
@@ -29257,7 +29318,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29280,7 +29341,7 @@
       }
     },
     {
-      "build_hash": "59c18111c5e639e6c106a4c83d9cb3da66a34910d87b33be834b8ba8a02f3734",
+      "build_hash": "083350a672099d008466870d13f859e252510cda1143541d8d7855d24178ff57",
       "label": "Lv, defect shape-text-invites-retry, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29288,7 +29349,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-invites-retry",
         "--backend-defect",
@@ -29320,7 +29381,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29343,7 +29404,7 @@
       }
     },
     {
-      "build_hash": "c199a905221a2835c80da0986bdbbd7e0745536b8503d27a57bc754b361735f2",
+      "build_hash": "48591974061a910ca47a51dba266e266ee28f8daba18412fc8e040f1c43c34f0",
       "label": "Lv, defect shape-text-invites-retry, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29351,7 +29412,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-invites-retry",
         "--backend-defect",
@@ -29383,7 +29444,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -29406,14 +29467,14 @@
       }
     },
     {
-      "build_hash": "6022f5c1feaf04b1730141bfc22458407bca567347433ce81d3c5358db2e5adb",
+      "build_hash": "2101da64e09308b68da8d83142a4eff96826c4aec54b17bb259b3737ef8dfd06",
       "label": "Lv, defect shape-text-invites-retry, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-invites-retry"
       ],
@@ -29443,7 +29504,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29466,7 +29527,7 @@
       }
     },
     {
-      "build_hash": "cfb5d47d976bff0fcc46fa7a94fb33236d45312d86d212a0f5ddb0399baa343d",
+      "build_hash": "d6c449420a91d4d6616b9e782f80259478ee7a3ca69221b6f53384f642d383b5",
       "label": "Lv, defect shape-text-says-all-saved, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29474,7 +29535,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-all-saved",
         "--backend-defect",
@@ -29506,7 +29567,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29529,7 +29590,7 @@
       }
     },
     {
-      "build_hash": "a0456314e3fab7901fb0a608bfec45f90c939deb8ece95edadb24798bc8a6d36",
+      "build_hash": "bb351ae1bae425a4d3e7d14f7d8d5279ebd93863833c3c6fcd3fccb91c0c5f32",
       "label": "Lv, defect shape-text-says-all-saved, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29537,7 +29598,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-all-saved",
         "--backend-defect",
@@ -29569,7 +29630,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29592,14 +29653,14 @@
       }
     },
     {
-      "build_hash": "7b58a2601071a5eecf06b4e0e821ea08dba0c30d6ae6be8180c463d1d8611f2a",
+      "build_hash": "4bac18362c0fd40916a7ef1eb0a2a7dcb93258a85363b6e2225da4a6d47715d6",
       "label": "Lv, defect shape-text-says-all-saved, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-all-saved",
         "--backend-defect",
@@ -29631,7 +29692,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -29654,14 +29715,14 @@
       }
     },
     {
-      "build_hash": "97b3d2248a449ccdf0e08697a782a17006d7abfc4fcb161c55aece10a2120da3",
+      "build_hash": "7c46e0babfc7287e843cada577a18e4218fdd0f9b5cfe32fc7913f9f3cfee3e2",
       "label": "Lv, defect shape-text-says-failed, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-failed",
         "--backend-defect",
@@ -29693,7 +29754,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29716,7 +29777,7 @@
       }
     },
     {
-      "build_hash": "5416e8a05d751d228b7817bcdc81698bd8fb6d222be8c13edd70ad52bc427b23",
+      "build_hash": "aee5da9899bae3de7af25e7f528d6705fbb151d013a5bb369bf6c4571340e0bb",
       "label": "Lv, defect shape-text-says-failed, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29724,7 +29785,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-failed",
         "--backend-defect",
@@ -29756,7 +29817,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -29779,7 +29840,7 @@
       }
     },
     {
-      "build_hash": "f7acebfda615cfb25c7700714d2f73f411bfb616f21de037b0e590f82f5738b5",
+      "build_hash": "9072800ab886979d21bf4977f725e941af654feb4894ff05794806c0e4c3d72b",
       "label": "Lv, defect shape-text-says-failed, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29787,7 +29848,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-failed",
         "--backend-defect",
@@ -29819,7 +29880,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29842,7 +29903,7 @@
       }
     },
     {
-      "build_hash": "0fbec3286c2e92d7b2f8a4ae3be4fd56159990b89a3ccddc7701f2350388cf53",
+      "build_hash": "6e6104797f41b6adc3cef3ba5ec800e07abfc1b6a9e6bd089ce78a61628833ea",
       "label": "Lv, defect shape-unknown-as-failed, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29850,7 +29911,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-unknown-as-failed",
         "--backend-defect",
@@ -29882,7 +29943,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -29905,14 +29966,14 @@
       }
     },
     {
-      "build_hash": "31b8de1979a886fd9e6c837ea3c524990144a6c5e02de7494651e17fe49360d9",
+      "build_hash": "bccb246d7bf2debc8ff6a21fab636ca631407eb64a57bc0a74e91f9d7f4d4098",
       "label": "Lv, defect shape-unknown-as-failed, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-unknown-as-failed",
         "--backend-defect",
@@ -29944,91 +30005,30 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not applicable"
-        ],
-        "FX-LOOK-1": [
-          "not applicable"
-        ],
-        "FX-LOOK-2": [
-          "not applicable"
-        ],
-        "FX-LOOK-3": [
-          "not applicable"
-        ],
-        "FX-LOOK-4": [
-          "not applicable"
-        ]
-      }
-    },
-    {
-      "build_hash": "81df72b44c8b6fdf05a67b8f3f0df498c4faaed2eb2a7448cb36fc01c044a1bf",
-      "label": "Lv, defect shape-unknown-as-failed, backend lookup-unscoped",
-      "start": [
-        "tiny-tracker",
-        "all",
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "lookup-unscoped"
-      ],
-      "fixture": {
-        "FX-BLD-1": [
-          "held"
-        ],
-        "FX-DIG-1": [
-          "held"
-        ],
-        "FX-DIG-2": [
-          "held"
-        ],
-        "FX-DIG-3": [
-          "held"
-        ],
-        "FX-DUR-1": [
-          "not applicable"
-        ],
-        "FX-DUR-2": [
-          "not applicable"
-        ],
-        "FX-DUR-3": [
-          "not applicable"
-        ],
-        "FX-FLT-1": [
-          "held"
-        ],
-        "FX-KEY-1": [
-          "not checked"
-        ],
-        "FX-KEY-2": [
-          "held"
-        ],
-        "FX-KEY-3": [
-          "not checked"
-        ],
-        "FX-LOOK-1": [
-          "held"
-        ],
-        "FX-LOOK-2": [
-          "held"
-        ],
-        "FX-LOOK-3": [
           "violated"
         ],
+        "FX-KEY-2": [
+          "held"
+        ],
+        "FX-KEY-3": [
+          "not applicable"
+        ],
+        "FX-LOOK-1": [
+          "not applicable"
+        ],
+        "FX-LOOK-2": [
+          "not applicable"
+        ],
+        "FX-LOOK-3": [
+          "not applicable"
+        ],
         "FX-LOOK-4": [
           "not applicable"
         ]
       }
     },
     {
-      "build_hash": "2611d1847712e20a3f0996ba39d4a6714516ff7a01705ba9a91b698b6d42f150",
+      "build_hash": "84f2b6a9c01f6e4fca97a30b2759524edc357dbbc0a4ba6a90947c685bdd0e2d",
       "label": "Lv, defect shape-unknown-as-failed, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30036,7 +30036,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-unknown-as-failed",
         "--backend-defect",
@@ -30068,7 +30068,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30091,14 +30091,14 @@
       }
     },
     {
-      "build_hash": "84401c281c54d10ba139cb7314f6412d33f60f35ebd1d9abceb97caa96e5c7d1",
+      "build_hash": "e4d58bec0ca07f7cf27aae300138a7baac243ab38c6169d1f84fba5e9acf9999",
       "label": "Lv, defect shape-wrong-version, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-wrong-version",
         "--backend-defect",
@@ -30130,7 +30130,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30153,7 +30153,7 @@
       }
     },
     {
-      "build_hash": "41902948ba7196d32ec6ac1391c08dda3e55d30ffea2458b11dd7164cfe07ac9",
+      "build_hash": "4291d8997194c0a9fe29e2f4567754c9508b1babb59eae4cb3b29af779030394",
       "label": "Lv, defect shape-wrong-version, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30161,7 +30161,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-wrong-version",
         "--backend-defect",
@@ -30193,7 +30193,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -30216,7 +30216,7 @@
       }
     },
     {
-      "build_hash": "e5fac7d78b0c37165aae89f677febf4f91b6b54114a2df8e07c2755da310ecf5",
+      "build_hash": "cd6ab6ab82849c7c44bdba93957d76835bccabfbe091d09f4bfbb0dea1c5716f",
       "label": "Lv, defect shape-wrong-version, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30224,7 +30224,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-wrong-version",
         "--backend-defect",
@@ -30256,7 +30256,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30279,7 +30279,7 @@
       }
     },
     {
-      "build_hash": "15d2c8af27135aaf58ce6a9fdc5e49fda0998901019fcbea89796a96d564b611",
+      "build_hash": "164d1f146e7e610bc0aecdea12a61bf5dd535e22c9551c44205056085bc2d457",
       "label": "Lv, defect skip-limits, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30287,7 +30287,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-limits",
         "--backend-defect",
@@ -30319,7 +30319,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30342,7 +30342,7 @@
       }
     },
     {
-      "build_hash": "49a21e6bc2dfc443f4dc1cf122c77a1d652045095eef868f222d05c1c6524c2f",
+      "build_hash": "626cdf2bf3dbd86cf9c09341772bd63d2eb0fae666b1c6ed5c878f9de81cf2ae",
       "label": "Lv, defect skip-limits, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30350,7 +30350,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-limits",
         "--backend-defect",
@@ -30382,7 +30382,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30405,14 +30405,14 @@
       }
     },
     {
-      "build_hash": "e17e2b55e30cf4bc96e3e0d260ddce9a55f7d03b34365546d4f1bf42aa3fd5f5",
+      "build_hash": "f81da8964b5ac3957070babdff4abc359dfccd989e90266fbf5396a1d98934a9",
       "label": "Lv, defect skip-limits, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-limits",
         "--backend-defect",
@@ -30444,7 +30444,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -30467,14 +30467,14 @@
       }
     },
     {
-      "build_hash": "601e19da04536d1acd96dd9cf05bb97c1c0ee04870215266be8ec6e14f5a3e86",
+      "build_hash": "6543772f36dc3353e8dbfe7174fd4097b4ef6247d2e41995ea2a3cd846b13db5",
       "label": "Lv, defect skip-null-assignee, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
@@ -30506,7 +30506,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30529,7 +30529,7 @@
       }
     },
     {
-      "build_hash": "de99367cbfb109aa574b04dd8a8e2be56b7186f749e4b1e8bdcf6e1d1da3ea29",
+      "build_hash": "4af0a5d8ba55f3c805a2af4999e4ba7428de038bd6bd96770137d561fa0d2e65",
       "label": "Lv, defect skip-null-assignee, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30537,7 +30537,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
@@ -30569,7 +30569,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30592,7 +30592,7 @@
       }
     },
     {
-      "build_hash": "a992196274fc76bdfa50639f42320a73ec17496da39956b081cc9b917f4239fe",
+      "build_hash": "0d80707d5ba4f21963a993d528c5008b860dd51960d9ebdcaa4e7ed4d62ec1ca",
       "label": "Lv, defect skip-null-assignee, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30600,7 +30600,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
@@ -30632,7 +30632,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30655,7 +30655,7 @@
       }
     },
     {
-      "build_hash": "3cc32c04d17721ac90ff4b0c9fa04db3e067f35fdaa7a3390bbe4144e179bdfa",
+      "build_hash": "affbdd1eaa71fc38f2825844c303955f71be3b5cbfa5178ac0eb7d21b430feff",
       "label": "Lv, defect stale-unannounced, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30663,7 +30663,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
@@ -30695,7 +30695,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30718,7 +30718,7 @@
       }
     },
     {
-      "build_hash": "6ce02504049416a643e84ac33d2cab40647461f55f1de6062c54f3499e5f12e8",
+      "build_hash": "b5bd3fd5edad200ad7056e1a7090d0d0d50bb4791860f571e2a9501829392a4b",
       "label": "Lv, defect stale-unannounced, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30726,7 +30726,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
@@ -30758,7 +30758,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30781,14 +30781,14 @@
       }
     },
     {
-      "build_hash": "dd93745914044bdf55025dc9d6cba2a1368c36950d12e0c5be0c4de29a877891",
+      "build_hash": "52d29166a9616b7b583f86d060935b4abdad7f382208274ed7767b646ff1ba8c",
       "label": "Lv, defect stale-unannounced, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
@@ -30820,7 +30820,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -30843,7 +30843,7 @@
       }
     },
     {
-      "build_hash": "1d4a0165cc86a7440b5577ae2c278054d3608708f8a6cefed18f1994b38d3269",
+      "build_hash": "7074c28ba4975b9f1b0a61a512ab55697b7a723e2dfa0712858cba134b9da8b3",
       "label": "Lv, defect token-in-error, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30851,7 +30851,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "token-in-error",
         "--backend-defect",
@@ -30883,7 +30883,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30906,7 +30906,7 @@
       }
     },
     {
-      "build_hash": "d9444378c38a614a61aff211ecca9e958a384704f4d84857cc634d29a507133b",
+      "build_hash": "33e7fa58fd596890dc97f4c03051e4ad74feaa4fd1ecabd58e75f63612dac3fe",
       "label": "Lv, defect token-in-error, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30914,7 +30914,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "token-in-error",
         "--backend-defect",
@@ -30946,7 +30946,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -30969,14 +30969,14 @@
       }
     },
     {
-      "build_hash": "587ef560b9c813e70ac33425aa8d028974d2f111f9222fea5659a340152cdf9d",
+      "build_hash": "82d14c6f8387bb8acdb36e2a5335fdc4aa5b8d9995878354df4fba47ba418f98",
       "label": "Lv, defect token-in-error, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "token-in-error",
         "--backend-defect",
@@ -31008,7 +31008,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -31031,7 +31031,7 @@
       }
     },
     {
-      "build_hash": "181df2d1408241b6cb5eb03e1222ff9267c2c069e8d8662ec7dacb12568361e6",
+      "build_hash": "e7cb311ea2975df9d2bbf3b5115aef2421486a41d0d26b0af8133e67b1815c55",
       "label": "Lv, defect undeclared-title-limit, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31039,7 +31039,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "undeclared-title-limit",
         "--backend-defect",
@@ -31071,7 +31071,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31094,7 +31094,7 @@
       }
     },
     {
-      "build_hash": "c6c05981454c68afb4657526338b4f7b6cafd5eea5bc0a33d556665185432c44",
+      "build_hash": "030281004bc93bc3943f78d4b56659888c07bbd9d918a96e0282d26a12839587",
       "label": "Lv, defect undeclared-title-limit, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31102,7 +31102,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "undeclared-title-limit",
         "--backend-defect",
@@ -31134,7 +31134,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31157,14 +31157,14 @@
       }
     },
     {
-      "build_hash": "82875087c22a25c7b4eb547cd04bf57638163b571342bf613186672fea41c276",
+      "build_hash": "97a28ade31ab6482d6452c3a6b21f7c17ca8a012ecc07e26b04d647eb74d7e3c",
       "label": "Lv, defect undeclared-title-limit, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "undeclared-title-limit",
         "--backend-defect",
@@ -31196,7 +31196,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -31219,7 +31219,7 @@
       }
     },
     {
-      "build_hash": "216a9063338825789dc70d9cc90499c7b7937faf3c3c2d72e6f58153ccd1ae1f",
+      "build_hash": "206e8cb339ef812ea8116a6386e086de494cbb595921fdddfa5890094a1fa3c2",
       "label": "Lv, defect unknown-denied-tools-ignored, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31227,7 +31227,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-denied-tools-ignored",
         "--backend-defect",
@@ -31259,7 +31259,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31282,7 +31282,7 @@
       }
     },
     {
-      "build_hash": "6d5dac9c62fc48fb264eb88bd770bc8059210df960e6a4ba73bbb2e8cc364381",
+      "build_hash": "d5e5161eba32b80a3f49935f186c18032ec5dd04309dd6a9ed01f91119919dbb",
       "label": "Lv, defect unknown-denied-tools-ignored, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31290,7 +31290,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-denied-tools-ignored",
         "--backend-defect",
@@ -31322,7 +31322,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31345,14 +31345,14 @@
       }
     },
     {
-      "build_hash": "ca19b6dbfaeed8d9c7b12517b0619b0fdbe3ee20b9c44f9054259ab9dcff469c",
+      "build_hash": "7d2b38eef1492446caa1bdcabd361b187ffc7701f7247b8b8337179b9485074d",
       "label": "Lv, defect unknown-denied-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-denied-tools-ignored",
         "--backend-defect",
@@ -31384,7 +31384,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -31407,7 +31407,7 @@
       }
     },
     {
-      "build_hash": "391a28e71ac48680550348c69a99946e40550bbb34a90683fbb419166aa2b63f",
+      "build_hash": "3e690a8037410eb8567cf800b2ce9ff2416f8c6b07be05c0bb03896adfc7fe3d",
       "label": "Lv, defect unknown-tools-ignored, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31415,7 +31415,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-tools-ignored",
         "--backend-defect",
@@ -31447,7 +31447,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31470,7 +31470,7 @@
       }
     },
     {
-      "build_hash": "1588feb1dca5ecf6b63dea31c95b9eeb3928a1d9a2a6e1c1823a22045da029b7",
+      "build_hash": "266db802cc0eb30de45fe0b15c477e9a931878354388f8fbbc37162e8feb9f4d",
       "label": "Lv, defect unknown-tools-ignored, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31478,7 +31478,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-tools-ignored",
         "--backend-defect",
@@ -31510,7 +31510,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31533,14 +31533,14 @@
       }
     },
     {
-      "build_hash": "0ba8ee43851c60d2c01d2fe3f1e177a7c4740f4ac4553b76f995cfac34e395b5",
+      "build_hash": "4d155e7fbe2bbf6c2ac7e5ad7755068ed90282592a538007d8202221a06a56d2",
       "label": "Lv, defect unknown-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-tools-ignored",
         "--backend-defect",
@@ -31572,7 +31572,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -31595,14 +31595,14 @@
       }
     },
     {
-      "build_hash": "dcb549d81ddcc991d6486c259579be5ca9627e201ed1047ce2c91a069ff88ad5",
+      "build_hash": "079781528b88888629f371dd5de4d91f9f764af53e9b8957a5bd3f6f907b46e9",
       "label": "Lv, defect update-adds-defaults, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -31634,7 +31634,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31657,7 +31657,7 @@
       }
     },
     {
-      "build_hash": "9a5d4fc503a38584e11528f34c2972423e4da16c6cbca652646b1f58c1dab85d",
+      "build_hash": "e2eab575b4b49d2b3e895e0acc33ccbaf01cf973f7640776618a128f627e918a",
       "label": "Lv, defect update-adds-defaults, backend digest-of-current-state, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31665,7 +31665,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -31697,7 +31697,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31720,7 +31720,7 @@
       }
     },
     {
-      "build_hash": "388ff11d884823cc2f285b7ec807cc32d0cea8c6ccd92f9a693bb0453c5da033",
+      "build_hash": "5336780aab37f598417a57488e5b5d9eda537b18e75869cff438a49e1e0c01e6",
       "label": "Lv, defect update-adds-defaults, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31728,7 +31728,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -31760,7 +31760,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31783,7 +31783,7 @@
       }
     },
     {
-      "build_hash": "93a5afe922bb19f799ad1bd95fa866042cbb6484fb92a2c1f26855c0e162cda8",
+      "build_hash": "bdd4c73374e8faf5cc4430ae2db7983af79de49c90b6f2fc1ae3ba5ca477ec66",
       "label": "Lv, defect vague-validation-error, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31791,7 +31791,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "vague-validation-error",
         "--backend-defect",
@@ -31823,7 +31823,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31846,7 +31846,7 @@
       }
     },
     {
-      "build_hash": "c9e7f29b8ea00ce50d625c0175769ef8876a35494b3ffb2839f1bda95cc168b0",
+      "build_hash": "bbc0597f195a58dc4c613eff012e601e05322da42bf02fccd56c5ebf9af8b21f",
       "label": "Lv, defect vague-validation-error, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31854,7 +31854,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "vague-validation-error",
         "--backend-defect",
@@ -31886,7 +31886,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -31909,14 +31909,14 @@
       }
     },
     {
-      "build_hash": "f4a1d7be5ce1ad782f0f745dd8ddfd850f2d86ac22bcaa532264aa501ceea0df",
+      "build_hash": "3de6bc72550de4f97f37f0ce7a7424cc8f8ba729586561050aeee1aef240519c",
       "label": "Lv, defect vague-validation-error, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "vague-validation-error",
         "--backend-defect",
@@ -31948,7 +31948,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "violated"
         ],
         "FX-KEY-2": [
           "held"
@@ -31971,7 +31971,7 @@
       }
     },
     {
-      "build_hash": "6b5fc978645b26e1bedfb10182d07f0d9b2fd42d36a37a4ae70148342a03e001",
+      "build_hash": "4e53274b75a24a5894d7bc01220f786c6a813a64731ce6c976a35cfc7bf3b809",
       "label": "Lv, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31979,7 +31979,7 @@
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults"
+        "evidence,strict-input,ledger,faults,clock"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -32007,7 +32007,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"
@@ -32030,14 +32030,14 @@
       }
     },
     {
-      "build_hash": "3d71bf4bdb4fd5ba8e260ced9d1b2ea6bd27efdd826a3f01d79f26810051ac1e",
+      "build_hash": "c0c4d679e9a7a1704418aab2fd45158cc9a9bf7947cb4f223955170942e33b80",
       "label": "Lv, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
         "tiny-tracker",
         "all",
         "--features",
-        "evidence,strict-input,ledger,faults"
+        "evidence,strict-input,ledger,faults,clock"
       ],
       "fixture": {
         "FX-BLD-1": [
@@ -32065,7 +32065,7 @@
           "held"
         ],
         "FX-KEY-1": [
-          "not checked"
+          "held"
         ],
         "FX-KEY-2": [
           "held"

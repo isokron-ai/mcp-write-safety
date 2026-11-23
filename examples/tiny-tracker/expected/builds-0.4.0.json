@@ -1,6 +1,6 @@
 {
   "release": "0.4.0",
-  "note": "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts and each defect's requires). Do not edit by hand.",
+  "note": "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Do not edit by hand.",
   "coverage": {
     "factors": {
       "level": 4,
@@ -8,15 +8,15 @@
       "backend": 10,
       "variant": 5
     },
-    "legal_candidates": 4140,
-    "pairs": 1044,
+    "legal_candidates": 4089,
+    "pairs": 1043,
     "builds": 515
   },
   "levels": {
     "L2": "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
     "L3": "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
     "L3d": "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable --data-dir {DATA_DIR}",
-    "Lv": "evidence,strict-input,ledger,faults"
+    "Lv": "evidence,strict-input,ledger,faults,clock"
   },
   "builds": [
     {
@@ -70,7 +70,7 @@
       "label": "Lv correct build",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults"
+        "evidence,strict-input,ledger,faults,clock"
       ],
       "factors": {
         "level": "Lv",
@@ -289,7 +289,7 @@
       "label": "Lv, defect label-by-position, backend lost-update, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -312,7 +312,7 @@
       "label": "Lv, defect update-adds-defaults, backend digest-of-current-state, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -335,7 +335,7 @@
       "label": "Lv, defect delete-refetches-version, backend digest-not-canonical, variant settle-by-lookup",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -357,7 +357,7 @@
       "label": "Lv, defect read-merge-put, backend replay-digest-mismatch, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
@@ -376,25 +376,6 @@
       "fixture": true
     },
     {
-      "label": "L2, defect label-by-position, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "label-by-position",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "label-by-position",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "L3, defect force-by-default, backend lost-update",
       "args": [
         "--features",
@@ -408,6 +389,25 @@
         "level": "L3",
         "mcp": "force-by-default",
         "backend": "lost-update",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect update-adds-defaults, backend key-expires-early",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "update-adds-defaults",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "update-adds-defaults",
+        "backend": "key-expires-early",
         "variant": "-"
       },
       "contract": false,
@@ -458,20 +458,20 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect update-adds-defaults, backend key-record-not-durable",
+      "label": "L3d, defect label-by-position, backend key-record-not-durable",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "update-adds-defaults",
+        "label-by-position",
         "--backend-defect",
         "key-record-not-durable"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "update-adds-defaults",
+        "mcp": "label-by-position",
         "backend": "key-record-not-durable",
         "variant": "-"
       },
@@ -503,7 +503,7 @@
       "label": "Lv, defect force-by-default, backend key-expires-early, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
@@ -581,25 +581,6 @@
       "fixture": true
     },
     {
-      "label": "L3, defect ignore-project-scope, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "key-expires-early"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "ignore-project-scope",
-        "backend": "key-expires-early",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "L3d, defect read-merge-put, backend lost-update",
       "args": [
         "--features",
@@ -642,7 +623,28 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect empty-filter-deletes-all, backend digest-not-canonical",
+      "label": "L3d, defect ignore-project-scope, backend digest-not-canonical",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "ignore-project-scope",
+        "backend": "digest-not-canonical",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3d, defect empty-filter-deletes-all, backend lookup-wrong-record",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
@@ -651,19 +653,19 @@
         "--defect",
         "empty-filter-deletes-all",
         "--backend-defect",
-        "digest-not-canonical"
+        "lookup-wrong-record"
       ],
       "factors": {
         "level": "L3d",
         "mcp": "empty-filter-deletes-all",
-        "backend": "digest-not-canonical",
+        "backend": "lookup-wrong-record",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3d, defect create-overwrites, backend lookup-wrong-record",
+      "label": "L3d, defect create-overwrites, backend lookup-unscoped",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
@@ -672,19 +674,19 @@
         "--defect",
         "create-overwrites",
         "--backend-defect",
-        "lookup-wrong-record"
+        "lookup-unscoped"
       ],
       "factors": {
         "level": "L3d",
         "mcp": "create-overwrites",
-        "backend": "lookup-wrong-record",
+        "backend": "lookup-unscoped",
         "variant": "-"
       },
       "contract": false,
       "fixture": true
     },
     {
-      "label": "L3d, defect skip-null-assignee, backend lookup-unscoped",
+      "label": "L3d, defect skip-null-assignee, backend key-expires-early",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
@@ -693,32 +695,11 @@
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
-        "lookup-unscoped"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "skip-null-assignee",
-        "backend": "lookup-unscoped",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect shape-claims-applied, backend key-expires-early",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "shape-claims-applied",
+        "mcp": "skip-null-assignee",
         "backend": "key-expires-early",
         "variant": "-"
       },
@@ -750,14 +731,14 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect ignore-project-scope, backend key-record-after-effect, variant settle-by-lookup",
+      "label": "L3d, defect shape-claims-applied, backend key-record-after-effect, variant settle-by-lookup",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "ignore-project-scope",
+        "shape-claims-applied",
         "--backend-defect",
         "key-record-after-effect"
       ],
@@ -766,7 +747,7 @@
       },
       "factors": {
         "level": "L3d",
-        "mcp": "ignore-project-scope",
+        "mcp": "shape-claims-applied",
         "backend": "key-record-after-effect",
         "variant": "settle-by-lookup"
       },
@@ -774,18 +755,18 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect error-as-text, backend lookup-wrong-record",
+      "label": "Lv, defect shape-claims-applied, backend lookup-wrong-record",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "error-as-text",
+        "shape-claims-applied",
         "--backend-defect",
         "lookup-wrong-record"
       ],
       "factors": {
         "level": "Lv",
-        "mcp": "error-as-text",
+        "mcp": "shape-claims-applied",
         "backend": "lookup-wrong-record",
         "variant": "-"
       },
@@ -793,18 +774,18 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-unknown-as-failed, backend lookup-unscoped",
+      "label": "Lv, defect error-as-text, backend lookup-unscoped",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "shape-unknown-as-failed",
+        "error-as-text",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
         "level": "Lv",
-        "mcp": "shape-unknown-as-failed",
+        "mcp": "error-as-text",
         "backend": "lookup-unscoped",
         "variant": "-"
       },
@@ -815,7 +796,7 @@
       "label": "Lv, defect conflict-without-iserror, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-without-iserror"
       ],
@@ -836,7 +817,7 @@
       "label": "Lv, defect stale-unannounced, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
@@ -859,7 +840,7 @@
       "label": "Lv, defect conflict-as-generic-error, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
@@ -879,12 +860,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect ignore-project-scope, backend digest-not-canonical, variant key-store-honest",
+      "label": "Lv, defect empty-filter-deletes-all, backend digest-not-canonical, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "ignore-project-scope",
+        "empty-filter-deletes-all",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -894,7 +875,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "ignore-project-scope",
+        "mcp": "empty-filter-deletes-all",
         "backend": "digest-not-canonical",
         "variant": "key-store-honest"
       },
@@ -902,12 +883,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect empty-filter-deletes-all, variant key-store-durable",
+      "label": "Lv, defect ignore-project-scope, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "empty-filter-deletes-all"
+        "ignore-project-scope"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-durable",
@@ -915,7 +896,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "ignore-project-scope",
         "backend": "-",
         "variant": "key-store-durable"
       },
@@ -926,7 +907,7 @@
       "label": "Lv, defect create-overwrites, backend lost-update, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
@@ -949,7 +930,7 @@
       "label": "Lv, defect skip-null-assignee, backend replay-digest-mismatch, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
@@ -969,12 +950,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant key-store-durable",
+      "label": "Lv, defect shape-unknown-as-failed, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "shape-claims-applied",
+        "shape-unknown-as-failed",
         "--backend-defect",
         "digest-not-canonical"
       ],
@@ -984,7 +965,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-claims-applied",
+        "mcp": "shape-unknown-as-failed",
         "backend": "digest-not-canonical",
         "variant": "key-store-durable"
       },
@@ -995,7 +976,7 @@
       "label": "Lv, defect shape-text-says-failed, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-failed",
         "--backend-defect",
@@ -1018,7 +999,7 @@
       "label": "Lv, defect shape-text-invites-retry, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-invites-retry"
       ],
@@ -1038,7 +1019,7 @@
       "label": "Lv, defect comment-id-dropped, backend lost-update, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
@@ -1060,7 +1041,7 @@
       "label": "Lv, defect receipt-missing-version, backend digest-of-current-state, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "receipt-missing-version",
         "--backend-defect",
@@ -1082,7 +1063,7 @@
       "label": "Lv, defect shape-wrong-version, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-wrong-version",
         "--backend-defect",
@@ -1104,7 +1085,7 @@
       "label": "Lv, defect shape-missing-failed, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-missing-failed",
         "--backend-defect",
@@ -1118,6 +1099,23 @@
         "mcp": "shape-missing-failed",
         "backend": "key-expires-early",
         "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect shape-unknown-as-failed",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "shape-unknown-as-failed"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "shape-unknown-as-failed",
+        "backend": "-",
+        "variant": "-"
       },
       "contract": false,
       "fixture": true
@@ -1669,6 +1667,26 @@
       "fixture": true
     },
     {
+      "label": "L2, defect empty-filter-deletes-all, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "empty-filter-deletes-all"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L2",
+        "mcp": "empty-filter-deletes-all",
+        "backend": "-",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "L2, defect create-overwrites, variant settle-by-lookup",
       "args": [
         "--features",
@@ -1709,26 +1727,6 @@
       "fixture": true
     },
     {
-      "label": "L2, defect shape-claims-applied, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "shape-claims-applied"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L2",
-        "mcp": "shape-claims-applied",
-        "backend": "-",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "L2, defect error-as-text, variant settle-by-lookup",
       "args": [
         "--features",
@@ -1749,32 +1747,12 @@
       "fixture": true
     },
     {
-      "label": "L2, defect shape-unknown-as-failed, variant settle-by-lookup",
+      "label": "L2, defect ignore-project-scope, backend lost-update, variant settle-by-lookup",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "shape-unknown-as-failed"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-lookup"
-      },
-      "factors": {
-        "level": "L2",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "-",
-        "variant": "settle-by-lookup"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect empty-filter-deletes-all, backend lost-update, variant settle-by-lookup",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "empty-filter-deletes-all",
+        "ignore-project-scope",
         "--backend-defect",
         "lost-update"
       ],
@@ -1783,7 +1761,29 @@
       },
       "factors": {
         "level": "L2",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "ignore-project-scope",
+        "backend": "lost-update",
+        "variant": "settle-by-lookup"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect shape-unknown-as-failed, backend lost-update, variant settle-by-lookup",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "shape-unknown-as-failed",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-lookup"
+      },
+      "factors": {
+        "level": "L3",
+        "mcp": "shape-unknown-as-failed",
         "backend": "lost-update",
         "variant": "settle-by-lookup"
       },
@@ -2564,7 +2564,7 @@
       "label": "Lv, defect shape-text-says-all-saved, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-all-saved",
         "--backend-defect",
@@ -2587,7 +2587,7 @@
       "label": "Lv, defect bulk-misreports-partial, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-misreports-partial",
         "--backend-defect",
@@ -2610,7 +2610,7 @@
       "label": "Lv, defect bulk-without-transaction, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-without-transaction",
         "--backend-defect",
@@ -2633,7 +2633,7 @@
       "label": "Lv, defect no-idempotency-key, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "no-idempotency-key",
         "--backend-defect",
@@ -2656,7 +2656,7 @@
       "label": "Lv, defect idempotency-key-dropped, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-dropped",
         "--backend-defect",
@@ -2679,7 +2679,7 @@
       "label": "Lv, defect idempotency-key-ignores-args, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-ignores-args",
         "--backend-defect",
@@ -2702,7 +2702,7 @@
       "label": "Lv, defect retry-without-key, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "retry-without-key",
         "--backend-defect",
@@ -2725,7 +2725,7 @@
       "label": "Lv, defect key-store-in-memory, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "key-store-in-memory",
         "--backend-defect",
@@ -2748,7 +2748,7 @@
       "label": "Lv, defect close-before-confirm, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "close-before-confirm",
         "--backend-defect",
@@ -2771,7 +2771,7 @@
       "label": "Lv, defect coerce-types, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "coerce-types",
         "--backend-defect",
@@ -2794,7 +2794,7 @@
       "label": "Lv, defect drop-unknown-args, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "drop-unknown-args",
         "--backend-defect",
@@ -2817,7 +2817,7 @@
       "label": "Lv, defect skip-limits, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-limits",
         "--backend-defect",
@@ -2840,7 +2840,7 @@
       "label": "Lv, defect vague-validation-error, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "vague-validation-error",
         "--backend-defect",
@@ -2863,7 +2863,7 @@
       "label": "Lv, defect undeclared-title-limit, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "undeclared-title-limit",
         "--backend-defect",
@@ -2886,7 +2886,7 @@
       "label": "Lv, defect convert-numeric-strings, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "convert-numeric-strings",
         "--backend-defect",
@@ -2909,7 +2909,7 @@
       "label": "Lv, defect ignore-unknown-args-with-notice, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-unknown-args-with-notice",
         "--backend-defect",
@@ -2932,7 +2932,7 @@
       "label": "Lv, defect read-only-strict-true, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-strict-true",
         "--backend-defect",
@@ -2955,7 +2955,7 @@
       "label": "Lv, defect unknown-denied-tools-ignored, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-denied-tools-ignored",
         "--backend-defect",
@@ -2978,7 +2978,7 @@
       "label": "Lv, defect read-only-by-annotation, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-by-annotation",
         "--backend-defect",
@@ -3001,7 +3001,7 @@
       "label": "Lv, defect unknown-tools-ignored, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-tools-ignored",
         "--backend-defect",
@@ -3024,7 +3024,7 @@
       "label": "Lv, defect comment-marked-read-only, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-marked-read-only",
         "--backend-defect",
@@ -3047,7 +3047,7 @@
       "label": "Lv, defect add-label-replaces-list, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "add-label-replaces-list",
         "--backend-defect",
@@ -3070,7 +3070,7 @@
       "label": "Lv, defect create-marked-idempotent, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-marked-idempotent",
         "--backend-defect",
@@ -3093,7 +3093,7 @@
       "label": "Lv, defect missing-annotations, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "missing-annotations",
         "--backend-defect",
@@ -3116,7 +3116,7 @@
       "label": "Lv, defect set-labels-non-destructive, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "set-labels-non-destructive",
         "--backend-defect",
@@ -3139,7 +3139,7 @@
       "label": "Lv, defect token-in-error, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "token-in-error",
         "--backend-defect",
@@ -3162,7 +3162,7 @@
       "label": "Lv, defect in-progress-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "in-progress-reported-not-applied",
         "--backend-defect",
@@ -3185,7 +3185,7 @@
       "label": "Lv, defect settle-miss-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "settle-miss-reported-not-applied",
         "--backend-defect",
@@ -3200,6 +3200,23 @@
         "mcp": "settle-miss-reported-not-applied",
         "backend": "digest-of-current-state",
         "variant": "key-store-honest"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L2, defect label-by-position",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "--defect",
+        "label-by-position"
+      ],
+      "factors": {
+        "level": "L2",
+        "mcp": "label-by-position",
+        "backend": "-",
+        "variant": "-"
       },
       "contract": false,
       "fixture": true
@@ -3273,16 +3290,16 @@
       "fixture": true
     },
     {
-      "label": "L2, defect ignore-project-scope",
+      "label": "L2, defect shape-claims-applied",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "ignore-project-scope"
+        "shape-claims-applied"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "ignore-project-scope",
+        "mcp": "shape-claims-applied",
         "backend": "-",
         "variant": "-"
       },
@@ -3329,23 +3346,6 @@
       "fixture": true
     },
     {
-      "label": "L3, defect update-adds-defaults",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "update-adds-defaults"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "update-adds-defaults",
-        "backend": "-",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "L3, defect delete-refetches-version, backend lost-update",
       "args": [
         "--features",
@@ -3358,6 +3358,25 @@
       "factors": {
         "level": "L3",
         "mcp": "delete-refetches-version",
+        "backend": "lost-update",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect empty-filter-deletes-all, backend lost-update",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "lost-update"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "empty-filter-deletes-all",
         "backend": "lost-update",
         "variant": "-"
       },
@@ -3422,37 +3441,18 @@
       "fixture": true
     },
     {
-      "label": "L3, defect shape-unknown-as-failed, backend lost-update",
+      "label": "L3, defect ignore-project-scope, backend digest-of-current-state",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "factors": {
-        "level": "L3",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "lost-update",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3, defect empty-filter-deletes-all, backend digest-of-current-state",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
-        "--defect",
-        "empty-filter-deletes-all",
+        "ignore-project-scope",
         "--backend-defect",
         "digest-of-current-state"
       ],
       "factors": {
         "level": "L3",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "ignore-project-scope",
         "backend": "digest-of-current-state",
         "variant": "-"
       },
@@ -3479,18 +3479,18 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect label-by-position",
+      "label": "L3d, defect update-adds-defaults",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "label-by-position"
+        "update-adds-defaults"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "label-by-position",
+        "mcp": "update-adds-defaults",
         "backend": "-",
         "variant": "-"
       },
@@ -4299,7 +4299,7 @@
       "label": "Lv, defect lookup-reexecutes, backend replay-digest-mismatch",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "lookup-reexecutes",
         "--backend-defect",
@@ -4318,7 +4318,7 @@
       "label": "Lv, defect delete-refetches-version, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -4341,7 +4341,7 @@
       "label": "Lv, defect read-merge-put, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
@@ -4364,7 +4364,7 @@
       "label": "Lv, defect skip-null-assignee, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
@@ -4387,7 +4387,7 @@
       "label": "Lv, defect shape-claims-applied, backend digest-of-current-state, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-claims-applied",
         "--backend-defect",
@@ -4410,7 +4410,7 @@
       "label": "Lv, defect update-adds-defaults, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -4430,12 +4430,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant key-store-honest",
+      "label": "Lv, defect ignore-project-scope, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "empty-filter-deletes-all",
+        "ignore-project-scope",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -4445,7 +4445,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "ignore-project-scope",
         "backend": "replay-digest-mismatch",
         "variant": "key-store-honest"
       },
@@ -4456,7 +4456,7 @@
       "label": "Lv, defect create-overwrites, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
@@ -4479,7 +4479,7 @@
       "label": "Lv, defect error-as-text, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
@@ -4502,7 +4502,7 @@
       "label": "Lv, defect shape-unknown-as-failed, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-unknown-as-failed",
         "--backend-defect",
@@ -4525,7 +4525,7 @@
       "label": "Lv, defect shape-text-says-failed, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-failed",
         "--backend-defect",
@@ -4548,7 +4548,7 @@
       "label": "Lv, defect shape-wrong-version, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-wrong-version",
         "--backend-defect",
@@ -4571,7 +4571,7 @@
       "label": "Lv, defect shape-missing-failed, backend replay-digest-mismatch, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-missing-failed",
         "--backend-defect",
@@ -4594,7 +4594,7 @@
       "label": "Lv, defect shape-text-invites-retry, backend digest-not-canonical, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-invites-retry",
         "--backend-defect",
@@ -4617,7 +4617,7 @@
       "label": "Lv, defect comment-id-dropped, backend digest-not-canonical, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
@@ -4640,7 +4640,7 @@
       "label": "Lv, defect receipt-missing-version, backend digest-not-canonical, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "receipt-missing-version",
         "--backend-defect",
@@ -4663,7 +4663,7 @@
       "label": "Lv, backend key-expires-early, variant key-store-honest",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--backend-defect",
         "key-expires-early"
       ],
@@ -4684,7 +4684,7 @@
       "label": "Lv, defect conflict-as-generic-error, backend lost-update, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
@@ -4704,33 +4704,10 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect ignore-project-scope, backend lost-update, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "lost-update"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "ignore-project-scope",
-        "backend": "lost-update",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "Lv, defect force-by-default, backend digest-of-current-state, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
@@ -4750,10 +4727,33 @@
       "fixture": true
     },
     {
+      "label": "Lv, defect empty-filter-deletes-all, backend digest-of-current-state, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults,clock",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "digest-of-current-state"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "empty-filter-deletes-all",
+        "backend": "digest-of-current-state",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "Lv, defect label-by-position, backend replay-digest-mismatch, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -4776,7 +4776,7 @@
       "label": "Lv, defect delete-refetches-version, backend replay-digest-mismatch, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -4799,7 +4799,7 @@
       "label": "Lv, defect conflict-without-iserror, backend replay-digest-mismatch, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
@@ -4819,10 +4819,33 @@
       "fixture": true
     },
     {
+      "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant key-store-durable",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults,clock",
+        "--defect",
+        "shape-claims-applied",
+        "--backend-defect",
+        "replay-digest-mismatch"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "key-store-durable",
+        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-claims-applied",
+        "backend": "replay-digest-mismatch",
+        "variant": "key-store-durable"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "Lv, defect read-merge-put, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
@@ -4845,7 +4868,7 @@
       "label": "Lv, defect stale-unannounced, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
@@ -4868,7 +4891,7 @@
       "label": "Lv, defect error-as-text, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
@@ -4888,33 +4911,10 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect shape-unknown-as-failed, backend digest-not-canonical, variant key-store-durable",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-unknown-as-failed",
-        "--backend-defect",
-        "digest-not-canonical"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "key-store-durable",
-        "TRACKER_KEY_JOURNAL": "{WORK}/keys.journal"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "shape-unknown-as-failed",
-        "backend": "digest-not-canonical",
-        "variant": "key-store-durable"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
       "label": "Lv, defect shape-missing-failed, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-missing-failed",
         "--backend-defect",
@@ -4937,7 +4937,7 @@
       "label": "Lv, defect shape-text-says-all-saved, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-all-saved",
         "--backend-defect",
@@ -4960,7 +4960,7 @@
       "label": "Lv, defect bulk-misreports-partial, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-misreports-partial",
         "--backend-defect",
@@ -4983,7 +4983,7 @@
       "label": "Lv, defect bulk-without-transaction, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-without-transaction",
         "--backend-defect",
@@ -5006,7 +5006,7 @@
       "label": "Lv, defect no-idempotency-key, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "no-idempotency-key",
         "--backend-defect",
@@ -5029,7 +5029,7 @@
       "label": "Lv, defect idempotency-key-dropped, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-dropped",
         "--backend-defect",
@@ -5052,7 +5052,7 @@
       "label": "Lv, defect idempotency-key-ignores-args, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-ignores-args",
         "--backend-defect",
@@ -5075,7 +5075,7 @@
       "label": "Lv, defect retry-without-key, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "retry-without-key",
         "--backend-defect",
@@ -5098,7 +5098,7 @@
       "label": "Lv, defect key-store-in-memory, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "key-store-in-memory",
         "--backend-defect",
@@ -5121,7 +5121,7 @@
       "label": "Lv, defect close-before-confirm, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "close-before-confirm",
         "--backend-defect",
@@ -5144,7 +5144,7 @@
       "label": "Lv, defect coerce-types, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "coerce-types",
         "--backend-defect",
@@ -5167,7 +5167,7 @@
       "label": "Lv, defect drop-unknown-args, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "drop-unknown-args",
         "--backend-defect",
@@ -5190,7 +5190,7 @@
       "label": "Lv, defect skip-limits, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-limits",
         "--backend-defect",
@@ -5213,7 +5213,7 @@
       "label": "Lv, defect vague-validation-error, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "vague-validation-error",
         "--backend-defect",
@@ -5236,7 +5236,7 @@
       "label": "Lv, defect undeclared-title-limit, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "undeclared-title-limit",
         "--backend-defect",
@@ -5259,7 +5259,7 @@
       "label": "Lv, defect convert-numeric-strings, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "convert-numeric-strings",
         "--backend-defect",
@@ -5282,7 +5282,7 @@
       "label": "Lv, defect ignore-unknown-args-with-notice, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-unknown-args-with-notice",
         "--backend-defect",
@@ -5305,7 +5305,7 @@
       "label": "Lv, defect read-only-strict-true, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-strict-true",
         "--backend-defect",
@@ -5328,7 +5328,7 @@
       "label": "Lv, defect unknown-denied-tools-ignored, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-denied-tools-ignored",
         "--backend-defect",
@@ -5351,7 +5351,7 @@
       "label": "Lv, defect read-only-by-annotation, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-by-annotation",
         "--backend-defect",
@@ -5374,7 +5374,7 @@
       "label": "Lv, defect unknown-tools-ignored, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-tools-ignored",
         "--backend-defect",
@@ -5397,7 +5397,7 @@
       "label": "Lv, defect comment-marked-read-only, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-marked-read-only",
         "--backend-defect",
@@ -5420,7 +5420,7 @@
       "label": "Lv, defect add-label-replaces-list, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "add-label-replaces-list",
         "--backend-defect",
@@ -5443,7 +5443,7 @@
       "label": "Lv, defect create-marked-idempotent, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-marked-idempotent",
         "--backend-defect",
@@ -5466,7 +5466,7 @@
       "label": "Lv, defect missing-annotations, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "missing-annotations",
         "--backend-defect",
@@ -5489,7 +5489,7 @@
       "label": "Lv, defect set-labels-non-destructive, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "set-labels-non-destructive",
         "--backend-defect",
@@ -5512,7 +5512,7 @@
       "label": "Lv, defect token-in-error, backend digest-not-canonical, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "token-in-error",
         "--backend-defect",
@@ -5535,7 +5535,7 @@
       "label": "Lv, defect shape-text-invites-retry, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-invites-retry",
         "--backend-defect",
@@ -5558,7 +5558,7 @@
       "label": "Lv, defect comment-id-dropped, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-id-dropped",
         "--backend-defect",
@@ -5581,7 +5581,7 @@
       "label": "Lv, defect receipt-missing-version, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "receipt-missing-version",
         "--backend-defect",
@@ -5604,7 +5604,7 @@
       "label": "Lv, defect shape-wrong-version, backend key-expires-early, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-wrong-version",
         "--backend-defect",
@@ -5627,7 +5627,7 @@
       "label": "Lv, defect conflict-as-generic-error, backend digest-of-current-state, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
@@ -5646,34 +5646,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect ignore-project-scope, backend digest-of-current-state, variant settle-by-client-reference",
+      "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "digest-of-current-state"
-      ],
-      "env": {
-        "TRACKER_VARIANTS": "settle-by-client-reference"
-      },
-      "factors": {
-        "level": "Lv",
-        "mcp": "ignore-project-scope",
-        "backend": "digest-of-current-state",
-        "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant settle-by-client-reference",
-      "args": [
-        "--features",
-        "evidence,strict-input,ledger,faults",
-        "--defect",
-        "shape-claims-applied",
+        "empty-filter-deletes-all",
         "--backend-defect",
         "replay-digest-mismatch"
       ],
@@ -5682,7 +5660,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "shape-claims-applied",
+        "mcp": "empty-filter-deletes-all",
         "backend": "replay-digest-mismatch",
         "variant": "settle-by-client-reference"
       },
@@ -5693,7 +5671,7 @@
       "label": "Lv, defect update-adds-defaults, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "update-adds-defaults",
         "--backend-defect",
@@ -5715,7 +5693,7 @@
       "label": "Lv, defect label-by-position, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "label-by-position",
         "--backend-defect",
@@ -5737,7 +5715,7 @@
       "label": "Lv, defect force-by-default, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "force-by-default",
         "--backend-defect",
@@ -5759,7 +5737,7 @@
       "label": "Lv, defect conflict-without-iserror, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
@@ -5781,7 +5759,7 @@
       "label": "Lv, defect create-overwrites, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
@@ -5803,7 +5781,7 @@
       "label": "Lv, defect skip-null-assignee, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-null-assignee",
         "--backend-defect",
@@ -5822,10 +5800,32 @@
       "fixture": true
     },
     {
+      "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant settle-by-client-reference",
+      "args": [
+        "--features",
+        "evidence,strict-input,ledger,faults,clock",
+        "--defect",
+        "shape-claims-applied",
+        "--backend-defect",
+        "digest-not-canonical"
+      ],
+      "env": {
+        "TRACKER_VARIANTS": "settle-by-client-reference"
+      },
+      "factors": {
+        "level": "Lv",
+        "mcp": "shape-claims-applied",
+        "backend": "digest-not-canonical",
+        "variant": "settle-by-client-reference"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "Lv, defect shape-text-says-failed, backend digest-not-canonical, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-failed",
         "--backend-defect",
@@ -5847,7 +5847,7 @@
       "label": "Lv, defect delete-refetches-version, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "delete-refetches-version",
         "--backend-defect",
@@ -5869,7 +5869,7 @@
       "label": "Lv, defect stale-unannounced, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "stale-unannounced",
         "--backend-defect",
@@ -5888,12 +5888,12 @@
       "fixture": true
     },
     {
-      "label": "Lv, defect empty-filter-deletes-all, backend key-expires-early, variant settle-by-client-reference",
+      "label": "Lv, defect ignore-project-scope, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
-        "empty-filter-deletes-all",
+        "ignore-project-scope",
         "--backend-defect",
         "key-expires-early"
       ],
@@ -5902,7 +5902,7 @@
       },
       "factors": {
         "level": "Lv",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "ignore-project-scope",
         "backend": "key-expires-early",
         "variant": "settle-by-client-reference"
       },
@@ -5913,7 +5913,7 @@
       "label": "Lv, defect error-as-text, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "error-as-text",
         "--backend-defect",
@@ -5935,7 +5935,7 @@
       "label": "Lv, defect shape-unknown-as-failed, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-unknown-as-failed",
         "--backend-defect",
@@ -5957,7 +5957,7 @@
       "label": "Lv, defect shape-text-says-all-saved, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "shape-text-says-all-saved",
         "--backend-defect",
@@ -5979,7 +5979,7 @@
       "label": "Lv, defect bulk-misreports-partial, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-misreports-partial",
         "--backend-defect",
@@ -6001,7 +6001,7 @@
       "label": "Lv, defect bulk-without-transaction, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "bulk-without-transaction",
         "--backend-defect",
@@ -6023,7 +6023,7 @@
       "label": "Lv, defect no-idempotency-key, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "no-idempotency-key",
         "--backend-defect",
@@ -6045,7 +6045,7 @@
       "label": "Lv, defect idempotency-key-dropped, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-dropped",
         "--backend-defect",
@@ -6067,7 +6067,7 @@
       "label": "Lv, defect idempotency-key-ignores-args, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "idempotency-key-ignores-args",
         "--backend-defect",
@@ -6089,7 +6089,7 @@
       "label": "Lv, defect retry-without-key, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "retry-without-key",
         "--backend-defect",
@@ -6111,7 +6111,7 @@
       "label": "Lv, defect key-store-in-memory, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "key-store-in-memory",
         "--backend-defect",
@@ -6133,7 +6133,7 @@
       "label": "Lv, defect close-before-confirm, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "close-before-confirm",
         "--backend-defect",
@@ -6155,7 +6155,7 @@
       "label": "Lv, defect coerce-types, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "coerce-types",
         "--backend-defect",
@@ -6177,7 +6177,7 @@
       "label": "Lv, defect drop-unknown-args, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "drop-unknown-args",
         "--backend-defect",
@@ -6199,7 +6199,7 @@
       "label": "Lv, defect skip-limits, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "skip-limits",
         "--backend-defect",
@@ -6221,7 +6221,7 @@
       "label": "Lv, defect vague-validation-error, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "vague-validation-error",
         "--backend-defect",
@@ -6243,7 +6243,7 @@
       "label": "Lv, defect undeclared-title-limit, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "undeclared-title-limit",
         "--backend-defect",
@@ -6265,7 +6265,7 @@
       "label": "Lv, defect convert-numeric-strings, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "convert-numeric-strings",
         "--backend-defect",
@@ -6287,7 +6287,7 @@
       "label": "Lv, defect ignore-unknown-args-with-notice, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "ignore-unknown-args-with-notice",
         "--backend-defect",
@@ -6309,7 +6309,7 @@
       "label": "Lv, defect read-only-strict-true, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-strict-true",
         "--backend-defect",
@@ -6331,7 +6331,7 @@
       "label": "Lv, defect unknown-denied-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-denied-tools-ignored",
         "--backend-defect",
@@ -6353,7 +6353,7 @@
       "label": "Lv, defect read-only-by-annotation, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "read-only-by-annotation",
         "--backend-defect",
@@ -6375,7 +6375,7 @@
       "label": "Lv, defect unknown-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "unknown-tools-ignored",
         "--backend-defect",
@@ -6397,7 +6397,7 @@
       "label": "Lv, defect comment-marked-read-only, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "comment-marked-read-only",
         "--backend-defect",
@@ -6419,7 +6419,7 @@
       "label": "Lv, defect add-label-replaces-list, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "add-label-replaces-list",
         "--backend-defect",
@@ -6441,7 +6441,7 @@
       "label": "Lv, defect create-marked-idempotent, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "create-marked-idempotent",
         "--backend-defect",
@@ -6463,7 +6463,7 @@
       "label": "Lv, defect missing-annotations, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "missing-annotations",
         "--backend-defect",
@@ -6485,7 +6485,7 @@
       "label": "Lv, defect set-labels-non-destructive, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "set-labels-non-destructive",
         "--backend-defect",
@@ -6507,7 +6507,7 @@
       "label": "Lv, defect token-in-error, backend key-expires-early, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults",
+        "evidence,strict-input,ledger,faults,clock",
         "--defect",
         "token-in-error",
         "--backend-defect",
@@ -6521,25 +6521,6 @@
         "mcp": "token-in-error",
         "backend": "key-expires-early",
         "variant": "settle-by-client-reference"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L2, defect ignore-project-scope, backend replay-digest-mismatch",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
-        "--defect",
-        "ignore-project-scope",
-        "--backend-defect",
-        "replay-digest-mismatch"
-      ],
-      "factors": {
-        "level": "L2",
-        "mcp": "ignore-project-scope",
-        "backend": "replay-digest-mismatch",
-        "variant": "-"
       },
       "contract": false,
       "fixture": true
@@ -6754,18 +6735,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect empty-filter-deletes-all, backend lookup-wrong-record",
+      "label": "L2, defect create-overwrites, backend lookup-wrong-record",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "empty-filter-deletes-all",
+        "create-overwrites",
         "--backend-defect",
         "lookup-wrong-record"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "empty-filter-deletes-all",
+        "mcp": "create-overwrites",
         "backend": "lookup-wrong-record",
         "variant": "-"
       },
@@ -6792,18 +6773,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect shape-claims-applied, backend lookup-wrong-record",
+      "label": "L2, defect error-as-text, backend lookup-wrong-record",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "shape-claims-applied",
+        "error-as-text",
         "--backend-defect",
         "lookup-wrong-record"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "shape-claims-applied",
+        "mcp": "error-as-text",
         "backend": "lookup-wrong-record",
         "variant": "-"
       },
@@ -7666,18 +7647,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect create-overwrites, backend lookup-unscoped",
+      "label": "L2, defect skip-null-assignee, backend lookup-unscoped",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "create-overwrites",
+        "skip-null-assignee",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "create-overwrites",
+        "mcp": "skip-null-assignee",
         "backend": "lookup-unscoped",
         "variant": "-"
       },
@@ -7704,18 +7685,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect error-as-text, backend lookup-unscoped",
+      "label": "L2, defect shape-unknown-as-failed, backend lookup-unscoped",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
         "--defect",
-        "error-as-text",
+        "shape-unknown-as-failed",
         "--backend-defect",
         "lookup-unscoped"
       ],
       "factors": {
         "level": "L2",
-        "mcp": "error-as-text",
+        "mcp": "shape-unknown-as-failed",
         "backend": "lookup-unscoped",
         "variant": "-"
       },
@@ -8388,18 +8369,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect update-adds-defaults, backend key-expires-early",
+      "label": "L3, defect label-by-position, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
-        "update-adds-defaults",
+        "label-by-position",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
-        "mcp": "update-adds-defaults",
+        "level": "L3",
+        "mcp": "label-by-position",
         "backend": "key-expires-early",
         "variant": "-"
       },
@@ -8407,17 +8388,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect read-merge-put, backend key-expires-early",
+      "label": "L3, defect read-merge-put, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "read-merge-put",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "read-merge-put",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8426,17 +8407,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect conflict-without-iserror, backend key-expires-early",
+      "label": "L3, defect conflict-without-iserror, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "conflict-without-iserror",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "conflict-without-iserror",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8445,17 +8426,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect conflict-as-generic-error, backend key-expires-early",
+      "label": "L3, defect conflict-as-generic-error, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "conflict-as-generic-error",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "conflict-as-generic-error",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8464,17 +8445,36 @@
       "fixture": true
     },
     {
-      "label": "L2, defect create-overwrites, backend key-expires-early",
+      "label": "L3, defect empty-filter-deletes-all, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
+        "--defect",
+        "empty-filter-deletes-all",
+        "--backend-defect",
+        "key-expires-early"
+      ],
+      "factors": {
+        "level": "L3",
+        "mcp": "empty-filter-deletes-all",
+        "backend": "key-expires-early",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
+      "label": "L3, defect create-overwrites, backend key-expires-early",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "create-overwrites",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "create-overwrites",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8483,18 +8483,18 @@
       "fixture": true
     },
     {
-      "label": "L2, defect skip-null-assignee, backend key-expires-early",
+      "label": "L3, defect shape-claims-applied, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
-        "skip-null-assignee",
+        "shape-claims-applied",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
-        "mcp": "skip-null-assignee",
+        "level": "L3",
+        "mcp": "shape-claims-applied",
         "backend": "key-expires-early",
         "variant": "-"
       },
@@ -8502,17 +8502,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect lookup-reexecutes, backend key-expires-early",
+      "label": "L3, defect lookup-reexecutes, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "lookup-reexecutes",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "lookup-reexecutes",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8521,17 +8521,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect in-progress-reported-not-applied, backend key-expires-early",
+      "label": "L3, defect in-progress-reported-not-applied, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "in-progress-reported-not-applied",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "in-progress-reported-not-applied",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8540,17 +8540,17 @@
       "fixture": true
     },
     {
-      "label": "L2, defect settle-miss-reported-not-applied, backend key-expires-early",
+      "label": "L3, defect settle-miss-reported-not-applied, backend key-expires-early",
       "args": [
         "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock",
         "--defect",
         "settle-miss-reported-not-applied",
         "--backend-defect",
         "key-expires-early"
       ],
       "factors": {
-        "level": "L2",
+        "level": "L3",
         "mcp": "settle-miss-reported-not-applied",
         "backend": "key-expires-early",
         "variant": "-"
@@ -8578,20 +8578,20 @@
       "fixture": true
     },
     {
-      "label": "L3d, defect label-by-position, backend key-record-not-durable",
+      "label": "L3d, defect update-adds-defaults, backend key-record-not-durable",
       "args": [
         "--features",
         "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
         "--data-dir",
         "{DATA_DIR}",
         "--defect",
-        "label-by-position",
+        "update-adds-defaults",
         "--backend-defect",
         "key-record-not-durable"
       ],
       "factors": {
         "level": "L3d",
-        "mcp": "label-by-position",
+        "mcp": "update-adds-defaults",
         "backend": "key-record-not-durable",
         "variant": "-"
       },
@@ -9752,6 +9752,27 @@
       "fixture": true
     },
     {
+      "label": "L3d, defect ignore-project-scope, backend key-record-after-effect",
+      "args": [
+        "--features",
+        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
+        "--data-dir",
+        "{DATA_DIR}",
+        "--defect",
+        "ignore-project-scope",
+        "--backend-defect",
+        "key-record-after-effect"
+      ],
+      "factors": {
+        "level": "L3d",
+        "mcp": "ignore-project-scope",
+        "backend": "key-record-after-effect",
+        "variant": "-"
+      },
+      "contract": false,
+      "fixture": true
+    },
+    {
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-after-effect",
       "args": [
         "--features",
@@ -9808,27 +9829,6 @@
       "factors": {
         "level": "L3d",
         "mcp": "skip-null-assignee",
-        "backend": "key-record-after-effect",
-        "variant": "-"
-      },
-      "contract": false,
-      "fixture": true
-    },
-    {
-      "label": "L3d, defect shape-claims-applied, backend key-record-after-effect",
-      "args": [
-        "--features",
-        "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock,durable",
-        "--data-dir",
-        "{DATA_DIR}",
-        "--defect",
-        "shape-claims-applied",
-        "--backend-defect",
-        "key-record-after-effect"
-      ],
-      "factors": {
-        "level": "L3d",
-        "mcp": "shape-claims-applied",
         "backend": "key-record-after-effect",
         "variant": "-"
       },
@@ -10616,7 +10616,7 @@
       "label": "Lv, variant key-store-durable",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults"
+        "evidence,strict-input,ledger,faults,clock"
       ],
       "env": {
         "TRACKER_VARIANTS": "key-store-durable",
@@ -10635,7 +10635,7 @@
       "label": "Lv, variant settle-by-client-reference",
       "args": [
         "--features",
-        "evidence,strict-input,ledger,faults"
+        "evidence,strict-input,ledger,faults,clock"
       ],
       "env": {
         "TRACKER_VARIANTS": "settle-by-client-reference"

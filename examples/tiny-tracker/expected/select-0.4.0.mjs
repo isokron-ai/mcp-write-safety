@@ -8,15 +8,16 @@
 //                   L3   L2 with the 0.3.0 in-memory features (inflight, retention, clock)
 //                   L3d  L2 with inflight, retention, clock and durable, on a data dir of the row's own ({DATA_DIR});
 //                        the journal keeps the fixture clock's offset (0.4.0, clock lines), so FX-KEY-1 runs there
-//                   Lv   evidence, strict-input, ledger, faults: lookup and the other core features only from the
-//                        default profile, so the key-store variants that turn lookup off can run (CMP-5, CMP-53)
+//                   Lv   evidence, strict-input, ledger, faults, clock: lookup and the other core features only from
+//                        the default profile, so the key-store variants that turn lookup off can run (CMP-5, CMP-53);
+//                        the fixture clock so FX-KEY-1 is checked there (coordinator note 26 item 7)
 //   mcp defect    none, or one of the MCP-layer defects (src/defects)
 //   backend       none, or one of the backend defects (src/backend/defects)
 //   variant       none, or one of the variants (src/variants)
 //
 // Every pair of values from two factors that some legal build can hold appears in at least one row. Legal: the
-// compatibility table (src/compat.ts) refuses nothing, each defect's `requires` is met by the effective features, and
-// a backend defect's refusals are empty. The rows are picked greedily (the candidate that covers the most uncovered
+// compatibility table (src/compat.ts) refuses nothing, each defect's `requires` is met by the effective features, a
+// backend defect's refusals are empty, and the matrix-only needs (MATRIX_NEEDS) are met. The rows are picked greedily (the candidate that covers the most uncovered
 // pairs; ties go to the first in a fixed order), after the seed rows: the 0.2.0 build list (which the contract driver
 // runs) and one correct build per level. Nothing depends on the time, the machine or a random number, so --check
 // selects again and compares with the committed list byte for byte.
@@ -39,11 +40,19 @@ export const LEVELS = [
   { id: "L3", features: [...EVIDENCE_02, "inflight", "retention", "clock"], dataDir: false },
   // 0.4.0 (note 19 item 7): the journal keeps the clock's offset, so durable runs with the fixture clock (CMP-65 retired).
   { id: "L3d", features: [...EVIDENCE_02, "inflight", "retention", "clock", "durable"], dataDir: true },
-  { id: "Lv", features: ["evidence", "strict-input", "ledger", "faults"], dataDir: false },
+  // Note 26 item 7: the fixture clock, so key-expires-early (MATRIX_NEEDS) is checked by FX-KEY-1 on Lv rows too.
+  { id: "Lv", features: ["evidence", "strict-input", "ledger", "faults", "clock"], dataDir: false },
 ];
 
 /** Variants that keep a journal of used keys (TRACKER_KEY_JOURNAL, src/variants). */
 const KEY_JOURNAL_VARIANTS = ["key-store-honest", "key-store-durable"];
+
+/**
+ * Matrix-only placement needs, on top of a defect's own `requires` (coordinator note 26 item 7): FX-KEY-1 needs the
+ * fixture clock, so key-expires-early is placed only where it can be checked. The CLI still allows the defect without
+ * the clock.
+ */
+const MATRIX_NEEDS = { "key-expires-early": ["clock"] };
 
 export async function select() {
   const { DEFECTS } = await dist("defects/index.js");
@@ -71,6 +80,7 @@ export async function select() {
     if (refusals.length) return false;
     for (const name of mcp) if (!(DEFECTS.find((d) => d.name === name).requires ?? []).every((f) => features.includes(f))) return false;
     if (backendDefectRefusals(backend, { features }).length) return false;
+    for (const name of [...mcp, ...backend]) if (!(MATRIX_NEEDS[name] ?? []).every((f) => features.includes(f))) return false;
     return true;
   };
 
@@ -136,7 +146,7 @@ export async function select() {
   });
   return {
     release: "0.4.0",
-    note: "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts and each defect's requires). Do not edit by hand.",
+    note: "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Do not edit by hand.",
     coverage: { factors: Object.fromEntries(names.map((n) => [n, factors[n].length])), legal_candidates: candidates.length, pairs: coverable, builds: builds.length },
     levels: Object.fromEntries(LEVELS.map((l) => [l.id, l.features.join(",") + (l.dataDir ? " --data-dir {DATA_DIR}" : "")])),
     builds,
