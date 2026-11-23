@@ -37,7 +37,7 @@ A defect is a deliberate, switchable fault that one check detects. It is off unl
    node expected/generate.mjs --builds expected/builds-0.4.0.json --out expected/0.4.0.json --contract-dir <checkout> --repeat 3 --check
    node dist/test/repro-known-answers.js --runs 3
    ```
-   Verdict files need the owner's review before a release.
+   Only the current release's file is regenerated. **A release's known answers reproduce at its own tag** (`expected/0.3.0.json` at `tiny-tracker-v0.3.0`, and so on; see [docs/STABILITY.md](docs/STABILITY.md)): never regenerate an earlier release's file on a later tree. Verdict files need the owner's review before a release.
 
 **Backend defect** (`src/backend/defects/`): the same file and header rules. It names the backend **seams** it replaces (`BACKEND_SEAMS` in `src/backend/defects/index.ts`); a seam that is not wired yet cannot take a defect, and the start is refused. Add its entry to `BACKEND_DEFECTS`. A backend defect build binds loopback only and prints a banner. Name the requirement or `FX-` property it demonstrates in `context`.
 
