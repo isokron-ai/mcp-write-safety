@@ -15,7 +15,7 @@ import { verifyCapture } from '../../src/core/capture.js';
 import { openRuns } from '../../src/core/ledger.js';
 import { verifyChecksums } from '../../src/report/evidence.js';
 import { requirement } from '../../src/requirements.js';
-import { RESULTS_KEYS } from '../../src/report/results.js';
+import { RESULTS_KEYS_WRITTEN } from '../../src/report/results.js';
 import { writePathKey, type Result } from '../../src/report/verdicts.js';
 import { fakeManifest, runFake, startFake } from '../fake/harness.js';
 
@@ -55,7 +55,7 @@ test('correct build, 40 pairs: no violation, the forced cases held, pairs only "
     assert.ok(verifyChecksums(r.outDir).ok);
     assert.ok(verifyCapture(join(r.outDir, 'capture')).ok);
     const json = JSON.parse(readFileSync(join(r.outDir, 'results.json'), 'utf8')) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(json), [...RESULTS_KEYS]);
+    assert.deepEqual(Object.keys(json), [...RESULTS_KEYS_WRITTEN]);
     assert.equal(readFileSync(join(r.outDir, 'report.md'), 'utf8').split('\n')[0]!.startsWith('Scope:'), true);
     assert.ok(r.doc.measurements && r.doc.measurements['A-2'].tools === 7 && r.doc.measurements['A-4'].order_stable_across_two_lists === true);
     // History: every invoke has an outcome.
@@ -83,11 +83,12 @@ const MATRIX: [string, string[]][] = [
   ['MWS-RES-2', ['MWS-RES-2 ticket:ticket_update']],
   // Coercion also turns a wrong-type id into a not-found.
   // K9: ticket_get's coerced id answers with a tool error that does not name the argument: MWS-IN-4 violated there.
-  ['MWS-IN-1', ['MWS-IN-1 ticket:ticket_update', 'MWS-IN-4 ticket-doc:ticket_get', 'MWS-IN-4 ticket:ticket_get', 'MWS-IN-6 ticket:ticket_update']],
+  // B-GAP F2: the input defects are found on the create and the delete tool too (src/checks/inputwrites.ts).
+  ['MWS-IN-1', ['MWS-IN-1 ticket:ticket_create', 'MWS-IN-1 ticket:ticket_update', 'MWS-IN-4 ticket-doc:ticket_get', 'MWS-IN-4 ticket:ticket_get', 'MWS-IN-6 ticket:ticket_create', 'MWS-IN-6 ticket:ticket_update']],
   // A dropped argument was also not rejected (MWS-IN-7).
-  ['MWS-IN-2', ['MWS-IN-2 ticket-doc:ticket_get', 'MWS-IN-2 ticket-doc:ticket_replace', 'MWS-IN-2 ticket:ticket_get', 'MWS-IN-2 ticket:ticket_update', 'MWS-IN-7 ticket-doc:ticket_get', 'MWS-IN-7 ticket-doc:ticket_replace', 'MWS-IN-7 ticket:ticket_get', 'MWS-IN-7 ticket:ticket_update']],
-  ['MWS-IN-3', ['MWS-IN-3 ticket:ticket_update']],
-  ['MWS-IN-4', ['MWS-IN-4 ticket-doc:ticket_get', 'MWS-IN-4 ticket-doc:ticket_replace', 'MWS-IN-4 ticket:ticket_get', 'MWS-IN-4 ticket:ticket_update']],
+  ['MWS-IN-2', ['MWS-IN-2 ticket-doc:ticket_get', 'MWS-IN-2 ticket-doc:ticket_replace', 'MWS-IN-2 ticket:ticket_create', 'MWS-IN-2 ticket:ticket_delete', 'MWS-IN-2 ticket:ticket_get', 'MWS-IN-2 ticket:ticket_update', 'MWS-IN-7 ticket-doc:ticket_get', 'MWS-IN-7 ticket-doc:ticket_replace', 'MWS-IN-7 ticket:ticket_create', 'MWS-IN-7 ticket:ticket_delete', 'MWS-IN-7 ticket:ticket_get', 'MWS-IN-7 ticket:ticket_update']],
+  ['MWS-IN-3', ['MWS-IN-3 ticket:ticket_create', 'MWS-IN-3 ticket:ticket_update']],
+  ['MWS-IN-4', ['MWS-IN-4 ticket-doc:ticket_get', 'MWS-IN-4 ticket-doc:ticket_replace', 'MWS-IN-4 ticket:ticket_create', 'MWS-IN-4 ticket:ticket_delete', 'MWS-IN-4 ticket:ticket_get', 'MWS-IN-4 ticket:ticket_update']],
   ['MWS-ANN-1', ['MWS-ANN-1 ticket-doc:ticket_list', 'MWS-ANN-1 ticket:ticket_list']],
   // An overwrite of the field the call names is not MWS-ANN-2 (spec, narrowed); it is not additive (MWS-ANN-5).
   ['MWS-ANN-2', ['MWS-ANN-5 ticket:ticket_update']],

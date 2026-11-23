@@ -11,7 +11,7 @@
 //
 // Mirrors: Grafana B1 and B2 (a receipt with the applied operations and the
 // stored state removed the verify reads callers otherwise made).
-//   https://isokron.ai/research/grafana-mcp-server-audit#findings-register
+//   https://isokron.ai/research/grafana-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

@@ -10,7 +10,7 @@
 //
 // Mirrors: Payload PAY-05 (a bulk failure without `isError`, 5 of 5) and
 // PAY-01 (an opt-out refusal returned as plain text).
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

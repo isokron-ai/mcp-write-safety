@@ -35,7 +35,7 @@ resources:
 const ok = (data: unknown) => ({ ok: true, isError: false, data, text: JSON.stringify(data), timed_out: false, transport_error: null, rpc_error: null });
 const err = (t: string) => ({ ok: false, isError: true, data: null, text: t, timed_out: false, transport_error: null, rpc_error: null });
 
-/** posts and pages through one generic tool set: the collection is a resource var (Strapi/Payload shape). */
+/** posts and pages through one generic tool set: the collection is a resource var (a CMS-style shape). */
 const VARS = parseManifestText(VARS_TEXT(), 'm.yaml');
 
 /** posts and pages through one generic tool set: the collection is the text around the id. */

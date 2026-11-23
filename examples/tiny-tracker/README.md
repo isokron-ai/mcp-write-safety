@@ -10,7 +10,7 @@ If you want a starting point for your own server, read the correct handlers in `
 - Streamable HTTP. Protocol revision 2026-07-28, with the SDK's stateless fallback for 2025-11-25 clients.
 - One direct runtime dependency (the SDK, which brings `zod` with it). No network access beyond 127.0.0.1.
 - npm package `@mcp-write-safety/tiny-tracker` (command `tiny-tracker`): `npx -y @mcp-write-safety/tiny-tracker all`, or build it from this folder (below). Its `writecheck.yaml` is the `mcp-writecheck` manifest for it.
-- The requirements: [MCP Write-Safety Requirements 0.9](https://isokron.ai/mws). Source: [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety/tree/main/examples/tiny-tracker).
+- The requirements: [MCP Write-Safety Requirements 0.9](https://isokron.ai/mws?utm_source=tiny-tracker-readme&utm_medium=readme). Source: [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety/tree/main/examples/tiny-tracker).
 
 ## Contents
 
@@ -268,4 +268,4 @@ Feedback is welcome: open an issue or a discussion on [isokron-ai/mcp-write-safe
 
 Apache-2.0, like the rest of the code in this repository.
 
-Made by [IsoKron](https://isokron.ai/?utm_source=npm&utm_medium=readme&utm_campaign=tiny-tracker).
+Made by [IsoKron](https://isokron.ai/?utm_source=tiny-tracker-readme&utm_medium=readme).

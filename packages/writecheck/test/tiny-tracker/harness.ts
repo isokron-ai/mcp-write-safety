@@ -6,6 +6,8 @@
  * behind the loopback gate.
  */
 
+import { assertPublishable } from '../publish-lint.js';
+import { assertViolationsHaveSteps } from '../steps-lint.js';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -81,5 +83,10 @@ export async function startTinyTracker(ttDir: string, o: { defects?: string[]; b
 
 export async function runTT(t: TT, log: (s: string) => void = () => {}): Promise<RunOutcome> {
   const { hash } = await planCommand({ manifest: t.manifest, env: t.env, log: () => {} });
-  return runCommand({ manifest: t.manifest, outRoot: join(t.dir, 'out'), stateDir: join(t.dir, 'state'), confirmTarget: 'tiny-tracker', planHash: hash, interactive: false, env: t.env, log, noSignals: true });
+  const r = await runCommand({ manifest: t.manifest, outRoot: join(t.dir, 'out'), stateDir: join(t.dir, 'state'), confirmTarget: 'tiny-tracker', planHash: hash, interactive: false, env: t.env, log, noSignals: true });
+  // why: review R2 (lane F1): no violated record without its trace steps, unless its evidence is not a call trace.
+  assertViolationsHaveSteps(r.doc);
+  // why: what a run wrote matches the published schema member for member, and names no product and no review.
+  assertPublishable(r.outDir);
+  return r;
 }

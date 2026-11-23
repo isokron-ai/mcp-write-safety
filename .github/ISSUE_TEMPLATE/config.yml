@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Comment by email (no GitHub account)
-    url: https://isokron.ai/mws#comment
+    url: https://isokron.ai/mws?utm_source=mws-issue-template&utm_medium=github-template#comment
     about: Send your comment to comments@isokron.ai. We copy each emailed comment into a public issue, with your permission, and record its disposition.
   - name: Security reports
     url: https://github.com/isokron-ai/mcp-write-safety/security/advisories/new

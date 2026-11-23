@@ -8,7 +8,7 @@ The MCP Write-Safety Requirements (MWS) are a specification for Model Context Pr
 
 **Status: MWS 0.9, a draft for public comment, published 16 November 2026, open for comment until 16 December 2026.** Every requirement has the status `draft`. Comments are made as issues in this repository, and every comment gets a recorded disposition. Version 1.0 follows the comment window ([section 1](spec/mws.md#1-status-of-this-document) of the specification gives the exit criteria).
 
-Read the specification in [`spec/mws.md`](spec/mws.md) or at [isokron.ai/mws](https://isokron.ai/mws).
+Read the specification in [`spec/mws.md`](spec/mws.md) or at [isokron.ai/mws](https://isokron.ai/mws?utm_source=mws-readme&utm_medium=readme).
 
 MWS is an independent draft. It is not a product of the Model Context Protocol project or of the foundation that hosts it, and no MCP maintainer and no maintainer of a cited server has endorsed it. It is written and stewarded by IsoKron, which sells audits and builds of MCP servers and so has a commercial interest in the subject (section 15.1 of the specification). Every finding it cites comes from IsoKron's own audits of November 2026. The text was drafted with the assistance of AI tools.
 
@@ -25,6 +25,10 @@ To see the test tool run against the sample server, on your own machine only (No
 npx -y -p @mcp-write-safety/writecheck@0.1.0 -p @mcp-write-safety/tiny-tracker@0.1.0 mcp-writecheck demo --defect all
 ```
 
+## Defect matrix (T0 worker)
+
+[`.github/workflows/defect-matrix.yml`](.github/workflows/defect-matrix.yml) runs on `workflow_dispatch` only. It builds `examples/tiny-tracker`, starts each requested build and compares its fixture answers with the committed row in `examples/tiny-tracker/expected/0.3.0.json`, using the same generator (`expected/generate.mjs`) that wrote that file. Inputs: `shard_id`, `attempt_id`, `fence` and `run_key` (required strings), and `defects`, a comma-separated list of defect names such as `lookup-reexecutes`. With `defects` empty it runs two control builds: the correct build, and one build with a known defect that the fixture answers can tell apart from the correct one. The workflow does nothing unless the repository variable `LOOP_ENABLED` is exactly `true`. It writes `t0-manifest.json` (`attempt_id`, `fence`, `run_key`, `conclusion`) and uploads it as artifact `t0-<attempt_id>` for 3 days. It uses no secrets. Only the fixture answers are compared; the contract-driver and `mcp-writecheck` rows of the known-answer files are not.
+
 ## Related repositories
 
 - [isokron-ai/mcp-writecheck-action](https://github.com/isokron-ai/mcp-writecheck-action): a GitHub Action that runs `mcp-writecheck` in CI and reports the result in the job summary.
@@ -38,4 +42,4 @@ Comments on any part of the text are welcome as issues. A proposal to change a r
 
 The code (`packages/`, `examples/`, `integrations/`) is Apache-2.0 (`LICENSE`; `integrations/` carries its own `LICENSE` and `NOTICE`); the specification text and the result shape are CC BY 4.0 (`LICENSE-spec`). The name "MCP Write-Safety Requirements" and the MWS mark are covered by neither licence; see [TRADEMARKS.md](TRADEMARKS.md). Each package has a `CHANGELOG.md`.
 
-Written and stewarded by [IsoKron](https://isokron.ai/?utm_source=github&utm_medium=readme&utm_campaign=mcp-write-safety).
+Written and stewarded by [IsoKron](https://isokron.ai/?utm_source=mws-readme&utm_medium=readme).

@@ -52,9 +52,18 @@ export function blockedReason(ip: string): string | null {
   return blocked.check(ip, 'ipv4') ? `non-public IPv4 address ${ip}${ip === '169.254.169.254' ? ' (cloud metadata)' : ''}` : null;
 }
 
+/** Default ports by scheme: HTTP for the tester's own requests, database schemes for the wire gate's upstream. */
+const DEFAULT_PORTS: Record<string, string> = { 'http:': '80', 'https:': '443', 'postgres:': '5432', 'postgresql:': '5432', 'redis:': '6379', 'rediss:': '6379', 'mongodb:': '27017' };
+/** The default port of a scheme (`postgres:` → 5432); 80 for a scheme not listed. */
+export function defaultPortOf(protocol: string): string {
+  return DEFAULT_PORTS[protocol.toLowerCase()] ?? '80';
+}
+/** Schemes the wire gate may connect to (its upstream only; the tester's own requests stay HTTP). */
+export const WIRE_SCHEMES = new Set(['postgres:', 'postgresql:', 'redis:', 'mongodb:']);
+
 export function hostAllowed(url: URL, allow: string[]): boolean {
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  const withPort = `${host}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
+  const withPort = `${host}:${url.port || defaultPortOf(url.protocol)}`;
   return allow.some((a) => {
     const p = a.toLowerCase();
     if (p.startsWith('*.')) return host.endsWith(p.slice(1));
@@ -108,9 +117,12 @@ export function setResolver(r: Resolver): () => void {
   };
 }
 
-/** Throw unless the URL is http(s) to a host on the list (and never a metadata name or address). */
-export function assertEgress(url: URL, policy: EgressPolicy): void {
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new EgressBlocked(`egress blocked: scheme ${url.protocol}`);
+/**
+ * Throw unless the URL is http(s) to a host on the list (and never a metadata name or address).
+ * `wire: true` (the wire gate's upstream only) also allows the database schemes in WIRE_SCHEMES.
+ */
+export function assertEgress(url: URL, policy: EgressPolicy, o: { wire?: boolean } = {}): void {
+  if (url.protocol !== 'https:' && url.protocol !== 'http:' && !(o.wire && WIRE_SCHEMES.has(url.protocol))) throw new EgressBlocked(`egress blocked: scheme ${url.protocol}`);
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
   if (METADATA_NAMES.has(host) || isMetadataAddress(host)) throw new EgressBlocked(`egress blocked: ${host} is a cloud metadata address`);
   if (!hostAllowed(url, policy.allow)) throw new EgressBlocked(`egress blocked: ${url.host} is not on the egress list (${policy.allow.join(', ') || 'empty'})`);
@@ -156,7 +168,7 @@ export function egressFor(urls: (string | undefined | null)[]): EgressPolicy {
     if (!u) continue;
     try {
       const p = new URL(u);
-      allow.add(`${p.hostname.replace(/^\[|\]$/g, '').toLowerCase()}:${p.port || (p.protocol === 'https:' ? '443' : '80')}`);
+      allow.add(`${p.hostname.replace(/^\[|\]$/g, '').toLowerCase()}:${p.port || defaultPortOf(p.protocol)}`);
     } catch {
       /* not a URL: nothing to allow */
     }

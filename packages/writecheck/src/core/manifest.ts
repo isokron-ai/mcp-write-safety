@@ -27,6 +27,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { parsePath, isObj, parseConfigText, sha256, WritecheckError, type Obj } from './util.js';
 import { templateRoots } from './template.js';
 import { RESULT_SHAPES, type ShapeName } from '../checks/shape.js';
+import { parseProvenance } from './identity.js';
 
 export const MANIFEST_VERSIONS = ['0.9'] as const;
 export const UPDATE_MODES = ['field_patch', 'full_replace', 'command', 'composite'] as const;
@@ -47,15 +48,312 @@ export interface ToolTemplate {
  * outputSchema marks them. Absent unless declared (the outputSchema decides).
  */
 export type DecodeMode = 'json' | 'none';
-export type Decode = { decode?: DecodeMode };
+/**
+ * Read extraction (`decode: { extract: … }`): a tool whose answer carries its JSON inside markup or prose (the whole answer
+ * wrapped in `<insecure-content>…</insecure-content>`, say) has that JSON taken out of the answer's text before it is parsed.
+ * `between`: the text after the first `start` and before the first `end` that follows it; `regex`: the one capture group of
+ * the first match (dotAll). `refusals`: also extract from an error answer, and let the structured refusal signals read the
+ * extracted document; without it a refusal is classified on the answer as received.
+ */
+export type Extract = ({ between: [string, string] } | { regex: string }) & { refusals: boolean };
+export type Decode = { decode?: DecodeMode; extract?: Extract };
 
-const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it)';
+const DECODE_WHY = 'json (decode the JSON document a wrapped result carries as a string) or none (never decode it); or an object { mode, extract }';
 
-/** Parse an optional `decode` member. */
+/** The longest extraction pattern accepted. */
+const EXTRACT_MAX = 512;
+
+/**
+ * Why a declared extraction regex is refused (null: accepted). It must compile, have exactly one capture group, and be bounded:
+ * the group is delimited by something on each side that is more than anchors or a match-anything run (a group that can reach
+ * either end of the answer could take the whole of it), and no quantified group holds a quantifier of its own (catastrophic
+ * backtracking on a long answer).
+ */
+export function extractRegexProblem(src: string): string | null {
+  if (src.length > EXTRACT_MAX) return `longer than ${EXTRACT_MAX} characters`;
+  try {
+    void new RegExp(src, 's');
+  } catch (e) {
+    return `not a valid regular expression: ${(e as Error).message}`;
+  }
+  const groups = (new RegExp(`${src}|`, 's').exec('') ?? []).length - 1;
+  if (groups !== 1) return `${groups} capture groups; exactly one is needed (use (?:…) for any other group)`;
+  // Locate the capture group: the first "(" that is not escaped, not in a class, and not followed by "?" (or is "(?<name>").
+  let open = -1;
+  let close = -1;
+  let depth = 0;
+  let inClass = false;
+  let capDepth = -1;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') inClass = true;
+    else if (c === '(') {
+      depth++;
+      const capturing = src[i + 1] !== '?' || (src[i + 2] === '<' && src[i + 3] !== '=' && src[i + 3] !== '!');
+      if (capturing && open < 0) {
+        open = i;
+        capDepth = depth;
+      }
+    } else if (c === ')') {
+      if (depth === capDepth && close < 0 && open >= 0) close = i;
+      depth--;
+    }
+  }
+  if (open < 0 || close < 0) return 'the capture group could not be located';
+  const before = required(src.slice(0, open));
+  const after = required(src.slice(close + 1).replace(/^(?:[*+?]|\{\d*,?\d*\})\??/, ''));
+  if (!before || !after) return 'unbounded: the capture group must be delimited on both sides by text the answer must contain (e.g. "<tag>(.*?)</tag>"), or it could take the whole answer; prefer between: [start, end]';
+  if (/\((?:[^()\\]|\\.)*[*+](?:[^()\\]|\\.)*\)[*+{]/.test(src)) return 'unbounded: a quantified group holds a quantifier (catastrophic backtracking)';
+  return null;
+}
+
+/**
+ * What a regex fragment requires the text to contain: anchors, optional atoms and groups (`x?`, `x*`, `x{0,n}`, `(?:…)?`), a group
+ * with an empty alternative (`(?:<t>|)`) and match-anything runs (`.+`, `[\s\S]+`, `\S+`) taken out. Empty: no delimiter.
+ */
+function required(s: string): string {
+  const G = String.raw`(?:[^()\\]|\\.)*`;
+  let x = s.replace(/\\[bBAzZ]|[\^$]/g, '');
+  const optGroup = new RegExp(String.raw`\((?:\?:)?${G}\)(?:[?*]|\{0(?:,\d*)?\})\??`, 'g');
+  const emptyAlt = new RegExp(String.raw`\((?:\?:)?(?:\|${G}|${G}\||${G}\|\|${G})\)`, 'g');
+  for (let prev = ''; prev !== x; ) {
+    prev = x;
+    x = x.replace(optGroup, '').replace(emptyAlt, '');
+  }
+  x = x.replace(/(?:\\.|\[(?:[^\]\\]|\\.)*\]|[^\\()|])(?:[?*]|\{0(?:,\d*)?\})\??/g, '');
+  x = x.replace(/(?:\.|\[\\s\\S\]|\[\\S\\s\]|\[\^\]\]|\\[sSwWdD])\+\??/g, '');
+  return x.replace(/\(\?:|[()|]/g, '').trim();
+}
+
+function extractOf(v: unknown, where: string): Extract {
+  const o = obj(v, where);
+  keys(o, ['between', 'regex', 'refusals'], where);
+  if ((o['between'] === undefined) === (o['regex'] === undefined)) throw fail(where, 'give exactly one of between: [start, end] or regex: "<pattern with one capture group>"');
+  if (o['refusals'] !== undefined && typeof o['refusals'] !== 'boolean') throw fail(`${where}.refusals`, 'true or false');
+  const refusals = o['refusals'] === true;
+  if (o['between'] !== undefined) {
+    const b = o['between'];
+    if (!Array.isArray(b) || b.length !== 2 || b.some((x) => typeof x !== 'string' || !x || x.length > EXTRACT_MAX)) throw fail(`${where}.between`, `[start, end]: two non-empty strings of at most ${EXTRACT_MAX} characters (unbounded otherwise)`);
+    return { between: [b[0] as string, b[1] as string], refusals };
+  }
+  const src = str(o['regex'], `${where}.regex`);
+  const why = extractRegexProblem(src);
+  if (why) throw fail(`${where}.regex`, why);
+  return { regex: src, refusals };
+}
+
+/** Parse an optional `decode` member: `json`, `none`, or `{ mode, extract }`. */
 function decodeOf(v: unknown, where: string): Decode {
   if (v === undefined) return {};
-  if (v !== 'json' && v !== 'none') throw fail(`${where}.decode`, DECODE_WHY);
-  return { decode: v };
+  if (v === 'json' || v === 'none') return { decode: v };
+  if (!isObj(v)) throw fail(`${where}.decode`, DECODE_WHY);
+  keys(v, ['mode', 'extract'], `${where}.decode`);
+  if (v['mode'] === undefined && v['extract'] === undefined) throw fail(`${where}.decode`, 'mode, extract or both');
+  if (v['mode'] !== undefined && v['mode'] !== 'json' && v['mode'] !== 'none') throw fail(`${where}.decode.mode`, 'json or none');
+  return { ...(v['mode'] !== undefined ? { decode: v['mode'] as DecodeMode } : {}), ...(v['extract'] !== undefined ? { extract: extractOf(v['extract'], `${where}.decode.extract`) } : {}) };
+}
+
+/**
+ * Every tool the declaration names an extraction for (server.decode, target.guard, each resource's read and list), one per tool;
+ * two different extractions for one tool are refused.
+ */
+export function declaredExtracts(m: Pick<Manifest, 'server' | 'target' | 'resources'>): Map<string, Extract> {
+  const out = new Map<string, Extract>();
+  const where = new Map<string, string>();
+  const add = (tool: string, x: Extract | undefined, at: string) => {
+    if (!x) return;
+    const had = out.get(tool);
+    if (had && JSON.stringify(had) !== JSON.stringify(x)) throw fail(at, `decode.extract for ${tool} differs from the one ${where.get(tool)} declares (one extraction per tool: it applies to every call of the tool)`);
+    out.set(tool, x);
+    where.set(tool, at);
+  };
+  for (const [tool, x] of Object.entries(m.server?.extract ?? {})) add(tool, x, `server.decode.${tool}.extract`);
+  if (m.target?.guard) add(m.target.guard.tool, m.target.guard.extract, 'target.guard.decode.extract');
+  (m.resources ?? []).forEach((r, i) => {
+    add(r.read.tool, r.read.extract, `resources[${i}].read.decode.extract`);
+    if (r.list) add(r.list.tool, r.list.extract, `resources[${i}].list.decode.extract`);
+  });
+  return out;
+}
+
+/**
+ * Feature: per-session init (`session.init`). Calls made on every MCP session the tester opens, after the handshake and before
+ * the session's first other tools/call, for a server that connects to its backend only when a call carries the connection
+ * settings. `args` may use `{{env.NAME}}` (the tester's environment; every such value is treated as a secret). `read_only: true`
+ * declares the call only reads; otherwise (and where tools/list does not mark it readOnlyHint: true) each call counts as a write.
+ */
+export interface SessionInit {
+  tool: string;
+  args: unknown;
+  read_only: boolean;
+  /** Every environment variable the arguments name (`{{env.NAME}}`). */
+  env: string[];
+  /** Those given under a secret-like name: their values are secrets however short (from three characters). */
+  secret_env: string[];
+}
+
+/** Name parts that mark a credential on their own. */
+const SECRET_PARTS = new Set(['password', 'passwd', 'passphrase', 'pass', 'pwd', 'secret', 'secrets', 'token', 'tokens', 'credential', 'credentials', 'creds', 'cookie', 'cookies', 'dsn', 'auth', 'authorization', 'bearer', 'oauth', 'apikey', 'connstr']);
+/** The password-type parts: a numeric literal is refused only under these. */
+const PASSWORD_PARTS = new Set(['password', 'passwd', 'passphrase', 'pass', 'pwd', 'pin']);
+/** With `key`, these make it a credential (`api_key`, `privateKey`); `key` alone is one too. Any other `key` (primary, sort, cache) is not. */
+const KEY_QUALIFIERS = new Set(['api', 'private', 'access', 'secret', 'client', 'signing', 'encryption', 'master']);
+/** A last part that describes a setting rather than holding the credential (`token_type`, `auth_mode`, `secretName`, `password_policy`, `token_url`). */
+const DESCRIPTORS = new Set(['type', 'types', 'mode', 'scope', 'scopes', 'name', 'names', 'kind', 'policy', 'field', 'path', 'id', 'ids', 'length', 'len', 'size', 'format', 'url', 'uri', 'endpoint', 'host', 'file', 'dir', 'env', 'var', 'ttl', 'expiry', 'expires', 'lifetime', 'header', 'prefix', 'location', 'method', 'provider', 'version', 'enabled', 'required']);
+/** A first part that makes the name a limit or a count (`max_tokens`). */
+const COUNTERS = new Set(['max', 'min', 'num', 'count', 'n']);
+/** Lowercase compounds written as one word, split into their parts. */
+const COMPOUNDS: Record<string, string[]> = {
+  apikey: ['api', 'key'],
+  accesskey: ['access', 'key'],
+  privatekey: ['private', 'key'],
+  secretkey: ['secret', 'key'],
+  clientsecret: ['client', 'secret'],
+  accesstoken: ['access', 'token'],
+  authtoken: ['auth', 'token'],
+  refreshtoken: ['refresh', 'token'],
+  idtoken: ['id', 'token'],
+  connectionstring: ['connection', 'string'],
+};
+
+/** A name's parts: camelCase, `_`, `-`, `.`, digits; lowercased; known one-word compounds split. */
+export function nameParts(name: string): string[] {
+  return name
+    .replace(/^-+/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_.\-\d]+/)
+    .map((p) => p.toLowerCase())
+    .filter(Boolean)
+    .flatMap((p) => COMPOUNDS[p] ?? [p]);
+}
+
+/**
+ * Is an argument name (or a command-line flag's name) secret-like, a name whose value is a credential? Matched on whole name
+ * parts, case ignored, camelCase and compounds included: a part `password`, `passwd`, `passphrase`, `pass`, `pwd`, `secret`,
+ * `token`, `credential(s)`, `creds`, `cookie`, `dsn`, `auth`, `authorization`, `bearer`, `oauth`; `connection` or `conn` with `string` or `str`;
+ * `key` alone or with `api`, `private`, `access`, `secret`, `client`, `signing`, `encryption` or `master`. Not secret-like: a name
+ * whose last part describes the setting (`token_type`, `auth_mode`, `oauth_scope`, `secretName`, `cookie_name`,
+ * `password_policy`, `token_url`), one whose first part makes it a limit (`max_tokens`), and a part that merely contains a
+ * marker (`bypass`, `passport`, `tokenizer`, `author`, `keyboard`).
+ */
+export function secretLikeName(name: string): boolean {
+  const parts = nameParts(name);
+  if (!parts.length) return false;
+  if (parts.length > 1 && DESCRIPTORS.has(parts[parts.length - 1]!)) return false;
+  if (COUNTERS.has(parts[0]!) && parts.length > 1) return false;
+  if (parts.some((p) => SECRET_PARTS.has(p))) return true;
+  if ((parts.includes('connection') || parts.includes('conn')) && (parts.includes('string') || parts.includes('str'))) return true;
+  if (parts.includes('key')) return parts.length === 1 || parts.some((p) => KEY_QUALIFIERS.has(p));
+  return false;
+}
+
+/** A password-type name (`password`, `dbPass`, `pwd`): a numeric literal under it is refused too. */
+export const passwordLikeName = (name: string): boolean => secretLikeName(name) && nameParts(name).some((p) => PASSWORD_PARTS.has(p));
+
+/** A literal URL that carries a credential: a user-info password (`user:pass@`) or a query parameter with a secret-like name. */
+export function urlCarriesSecret(v: string): boolean {
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v.trim())) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/\s@?#]*:[^/\s@?#]*@/i.test(v.trim())) return true;
+  const q = /\?([^#]*)/.exec(v);
+  if (!q) return false;
+  return q[1]!.split('&').some((kv) => {
+    const k = decodeURIComponent(kv.split('=')[0] ?? '');
+    return !!k && secretLikeName(k) && (kv.split('=')[1] ?? '') !== '' && !/^\{\{/.test(decodeURIComponent(kv.split('=').slice(1).join('=')));
+  });
+}
+
+const envOnly = (x: string): string | null => /^\{\{\s*\??env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(x)?.[1] ?? null;
+
+function sessionOf(v: unknown): { init: SessionInit[] } | null {
+  if (v === undefined) return null;
+  const o = obj(v, 'session');
+  keys(o, ['init'], 'session');
+  if (!Array.isArray(o['init']) || o['init'].length === 0 || o['init'].length > 8) throw fail('session.init', 'a list of one to eight { tool, args, read_only } calls');
+  const init = (o['init'] as unknown[]).map((x, i) => {
+    const w = `session.init[${i}]`;
+    const t = tool(x, w, ['read_only']);
+    if (t['read_only'] !== undefined && typeof t['read_only'] !== 'boolean') throw fail(`${w}.read_only`, 'true or false');
+    if (!isObj(t.args)) throw fail(`${w}.args`, 'an object');
+    const roots = templateRoots(t.args);
+    for (const r of roots) if (r !== 'env') throw fail(`${w}.args`, `{{${r}}}: session.init arguments may use only {{env.NAME}} (they are sent before any object of the run exists)`);
+    const env = new Set<string>();
+    const walk = (s: unknown): void => {
+      if (typeof s === 'string') {
+        for (const m of s.matchAll(/\{\{\s*(?:json:|\?)?env(?:\.([^}\s]*))?\s*\}\}/g)) {
+          if (!m[1] || !ENV.test(m[1])) throw fail(`${w}.args`, `${m[0]}: write {{env.NAME}} with one environment variable name`);
+          env.add(m[1]);
+        }
+      } else if (Array.isArray(s)) s.forEach(walk);
+      else if (isObj(s)) for (const [k, x] of Object.entries(s)) (walk(k), walk(x));
+    };
+    walk(t.args);
+    // why: review of PR #14 (8) and its follow-up (B, re-review): a credential is never written in the manifest. Under a secret-like
+    // name (an object key, a `--flag` or `-p` in a list, `name=value` in a list, a `{ name, value }` header pair) the value must be
+    // exactly one {{env.NAME}}, whose value is then a secret however short (secret_env). A literal URL anywhere must not carry a
+    // credential (user-info or a secret-like query parameter). A number is refused only under a password-type name.
+    const secretEnv = new Set<string>();
+    const why = 'a value under a secret-like name is given as {{env.NAME}} (one variable, the whole value), never written in the manifest';
+    const check = (x: unknown, at: string, name: string): void => {
+      if (x === null || x === undefined || x === '' || typeof x === 'boolean') return;
+      if (typeof x === 'number') {
+        if (passwordLikeName(name)) throw fail(`${w}.args${at}`, why);
+        return;
+      }
+      if (Array.isArray(x)) return x.forEach((y, j) => (typeof y === 'string' || typeof y === 'number' ? check(y, `${at}[${j}]`, name) : lit(y, `${at}[${j}]`)));
+      if (isObj(x)) return lit(x, at);
+      const n = typeof x === 'string' ? envOnly(x) : null;
+      if (!n) throw fail(`${w}.args${at}`, why);
+      secretEnv.add(n);
+    };
+    const urlOk = (x: unknown, at: string): void => {
+      if (typeof x === 'string' && urlCarriesSecret(x)) throw fail(`${w}.args${at}`, 'a literal URL that carries a credential (user-info or a secret-like query parameter) is given as {{env.NAME}}, never written in the manifest');
+    };
+    const lit = (v: unknown, at: string): void => {
+      if (Array.isArray(v)) {
+        v.forEach((x, j) => {
+          const here = `${at}[${j}]`;
+          if (typeof x !== 'string') return lit(x, here);
+          urlOk(x, here);
+          const kv = /^(-{0,2}[A-Za-z][\w.-]*)=(.*)$/s.exec(x);
+          if (kv && secretLikeName(kv[1]!)) return check(kv[2], here, kv[1]!);
+          const flag = /^-{1,2}([A-Za-z][\w.-]*)$/.exec(x);
+          const next = v[j + 1];
+          const isLit = j + 1 < v.length && (typeof next === 'string' || typeof next === 'number') && !/^-{1,2}[A-Za-z]/.test(String(next));
+          if (flag && isLit && (secretLikeName(flag[1]!) || (/^-[pP]$/.test(x) && typeof next === 'string' && !/^\d+$/.test(next)))) check(next, `${at}[${j + 1}] (after ${x})`, /^-[pP]$/.test(x) ? 'password' : flag[1]!);
+        });
+        return;
+      }
+      if (isObj(v)) {
+        // A header pair { name: "Authorization", value: "…" } (also key/header in place of name).
+        const pairName = ['name', 'key', 'header'].map((k) => v[k]).find((x): x is string => typeof x === 'string');
+        const pair = pairName !== undefined && Object.hasOwn(v, 'value');
+        if (pair && secretLikeName(pairName)) check(v['value'], `${at}.value`, pairName);
+        for (const [k, x] of Object.entries(v)) {
+          if (pair && (k === 'value' || ['name', 'key', 'header'].includes(k))) {
+            if (k === 'value' && !secretLikeName(pairName)) lit(x, `${at}.${k}`), urlOk(x, `${at}.${k}`);
+            continue;
+          }
+          if (secretLikeName(k)) check(x, `${at}.${k}`, k);
+          else {
+            urlOk(x, `${at}.${k}`);
+            lit(x, `${at}.${k}`);
+          }
+        }
+      }
+    };
+    lit(t.args, '');
+    return { tool: t.tool, args: t.args, read_only: t['read_only'] === true, env: [...env], secret_env: [...secretEnv] };
+  });
+  return { init };
 }
 
 /**
@@ -127,6 +425,12 @@ export interface ListSpec extends ToolTemplate, Decode {
   ignore: string[];
   /** How to ask for the next page: the value at `path` in an answer, sent as the argument `arg`; null: one answer is the list. */
   next: { path: string; arg: string } | null;
+  /**
+   * For an eventually consistent list (MWS-RES-3, RETRY-1): `args`, arguments merged into this list's arguments when it is read
+   * to find the run's own new objects (the backend's consistent-read option); `settle_ms`, how long such a find is repeated
+   * until it shows the objects it looks for. Absent: one plain read, as before.
+   */
+  consistency?: { args: Record<string, unknown> | null; settle_ms: number };
 }
 
 /** A case the declaration adds to MWS-RES-1: an update with these arguments must leave `expect` in effect. */
@@ -144,6 +448,27 @@ export interface MultiSpec extends ToolTemplate {
   invalid_id: unknown;
   /** Where the result lists the items it says were applied (a path in the result, and the id inside each entry). */
   report: { applied: string; id: string | null } | null;
+}
+
+/**
+ * One condition of a declared effect, on the object read back after the call: `path` equals `value` (with `pick`: the list at
+ * `path`, each element reduced to its `pick` member, equals `value`); the list at `path` holds an element matching `contains`
+ * (an object matches on the members it names; any other value matches an equal element); or holds none matching `lacks`.
+ */
+export type EffectCond = { path: string; value: unknown; pick: string | null } | { path: string; contains: unknown } | { path: string; lacks: unknown };
+
+/**
+ * A write call and the state it asks for (MWS-RES-1), judged by reading the object back. `on: object`: the call writes a fresh
+ * scratch object of the resource ({{id}}, and {{object}} / {{version}} as read just before the call); `on: new`: the call
+ * creates the object, which is found by its {{marker}} through the resource's list. `deleted`: the object is gone afterwards.
+ * `answers`: the inputResponses to send where the tool answers input_required (revision 2026-07-28).
+ */
+export interface EffectSpec extends ToolTemplate {
+  on: 'object' | 'new';
+  deleted: boolean;
+  expect: EffectCond[];
+  answers: Record<string, unknown> | null;
+  client_capabilities: Record<string, unknown> | null;
 }
 
 /** A tool that edits one element of a list held inside the object (MWS-UPD-2). */
@@ -244,6 +569,8 @@ export interface ResourceSpec {
    * the fields the update tool can set; MWS-IN-1 and MWS-IN-4 counterpart controls): `path` is where the read shows the field.
    */
   restorable: { arg: string; path: string; call_only?: boolean }[];
+  /** MWS-RES-1: write calls with the state each asks for, judged by reading the object back (absent in older parsed forms). */
+  effects?: EffectSpec[];
   /** MWS-RETRY-3: how to make a tool answer input_required, and the answers to send on the retry. */
   input_required: { tool: string; args: unknown; answers: Record<string, unknown>; client_capabilities: Record<string, unknown>; effect: { path: string; value: unknown } | null }[];
   delete: ToolTemplate | null;
@@ -272,6 +599,23 @@ export interface ReviewSpec {
   answers: Record<string, { answer: boolean; note: string | null }>;
 }
 
+/** F5 (rating method 0.4): the pair budget per probabilistic requirement, 2 repeats of 1500 barrier pairs; used only when declared. */
+export const PAIR_BUDGET = { repeats: 2, pairs: 1500 } as const;
+export const MAX_WRITE_BUDGET = 250_000;
+/**
+ * F5: the write budget when none is declared, sized to fit the run: 1000 for everything but the pairs, and for each resource
+ * with an update tool and two fields, four writes per barrier pair (two writes and the reset) in each repeat, twice where a
+ * control block can run the control arm, plus the RETRY-2 overlapped pairs of a resource with an idempotency block.
+ */
+export function defaultWriteBudget(resources: ResourceSpec[], pairs: number, repeats: number): number {
+  let n = 1000;
+  for (const r of resources) {
+    if (r.update && r.fields) n += (repeats * (pairs + 1)) * 4 * (r.control ? 2 : 1);
+    if (r.idempotency) n += pairs * 4;
+  }
+  return Math.min(MAX_WRITE_BUDGET, Math.max(500, n));
+}
+
 export interface Manifest {
   mws: string;
   /** The first part of every name the run gives its objects (`<prefix>-<run>-…`); default mwsc. */
@@ -296,6 +640,8 @@ export interface Manifest {
     restart: { stop: 'graceful' | 'kill' } | null;
     /** Per tool: how its wrapped results are read (`json` or `none`); absent unless declared. */
     decode?: Record<string, DecodeMode>;
+    /** Per tool: the read extraction declared under `server.decode.<tool>.extract`; absent unless declared. */
+    extract?: Record<string, Extract>;
   };
   target: {
     environment: string;
@@ -310,18 +656,51 @@ export interface Manifest {
     guard: ({ tool: string; args: unknown; path: string | null; pattern: string; read_only: boolean; read_only_call?: boolean } & Decode) | null;
     refuse_fingerprints: string[];
   };
-  limits: { write_budget: number; writes_per_second: number; pairs: number; stale_reps: number; gate_reps: number; timeout_ms: number; max_fuzz_cases: number };
+  limits: {
+    write_budget: number;
+    writes_per_second: number;
+    /** Barrier pairs per repeat (MWS-CONC-3 tier 2). Default 40, or pair_budget.pairs where a pair budget is declared. */
+    pairs: number;
+    /**
+     * Repeats of the barrier pairs. Absent means 1. Present only where declared, or where a pair budget is declared (so the plan
+     * hash of a manifest that opts into nothing does not change).
+     */
+    pair_repeats?: number;
+    /**
+     * F5 (opt-in): the pair budget a rating asks of a probabilistic requirement (rating method 0.4: 2 × 1500), from
+     * `limits.pair_budget` or `--pair-budget`. Absent: no budget; the record states none. A run below it reports "below the pair budget".
+     */
+    pair_budget?: { repeats: number; pairs: number };
+    stale_reps: number;
+    gate_reps: number;
+    timeout_ms: number;
+    max_fuzz_cases: number;
+    /** MWS-IN-5 search: calls per tool at most (search, bisection and repeats); default 80. */
+    in5_probes?: number;
+    /** MWS-IN-5 search: the largest value sent, in bytes (a string's UTF-8 bytes, otherwise its JSON form); default 65536. */
+    in5_payload_bytes?: number;
+    /** MWS-IN-5 search: calls to a create tool at most (each accepted one makes an object); default 10. */
+    in5_creates?: number;
+  };
   /** backend.gate: exactly one route (rewrite_env: base-URL rewrite; node_import: the in-process hook). */
   backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
   /** Arguments for other tools (annotation effects), bound to a resource whose scratch object `{{id}}` names. */
   calls: Record<string, { args: unknown; resource: string | null }>;
+  /**
+   * Per write tool, for the MWS-IN probes on every write tool (spec MWS-IN-4, R15-4): `counterpart_args` are the arguments to
+   * which the operator lets the tester give, in a base call on its own objects, the value of the declared type that a refused
+   * probe means (its counterpart). The counterpart control is then that base call itself, so it changes nothing the base call
+   * does not. Absent: no such argument is declared, and a refused probe whose counterpart would send another value to a tool
+   * that writes an existing object is not judged.
+   */
+  inputs: Record<string, { counterpart_args: string[] }>;
   resources: ResourceSpec[];
   /** Start-up settings meant to restrict writes (MWS-CFG-1 to MWS-CFG-3), set through environment variables of a server the tester starts. */
   settings: {
     /** Settings applied with a request (spec 516c4ed, MWS-CFG-1 to CFG-4) are declared with `applied: request`; this preview does not test them. */
     per_request: { name: string; kind: 'read_only' | 'deny' | 'allow' }[];
     /** valid: every value the declaration lists as valid; restrict: those it says restrict writes (Annex E, R7-6). The `on` value restricts. */
-    read_only: { env: string; on: string; valid: string[]; restrict: string[]; empty_distinct: boolean } | null;
+    read_only: { env: string; on: string; valid: string[]; restrict: string[]; empty_distinct: boolean; permit?: string[] } | null;
     tool_filters: { env: string; kind: 'allow' | 'deny'; separator: string }[];
   };
   /** MWS-SEC-1: extra values to look for (environment variable names; never the values) and URL query parameters that carry a token or a signature. */
@@ -345,6 +724,13 @@ export interface Manifest {
    * own entry overrides the top level; `shape: null` there adopts none for that tool. See src/checks/shape.ts.
    */
   results: { shape: ShapeName | null; tools: Record<string, ShapeName | null> };
+  /**
+   * MWS-IN-5 search (optional): documents the tester reads for bounds stated in words (`docs`, paths relative to this file),
+   * resolved to absolute paths. Read at plan time; nothing is fetched.
+   */
+  in5?: { docs: string[]; allow_args?: string[] };
+  /** `session.init`: calls made on every MCP session before its first other tools/call; absent unless declared. */
+  session?: { init: SessionInit[] };
   source: { path: string; sha256: string };
 }
 
@@ -459,14 +845,25 @@ function control(v: unknown, where: string): ControlSpec {
 export const RESERVED_VARS = ['prefix', 'id', 'field', 'value', 'object', 'version', 'key', 'scope', 'marker', 'ids', 'batch', 'missing_id', 'names_inserted', 'position', 'element_id', 'n'];
 
 function listSpec(v: unknown, where: string): ListSpec {
-  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode']);
+  const l = tool(v, where, ['items', 'id', 'name', 'ignore', 'next', 'decode', 'consistency']);
+  let consistency: ListSpec['consistency'];
+  if (l['consistency'] !== undefined) {
+    const c = obj(l['consistency'], `${where}.consistency`);
+    keys(c, ['args', 'settle_ms'], `${where}.consistency`);
+    const args = c['args'] === undefined ? null : obj(c['args'], `${where}.consistency.args`);
+    const settle = c['settle_ms'] === undefined ? 0 : c['settle_ms'];
+    if (typeof settle !== 'number' || !Number.isInteger(settle) || settle < 0 || settle > 120_000) throw fail(`${where}.consistency.settle_ms`, 'a whole number of milliseconds from 0 to 120000');
+    if (!args && !settle) throw fail(`${where}.consistency`, '{ args, settle_ms }: the arguments of a consistent read, a settle window, or both');
+    if (args && l.args !== undefined && l.args !== null && (typeof l.args !== 'object' || Array.isArray(l.args))) throw fail(`${where}.consistency.args`, `merged into ${where}.args, which must then be an object`);
+    consistency = { args, settle_ms: settle };
+  }
   let next: ListSpec['next'] = null;
   if (l['next'] !== undefined) {
     const n = obj(l['next'], `${where}.next`);
     keys(n, ['path', 'arg'], `${where}.next`);
     next = { path: path(n['path'], `${where}.next.path`), arg: str(n['arg'], `${where}.next.arg`) };
   }
-  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...decodeOf(l['decode'], where) };
+  return { tool: l.tool, args: l.args, items: path(l['items'] ?? '$', `${where}.items`), id: path(l['id'] ?? 'id', `${where}.id`), name: path(l['name'] ?? 'name', `${where}.name`), ignore: strList(l['ignore'], `${where}.ignore`).map((p, j) => path(p, `${where}.ignore[${j}]`)), next, ...(consistency ? { consistency } : {}), ...decodeOf(l['decode'], where) };
 }
 
 const optBool = (v: unknown, where: string): boolean | null => {
@@ -521,10 +918,35 @@ function effectOf(v: unknown, where: string, word: 'deleted' | 'removed'): { pat
   return { path: path(e['path'], `${where}.path`), value: e['value'] };
 }
 
+/** A declared MWS-RES-1 effect: "deleted", "created", one condition, or a list of conditions (with "created" in it for a create). */
+function effectSpecOf(v: unknown, where: string): { on: 'object' | 'new'; deleted: boolean; expect: EffectCond[] } {
+  if (v === 'deleted') return { on: 'object', deleted: true, expect: [] };
+  const items = Array.isArray(v) ? v : [v];
+  if (!items.length) throw fail(where, '"deleted", "created", a condition, or a list of conditions');
+  let created = false;
+  const expect: EffectCond[] = [];
+  items.forEach((x, k) => {
+    const iw = Array.isArray(v) ? `${where}[${k}]` : where;
+    if (x === 'created') return void (created = true);
+    if (x === 'deleted') throw fail(iw, '"deleted" stands alone');
+    const c = obj(x, iw);
+    keys(c, ['path', 'value', 'pick', 'contains', 'lacks'], iw);
+    const p = path(c['path'], `${iw}.path`);
+    const n = ['value', 'contains', 'lacks'].filter((m) => Object.hasOwn(c, m));
+    if (n.length !== 1) throw fail(iw, 'give exactly one of value, contains or lacks');
+    if (c['pick'] !== undefined && n[0] !== 'value') throw fail(`${iw}.pick`, 'only with value');
+    if (n[0] === 'value') expect.push({ path: p, value: c['value'], pick: c['pick'] === undefined ? null : path(c['pick'], `${iw}.pick`) });
+    else if (n[0] === 'contains') expect.push({ path: p, contains: c['contains'] });
+    else expect.push({ path: p, lacks: c['lacks'] });
+  });
+  if (!created && !expect.length) throw fail(where, 'a condition, "created" or "deleted"');
+  return { on: created ? 'new' : 'object', deleted: false, expect };
+}
+
 function resource(v: unknown, i: number): ResourceSpec {
   const w = `resources[${i}]`;
   const o = obj(v, w);
-  keys(o, ['name', 'vars', 'create', 'read', 'update', 'fields', 'version', 'delete', 'archive', 'list', 'cleanup', 'fixture', 'idempotency', 'control', 'missing_id', 'key', 'scope', 'selector', 'multi', 'list_edit', 'creates', 'failures', 'jobs', 'versioned', 'no_version_check', 'input_required', 'try_values', 'fixed_constraints', 'server_managed', 'restorable'], w);
+  keys(o, ['name', 'vars', 'create', 'read', 'update', 'fields', 'version', 'delete', 'archive', 'list', 'cleanup', 'fixture', 'idempotency', 'control', 'missing_id', 'key', 'scope', 'selector', 'multi', 'list_edit', 'creates', 'failures', 'jobs', 'versioned', 'no_version_check', 'input_required', 'try_values', 'fixed_constraints', 'server_managed', 'restorable', 'effects'], w);
   const name = str(o['name'], `${w}.name`, /^[a-z][a-z0-9_-]{0,39}$/);
   const vars = o['vars'] === undefined ? {} : obj(o['vars'], `${w}.vars`);
   for (const k of Object.keys(vars)) if (RESERVED_VARS.includes(k)) throw fail(`${w}.vars.${k}`, 'a reserved template name');
@@ -751,6 +1173,19 @@ function resource(v: unknown, i: number): ResourceSpec {
       inputRequired.push({ tool: t.tool, args: t.args, answers, client_capabilities: caps, effect });
     });
   }
+  const effects: EffectSpec[] = [];
+  if (o['effects'] !== undefined) {
+    if (!Array.isArray(o['effects'])) throw fail(`${w}.effects`, 'a list of { tool, args, effect, answers?, client_capabilities? }');
+    (o['effects'] as unknown[]).forEach((x, j) => {
+      const ew = `${w}.effects[${j}]`;
+      const t = tool(x, ew, ['effect', 'answers', 'client_capabilities']);
+      const e = effectSpecOf(t['effect'], `${ew}.effect`);
+      if (e.on === 'new' && (!o['create'] || !o['list'])) throw fail(`${ew}.effect`, 'created needs the resource\'s create and list blocks (the object is found by its {{marker}} through the list)');
+      const answers = t['answers'] === undefined ? null : obj(t['answers'], `${ew}.answers`);
+      const caps = t['client_capabilities'] === undefined ? (answers ? { elicitation: { form: {} } } : null) : obj(t['client_capabilities'], `${ew}.client_capabilities`);
+      effects.push({ tool: t.tool, args: t.args, ...e, answers, client_capabilities: caps });
+    });
+  }
   const tryValues: ResourceSpec['try_values'] = [];
   if (o['try_values'] !== undefined) {
     if (!Array.isArray(o['try_values'])) throw fail(`${w}.try_values`, 'a list of { arg, value } or { arg, length }');
@@ -782,6 +1217,7 @@ function resource(v: unknown, i: number): ResourceSpec {
     vars,
     versioned,
     input_required: inputRequired,
+    effects,
     try_values: tryValues,
     fixed_constraints: fixedConstraints,
     server_managed: strList(o['server_managed'], `${w}.server_managed`).map((x, j) => path(x, `${w}.server_managed[${j}]`)),
@@ -944,6 +1380,9 @@ function topLevel(o: Obj): Pick<Manifest, 'settings' | 'secrets' | 'canaries' | 
       }
       const on = String(ro['on'] ?? 'true');
       settings.read_only = { env: str(ro['env'], 'settings.read_only.env', ENV), on, valid, restrict: [...new Set([on, ...restrict])], empty_distinct: ro['empty_distinct'] === true };
+      // why: the map form classes every value; `permit` (present only for it) keeps that in the parsed declaration, so it enters
+      // each record's test_hash and survives a copy, while a list-form manifest parses, and hashes, as before.
+      if (!Array.isArray(ro['valid']) && ro['valid'] !== undefined) settings.read_only.permit = valid.filter((v) => !settings.read_only!.restrict.includes(v));
     }
     if (st['tool_filters'] !== undefined) {
       if (!Array.isArray(st['tool_filters'])) throw fail('settings.tool_filters', 'a list of { env, kind: allow | deny }');
@@ -1029,18 +1468,22 @@ function cwdOf(cwd: string | null, manifestPath: string): string | null {
   return isAbsolute(cwd) ? cwd : resolve(dirname(resolve(manifestPath)), cwd);
 }
 
-export function validateManifest(raw: unknown, source: { path: string; sha256: string }): Manifest {
+export function validateManifest(raw: unknown, source: { path: string; sha256: string }, opts: ManifestOptions = {}): Manifest {
   const o = obj(raw, '(top)');
-  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results'], '(top)');
+  keys(o, ['mws', 'prefix', 'server', 'target', 'limits', 'backend', 'calls', 'inputs', 'resources', 'settings', 'secrets', 'canaries', 'review', 'patterns', 'async_operations', 'outcome_field', 'results', 'in5', 'session'], '(top)');
   const mws = String(o['mws'] ?? '');
   if (!(MANIFEST_VERSIONS as readonly string[]).includes(mws)) throw fail('mws', `the requirements version this manifest is written for (${MANIFEST_VERSIONS.join(', ')})`);
   const s = obj(o['server'], 'server');
   keys(s, ['stdio', 'url', 'launch', 'protocol', 'headers_env', 'env_passthrough', 'env_public', 'env', 'cwd', 'processes', 'restart', 'decode'], 'server');
   let serverDecode: Record<string, DecodeMode> | null = null;
+  let serverExtract: Record<string, Extract> | null = null;
   if (s['decode'] !== undefined) {
     const d = obj(s['decode'], 'server.decode');
-    serverDecode = {};
-    for (const [tool, v] of Object.entries(d)) serverDecode[tool] = decodeOf(v, `server.decode.${tool}`).decode!;
+    for (const [tool, v] of Object.entries(d)) {
+      const dd = decodeOf(v, `server.decode.${tool}`);
+      if (dd.decode) (serverDecode ??= {})[tool] = dd.decode;
+      if (dd.extract) (serverExtract ??= {})[tool] = dd.extract;
+    }
   }
   const stdio = s['stdio'] === undefined ? null : strList(s['stdio'], 'server.stdio');
   const url = optStr(s['url'], 'server.url');
@@ -1093,7 +1536,9 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   for (const n of envPublic) if (!ENV.test(n)) throw fail('server.env_public', `${n} is not an environment variable name`);
 
   const t = obj(o['target'], 'target');
-  keys(t, ['environment', 'confirm', 'allow_hosts', 'guard', 'refuse_fingerprints'], 'target');
+  keys(t, ['environment', 'confirm', 'allow_hosts', 'guard', 'refuse_fingerprints', 'provenance'], 'target');
+  // why: F8: the build under test, for results.identity (core/identity.ts); validated here so plan refuses a bad one too.
+  if (t['provenance'] !== undefined) parseProvenance(t['provenance'], 'manifest target.provenance');
   const environment = str(t['environment'], 'target.environment');
   let guard: Manifest['target']['guard'] = null;
   if (t['guard'] !== undefined) {
@@ -1111,7 +1556,18 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
     guard = { tool: g.tool, args: g.args, path: g['path'] === undefined ? null : path(g['path'], 'target.guard.path'), pattern, read_only: g['read_only'] === true, ...(g['read_only_call'] === true ? { read_only_call: true } : {}), ...decodeOf(g['decode'], 'target.guard') };
   }
   const lim = o['limits'] === undefined ? {} : obj(o['limits'], 'limits');
-  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases'], 'limits');
+  keys(lim, ['write_budget', 'writes_per_second', 'pairs', 'pair_repeats', 'pair_budget', 'stale_reps', 'gate_reps', 'timeout_ms', 'max_fuzz_cases', 'in5_probes', 'in5_payload_bytes', 'in5_creates'], 'limits');
+  // why: review S2: the pair budget is opt-in (limits.pair_budget, or --pair-budget through opts); without it the defaults are as before.
+  let pairBudget: { repeats: number; pairs: number } | null = null;
+  if (opts.pairBudget) pairBudget = { ...opts.pairBudget };
+  else if (lim['pair_budget'] !== undefined) {
+    const pb = obj(lim['pair_budget'], 'limits.pair_budget');
+    keys(pb, ['repeats', 'pairs'], 'limits.pair_budget');
+    pairBudget = { repeats: num(pb['repeats'], PAIR_BUDGET.repeats, 1, 10, 'limits.pair_budget.repeats'), pairs: num(pb['pairs'], PAIR_BUDGET.pairs, 1, 5000, 'limits.pair_budget.pairs') };
+  }
+  const pairsDeclared = lim['pairs'] !== undefined;
+  const pairs = num(lim['pairs'], pairBudget ? pairBudget.pairs : 40, 1, 5000, 'limits.pairs');
+  const pairRepeats = lim['pair_repeats'] !== undefined ? num(lim['pair_repeats'], 1, 1, 10, 'limits.pair_repeats') : pairBudget && !pairsDeclared ? pairBudget.repeats : null;
   let backend: Manifest['backend'] = null;
   if (o['backend'] !== undefined) {
     const b = obj(o['backend'], 'backend');
@@ -1134,11 +1590,28 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
       calls[name] = { args: cc['args'] ?? {}, resource: optStr(cc['resource'], `calls.${name}.resource`) };
     }
   }
+  const inputs: Manifest['inputs'] = {};
+  if (o['inputs'] !== undefined) {
+    for (const [name, c] of Object.entries(obj(o['inputs'], 'inputs'))) {
+      const cc = obj(c, `inputs.${name}`);
+      keys(cc, ['counterpart_args'], `inputs.${name}`);
+      inputs[name] = { counterpart_args: strList(cc['counterpart_args'], `inputs.${name}.counterpart_args`) };
+    }
+  }
   // why: a team may need its own recognisable prefix on the test objects (CLI-BUGS item 14); it must stay short and plain.
   const prefix = o['prefix'] === undefined ? 'mwsc' : str(o['prefix'], 'prefix');
   if (!/^[a-z][a-z0-9]{1,7}$/.test(prefix)) throw fail('prefix', 'two to eight lowercase letters or digits, starting with a letter (default mwsc)');
   if (!Array.isArray(o['resources']) || o['resources'].length === 0) throw fail('resources', 'at least one resource');
   const resources = (o['resources'] as unknown[]).map(resource);
+  // why: spec 7.3, rule 1: on a tool that deletes or acts on several objects, a base call with a counterpart's value is one more
+  // call of that tool that the run's checks do not otherwise make; it is allowed only where every object is declared disposable.
+  if (!resources.some((r) => !!r.selector?.send_empty_forms)) {
+    for (const [name, x] of Object.entries(inputs)) {
+      if (!x.counterpart_args.length || resources.some((r) => r.read.tool === name || r.update?.tool === name)) continue;
+      const r = resources.find((rr) => rr.create?.tool !== name && !rr.creates.some((cr) => cr.tool === name) && (rr.delete?.tool === name || rr.multi.some((mu) => mu.tool === name)));
+      if (r) throw fail(`inputs.${name}.counterpart_args`, `${name} deletes or acts on several objects (resource ${r.name}), so a base call with a counterpart's value is allowed only where the backend is declared disposable (selector.send_empty_forms: true; spec 7.3, rule 1)`);
+    }
+  }
   // why: spec R15-4, review of 3283a69 (5): restorable applies only to a tool that updates one object named by its identifier.
   for (const [i, r] of resources.entries()) {
     if (!r.restorable.length || !r.update) continue;
@@ -1156,38 +1629,74 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   const m: Manifest = {
     mws,
     prefix,
-    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}) },
+    server: { stdio, url, launch, protocol: protocol as Manifest['server']['protocol'], headers_env, env_passthrough: passthrough, env_public: envPublic, env, cwd: cwdOf(optStr(s['cwd'], 'server.cwd'), source.path), processes, restart, ...(serverDecode ? { decode: serverDecode } : {}), ...(serverExtract ? { extract: serverExtract } : {}) },
     target: { environment, confirm: str(t['confirm'], 'target.confirm'), allow_hosts: strList(t['allow_hosts'], 'target.allow_hosts'), guard, refuse_fingerprints: strList(t['refuse_fingerprints'], 'target.refuse_fingerprints') },
     limits: {
-      write_budget: num(lim['write_budget'], 500, 1, 100_000, 'limits.write_budget'),
+      // why: F5: with a declared pair budget the default is sized to fit it (see defaultWriteBudget); a declared write_budget stays a hard cap.
+      write_budget: num(lim['write_budget'], pairBudget ? defaultWriteBudget(resources, pairs, pairRepeats ?? 1) : 500, 1, MAX_WRITE_BUDGET, 'limits.write_budget'),
       writes_per_second: num(lim['writes_per_second'], 5, 0.1, 1000, 'limits.writes_per_second'),
-      pairs: num(lim['pairs'], 40, 1, 1000, 'limits.pairs'),
+      pairs,
+      ...(pairRepeats !== null ? { pair_repeats: pairRepeats } : {}),
+      ...(pairBudget ? { pair_budget: pairBudget } : {}),
       stale_reps: num(lim['stale_reps'], 3, 1, 100, 'limits.stale_reps'),
       gate_reps: num(lim['gate_reps'], 2, 1, 100, 'limits.gate_reps'),
       timeout_ms: num(lim['timeout_ms'], 30_000, 100, 600_000, 'limits.timeout_ms'),
       max_fuzz_cases: num(lim['max_fuzz_cases'], 200, 0, 1000, 'limits.max_fuzz_cases'),
+      // why: review S6: the MWS-IN-5 limits are kept only where declared, so the plan-hashed limits of a manifest that does not
+      // declare them are unchanged; the defaults are applied where they are used (src/checks/in5search.ts).
+      ...(lim['in5_probes'] !== undefined ? { in5_probes: num(lim['in5_probes'], 80, 0, 2000, 'limits.in5_probes') } : {}),
+      ...(lim['in5_payload_bytes'] !== undefined ? { in5_payload_bytes: num(lim['in5_payload_bytes'], 65536, 64, 1_048_576, 'limits.in5_payload_bytes') } : {}),
+      ...(lim['in5_creates'] !== undefined ? { in5_creates: num(lim['in5_creates'], 10, 0, 2000, 'limits.in5_creates') } : {}),
     },
     backend,
     calls,
+    inputs,
     resources,
     ...topLevel(o),
+    ...in5Of(o['in5'], source.path),
+    ...((sess) => (sess ? { session: sess } : {}))(sessionOf(o['session'])),
     source,
   };
-  // why: one decode mode per tool (refused here, before anything runs).
+  // why: one decode mode per tool, and one extraction per tool (refused here, before anything runs).
   declaredDecodes(m);
+  declaredExtracts(m);
   return m;
 }
 
-/** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */
-export function loadManifest(file: string): Manifest {
-  const text = readFileSync(file, 'utf8');
-  return parseManifestText(text, file);
+/** MWS-IN-5 search options: the documents read for bounds stated in words (paths relative to the manifest). */
+function in5Of(v: unknown, manifestPath: string): Pick<Manifest, 'in5'> {
+  if (v === undefined) return {};
+  const o = obj(v, 'in5');
+  keys(o, ['docs', 'allow_args'], 'in5');
+  const base = dirname(resolve(manifestPath));
+  return { in5: { docs: strList(o['docs'], 'in5.docs').map((d) => (isAbsolute(d) ? d : resolve(base, d))), allow_args: strList(o['allow_args'], 'in5.allow_args') } };
 }
 
-export function parseManifestText(text: string, file: string): Manifest {
+/** Load a manifest file; refused while any `# guessed` marker from `init` is left in it. */
+/** Options that act as part of the declaration (they enter the limits, so the plan hash). */
+export interface ManifestOptions {
+  /** `--pair-budget RxP`: as `limits.pair_budget: { repeats: R, pairs: P }`, overriding it. */
+  pairBudget?: { repeats: number; pairs: number } | null;
+}
+
+/** Parse `--pair-budget`: `2x1500` (repeats × pairs). */
+export function parsePairBudget(v: string): { repeats: number; pairs: number } {
+  const m = /^\s*(\d+)\s*[x×*]\s*(\d+)\s*$/i.exec(v);
+  const repeats = m ? Number(m[1]) : NaN;
+  const pairs = m ? Number(m[2]) : NaN;
+  if (!m || repeats < 1 || repeats > 10 || pairs < 1 || pairs > 5000) throw new WritecheckError(`--pair-budget ${JSON.stringify(v)}: give repeats x pairs, e.g. 2x1500 (repeats 1 to 10, pairs 1 to 5000)`, 2);
+  return { repeats, pairs };
+}
+
+export function loadManifest(file: string, opts: ManifestOptions = {}): Manifest {
+  const text = readFileSync(file, 'utf8');
+  return parseManifestText(text, file, opts);
+}
+
+export function parseManifestText(text: string, file: string, opts: ManifestOptions = {}): Manifest {
   const guessed = text.split('\n').map((l, i) => ({ l, i })).filter(({ l }) => l.includes(GUESSED));
   if (guessed.length) {
     throw new WritecheckError(`manifest ${file}: ${guessed.length} line(s) still marked "${GUESSED}" (first at line ${guessed[0]!.i + 1}). Read each guess, correct it, and remove the marker; that is the confirmation that a person checked it.`, 2);
   }
-  return validateManifest(parseConfigText(text, file), { path: file, sha256: sha256(text) });
+  return validateManifest(parseConfigText(text, file), { path: file, sha256: sha256(text) }, opts);
 }
