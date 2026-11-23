@@ -16,24 +16,40 @@
 // complete CommittedTransaction, pending_jseq), pending lines (inflight),
 // aborted lines, fence lines (a run reset ended a pending line; seams v2.1),
 // run-alloc lines (the fixture layer's run registry; seams v2.1),
-// lookup-fence lines (settle-by-lookup; additive) and clock lines (the fixture
-// clock's moves; additive, 0.4.0). The effect and its key record are one line: replay rebuilds the
+// lookup-fence lines (settle-by-lookup; additive), clock lines (the fixture
+// clock's moves; additive, 0.4.0) and lease lines (a start took the lease, with
+// its epoch; additive, 0.4.0, G3 note 26). Every line after a lease line carries
+// its writer's `epoch`. The effect and its key record are one line: replay rebuilds the
 // key record from the commit line with storedReplyOf(tx).
 //
 // The journal is the commit path's step 2 (src/backend/commit.ts): the line is
-// written and flushed (writeSync + fsyncSync) before the write is applied; if it
-// cannot be, the file is cut back to where it was and the error is thrown, so the
-// store is put back and the request gets 503. Replay applies post-state only: no
+// written and flushed (writeSync + fsyncSync) before the write is applied. The
+// file is open O_APPEND and written with no position, so a holder that was paused
+// past a takeover appends after the new holder's lines, never over them, and the
+// file is never cut back after a write that may have raced (G3 note 26 item 1a):
+// an append that fails once it has begun marks the journal broken (every later
+// write answers 503; restart it). After the flush the holder checks the lease
+// again; if it was taken over meanwhile the answer is 503 lease_lost (outcome
+// unknown), never a success. Replay applies post-state only: no
 // operation is re-run and no clock is read, so a restart cannot change a digest.
 //
-// Recovery: a torn write (an unterminated last line that does not decode) is
-// dropped, cut from the file and logged. Any other bad line, the last one
-// included when it has its newline or decodes (an unknown kind, a sequence
-// gap), stops the start with an error and the file is not touched. A pending line
-// that no commit or aborted line names is ended at start by an aborted line
-// (reason orphan_at_start), written before the backend serves.
+// Epochs (G3 note 26 item 1b): each start writes a lease line with an epoch one
+// more than the highest in the file, before it replays. A line whose epoch is
+// lower than a lease line before it is a superseded writer's: not applied,
+// counted in the load report and logged.
+//
+// Recovery: nothing is cut from the file once the lease is taken (G3a: a start
+// paused between a check and a cut could cut a newer holder's lines). A torn write
+// (bytes of a write cut short: an unterminated last line that does not decode)
+// stays in the file and is left out; the next write joins it on its physical line,
+// and every later start leaves that fragment out again (scanJournal, splitJoined).
+// A physical line that holds no whole line, other than the unterminated last one,
+// or any other bad line (an unknown kind, a sequence gap) stops the start with an
+// error and the file is not touched. A pending line that no commit or aborted line
+// names is ended at start by an aborted line (reason orphan_at_start), written
+// before the backend serves.
 
-import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { performance } from "node:perf_hooks";
 import { createHash, randomBytes } from "node:crypto";
@@ -41,7 +57,7 @@ import { isMainThread } from "node:worker_threads";
 import { join, resolve } from "node:path";
 import { canonicalize } from "../digest.js";
 import { ensurePrivateDir, PrivateDirError } from "../private-dir.js";
-import { JournalError, storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalClockLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
+import { JournalError, storedReplyOf, type CommittedTransaction, type JournalAbortedLine, type JournalClockLine, type JournalCommitLine, type JournalFenceLine, type JournalHeader, type JournalLeaseLine, type JournalLine, type JournalLookupFenceLine, type JournalPendingLine, type JournalRunAllocLine } from "./commit.js";
 import type { AbortReason, JournalSeam, KeyScope } from "./seams.js";
 import type { Store } from "./store.js";
 import type { DurableKeyRecords, KeyLineWriter } from "./keyrecords.js";
@@ -497,17 +513,32 @@ export function releaseLock(dir: string): void {
 // refuses. The holder checks before every journal append that lock.d is still its own (inode and owner text) and that
 // its last heartbeat is younger than selfFenceMs (< staleMs): a holder that was paused past that, or whose lease was
 // taken over or moved, is fenced: it appends nothing more (writes answer 503 journal_unavailable) and must be
-// restarted. So two servers on one data dir can both run in the residual races, but only the lease holder appends.
-// The pid lock below stays as a second check for this release.
+// restarted. The check and the write are not atomic: a holder paused between them writes one more line after a
+// takeover. That line goes after the new holder's (O_APPEND), carries the old epoch and is not applied at replay
+// (unless it reached the file before the new holder read it: then the new holder applied it), and the holder's check
+// after the flush answers its request 503 lease_lost, outcome unknown (G3 note 26 item 1).
+// The pid lock above stays as a second check for this release.
 
 /** Lease timing. Tests shorten it (a child process sets it before it opens the journal). */
 export const leaseTiming = { heartbeatMs: 2_000, selfFenceMs: 10_000, staleMs: 20_000 };
+
+/** Test seams of the load (G3 note 26 item 3): once per journal line read or replayed; before each lease refresh. */
+export const loadHooks: { onLine?: () => void; beforeRefresh?: () => void } = {};
 
 /** Test seams: after a lease was judged stale and before it is taken over; after it was moved aside. */
 export const leaseHooks: { beforeTakeover?: (path: string) => void; afterAside?: (path: string) => void } = {};
 
 /** The lease is no longer this holder's: nothing more is appended. */
 export class LeaseLostError extends Error {}
+
+/**
+ * The lease was found taken over right after a line was written and flushed (G3 note 26 item 1c): the line is in the
+ * file, and whether a restart applies it depends on whether the new holder read it before its lease line. The request
+ * is answered 503 lease_lost (outcome unknown), never a success.
+ */
+export class LeaseLostAfterWriteError extends LeaseLostError {
+  readonly code = "lease_lost";
+}
 
 interface HeldLease {
   path: string;
@@ -753,6 +784,41 @@ export function checkLease(dir: string): void {
   if (held.lost) throw new LeaseLostError(`the data-dir lease is lost (${held.lost}); this server appends nothing more to the journal: restart it`);
 }
 
+/**
+ * Ownership again, after a line was written and flushed (G3 note 26 item 1c): lock.d is still this holder's (inode and
+ * owner text, which holds the nonce). A lease found taken over is lost for good. Lateness is not checked here: the line
+ * is already in the file, and only a takeover can supersede it.
+ */
+export function confirmLease(dir: string): boolean {
+  const held = LEASES.get(heldKey(dir));
+  if (!held) return false;
+  if (!held.lost && !leaseIsOwn(held)) held.lost = "the lease was taken over or moved by another start";
+  return !held.lost;
+}
+
+/**
+ * Checks the lease is still this holder's and beats it now (G3 note 26 item 3): called through a long synchronous load,
+ * where the heartbeat timer cannot run, and after the replay before anything is appended. Ownership decides, not the
+ * time since the last beat: a lease still in place with this holder's text was not taken over. Throws LeaseLostError.
+ */
+export function refreshLease(dir: string): void {
+  const held = LEASES.get(heldKey(dir));
+  if (!held) throw new LeaseLostError(`the data dir ${dir}: this process holds no lease on it`);
+  if (!held.lost && !leaseIsOwn(held)) held.lost = "the lease was taken over or moved by another start while this start was loading";
+  if (held.lost) throw new LeaseLostError(`the data-dir lease is lost (${held.lost}); this server appends nothing more to the journal: restart it`);
+  const now = new Date();
+  utimesSync(held.path, now, now);
+  held.lastBeat = performance.now();
+}
+
+/** The owner this process wrote into the lease it holds on a data dir (pid, host, nonce), for the journal's lease line. */
+export function heldLeaseOwner(dir: string): { pid: number; host: string; nonce: string } {
+  const held = LEASES.get(heldKey(dir));
+  if (!held) throw new LeaseLostError(`the data dir ${dir}: this process holds no lease on it`);
+  const o = JSON.parse(held.text) as { pid: number; host: string; nonce: string };
+  return { pid: o.pid, host: o.host, nonce: o.nonce };
+}
+
 /** Releases the lease this process holds: moved aside and removed only if it is still its own; a lease another start put in its place is left alone. */
 export function releaseLease(dir: string): void {
   const real = heldKey(dir);
@@ -793,12 +859,24 @@ export function abandonLease(dir: string): void {
   LEASE_TEXTS.delete(held.text);
 }
 
+/** A line a superseded writer appended (G3 note 26 item 1b): in the file, not applied. */
+export interface SupersededLine {
+  jseq: number;
+  line: string;
+  epoch: number;
+  /** The epoch of the lease line that superseded it. */
+  by_epoch: number;
+}
+
 export interface LoadReport {
-  /** Lines after the header that were kept. */
+  /** Lines after the header that were kept (this start's lease line included; superseded lines not). */
   lines: number;
   /** The last commit sequence replayed. */
   commits: number;
+  /** This start found a torn last line (left out; it stays in the file, joined by this start's lease line). */
   droppedTornLine: boolean;
+  /** Torn fragments in the file that later writes joined (left out at every start; G3a). */
+  fragments: number;
   abortedOrphans: number;
   /** Fences restored (fence and lookup-fence lines). */
   fences: number;
@@ -811,13 +889,38 @@ export interface LoadReport {
    * commit line and its fence line): fenced at start, and their fence lines written then (G2 fold-in 5).
    */
   fencedAtStart: number;
+  /** This start's lease epoch (its lease line's). */
+  epoch: number;
+  /** Lines of superseded writers (G3 note 26 item 1b): in the file, not applied, logged at start. */
+  superseded: SupersededLine[];
 }
 
-/** What is wrong with a line at position `expected` (undefined: nothing). */
-function lineProblem(line: JournalLine | undefined, expected: number, lastCommit: number, pendings: Set<number>): string | undefined {
-  if (line === undefined) return "a bad checksum or a torn write";
+/** A line's writer epoch: its `epoch` member, 0 when absent (a journal written before 0.4.0) or for the header. */
+export function epochOf(line: JournalLine): number {
+  if (line.line === "header") return 0;
+  return (line as { epoch?: number }).epoch ?? 0;
+}
+
+/** The line kinds journal-format/1 knows (INTERFACES 1.9). A line of any other kind is refused, never skipped. */
+export const JOURNAL_LINE_KINDS = ["header", "pending", "commit", "aborted", "fence", "run-alloc", "lookup-fence", "clock", "lease"] as const;
+
+/** What is wrong with a line's own members, wherever it is (undefined: nothing). Superseded lines are checked by this too. */
+function shapeProblem(line: JournalLine): string | undefined {
+  if (!(JOURNAL_LINE_KINDS as readonly string[]).includes(line.line)) return `unknown line kind ${JSON.stringify((line as { line: unknown }).line)}`;
+  const epoch = (line as { epoch?: unknown }).epoch;
+  if (epoch !== undefined && (!Number.isSafeInteger(epoch) || (epoch as number) < 0)) return "an epoch that is not a non-negative integer";
+  if (line.line === "lease" && (!Number.isSafeInteger(line.epoch) || line.epoch < 1 || !Number.isSafeInteger(line.pid) || typeof line.host !== "string" || typeof line.nonce !== "string")) {
+    return "a lease line without a positive epoch, pid, host or nonce";
+  }
+  return undefined;
+}
+
+/** What is wrong with an applied line at position `expected` (undefined: nothing). */
+function lineProblem(line: JournalLine, expected: number, lastCommit: number, pendings: Set<number>): string | undefined {
   if (line.jseq !== expected) return `jseq ${line.jseq} where ${expected} was expected`;
   if (line.line === "header") return "a second header";
+  const shape = shapeProblem(line);
+  if (shape !== undefined) return shape;
   if (line.line === "commit") {
     if (line.commit_seq !== lastCommit + 1 || line.tx?.seq !== line.commit_seq) return `commit_seq ${line.commit_seq} where ${lastCommit + 1} was expected`;
     if (line.pending_jseq !== null && !pendings.has(line.pending_jseq)) return `pending_jseq ${line.pending_jseq} names no open pending line`;
@@ -834,22 +937,175 @@ function lineProblem(line: JournalLine | undefined, expected: number, lastCommit
     if (!Number.isSafeInteger(line.from_ms) || !Number.isSafeInteger(line.to_ms) || line.from_ms < 0 || line.to_ms <= line.from_ms || typeof line.at !== "string") {
       return "a clock line whose offsets are not integers moving forward";
     }
-  } else if (line.line !== "pending") {
-    return `unknown line kind ${JSON.stringify((line as { line: unknown }).line)}`;
   }
   return undefined;
 }
 
-/** The journal: the commit path's journal sink, the key-state line writer and the replay at start. */
+/** How every line the journal writes begins (encodeLine puts jseq first): where a joined line can start. */
+const LINE_START = '{"jseq":';
+
+/**
+ * One physical line of the file, split into what it holds (G3a): one whole line; or a torn fragment (bytes of a write
+ * that was cut short, which the next write joined because nothing is ever cut from the file) followed by the whole
+ * line(s) that joined it; or bytes that hold no whole line. A whole line is found by its checksum, so a fragment cannot
+ * pass for one: the longest suffix that starts where a line starts and decodes is the joined line.
+ */
+export function splitJoined(text: string): Array<{ line: JournalLine } | { junk: string }> {
+  const whole = decodeLine(text);
+  if (whole !== undefined) return [{ line: whole }];
+  for (let i = text.indexOf(LINE_START, 1); i > 0; i = text.indexOf(LINE_START, i + 1)) {
+    const tail = decodeLine(text.slice(i));
+    if (tail !== undefined) return [...splitJoined(text.slice(0, i)), { line: tail }];
+  }
+  return [{ junk: text }];
+}
+
+/** A journal file read and checked: the lines a replay applies, and what it leaves out. */
+export interface JournalScan {
+  /** The header, then every line a replay applies, jseq contiguous from 0. */
+  lines: JournalLine[];
+  /** Lines of superseded writers, in file order (G3 note 26 item 1b). */
+  superseded: SupersededLine[];
+  /** The highest epoch any line in the file names (lease lines and members, superseded ones included). */
+  maxEpoch: number;
+  /** The file ends in a torn fragment (an unterminated last line that holds no whole line): left out. */
+  tornLast: boolean;
+  /** Torn fragments a later write joined (left out; G3a): bytes of writes that were cut short, never cut from the file. */
+  fragments: number;
+  /** The last commit_seq applied. */
+  lastCommit: number;
+  /** Pending lines still open after the last line, by jseq. */
+  open: Map<number, JournalPendingLine>;
+  /** Open pending lines a run-reset commit line fenced: pending jseq -> the reset's commit_seq. */
+  resetFenced: Map<number, number>;
+}
+
+/**
+ * Reads and checks a journal file's text (G3 note 26 item 1b; G3a). "new": the file is empty, or holds only a header
+ * that was torn at the very first start (an unterminated fragment and nothing else: "torn-header").
+ *
+ * Fragments: nothing is ever cut from the file (a cut could race with a takeover), so a write that was cut short stays,
+ * and the next write joins it on the same physical line. Such a fragment, followed by a whole line on its line, is left
+ * out; a physical line that holds no whole line is refused, except the unterminated last line (a torn write, as before).
+ * jseq stays contiguous over the applied lines, so a fragment can never hide an applied line.
+ *
+ * Pass 1 decides which lines apply: a line whose epoch is lower than a lease line before it is superseded; a lease line
+ * also supersedes the lines before it with a jseq of its own or higher (appended after its writer read the file, by the
+ * previous holder: their writers were answered 503 lease_lost), which must be of a lower epoch; a lease line whose epoch
+ * is not above the current one is a start that lost the race (it refused to start); a header after a lease line is a
+ * start that found the file empty and lost the race. Every line after a lease line carries an epoch. Superseded lines
+ * must still be of a known kind. Pass 2 checks the applied lines as one journal: jseq contiguous, commit_seq contiguous,
+ * every pending_jseq naming an open pending line. Anything else throws JournalCorruptError. `tick` is called once per
+ * line (the lease refresh of a long load).
+ */
+export function scanJournal(path: string, raw: string, tick?: () => void): JournalScan | "new" | "torn-header" {
+  if (raw.length === 0) return "new";
+  const parts = raw.split("\n");
+  const terminated = parts[parts.length - 1] === "";
+  if (terminated) parts.pop();
+  const lines: JournalLine[] = [];
+  let tornLast = false;
+  let fragments = 0;
+  for (let i = 0; i < parts.length; i++) {
+    tick?.();
+    const pieces = splitJoined(parts[i]);
+    if (pieces.length === 1 && "junk" in pieces[0]) {
+      if (i === parts.length - 1 && !terminated) {
+        tornLast = true;
+        break;
+      }
+      throw new JournalCorruptError(`${path}: line ${i + 1} of the file is not valid (a bad checksum or a torn write, with no whole line after it); only a torn last line (unterminated, not decodable) is tolerated. Not starting.`);
+    }
+    for (const p of pieces) {
+      if ("junk" in p) fragments++;
+      else lines.push(p.line);
+    }
+  }
+  const header = lines[0];
+  if (header === undefined) {
+    // A header torn at the very first start (nothing after it) is the only header problem that is not corruption (G2
+    // round 2, item 5). A first line that decodes but is not a header is refused, never wiped.
+    return "torn-header";
+  }
+  if (header.line !== "header" || header.jseq !== 0) {
+    throw new JournalCorruptError(`${path}: the first line is not a valid journal header. Not starting.`);
+  }
+  if (header.journal !== JOURNAL_FORMAT) throw new JournalCorruptError(`${path}: journal format ${JSON.stringify(header.journal)}; this version reads ${JOURNAL_FORMAT}. Not starting.`);
+  const accepted: JournalLine[] = [header];
+  const superseded: SupersededLine[] = [];
+  let epoch = 0;
+  let maxEpoch = 0;
+  const supersede = (l: JournalLine, by: number) => superseded.push({ jseq: l.jseq, line: l.line, epoch: epochOf(l), by_epoch: by });
+  for (const l of lines.slice(1)) {
+    const shape = l.line === "header" ? undefined : shapeProblem(l);
+    if (shape !== undefined) throw new JournalCorruptError(`${path}: line jseq ${l.jseq} is not valid (${shape}). Not starting.`);
+    const e = l.line === "lease" ? l.epoch : epochOf(l);
+    maxEpoch = Math.max(maxEpoch, e);
+    if (l.line === "header") {
+      // A start that found the file empty writes its header and lease line in one write; one that lost the race (its
+      // lease was taken over before it wrote) lands after the winner's lines, and refused to start.
+      if (epoch === 0) throw new JournalCorruptError(`${path}: line jseq ${l.jseq} is not valid (a second header). Not starting.`);
+      supersede(l, epoch);
+      continue;
+    }
+    if (l.line === "lease") {
+      if (l.epoch <= epoch) {
+        // A start whose lease was taken over between its check and its lease line (it refused to start).
+        supersede(l, epoch);
+        continue;
+      }
+      while (accepted.length > 1 && accepted[accepted.length - 1].jseq >= l.jseq) {
+        const p = accepted.pop()!;
+        if (epochOf(p) >= l.epoch) throw new JournalCorruptError(`${path}: the lease line of epoch ${l.epoch} (jseq ${l.jseq}) follows a line of epoch ${epochOf(p)} with jseq ${p.jseq}. Not starting.`);
+        supersede(p, l.epoch);
+      }
+      epoch = l.epoch;
+      accepted.push(l);
+      continue;
+    }
+    if (epoch > 0 && (l as { epoch?: unknown }).epoch === undefined) throw new JournalCorruptError(`${path}: line jseq ${l.jseq} (${l.line}) has no epoch, after a lease line. Not starting.`);
+    if (epochOf(l) < epoch) {
+      supersede(l, epoch);
+      continue;
+    }
+    if (epochOf(l) > epoch) throw new JournalCorruptError(`${path}: line jseq ${l.jseq} has epoch ${epochOf(l)}, and no lease line before it took that epoch. Not starting.`);
+    accepted.push(l);
+  }
+  const open = new Map<number, JournalPendingLine>();
+  const resetFenced = new Map<number, number>();
+  let lastCommit = 0;
+  for (let k = 1; k < accepted.length; k++) {
+    const l = accepted[k];
+    const bad = lineProblem(l, k, lastCommit, new Set(open.keys()));
+    if (bad !== undefined) throw new JournalCorruptError(`${path}: line jseq ${k} is not valid (${bad}); only a torn last line (unterminated, not decodable) is tolerated. Not starting.`);
+    if (l.line === "pending") open.set(l.jseq, l);
+    if (l.line === "aborted" || l.line === "fence") open.delete(l.pending_jseq);
+    if (l.line === "commit") {
+      lastCommit = l.commit_seq;
+      if (l.pending_jseq !== null) open.delete(l.pending_jseq);
+      // Seams v2.1: a run reset fences its run's pending records. Its fence lines follow its commit line; if the
+      // process died between them, the pending line is fenced at start, never ended as an orphan.
+      const reset = l.tx.kind === "run-reset" ? l.tx.reset : undefined;
+      if (reset) for (const p of open.values()) if (p.principal === reset.principal && p.run === reset.run && !resetFenced.has(p.jseq)) resetFenced.set(p.jseq, l.commit_seq);
+    }
+  }
+  for (const k of [...resetFenced.keys()]) if (!open.has(k)) resetFenced.delete(k);
+  return { lines: accepted, superseded, maxEpoch, tornLast, fragments, lastCommit, open, resetFenced };
+}
+
 export class Journal implements JournalSeam, KeyLineWriter {
   readonly name = "journal";
   readonly role = "journal" as const;
   private fd: number | undefined;
-  private size = 0;
   private jseq = 0;
   private lastChecksum: string | null = null;
+  /** This writer's lease epoch: its lease line's, carried by every line it appends (G3 note 26 item 1b). */
+  private epoch = 0;
   private dead = false;
-  /** Set when a failed append could not be cut back: later lines would follow a torn one, so nothing more is appended. */
+  /**
+   * Set when an append failed once its write had begun (G3 note 26 item 1a): part or all of the line may be in the file,
+   * and the file is never cut back after a write that may have raced, so nothing more is appended (restart it).
+   */
   private broken: Error | undefined;
   readonly path: string;
   report: LoadReport | undefined;
@@ -869,6 +1125,8 @@ export class Journal implements JournalSeam, KeyLineWriter {
   replayObservers: Array<(tx: CommittedTransaction) => void> = [];
   /** The commit_seq of the last commit line (a fence line names its reset by it). */
   private lastCommitSeq = 0;
+  /** performance.now() of the last lease refresh during load (G3 note 26 item 3). */
+  private lastRefresh = 0;
 
   constructor(readonly store: Store, readonly keys: DurableKeyRecords | undefined, readonly options: JournalOptions) {
     this.path = join(options.dataDir, JOURNAL_FILE);
@@ -897,109 +1155,125 @@ export class Journal implements JournalSeam, KeyLineWriter {
     const limit = flushLimit(this.options.platform ?? process.platform);
     if (limit) this.log(limit);
     try {
+      this.lastRefresh = performance.now();
       this.replay();
     } catch (e) {
       if (this.fd !== undefined) closeSync(this.fd);
       this.fd = undefined;
       releaseLock(this.options.dataDir);
       releaseLease(this.options.dataDir);
+      if (e instanceof LeaseLostError) throw new DataDirError(`the data dir ${this.options.dataDir}: ${e.message.replace(/; this server appends nothing more to the journal: restart it$/, "")}; this start stops (start again)`);
       throw e;
     }
   }
 
-  private replay(): void {
-    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, abortedOrphans: 0, fences: 0, runs: 0, clockOffsetMs: 0, fencedAtStart: 0 };
-    this.report = report;
-    // A journal file that is missing, or empty because the first start stopped before its header was flushed, is new.
-    if (!existsSync(this.path) || statSync(this.path).size === 0) {
-      this.fd = openSync(this.path, "w", 0o600);
-      const header: Omit<JournalHeader, "checksum"> = { jseq: 0, line: "header", journal: JOURNAL_FORMAT, writer: this.options.writer, boot_id: this.store.bootId, seed: structuredClone(this.store.seed) };
-      const text = `${encodeLine(header)}\n`;
-      writeSync(this.fd, text, 0);
-      fsyncSync(this.fd);
-      this.size = Buffer.byteLength(text);
-      this.lastChecksum = lineChecksum(header as unknown as Record<string, unknown>);
-      return;
-    }
-    const raw = readFileSync(this.path, "utf8");
-    const parts = raw.split("\n");
-    const terminated = parts[parts.length - 1] === "";
-    if (terminated) parts.pop();
-    const header = decodeLine(parts[0]);
-    if (header === undefined || header.line !== "header" || header.jseq !== 0) {
-      // A header torn at the very first start (nothing after it) is the only header problem that is not corruption:
-      // unterminated and not decodable, as fold-in 3's rule for any last line (G2 round 2, item 5). A first line that
-      // decodes but is not a header is refused, never wiped.
-      if (parts.length === 1 && !terminated && header === undefined) {
-        this.log("tiny-tracker: the journal header was torn at the first start; starting a new journal");
-        const fd = openSync(this.path, "r+");
-        ftruncateSync(fd, 0);
-        closeSync(fd);
-        return this.replay();
-      }
-      throw new JournalCorruptError(`${this.path}: the first line is not a valid journal header. Not starting.`);
-    }
-    if (header.journal !== JOURNAL_FORMAT) throw new JournalCorruptError(`${this.path}: journal format ${JSON.stringify(header.journal)}; this version reads ${JOURNAL_FORMAT}. Not starting.`);
-    let offset = Buffer.byteLength(parts[0]) + (parts.length === 1 && !terminated ? 0 : 1);
-    const lines: JournalLine[] = [header];
-    const open = new Map<number, JournalPendingLine>();
-    /** Open pending lines a run-reset commit line has fenced: pending jseq → the reset's commit_seq. */
-    const resetFenced = new Map<number, number>();
-    let lastCommit = 0;
-    for (let i = 1; i < parts.length; i++) {
-      const isLast = i === parts.length - 1;
-      const line = decodeLine(parts[i]);
-      const bad = lineProblem(line, i, lastCommit, new Set(open.keys()));
-      if (bad !== undefined) {
-        // G2 fold-in 3: only a torn write is tolerated, that is an unterminated last line that does not decode. A line
-        // that decodes (an unknown kind, a sequence gap) or that has its newline is refused whatever its problem, and
-        // the file is left as it is (nothing below has touched it yet).
-        if (!(isLast && !terminated && line === undefined)) {
-          throw new JournalCorruptError(`${this.path}: line jseq ${i} is not valid (${bad}); only a torn last line (unterminated, not decodable) is tolerated. Not starting.`);
-        }
-        this.log(`tiny-tracker: dropped a torn last journal line (jseq ${i}: ${bad})`);
-        report.droppedTornLine = true;
-        break;
-      }
-      const l = line!;
-      if (l.line === "pending") open.set(l.jseq, l);
-      if (l.line === "aborted" || l.line === "fence") open.delete(l.pending_jseq);
-      if (l.line === "commit") {
-        lastCommit = l.commit_seq;
-        if (l.pending_jseq !== null) open.delete(l.pending_jseq);
-        // Seams v2.1: a run reset fences its run's pending records. Its fence lines follow its commit line; if the
-        // process died between them, the pending line is fenced at start below, never ended as an orphan.
-        const reset = l.tx.kind === "run-reset" ? l.tx.reset : undefined;
-        if (reset) for (const p of open.values()) if (p.principal === reset.principal && p.run === reset.run && !resetFenced.has(p.jseq)) resetFenced.set(p.jseq, l.commit_seq);
-      }
-      lines.push(l);
-      offset += Buffer.byteLength(parts[i]) + (isLast && !terminated ? 0 : 1);
-    }
-    const lastClock = lines.findLast((l): l is JournalClockLine => l.line === "clock");
+  /**
+   * The lease refresh of a long load (G3 note 26 item 3): the heartbeat timer cannot run while the load runs, so the
+   * load beats the lease itself, at the heartbeat interval, after checking it is still this holder's.
+   */
+  private keepLease(force = false): void {
+    if (!force && performance.now() - this.lastRefresh < leaseTiming.heartbeatMs) return;
+    loadHooks.beforeRefresh?.();
+    refreshLease(this.options.dataDir);
+    this.lastRefresh = performance.now();
+  }
+
+  /** Reads the journal file and checks it (scanJournal); "new" when it is missing or empty. */
+  private read(): JournalScan | "new" | "torn-header" {
+    if (!existsSync(this.path)) return "new";
+    return scanJournal(this.path, readFileSync(this.path, "utf8"), () => {
+      loadHooks.onLine?.();
+      this.keepLease();
+    });
+  }
+
+  private refuseClockLines(scan: JournalScan): void {
+    const lastClock = scan.lines.findLast((l): l is JournalClockLine => l.line === "clock");
     if (lastClock && !this.clock) {
       throw new JournalCorruptError(`${this.path}: the journal moved the fixture clock to an offset of ${lastClock.to_ms} ms (clock lines); start this data dir with the clock feature, or record time would move back. Not starting.`);
     }
-    this.store.applySeed(header.seed);
-    for (const l of lines.slice(1)) this.apply(l, report);
-    this.lastCommitSeq = lastCommit;
-    this.jseq = lines.length - 1;
-    this.lastChecksum = lines[lines.length - 1].checksum;
-    report.lines = lines.length - 1;
-    report.commits = lastCommit;
-    this.fd = openSync(this.path, "r+");
-    // Cut a dropped torn line off, and end a whole last line that lost only its newline.
-    ftruncateSync(this.fd, offset);
-    this.size = offset;
-    if (!terminated && !report.droppedTornLine) {
-      writeSync(this.fd, "\n", this.size);
-      this.size += 1;
+  }
+
+  /**
+   * Writes this start's lease line (G3 note 26 item 1b): epoch one more than the highest in the file, jseq after the
+   * last line this start read. `header`: a new journal's header, written in the same write (so a start that loses the
+   * race leaves a header and a lease line together, which a reader skips as superseded).
+   */
+  private writeLeaseLine(maxEpoch: number, header?: string): JournalLeaseLine {
+    const owner = heldLeaseOwner(this.options.dataDir);
+    this.epoch = maxEpoch + 1;
+    const body = { jseq: this.jseq + 1, line: "lease", epoch: this.epoch, pid: owner.pid, host: owner.host, nonce: owner.nonce } as Omit<JournalLeaseLine, "checksum">;
+    checkLease(this.options.dataDir);
+    const text = this.writeLine(body, undefined, header === undefined ? "" : `${header}\n`);
+    return JSON.parse(text) as JournalLeaseLine;
+  }
+
+  /**
+   * The load (G3 note 26 item 1; G3a). Nothing is ever cut from the file once the lease is taken: a start paused between
+   * a check and a cut could otherwise cut a newer holder's lines. A torn last line stays where it is, and this start's
+   * lease line joins it on its physical line (scanJournal leaves the fragment out); a new journal's header goes in the
+   * same write as its lease line.
+   */
+  private replay(): void {
+    const report: LoadReport = { lines: 0, commits: 0, droppedTornLine: false, fragments: 0, abortedOrphans: 0, fences: 0, runs: 0, clockOffsetMs: 0, fencedAtStart: 0, epoch: 0, superseded: [] };
+    this.report = report;
+    const first = this.read();
+    // O_APPEND, written with no position (G3 note 26 item 1a): a line always goes after every line already in the file.
+    this.fd = openSync(this.path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND, 0o600);
+    this.keepLease(true);
+    let lease: JournalLeaseLine;
+    if (first === "new" || first === "torn-header") {
+      // A journal file that is missing, or empty because the first start stopped before its header was written, is new;
+      // so is one whose header was torn at the very first start (its bytes stay; the new header joins them).
+      if (first === "torn-header") this.log("tiny-tracker: the journal header was torn at the first start; starting a new journal after the torn bytes");
+      const header: Omit<JournalHeader, "checksum"> = { jseq: 0, line: "header", journal: JOURNAL_FORMAT, writer: this.options.writer, boot_id: this.store.bootId, seed: structuredClone(this.store.seed) };
+      this.jseq = 0;
+      lease = this.writeLeaseLine(0, encodeLine(header));
+    } else {
+      this.refuseClockLines(first);
+      this.jseq = first.lines.length - 1;
+      // The lease line goes in before the replay (G3 note 26 item 1b): from here on every other writer's line is superseded.
+      lease = this.writeLeaseLine(first.maxEpoch);
     }
-    fsyncSync(this.fd);
+    // Read again: the lines this start applies are the file's up to its own lease line. Lines a superseded holder
+    // appended after this start read it, before or after its lease line, are left out by the epoch rules.
+    const second = this.read();
+    if (second === "new" || second === "torn-header") throw new JournalCorruptError(`${this.path}: the journal changed under this start (it reads as ${second}). Not starting.`);
+    const own = second.lines[second.lines.length - 1];
+    if (own.line !== "lease" || own.nonce !== lease.nonce || own.epoch !== lease.epoch) {
+      throw new DataDirError(`the data dir ${this.options.dataDir}: another start wrote to the journal at the same moment (this start's lease line, epoch ${lease.epoch}, is not the journal's last applied line); this start stops (start again)`);
+    }
+    this.refuseClockLines(second);
+    report.droppedTornLine = first !== "new" && first !== "torn-header" && first.tornLast;
+    report.fragments = second.fragments;
+    if (report.droppedTornLine) this.log(`tiny-tracker: left out a torn last journal line (after jseq ${(first as JournalScan).lines.length - 1}: a bad checksum or a torn write); it stays in the file, joined by this start's lease line`);
+    report.superseded = second.superseded;
+    for (const s of second.superseded) {
+      this.log(`tiny-tracker: a superseded writer's journal line was not applied (${s.line} line jseq ${s.jseq}, epoch ${s.epoch}; lease epoch ${s.by_epoch} came before it): a holder paused past a takeover wrote it, and its request was answered 503`);
+    }
+    const lines = second.lines;
+    if (first !== "new" && first !== "torn-header") {
+      this.store.applySeed((lines[0] as JournalHeader).seed);
+      for (const l of lines.slice(1)) {
+        loadHooks.onLine?.();
+        this.keepLease();
+        this.apply(l, report);
+      }
+    }
+    this.lastCommitSeq = second.lastCommit;
+    this.jseq = own.jseq;
+    this.lastChecksum = own.checksum;
+    report.lines = lines.length - 1;
+    report.commits = second.lastCommit;
+    report.epoch = this.epoch;
+    // G3 note 26 item 3: a replay longer than the stale time must not leave the holder self-fenced: check ownership and
+    // beat now, before the first append below.
+    this.keepLease(true);
     // Orphan pending lines: a write that began and never committed. Nothing was applied; say so before serving.
     // A pending line whose run a later commit line reset was fenced by that reset (G2 fold-in 5): it gets the fence
     // line it lost and stays fenced, so a late original can never land under its key.
-    for (const p of open.values()) {
-      const resetSeq = resetFenced.get(p.jseq);
+    for (const p of second.open.values()) {
+      const resetSeq = second.resetFenced.get(p.jseq);
       if (resetSeq !== undefined && p.run !== null) {
         this.fenceLine({ principal: p.principal }, p.key, p.run, p.jseq, resetSeq);
         this.keys?.restoreFence({ principal: p.principal }, p.key, p.run, this.commitTimes.get(resetSeq) ?? "");
@@ -1067,28 +1341,46 @@ export class Journal implements JournalSeam, KeyLineWriter {
         this.clock?.restore(line.to_ms);
         report.clockOffsetMs = Math.max(report.clockOffsetMs, line.to_ms);
         break;
+      case "lease":
+        // A start took the lease: nothing to apply.
+        break;
       default:
         break;
     }
   }
 
-  /** Writes one line and flushes it; returns its jseq. On an I/O error the file is cut back and the error is thrown. */
-  private append(body: Omit<JournalLine, "jseq" | "checksum">, key?: string | null): number {
+  /**
+   * Writes one line and flushes it; returns its jseq. The lease is checked before (the fence) and after (ownership
+   * again: a takeover meanwhile answers 503 lease_lost). An append that fails once its write has begun marks the
+   * journal broken; nothing is ever cut back (G3 note 26 item 1a).
+   */
+  private append(body: Omit<JournalLine, "jseq" | "checksum" | "epoch">, key?: string | null): number {
     if (this.dead) throw new SimulatedCrash("after a simulated crash");
-    if (this.broken) throw new Error(`the journal stopped after a failed append it could not cut back: ${this.broken.message}`);
+    if (this.broken) throw new Error(`the journal stopped after an append that failed once it had begun (${this.broken.message}); this server appends nothing more: restart it`);
     if (this.fd === undefined) throw new Error("the journal is not open");
     // 0.4.0: the fence. Nothing is appended unless the data-dir lease is still this process's.
     checkLease(this.options.dataDir);
-    const line = { jseq: this.jseq + 1, ...body } as Omit<JournalLine, "checksum">;
+    this.writeLine({ jseq: this.jseq + 1, ...body, epoch: this.epoch } as Omit<JournalLine, "checksum">, key);
+    return this.jseq;
+  }
+
+  /** The write itself (append and the lease line): returns the line's text. */
+  private writeLine(line: Omit<JournalLine, "checksum">, key: string | null | undefined, prefix = ""): string {
+    if (this.dead) throw new SimulatedCrash("after a simulated crash");
+    if (this.broken) throw new Error(`the journal stopped after an append that failed once it had begun (${this.broken.message}); this server appends nothing more: restart it`);
+    if (this.fd === undefined) throw new Error("the journal is not open");
     const text = encodeLine(line);
-    const bytes = Buffer.from(`${text}\n`, "utf8");
+    const bytes = Buffer.from(`${prefix}${text}\n`, "utf8");
     const at = { jseq: line.jseq, line: line.line, key };
+    let begun = false;
     try {
       if (this.options.crash?.("before-append", at) === "tear") {
-        writeSync(this.fd, bytes, 0, Math.max(1, Math.floor(bytes.length / 2)), this.size);
+        writeSync(this.fd, bytes, 0, Math.max(1, Math.floor(bytes.length / 2)));
         throw new SimulatedCrash("torn-write");
       }
-      writeSync(this.fd, bytes, 0, bytes.length, this.size);
+      begun = true;
+      const written = writeSync(this.fd, bytes, 0, bytes.length);
+      if (written !== bytes.length) throw new Error(`a short write: ${written} of ${bytes.length} bytes`);
       this.options.crash?.("after-write", at);
       fsyncSync(this.fd);
       this.options.crash?.("after-fsync", at);
@@ -1098,20 +1390,21 @@ export class Journal implements JournalSeam, KeyLineWriter {
         this.dead = true;
         throw e;
       }
-      // A failed append is cut back to the last good offset, so a later line never follows a torn one (decision 0003,
-      // "only a torn last line"). If it cannot be cut back, the journal takes no more lines: every later write gets
-      // 503 journal_unavailable, and the next start drops the torn last line.
-      try {
-        ftruncateSync(this.fd, this.size);
-      } catch (t) {
-        this.broken = t as Error;
-      }
-      throw e;
+      if (!begun) throw e; // nothing of the line was written: the journal carries on
+      // Part or all of the line may be in the file, and another holder may have appended after it: the file is not cut
+      // back (that could cut the other holder's lines). The journal takes no more lines; the next start drops a torn
+      // last line, or applies a whole one.
+      this.broken = e as Error;
+      throw Object.assign(new Error(`${(e as Error)?.message ?? String(e)}`), { code: "append_failed" });
     }
-    this.size += bytes.length;
+    // G3 note 26 item 1c: ownership again, after the flush. A lease taken over meanwhile means the new holder may or may
+    // not have read this line before its lease line: the outcome is unknown, never a success.
+    if (!confirmLease(this.options.dataDir)) {
+      throw new LeaseLostAfterWriteError(`the data-dir lease was taken over while this line (${line.line}, jseq ${line.jseq}, epoch ${this.epoch}) was written; this server appends nothing more to the journal: restart it`);
+    }
     this.jseq = line.jseq;
     this.lastChecksum = JSON.parse(text).checksum;
-    return line.jseq;
+    return text;
   }
 
   // ---- CommitSink (role journal: told first; a throw aborts the write and the store is put back) ----
@@ -1134,7 +1427,7 @@ export class Journal implements JournalSeam, KeyLineWriter {
     this.append({ line: "run-alloc", run_id: run.run_id, principal: run.principal, created_at: run.created_at, label: run.label } as Omit<JournalRunAllocLine, "jseq" | "checksum">);
   }
 
-  // ---- the fixture clock (0.4.0): a move is journalled before the offset is stored or answered ----
+  // ---- the fixture clock (0.4.0): a move is journalled before it is answered (FixtureClock.advance rolls the offset back if this throws) ----
 
   recordClockMove(move: JournalClockMove): void {
     this.append({ line: "clock", from_ms: move.from_ms, to_ms: move.to_ms, at: move.at } as Omit<JournalClockLine, "jseq" | "checksum">);
@@ -1202,33 +1495,11 @@ export class Journal implements JournalSeam, KeyLineWriter {
   }
 }
 
-/** Reads a journal file without a store (recounts, tests): the lines, after the same checks as a start. */
-export function readJournal(path: string): { lines: JournalLine[]; tornLast: boolean } {
-  const parts = readFileSync(path, "utf8").split("\n");
-  const terminated = parts[parts.length - 1] === "";
-  if (terminated) parts.pop();
-  const lines: JournalLine[] = [];
-  let tornLast = false;
-  const open = new Set<number>();
-  let lastCommit = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const l = decodeLine(parts[i]);
-    const bad = i === 0
-      ? (l === undefined ? "a bad checksum or a torn write" : l.line !== "header" || l.jseq !== 0 ? "not a journal header" : undefined)
-      : lineProblem(l, i, lastCommit, open);
-    if (bad !== undefined) {
-      // As at start (G2 fold-in 3): only an unterminated last line that does not decode is a torn write.
-      if (i === parts.length - 1 && !terminated && l === undefined) { tornLast = true; break; }
-      throw new JournalCorruptError(`${path}: line jseq ${i} is not valid (${bad})`);
-    }
-    const line = l!;
-    if (line.line === "pending") open.add(line.jseq);
-    if (line.line === "aborted" || line.line === "fence") open.delete(line.pending_jseq);
-    if (line.line === "commit") {
-      lastCommit = line.commit_seq;
-      if (line.pending_jseq !== null) open.delete(line.pending_jseq);
-    }
-    lines.push(line);
-  }
-  return { lines, tornLast };
+/** Reads a journal file without a store (recounts, tests): the lines a start applies, after the same checks as a start. */
+export function readJournal(path: string): { lines: JournalLine[]; tornLast: boolean; superseded: SupersededLine[]; fragments: number } {
+  const scan = scanJournal(path, readFileSync(path, "utf8"));
+  // As at start (G2 fold-in 3): only an unterminated last line that does not decode is a torn write.
+  if (scan === "new") return { lines: [], tornLast: false, superseded: [], fragments: 0 };
+  if (scan === "torn-header") return { lines: [], tornLast: true, superseded: [], fragments: 0 };
+  return { lines: scan.lines, tornLast: scan.tornLast, superseded: scan.superseded, fragments: scan.fragments };
 }

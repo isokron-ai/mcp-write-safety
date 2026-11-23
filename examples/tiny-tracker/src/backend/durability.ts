@@ -166,7 +166,9 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
       try {
         s = keys.fence({ principal }, key, run, write);
       } catch (e) {
-        // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed.
+        // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed. lease_lost
+        // (G3 note 26 item 1c): it was written, then the lease was found taken over, so whether it holds is unknown.
+        if ((e as { code?: unknown } | null)?.code === "lease_lost") return { status: 503, body: { error: "lease_lost", message: `the fence line was written, then the data-dir lease was found taken over: ${(e as Error).message}; whether the key is fenced is unknown (ask the new holder)` } };
         return { status: 503, body: { error: "journal_unavailable", message: `the fence could not be recorded: ${(e as Error).message}; nothing was fenced` } };
       }
       if (!s && forgets) {

@@ -478,7 +478,7 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
       let second: Awaited<ReturnType<typeof runCli>> | undefined;
       const first = await runCli(["backend", "--features", "durable,strict-input,inflight,retention", "--data-dir", t.dataDir, "--key-retention", "2d", "--port", "0"], env, async (state) => {
         assert.equal(state.journal.data_dir, t.dataDir);
-        assert.match(state.journal.head, /^0:[0-9a-f]{16}$/);
+        assert.match(state.journal.head, /^1:[0-9a-f]{16}$/, "a new journal's head is this start's lease line (jseq 1)");
         const rest = new Rest(state.backend, env.TRACKER_BACKEND_TOKEN);
         assert.equal((await rest.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "cli-key-000001" })).status, 201);
         second = await runCli(["backend", "--features", "durable,strict-input", "--data-dir", t.dataDir, "--port", "0"], env);
@@ -487,7 +487,7 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
       assert.equal(second!.code, 2);
       assert.match(second!.stderr, /locked by process/);
       const again = await runCli(["backend", "--features", "durable,strict-input,inflight,retention", "--data-dir", t.dataDir, "--port", "0"], env, async (state) => {
-        assert.match(state.journal.head, /^2:/, "header, pending, commit");
+        assert.match(state.journal.head, /^4:/, "header, lease, pending, commit, then this start's lease line");
       });
       assert.equal(again.code, 0, again.stderr);
       const flag = await runCli(["backend", "--profile", "0.1", "--key-expiry", "forget", "--port", "0"], env);

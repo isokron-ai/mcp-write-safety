@@ -227,11 +227,11 @@ export function storedReplyOf(tx: CommittedTransaction): import("./seams.js").St
 // run_not_allocated checks) survive a restart. `checksum` is lower-case hex SHA-256 of the line's RFC 8785 bytes
 // without the checksum member.
 //
-// Torn lines (decision 0003 section 5): only a torn LAST line is tolerated at load. A failed append can leave a partial
-// line; since the store carries on after a journal failure, the writer must not append after it. After a failed
-// append the journal truncates the file back to the offset of the end of the last good line (ftruncate, then fsync)
-// before the next append; if it cannot truncate, it fails stop (it throws on every later append and the store
-// answers 503) instead of appending after a torn line.
+// Torn lines (decision 0003 section 5, as revised in 0.4.0 by G3 note 26 item 1a): nothing is ever cut from the file,
+// since a cut could race with a takeover and cut a newer holder's lines. An append that fails before its write begins
+// leaves the journal usable; one that fails once its write has begun stops the journal (every later append throws and
+// the store answers 503; restart it). A torn write stays in the file; the next write joins it on its physical line,
+// and every reader leaves the fragment out (src/backend/journal.ts splitJoined).
 
 /** The state a store starts from before any commit: the seeded projects, as created, and the id counters. */
 export interface SeedState {
@@ -344,7 +344,36 @@ export interface JournalClockLine {
   checksum: string;
 }
 
-export type JournalLine = JournalHeader | JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine | JournalLookupFenceLine | JournalClockLine;
+/**
+ * Additive (0.4.0, G3 note 26 item 1): a start took the data-dir lease. Written once per start, before the journal is
+ * replayed and before anything is served, with `epoch` one more than the highest epoch in the file (a journal without
+ * lease lines is epoch 0). Every later line a writer appends carries that writer's `epoch` (JournalEpoch). At replay a
+ * line whose epoch is lower than a lease line before it in the file is a superseded writer's (a holder that was paused
+ * past a takeover): it is not applied, and the load report counts it as superseded. A lease line also supersedes the
+ * lines of the previous epoch with a jseq of its own or higher that come before it (lines appended after the new holder
+ * read the file and before its lease line). No commit_seq; it applies nothing.
+ */
+export interface JournalLeaseLine {
+  jseq: number;
+  line: "lease";
+  epoch: number;
+  /** The lease owner (lock.d/owner): pid, host and the owner text's nonce. */
+  pid: number;
+  host: string;
+  nonce: string;
+  checksum: string;
+}
+
+/**
+ * The writer's lease epoch (additive member, 0.4.0, G3 note 26 item 1): on every line a 0.4.0 writer appends after its
+ * lease line (pending, commit, aborted, fence, run-alloc, lookup-fence and clock lines). Absent means epoch 0 (a
+ * journal written before 0.4.0).
+ */
+export interface JournalEpoch {
+  epoch?: number;
+}
+
+export type JournalLine = JournalHeader | JournalLeaseLine | ((JournalPendingLine | JournalAbortedLine | JournalCommitLine | JournalRunAllocLine | JournalFenceLine | JournalLookupFenceLine | JournalClockLine) & JournalEpoch);
 
 export class CommitSinkError extends Error {
   constructor(readonly sink: string, cause: unknown) {
@@ -352,10 +381,24 @@ export class CommitSinkError extends Error {
   }
 }
 
-/** The journal could not append: the write was not applied. The request is answered 503; the store carries on. */
+/**
+ * The journal could not append: the write was not applied here. The request is answered 503 with `code`:
+ * journal_unavailable (nothing was appended, or the append failed), or lease_lost (0.4.0, G3 note 26 item 1c: the line
+ * was written and flushed, but the data-dir lease was found taken over right after, so whether a restart applies it is
+ * not known). The store carries on.
+ */
 export class JournalError extends Error {
+  readonly code: "journal_unavailable" | "lease_lost";
   constructor(readonly sink: string, cause: unknown) {
-    super(`the journal (${sink}) could not append: ${(cause as Error)?.message ?? String(cause)}; nothing was applied`);
+    const code = (cause as { code?: unknown } | null | undefined)?.code;
+    const lost = code === "lease_lost";
+    const why = (cause as Error)?.message ?? String(cause);
+    super(lost
+      ? `the journal (${sink}) wrote the line, then found the data-dir lease taken over by another start: ${why}; the outcome is unknown (the new holder decides it; a keyed repeat to it tells which)`
+      : code === "append_failed"
+        ? `the journal (${sink}) could not append: ${why}; nothing was applied in this process, but part or all of the line may be in the file (the next start decides), so this server appends nothing more: restart it`
+        : `the journal (${sink}) could not append: ${why}; nothing was applied`);
+    this.code = lost ? "lease_lost" : "journal_unavailable";
   }
 }
 
