@@ -33,6 +33,12 @@ Fixture options (see FIXTURE.md):
                            when it stops; a new state line follows every restart.
   --fault POINT[:once]     arm a fault point at start (process/position/action, src/fault-points.ts); the
                            supervisor keeps the arming, so a once fault does not re-arm on a restart.
+Listeners: there is no --host or --hostname option, and nothing binds by hostname. The backend API and the control
+listener bind 127.0.0.1; the MCP listener binds 127.0.0.1, or 0.0.0.0 in container mode (TRACKER_CONTAINER=1, which
+needs an MCP token). /mcp serves loopback Host and Origin values only (localhost, 127.0.0.1, [::1]): a request with a
+non-loopback Host or Origin gets 403, even with the token (a client connecting by a LAN address or DNS name sends one).
+TRACKER_EVIDENCE_LISTEN=HOST:PORT takes an IP address or localhost, not a hostname; off loopback it serves only the
+evidence routes, behind the evidence token, for any Host (for a build with defects, only in container mode).
 Tokens are read from the environment or a 0600 file, never from the command line.`;
 
 /**
@@ -239,17 +245,19 @@ async function main(): Promise<void> {
   const keyRetention = values["key-retention"] ?? env.TRACKER_KEY_RETENTION;
   const keyExpiry = values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY;
   let durability: import("./backend/durability.js").DurabilityOptions | undefined;
-  // `server` (0.3.0 default flip): retention comes from the profile and the backend is another process. The tools and
-  // (0.4.0) the server instructions state the retention the backend states (follow-up F2, read at start below);
-  // --key-retention given here must agree with it. null: the backend did not state one and none was given, so the tools
-  // say the retention is not known.
+  // `server`, and `stdio` with a backend URL, which runs as `server` (0.3.0 default flip): retention comes from the
+  // profile and the backend is another process. The tools and (0.4.0) the server instructions state the retention the
+  // backend states (follow-up F2, read at start below); --key-retention given here must agree with it. null: the
+  // backend did not state one and none was given, so the tools say the retention is not known.
   let statedRetentionMs: number | null | undefined;
   let givenRetentionMs: number | undefined;
   if ((keyRetention !== undefined || keyExpiry !== undefined) && !features.includes("retention")) {
     refusals.push("--key-retention and --key-expiry (TRACKER_KEY_RETENTION, TRACKER_KEY_EXPIRY) need the retention feature");
   } else if (layout === "server" && keyExpiry !== undefined) {
-    // Follow-up F3: the expiry policy is the backend's (it keeps the key records); in `server` it would be ignored.
-    refusals.push("--key-expiry (TRACKER_KEY_EXPIRY) is the backend's setting, and in `tiny-tracker server` the backend is another process: give it where the backend runs (`all` or `backend`)");
+    // Follow-up F3: the expiry policy is the backend's (it keeps the key records); in `server`, and in `stdio` with a
+    // backend URL (layout "server" too), it would be ignored. The refusal names the command that was run.
+    const where = stdio ? "`tiny-tracker stdio` with a backend URL (--backend-url or TRACKER_BACKEND_URL)" : "`tiny-tracker server`";
+    refusals.push(`--key-expiry (TRACKER_KEY_EXPIRY) is the backend's setting, and in ${where} the backend is another process: give it where the backend runs (\`all\`, \`backend\`, or \`stdio\` without a backend URL)`);
   } else if (["durable", "inflight", "retention"].some((f) => features.includes(f))) {
     const expiry = await import("./backend/expiry.js");
     try {

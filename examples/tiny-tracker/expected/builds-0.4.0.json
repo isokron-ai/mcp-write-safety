@@ -1,6 +1,7 @@
 {
   "release": "0.4.0",
-  "note": "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Do not edit by hand.",
+  "note": "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Two MCP-layer defects answer as the build without them does: see not_detected, which the generator carries into expected/0.4.0.json and the header of expected/0.4.0.md. Do not edit by hand.",
+  "not_detected": "Not detected in 0.4.0: in-progress-reported-not-applied and settle-miss-reported-not-applied. A row with one of them has the fixture answers of the row with the same level, backend defect and variant and no MCP-layer defect, where the matrix has that row, and none is run by the contract driver, so a \"held\" on these rows does not mean the defect is absent (tiny-tracker's own tests show each). in-progress-reported-not-applied: it trips MWS-RES-2 only on a same-key call while the first is still pending, which needs a request held before its commit; no built fault point holds one, so FX-KEY-3 answers \"not checked\". settle-miss-reported-not-applied: it trips MWS-RES-1 only on a lookup miss with no fence while the lost request can still land, which no FX- property checks.",
   "coverage": {
     "factors": {
       "level": 4,

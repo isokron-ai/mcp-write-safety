@@ -551,7 +551,17 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
       const r = await runCli(["server", ...args, "--port", "0"], { ...env, ...extra });
       assert.equal(r.code, 2, JSON.stringify([args, extra]));
       assert.match(r.stderr, /--key-expiry \(TRACKER_KEY_EXPIRY\) is the backend's setting/);
+      assert.match(r.stderr, /in `tiny-tracker server` the backend is another process/);
       assert.equal(r.stdout, "", "nothing started");
+    }
+    // `stdio` with a backend URL (flag or environment) runs as `server`: the refusal names the stdio transport, not `server`.
+    for (const [args, extra] of [[["--backend-url", "http://127.0.0.1:9"], {}], [[], { TRACKER_BACKEND_URL: "http://127.0.0.1:9" }]] as Array<[string[], Record<string, string>]>) {
+      const r = await runCli(["stdio", ...args, "--key-expiry", "forget"], { TRACKER_BACKEND_TOKEN: TOKEN, ...extra });
+      assert.equal(r.code, 2, JSON.stringify([args, extra]));
+      assert.match(r.stderr, /--key-expiry \(TRACKER_KEY_EXPIRY\) is the backend's setting/);
+      assert.match(r.stderr, /in `tiny-tracker stdio` with a backend URL \(--backend-url or TRACKER_BACKEND_URL\) the backend is another process/);
+      assert.doesNotMatch(r.stderr, /tiny-tracker server/);
+      assert.equal(r.stdout, "", "nothing on stdout: it carries protocol messages only");
     }
     // Where the backend runs it is still taken.
     const all = await runCli(["all", "--key-expiry", "forget", "--port", "0", "--backend-port", "0"], { TRACKER_BACKEND_TOKEN: TOKEN });

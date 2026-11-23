@@ -118,7 +118,7 @@ export const COMPAT_RULES: readonly CompatRule[] = [
   {
     id: "CMP-9", post01: true,
     check: (c) => c.backendDefects.length > 0 && c.layout === "server"
-      ? "--backend-defect has no effect in `tiny-tracker server` (the backend is another process); start the backend with it" : undefined,
+      ? "--backend-defect has no effect in `tiny-tracker server` or `tiny-tracker stdio --backend-url` (the backend is another process); start the backend with it" : undefined,
   },
   {
     id: "CMP-11", post01: true,

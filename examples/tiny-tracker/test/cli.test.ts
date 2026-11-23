@@ -146,6 +146,18 @@ describe("tiny-tracker command line", () => {
     assert.equal(r.code, 2);
     assert.match(r.stderr, /127\.0\.0\.1 or localhost/);
   });
+
+  it("--help says where each listener binds, that none binds by hostname, and what a non-loopback Host gets", async () => {
+    const { spawnSync } = await import("node:child_process");
+    const r = spawnSync(process.execPath, [CLI, "--help"], { env: { PATH: process.env.PATH ?? "" }, encoding: "utf8", timeout: 15000 });
+    assert.equal(r.status, 0);
+    const help = r.stdout.replace(/\s+/g, " ");
+    assert.match(help, /no --host or --hostname option/);
+    assert.match(help, /backend API and the control listener bind 127\.0\.0\.1/);
+    assert.match(help, /0\.0\.0\.0 in container mode/);
+    assert.match(help, /non-loopback Host or Origin gets 403, even with the token/);
+    assert.match(help, /TRACKER_EVIDENCE_LISTEN=HOST:PORT takes an IP address or localhost, not a hostname/);
+  });
 });
 
 it("package name: @mcp-write-safety/tiny-tracker, command tiny-tracker, published publicly; the README gives the npx command", async () => {

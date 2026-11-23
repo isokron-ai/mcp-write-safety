@@ -32,10 +32,13 @@ describe("profiles and features", () => {
     assert.equal(SERVER_INFO.version, PACKAGE_VERSION);
   });
 
-  it("profile 0.1 turns on no feature; the default turns on the core features 0.2.0 and 0.3.0 ship (not durable)", () => {
+  it("profile 0.1 turns on no feature; the default turns on the core features 0.2.0 and 0.3.0 ship (not durable); 0.4.0 adds none", () => {
     assert.deepEqual(PROFILE_FEATURES["0.1"], []);
     assert.deepEqual(PROFILE_FEATURES.default, ["execution-records", "lookup", "principals", "inflight", "retention"]);
     assert.ok(!PROFILE_FEATURES.default.includes("durable" as never), "durable needs --data-dir: it stays named");
+    // 0.4.0's release step leaves the default as 0.3.0 had it: 0.4.0 ships no feature switch. A 0.4.0 row added later
+    // fails here, so its release decides whether the default turns it on.
+    assert.deepEqual(FEATURES.filter((f) => (f.since as string) === "0.4.0").map((f) => f.name), []);
     assert.equal(parseProfile(undefined), "default");
     assert.equal(parseProfile("0.1"), "0.1");
     assert.throws(() => parseProfile("0.2"), SettingError);

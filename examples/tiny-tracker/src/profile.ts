@@ -8,13 +8,14 @@
 // gate. In 0.2.0 that is execution-records, lookup and principals: the 0.1
 // surface plus the two read-only lookup tools. In 0.3.0 inflight and
 // retention join them; durable stays named, since it needs --data-dir
-// (test/surface.test.ts).
+// (test/surface.test.ts). 0.4.0 adds none: it ships no feature switch of its
+// own (FEATURES has no 0.4.0 row).
 //
 // A feature is named with --features or TRACKER_FEATURES (comma-separated).
 // An unknown name, or a name for a feature this version does not build yet,
 // stops the process with exit 2, like every other setting.
 
-export const PACKAGE_VERSION = "0.3.0";
+export const PACKAGE_VERSION = "0.4.0";
 
 export const PROFILES = ["0.1", "default"] as const;
 export type ProfileName = (typeof PROFILES)[number];
@@ -69,6 +70,8 @@ export const PROFILE_FEATURES: Record<ProfileName, readonly FeatureName[]> = {
   // 0.1.0 accepted unless asked.
   // 0.3.0 (owner decision 1, after the G2 gate): inflight and retention, both backend features with no setting of their
   // own to give. durable stays named: it needs --data-dir. clock is a fixture-layer feature and needs --fixture-control.
+  // 0.4.0 (release step): unchanged. 0.4.0 ships no feature switch: stdio, container mode, the resource caps and the
+  // data-dir lease are in every build, and the clock's journal lines need durable and clock, which stay named as above.
   default: ["execution-records", "lookup", "principals", "inflight", "retention"],
 };
 

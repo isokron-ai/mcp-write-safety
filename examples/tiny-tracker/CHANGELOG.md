@@ -2,7 +2,12 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
-## Unreleased
+## 0.4.0 (unreleased) for MWS 0.9
+
+The contract kit: `tiny-tracker stdio`, a container image (container mode, with a bearer token for `/mcp`), resource caps on the MCP listener, `fx-check` answers for FX-KEY-1, FX-KEY-2, FX-DUR-1 and FX-DUR-2, the OpenAPI file and a pairwise known-answer matrix; a data-dir lease with epochs, and the fixture clock with `durable`. The default profile turns on what it did in 0.3.0; `--profile 0.1` keeps the surface of the published 0.1.0.
+
+### Known answers
+- **Not detected in 0.4.0:** `in-progress-reported-not-applied` and `settle-miss-reported-not-applied`. A row of `expected/0.4.0.json` with one of them has the fixture answers of the same build without it (where the matrix has that build), and none is run by the contract driver, so a "held" on these rows does not mean the defect is absent. `in-progress-reported-not-applied` trips MWS-RES-2 only on a same-key call while the earlier one is still pending (no built fault point holds a request before its commit, so FX-KEY-3 answers "not checked"); `settle-miss-reported-not-applied` trips MWS-RES-1 only on a lookup miss with no fence while the lost request can still land, which no FX- property checks. `expected/select-0.4.0.mjs` writes the statement into the build list's `not_detected` from one entry per defect, and refuses an entry without its reason; the generator carries it into `expected/0.4.0.json` and the header of `expected/0.4.0.md`, and refuses a `not_detected` that is not one non-empty statement. `key-expires-early`, not detected in 0.3.0, is detected on every 0.4.0 row with it (FX-KEY-1).
 
 ### Stream F (0.4.0 contract kit)
 - `tiny-tracker stdio`: the MCP server over stdin and stdout, from the same server factory as the HTTP transport, through the SDK's `./stdio` export. The state line goes to stderr.
@@ -54,6 +59,14 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 - `TRACKER_CONTAINER_ALLOW_DEFECTS` (R23) is removed: it does not exist in 0.4.0. A start that sets it, to any value, is refused with a message naming it, so a stale setting is never ignored silently.
 - The data-dir lease: `lock.d` in the data dir, an mkdir lease with a 2 s heartbeat and a 20 s stale time, taken over by compare-and-rename. Before every journal append the holder checks it still owns the lease and beat within 10 s; otherwise it is fenced (writes answer 503 `journal_unavailable`; restart it). The 0.3.0 pid lock stays as a second check for this release. `fx-check` FX-DUR-2 counts `lock.d` among the data dir's files.
 - The known-answer generator writes the second principal's file whenever principals are in effect (the profile included), so FX-LOOK-3 is checked on the matrix's Lv rows.
+
+### 0.4.0 release review (fresh eyes)
+- `tiny-tracker stdio` with a backend URL refuses `--key-expiry` naming `tiny-tracker stdio`, not `tiny-tracker server`.
+- `tiny-tracker --help` and the README say where each listener binds: nothing binds by hostname, and `/mcp` answers 403 to a non-loopback `Host` or `Origin` even with the bearer token.
+- FIXTURE: a ledger `journal-unavailable` entry (written for a 503 `lease_lost` too) means "outcome unknown, not applied by this process"; the fixture clock is not the wall clock.
+
+### The default profile (unchanged in 0.4.0)
+- The default profile turns on what it turned on in 0.3.0: `execution-records`, `lookup`, `principals`, `inflight` and `retention`. 0.4.0 ships no feature switch of its own: stdio, container mode, the resource caps and the data-dir lease are in every build, and the fixture clock's journal lines come with `durable` and `clock`, which stay named (`durable` needs `--data-dir`, `clock` needs `--fixture-control`).
 
 ## 0.3.0 (18 Nov 2026) for MWS 0.9
 

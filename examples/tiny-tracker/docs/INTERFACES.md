@@ -229,7 +229,7 @@ Every stream branches from the head of `tiny-tracker/shared-fixture` after the s
 
 | File | Rule |
 |---|---|
-| `src/profile.ts` | Each stream edits only its own rows of `FEATURES`: A (`execution-records`, `lookup`, `principals`), B (`ledger`, `faults`, `evidence`), D (`durable`, `inflight`, `retention`), E (`clock`). `PROFILE_FEATURES.default` is flipped at release time; for 0.2.0, stream A does it (§3). |
+| `src/profile.ts` | Each stream edits only its own rows of `FEATURES`: A (`execution-records`, `lookup`, `principals`), B (`ledger`, `faults`, `evidence`), D (`durable`, `inflight`, `retention`), E (`clock`). `PROFILE_FEATURES.default` is flipped at release time; for 0.2.0, stream A does it (§3). 0.4.0 has no feature row, so its release leaves the default as 0.3.0 set it. |
 | `src/compat.ts` | Append only. Reserved rule ids: A `CMP-20`–`29`, B `30`–`39`, C `40`–`49`, D `50`–`59`, E `60`–`69`, F `70`–`79`. Existing rules are not edited. |
 | `src/fixture-properties.ts` | Append only. New FX ids in the stream's own family (A: DIG, LOOK; B: FLT, BLD; D: DUR, KEY). |
 | `src/backend/store.ts`, `src/backend/http.ts` | A owns them. D writes only its delimited block in `store.ts`. B and E plug in through `sinks`, `clock` and `extension`, never by editing. |

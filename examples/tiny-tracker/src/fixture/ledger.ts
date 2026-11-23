@@ -15,8 +15,12 @@
 // own actions: its start, fault arming and firing (G9) and run allocation. A
 // run reset is a commit (kind run-reset) and reaches the ledger as one, with
 // tx.reset; a write whose journal append failed reaches it as a refusal with
-// code journal_unavailable and is written as kind journal-unavailable. Entries
-// are never edited or removed.
+// code journal_unavailable and is written as kind journal-unavailable. From
+// 0.4.0 a write answered 503 lease_lost (its line flushed, then the data-dir
+// lease found taken over) is recorded the same way: LedgerKind (src/records.ts)
+// has no lease_lost kind. Both mean "outcome unknown, not applied by this
+// process": the line may be in the journal, and the next start, or the start
+// that took the lease over, may apply it. Entries are never edited or removed.
 //
 // The ledger keeps its own sequence (`seq`, from 1). An execution entry links
 // to the store's commit sequence by `execution_id` (X-<commit seq>); a replay

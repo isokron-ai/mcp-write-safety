@@ -54,6 +54,32 @@ const KEY_JOURNAL_VARIANTS = ["key-store-honest", "key-store-durable"];
  */
 const MATRIX_NEEDS = { "key-expires-early": ["clock"] };
 
+/**
+ * The defects these known answers cannot tell from the build without them, each with its reason (0.3.0's follow-up F1,
+ * for 0.4.0). The selector writes them into the list's `not_detected`, which the generator carries into
+ * expected/0.4.0.json and the header of expected/0.4.0.md. Neither defect has a row the contract driver runs (the
+ * selector refuses one: the statement says so), and each row's fixture answers equal its twin's without the defect.
+ */
+export const NOT_DETECTED = [
+  { defect: "in-progress-reported-not-applied",
+    reason: "it trips MWS-RES-2 only on a same-key call while the first is still pending, which needs a request held before its commit; no built fault point holds one, so FX-KEY-3 answers \"not checked\"" },
+  { defect: "settle-miss-reported-not-applied",
+    reason: "it trips MWS-RES-1 only on a lookup miss with no fence while the lost request can still land, which no FX- property checks" },
+];
+
+/** The `not_detected` statement, F1's shape (one string). An entry without a defect or a reason is refused. */
+export function notDetectedStatement(entries, release = "0.4.0") {
+  if (!Array.isArray(entries) || entries.length === 0) throw new Error("not_detected: no entries");
+  for (const e of entries) {
+    if (typeof e?.defect !== "string" || e.defect.trim() === "") throw new Error(`not_detected: an entry names no defect (${JSON.stringify(e)})`);
+    if (typeof e.reason !== "string" || e.reason.trim() === "") throw new Error(`not_detected: ${e.defect} has no reason`);
+  }
+  const names = entries.map((e) => e.defect);
+  const named = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return `Not detected in ${release}: ${named}. A row with one of them has the fixture answers of the row with the same level, backend defect and variant and no MCP-layer defect, where the matrix has that row, and none is run by the contract driver, so a "held" on these rows does not mean the defect is absent (tiny-tracker's own tests show each). `
+    + entries.map((e) => `${e.defect}: ${e.reason}.`).join(" ");
+}
+
 export async function select() {
   const { DEFECTS } = await dist("defects/index.js");
   const { BACKEND_DEFECTS, backendDefectRefusals } = await dist("backend/defects/index.js");
@@ -144,9 +170,15 @@ export async function select() {
       contract: contractRows.has(`${r.level}/${r.mcp}/${r.backend}/${r.variant}`), fixture: true,
     };
   });
+  // The not_detected statement says no row with these defects is run by the contract driver.
+  for (const { defect } of NOT_DETECTED) {
+    if (!DEFECTS.some((d) => d.name === defect)) throw new Error(`not_detected names ${defect}, which is not an MCP-layer defect`);
+    for (const b of builds) if (b.factors.mcp === defect && b.contract) throw new Error(`not_detected: ${b.label} is run by the contract driver`);
+  }
   return {
     release: "0.4.0",
-    note: "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Do not edit by hand.",
+    note: "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Two MCP-layer defects answer as the build without them does: see not_detected, which the generator carries into expected/0.4.0.json and the header of expected/0.4.0.md. Do not edit by hand.",
+    not_detected: notDetectedStatement(NOT_DETECTED),
     coverage: { factors: Object.fromEntries(names.map((n) => [n, factors[n].length])), legal_candidates: candidates.length, pairs: coverable, builds: builds.length },
     levels: Object.fromEntries(LEVELS.map((l) => [l.id, l.features.join(",") + (l.dataDir ? " --data-dir {DATA_DIR}" : "")])),
     builds,

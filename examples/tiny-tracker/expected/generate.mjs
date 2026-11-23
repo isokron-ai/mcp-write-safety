@@ -210,6 +210,11 @@ const sortKeys = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, 
 
 export async function generate(o) {
   const list = JSON.parse(readFileSync(o.builds, "utf8"));
+  // `not_detected` (0.3.0's follow-up F1): one statement, naming each defect with its reason. Any other shape (an
+  // empty string, a list of entries, an entry without its reason) is refused before a build runs.
+  if ("not_detected" in list && (typeof list.not_detected !== "string" || list.not_detected.trim() === "")) {
+    throw new Error(`${o.builds}: not_detected must be one non-empty statement naming each defect with its reason (got ${JSON.stringify(list.not_detected)})`);
+  }
   const builds = [];
   const writecheck = [];
   // --jobs N: builds run N at a time (each on its own ports, tokens and folder); the output is sorted, so it does not

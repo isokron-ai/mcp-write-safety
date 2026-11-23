@@ -24,7 +24,7 @@ import { toolInputSchema } from "./validate.js";
 import { attributionFromMeta, runWithAttribution } from "../attribution.js";
 import { bearerMatches } from "../tokens.js";
 
-export const SERVER_INFO = { name: "tiny-tracker", version: "0.3.0" };
+export const SERVER_INFO = { name: "tiny-tracker", version: "0.4.0" };
 
 export interface RunningMcpServer {
   url: string;
