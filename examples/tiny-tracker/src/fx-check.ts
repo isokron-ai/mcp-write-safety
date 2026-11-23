@@ -110,6 +110,25 @@ const CHECKED = new Set<FixturePropertyId>(["FX-BLD-1", "FX-DIG-1", "FX-DIG-2", 
   "FX-DUR-1", "FX-DUR-2", "FX-DUR-3", "FX-KEY-1", "FX-KEY-2", "FX-KEY-3"]);
 
 /** The files journal-format/1 keeps in a data dir (decision 0003, src/backend/journal.ts); anything else is not the format. */
+/**
+ * The journal's lines as FX-DUR-2 reads them: every physical line that parses, and from 0.4.0 the whole line a later
+ * write joined onto a torn fragment (the longest suffix that starts `{"jseq":` and parses; the fragment is left out, as
+ * the server's reader leaves it out). A physical line with nothing whole in it is skipped. No checksum is checked here:
+ * FX-DUR-2 asks what the lines hold, not whether the file loads (integration pass, g3a open question 2).
+ */
+export function journalLinesOf(text: string): any[] {
+  const parse = (t: string): any[] => {
+    try { return [JSON.parse(t)]; } catch { /* a fragment, or a fragment joined by a whole line */ }
+    for (let i = t.indexOf('{"jseq":', 1); i > 0; i = t.indexOf('{"jseq":', i + 1)) {
+      let tail: unknown;
+      try { tail = JSON.parse(t.slice(i)); } catch { continue; }
+      return [...parse(t.slice(0, i)), tail];
+    }
+    return [];
+  };
+  return text.split("\n").filter(Boolean).flatMap(parse);
+}
+
 export const DATA_DIR_FILES = ["tiny-tracker.data", "lock", "lock.d", "journal.jsonl"] as const;
 
 /**
@@ -634,7 +653,7 @@ export async function fxCheck(o: FxCheckOptions): Promise<FxCheckReport> {
       try {
         names = readdirSync(o.dataDir);
         const text = readFileSync(join(o.dataDir, "journal.jsonl"), "utf8");
-        lines = text.split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+        lines = journalLinesOf(text);
       } catch (e) {
         set("FX-DUR-2", "not checked", `the data dir could not be read: ${(e as Error).message}`);
       }

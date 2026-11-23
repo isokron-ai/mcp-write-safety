@@ -44,6 +44,7 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 
 ### 0.4.0 integration pass (g3a and g3b merged; on the 0.3.0 release)
 - An append that fails once its write has begun is answered 503 `journal_unavailable` with its outcome unknown, as `lease_lost` is: the line may be in the file and the next start decides it. The code stays `journal_unavailable` (the ledger's schema is unchanged; the MCP layer answers every backend 5xx as outcome `unknown`), and the fence, run and clock routes no longer say "nothing was fenced" or "the clock did not move" for it. INTERFACES, decision 0003, FIXTURE and `openapi.yaml` say that `journal_unavailable` means "not applied by this process", never "never applied".
+- `fx-check` FX-DUR-2 reads a journal line that a later write joined onto a torn fragment (0.4.0 never cuts the file): it takes the line's whole part, as the server's reader does, instead of skipping the physical line.
 
 ### 0.4.0 additions (coordinator note 19)
 - The fixture clock with `durable`: each clock move is an additive journal `clock` line (`from_ms`, `to_ms`, `at`), written before the offset is stored; the offset is restored at load, and a data dir with clock lines refuses to start without the `clock` feature. CMP-65 (`durable` with `clock` refused) is retired, and the 0.4.0 matrix's durable level runs with the fixture clock, so FX-KEY-1 is checked on durable rows. `tt_recount.py` knows the kind. `fx-check` makes the FX-DUR-1 plant after FX-KEY-1's clock move, so the restart measures durability only.

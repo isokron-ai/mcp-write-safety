@@ -11,7 +11,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { DATA_DIR_LEFTOVER_PREFIXES, fxCheck, isDataDirFile, statedRetentionMs, type FxCheckReport } from "../src/fx-check.js";
+import { DATA_DIR_LEFTOVER_PREFIXES, fxCheck, isDataDirFile, journalLinesOf, statedRetentionMs, type FxCheckReport } from "../src/fx-check.js";
+import { encodeLine } from "../src/backend/journal.js";
 
 const GENERATE = pathToFileURL(fileURLToPath(new URL("../../expected/generate.mjs", import.meta.url))).href;
 const L3 = "evidence,strict-input,execution-records,lookup,principals,ledger,faults,inflight,retention,clock";
@@ -139,6 +140,19 @@ describe("fx-check 0.4.0: FX-DUR-2 ignores the lock and lease leftovers", () => 
     for (const name of ["lock.new-12-a1b2c3", "lock.stale-12-a1b2c3", "lock.d.new-12-a1b2c3", "lock.d.stale-12-a1b2c3", "lock.d.released-12-a1b2c3",
       "journal.jsonl", "lock", "lock.d", "tiny-tracker.data"]) assert.equal(isDataDirFile(name), true, name);
     for (const name of ["keys.jsonl", "after-effect.jsonl", "lock.old", "journal.jsonl.bak", "lockfile"]) assert.equal(isDataDirFile(name), false, name);
+  });
+
+  // Integration pass, g3a open question 2: from 0.4.0 a torn write stays in the file and the next write joins it on its
+  // physical line. FX-DUR-2 reads the joined line's whole part, as the server's reader does, instead of skipping it.
+  it("reads a keyed commit line that a later write joined onto a torn fragment", () => {
+    const commit = (jseq: number, tx: Record<string, unknown>) => encodeLine({ jseq, line: "commit", commit_seq: jseq, pending_jseq: null, tx, epoch: 1 } as any);
+    const whole = commit(3, { kind: "write", request: { key: "joined-key-01" }, status: 201, body: { ok: true }, headers: {} });
+    const bare = commit(4, { kind: "write", request: { key: "joined-key-02" } });
+    const torn = whole.slice(0, Math.floor(whole.length / 2));
+    const lines = journalLinesOf(`${torn}${whole}\n${torn}${torn}${bare}\n${torn}\n`);
+    assert.deepEqual(lines.map((l) => l.tx.request.key), ["joined-key-01", "joined-key-02"], "the fragments are left out, the whole lines read");
+    assert.equal(lines[1].tx.body, undefined, "a bare keyed commit line behind a fragment is read, so FX-DUR-2 can find it");
+    assert.deepEqual(journalLinesOf(`${whole}\n${bare}\n`).length, 2);
   });
 
   it("a correct durable build with leftovers in its data dir: FX-DUR-2 held; another file beside them: violated", async () => {
