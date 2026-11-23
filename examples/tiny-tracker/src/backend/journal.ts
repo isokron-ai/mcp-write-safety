@@ -411,7 +411,8 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     // ppid: a supervised child's lock names its supervisor too (evidence only; liveness is the pid's).
     // nonce (G2 follow-up 2): two locks this process writes never share a text, even in the same millisecond or under a
     // frozen wallNow, so releasing one never makes another look like an earlier process's (WRITTEN matches on text).
-    const content = JSON.stringify({ pid: process.pid, ppid: process.ppid, started_at: wallNow().toISOString(), nonce: randomBytes(8).toString("hex") });
+    // host (G3 note 26 item 4): a pid lock written on another host is judged by the lease alone, never by its pid here.
+    const content = JSON.stringify({ pid: process.pid, ppid: process.ppid, host: hostname(), started_at: wallNow().toISOString(), nonce: randomBytes(8).toString("hex") });
     const createdIno = createLock(path, content);
     if (createdIno !== false) {
       HELD.add(real);
@@ -439,7 +440,7 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
       throw e;
     }
     let pid = NaN;
-    let parsed: { pid?: unknown; started_at?: unknown } | undefined;
+    let parsed: { pid?: unknown; host?: unknown; started_at?: unknown } | undefined;
     try {
       parsed = JSON.parse(text);
       pid = Number(parsed!.pid);
@@ -455,9 +456,12 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
     if (pid === process.pid && ownLockText(text)) {
       throw new DataDirError(`the data dir ${dir} is already open in this process (its lock names this process); one writer per data dir`);
     }
-    // fencedPid (0.4.0): a holder on this host whose lease this start took over because it stopped beating; the lease
-    // fences it, so its live pid does not hold the pid lock either.
-    if (Number.isSafeInteger(pid) && pid !== process.pid && alive(pid) && pid !== fencedPid) {
+    // A pid lock another host wrote (G3 note 26 item 4): its pid means nothing here. This start holds the lease, which
+    // fences every other holder, so such a lock is judged by the lease alone and taken over.
+    const foreignHost = typeof parsed?.host === "string" && parsed.host !== hostname() ? parsed.host : undefined;
+    // fencedPid (0.4.0; G3 note 26 item 4: any takeover by age): a holder whose lease this start took over because it
+    // stopped beating; the lease fences it, so its pid, alive here or not, does not hold the pid lock either.
+    if (foreignHost === undefined && Number.isSafeInteger(pid) && pid !== process.pid && alive(pid) && pid !== fencedPid) {
       throw new DataDirError(`the data dir ${dir} is locked by process ${pid}; one server per data dir (more than one instance is not supported)`);
     }
     lockHooks.beforeTakeover?.(path);
@@ -467,7 +471,11 @@ export function acquireLock(dir: string, wallNow: () => Date, log: (m: string) =
       throw new DataDirError(`the data dir ${dir}: other starts took the lock over at the same moment; this start moved a lock aside and left it as ${taken.aside} (it may be a running server's; another start may since have removed it); one server per data dir`);
     }
     if (taken.result === "restored") continue; // another starter's lock: read it again (its live pid refuses this start)
-    log(`tiny-tracker: taking over a stale data-dir lock (process ${Number.isNaN(pid) ? "unknown" : pid} is gone)`);
+    log(foreignHost !== undefined
+      ? `tiny-tracker: taking over a data-dir lock written on host ${foreignHost} (process ${pid}); this start holds the lease, which decides`
+      : pid === fencedPid && alive(pid)
+        ? `tiny-tracker: taking over the data-dir lock of process ${pid}, whose lease this start took over (it stopped beating)`
+        : `tiny-tracker: taking over a stale data-dir lock (process ${Number.isNaN(pid) ? "unknown" : pid} is gone)`);
   }
   throw new DataDirError(`could not take the data-dir lock in ${dir}`);
 }
@@ -729,8 +737,10 @@ export function acquireLease(dir: string, log: (m: string) => void): { fencedPid
       why = `process ${pid} is gone`;
     } else if (age > leaseTiming.staleMs) {
       why = `its heartbeat stopped ${Math.round(age / 1000)} s ago`;
-      if (sameHost) fencedPid = pid;
     }
+    // G3 note 26 item 4: any takeover by age fences the old holder, so its pid lock goes with the lease, whatever host
+    // it ran on (the pid may name an unrelated live process here).
+    if (why !== undefined && !(sameHost && (pid === process.pid || !alive(pid))) && Number.isSafeInteger(pid)) fencedPid = pid;
     if (why === undefined) {
       throw new DataDirError(`the data dir ${dir} is locked by ${Number.isSafeInteger(pid) ? `process ${pid}` : "another start"}${owner.host !== undefined && owner.host !== host ? ` on host ${String(owner.host)}` : ""} (its lease heartbeat is ${Math.round(age / 1000)} s old); one server per data dir (more than one instance is not supported)`);
     }

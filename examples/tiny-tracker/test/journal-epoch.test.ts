@@ -8,12 +8,13 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/durable.js";
-import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LOCK_FILE, leaseTiming, loadHooks, prepareDataDir, readJournal, splitJoined, type CrashHook } from "../src/backend/journal.js";
+import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LEASE_OWNER, LOCK_FILE, leaseTiming, loadHooks, prepareDataDir, readJournal, splitJoined, type CrashHook } from "../src/backend/journal.js";
 import { Store } from "../src/backend/store.js";
 
 const child = fileURLToPath(new URL("./support/durable-child.js", import.meta.url));
@@ -337,6 +338,57 @@ describe("a long load keeps the lease (G3 note 26 item 3)", () => {
     } finally {
       loadHooks.onLine = undefined;
       Object.assign(leaseTiming, saved);
+      t.cleanup();
+    }
+  });
+});
+
+describe("the pid lock across hosts (G3 note 26 item 4)", () => {
+  /** A live process that is not this one (recorded; killed by its pid only). */
+  async function livePid(): Promise<{ pid: number; stop(): Promise<void> }> {
+    const p = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+    await new Promise((r) => p.once("spawn", r));
+    return { pid: p.pid!, stop: async () => { const gone = new Promise((r) => p.once("exit", r)); p.kill("SIGKILL"); await gone; } };
+  }
+
+  it("a pid lock another host wrote is judged by the lease alone, even when its pid is alive here", async () => {
+    const t = tempDir("ep-host");
+    const other = await livePid();
+    try {
+      prepareDataDir(t.dataDir);
+      writeFileSync(join(t.dataDir, LOCK_FILE), JSON.stringify({ pid: other.pid, ppid: 1, host: "another-host", started_at: "t", nonce: "aa" }), { mode: 0o600 });
+      const s = open(t.dataDir);
+      try {
+        assert.match(s.logs.join("\n"), /taking over a data-dir lock written on host another-host/);
+        assert.equal(JSON.parse(readFileSync(join(t.dataDir, LOCK_FILE), "utf8")).host, hostname(), "the pid lock names its host");
+      } finally {
+        s.j.close();
+      }
+    } finally {
+      await other.stop();
+      t.cleanup();
+    }
+  });
+
+  it("a takeover by age takes a host-less pid lock whose pid is alive here (the old holder is fenced by the lease)", async () => {
+    const t = tempDir("ep-age");
+    const other = await livePid();
+    try {
+      prepareDataDir(t.dataDir);
+      const lease = join(t.dataDir, LEASE_DIR);
+      mkdirSync(lease, { mode: 0o700 });
+      writeFileSync(join(lease, LEASE_OWNER), JSON.stringify({ pid: other.pid, host: "a-moved-container", nonce: "bb" }));
+      const old = new Date(Date.now() - leaseTiming.staleMs - 5000);
+      utimesSync(lease, old, old);
+      writeFileSync(join(t.dataDir, LOCK_FILE), JSON.stringify({ pid: other.pid, ppid: 1, started_at: "t", nonce: "cc" }), { mode: 0o600 });
+      const s = open(t.dataDir);
+      try {
+        assert.match(s.logs.join("\n"), new RegExp(`taking over the data-dir lock of process ${other.pid}, whose lease this start took over`));
+      } finally {
+        s.j.close();
+      }
+    } finally {
+      await other.stop();
       t.cleanup();
     }
   });

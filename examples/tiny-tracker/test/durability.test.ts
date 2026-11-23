@@ -1017,7 +1017,8 @@ describe("the data-dir lease (0.4.0, note 19 item 11)", () => {
       const old = new Date(Date.now() - leaseTiming.staleMs - 5000);
       utimesSync(path, old, old);
       const logs: string[] = [];
-      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), {}, "another host's pid is never fenced through the pid lock");
+      // G3 note 26 item 4: any takeover by age fences the old holder, whatever host it ran on, so its pid lock goes with the lease.
+      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), { fencedPid: 2 ** 22 + 777 });
       assert.match(logs.join(), /its heartbeat stopped/);
       assert.equal(JSON.parse(readFileSync(join(path, LEASE_OWNER), "utf8")).pid, process.pid);
       checkLease(t.dataDir);
