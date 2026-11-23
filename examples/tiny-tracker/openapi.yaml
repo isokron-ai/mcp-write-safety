@@ -719,8 +719,10 @@ paths:
       description: |
         Moves the fixture clock forward (feature `clock`, with `--fixture-control`). Every record carries
         `clock_offset_ms`; an A5 run that counts shows offset 0 with control off. Without the `clock` feature: 501.
-        With `durable` the move is journalled (a `clock` line) before the offset is stored, and the offset is restored
-        at the next start; if the line cannot be written the clock does not move (503 `journal_unavailable`).
+        With `durable` the move is journalled (a `clock` line) once the offset is stored and before it is answered, and
+        the offset is restored at the next start; if the line cannot be written the offset is put back (503
+        `journal_unavailable`); if the line was written and the data-dir lease was then found taken over, the answer is
+        503 `lease_lost` and whether a restart keeps the move is unknown.
       security: [{ controlToken: [] }]
       requestBody:
         required: true
@@ -1031,13 +1033,17 @@ components:
             no_record and no_route (404), bad_json, bad_if_match, bad_idempotency_key and not_well_formed (400),
             exists, not_empty, in_progress, key_fenced and run_reset (409), key_expired (410), precondition_failed
             (412), too_large (413), validation (422, with `field` and `reason`), idempotency_key_reused (422),
-            precondition_required (428), journal_unavailable and stopped (503), internal (500). Evidence: bad query
+            precondition_required (428), journal_unavailable, lease_lost and stopped (503), internal (500). Evidence: bad query
             parameters, principal_required and unknown_principal (400), forbidden (403), read_only (405), not_enabled
             (501). Control: bad_json, bad_body, bad_request, bad_selector, bad_principal, unknown_principal,
             unknown_point, not_planned and needs_feature (400), unauthorized (401), forbidden (403), no_route and no_such_run (404),
             method_not_allowed (405), needs_supervise (409), too_large (413), unsupported_media_type (415),
-            too_many_runs and too_many_faults (429), not_enabled and not_built (501), ledger_stopped, stopped and
-            journal_unavailable (503).
+            too_many_runs and too_many_faults (429), not_enabled and not_built (501), ledger_stopped, stopped,
+            journal_unavailable and lease_lost (503). `lease_lost` (durable, 0.4.0): the journal line was written and
+            flushed, then the data-dir lease was found taken over by another start, so the outcome is unknown (the new
+            holder decides it; a keyed repeat to it tells which); this server appends nothing more and must be restarted.
+            `journal_unavailable`: nothing was appended, or the append failed (if it failed once its write had begun, the
+            line may be in the file and the next start decides it).
         message: { type: string }
     NotBuilt:
       type: object
