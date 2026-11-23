@@ -2,12 +2,12 @@
 #
 # Builds examples/tiny-tracker and, for each build in the matrix, starts it, collects the fixture answers
 # with expected/generate.mjs (the generator the known-answer files come from) and compares them with the
-# committed row of expected/0.3.0.json: same build_hash, same FX- answers.
+# committed row of expected/<version>.json, where <version> is package.json's: same build_hash, same FX- answers.
 #
 #   defects empty   the control set: "correct build" (known good: must match its row) and
 #                   "backend defect digest-of-current-state" (known bad, FX-DIG-1 differs: must match its own row, and that row must
 #                   differ from the correct build's). It shows the matrix itself works.
-#   defects a,b     those defects (names as in the labels of expected/builds-0.3.0.json, for example
+#   defects a,b     those defects (names as in the labels of expected/builds-<version>.json, for example
 #                   digest-of-current-state); each must match its committed row.
 #
 # Only the fixture answers are compared here. The contract-driver and mcp-writecheck rows need a checkout of
@@ -141,16 +141,20 @@ jobs:
             import { readFileSync } from "node:fs";
             import { isDeepStrictEqual } from "node:util";
             import { generate } from "./expected/generate.mjs";
-            const builds = "expected/builds-0.3.0.json";
-            const committed = JSON.parse(readFileSync("expected/0.3.0.json", "utf8")).builds;
+            // The newest known answers are the ones for this tree (the own-tag rule): pick them by the version in package.json.
+            const v = JSON.parse(readFileSync("package.json", "utf8")).version;
+            const builds = `expected/builds-${v}.json`;
+            const committed = JSON.parse(readFileSync(`expected/${v}.json`, "utf8")).builds;
             const labels = JSON.parse(readFileSync(builds, "utf8")).builds.map((b) => b.label);
             const { KIND, DEFECT } = process.env;
-            let label = process.env.LABEL;
-            if (KIND === "defect") {
-              const hits = labels.filter((l) => l.endsWith(` defect ${DEFECT}`) || l === `defect ${DEFECT}`);
-              if (hits.length !== 1) { console.error(`${DEFECT}: ${hits.length} builds in ${builds} carry that defect, expected 1`); process.exit(1); }
-              label = hits[0];
-            }
+            // Labels differ between releases: 0.3.0 says "correct build" and "backend defect X"; 0.4.0 prefixes a layer
+            // ("L2 correct build", "L2, defect X", "L2, backend X"). Take the first candidate that this release has.
+            const pick = (cands) => cands.find((c) => labels.includes(c));
+            let label;
+            if (KIND === "known-good") label = pick(["L2 correct build", "correct build"]);
+            else if (KIND === "known-bad") label = pick(["L2, backend digest-of-current-state", "backend defect digest-of-current-state"]);
+            else label = pick([`L2, defect ${DEFECT}`, `L2, backend ${DEFECT}`, `defect ${DEFECT}`, `backend defect ${DEFECT}`]);
+            if (!label) { console.error(`${KIND} ${DEFECT ?? ""}: no single-defect build in ${builds}`); process.exit(1); }
             const want = committed.find((b) => b.label === label);
             if (!want) { console.error(`no committed row for "${label}"`); process.exit(1); }
             const doc = await generate({ builds, only: [label], repeat: 3 });
@@ -159,11 +163,11 @@ jobs:
             if (got.build_hash !== want.build_hash) failures.push("build_hash differs from the committed row");
             if (!isDeepStrictEqual(got.fixture, want.fixture)) failures.push("fixture answers differ from the committed row");
             if (KIND === "known-bad") {
-              const good = committed.find((b) => b.label === "correct build");
+              const good = committed.find((b) => b.label === pick(["L2 correct build", "correct build"]));
               if (isDeepStrictEqual(got.fixture, good.fixture)) failures.push("the known-bad build answers like the correct build");
             }
             if (failures.length) { for (const f of failures) console.error(`${label}: ${f}`); process.exit(1); }
-            console.log(`${label}: matches expected/0.3.0.json`);
+            console.log(`${label}: matches expected/${v}.json`);
           '
 
   t0-manifest:
