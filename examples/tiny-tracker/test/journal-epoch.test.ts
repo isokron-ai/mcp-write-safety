@@ -14,8 +14,10 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/durable.js";
-import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LEASE_OWNER, LOCK_FILE, leaseTiming, loadHooks, prepareDataDir, readJournal, splitJoined, type CrashHook } from "../src/backend/journal.js";
+import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LEASE_OWNER, LOCK_FILE, acquireLease, leaseFs, leaseTiming, loadHooks, prepareDataDir, readJournal, releaseLease, splitJoined, type CrashHook } from "../src/backend/journal.js";
+import { openDurability } from "../src/backend/durability.js";
 import { Store } from "../src/backend/store.js";
+import { FixtureClock, memoryOffset } from "../src/fixture/clock.js";
 
 const child = fileURLToPath(new URL("./support/durable-child.js", import.meta.url));
 
@@ -389,6 +391,86 @@ describe("the pid lock across hosts (G3 note 26 item 4)", () => {
       }
     } finally {
       await other.stop();
+      t.cleanup();
+    }
+  });
+});
+
+describe("availability (G3 note 26 item 5)", () => {
+  function fakeLease(dataDir: string, host: string, ageMs: number) {
+    prepareDataDir(dataDir);
+    const lease = join(dataDir, LEASE_DIR);
+    mkdirSync(lease, { mode: 0o700 });
+    writeFileSync(join(lease, LEASE_OWNER), JSON.stringify({ pid: 4_000_002, host, nonce: "dd" }));
+    const at = new Date(Date.now() - ageMs);
+    utimesSync(lease, at, at);
+  }
+
+  it("another hostname whose heartbeat is older than the self-fence time is taken at once (docker run --rm --init); a younger one is held", () => {
+    const t = tempDir("ep-otherhost");
+    try {
+      fakeLease(t.dataDir, "container-1", leaseTiming.selfFenceMs + 3000);
+      const logs: string[] = [];
+      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), { fencedPid: 4_000_002 });
+      assert.match(logs.join(), /names host container-1, whose heartbeat stopped \d+ s ago \(past the 10 s self-fence time\)/);
+      releaseLease(t.dataDir);
+    } finally {
+      t.cleanup();
+    }
+    const y = tempDir("ep-otherhost-young");
+    try {
+      fakeLease(y.dataDir, "container-1", leaseTiming.selfFenceMs - 4000);
+      assert.throws(() => acquireLease(y.dataDir, () => {}), (e) => e instanceof DataDirError && /on host container-1/.test(e.message));
+    } finally {
+      y.cleanup();
+    }
+  });
+
+  for (const code of ["EPERM", "EBUSY"]) {
+    it(`a lease folder that cannot be moved or removed (${code}, as on Windows) is a clear refusal, not a raw error`, () => {
+      const t = tempDir("ep-win");
+      const saved = { ...leaseFs };
+      try {
+        fakeLease(t.dataDir, hostname(), leaseTiming.staleMs + 5000);
+        leaseFs.renameSync = ((from: string, to: string) => {
+          if (String(to).includes(".stale-")) throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+          return saved.renameSync(from, to);
+        }) as typeof leaseFs.renameSync;
+        assert.throws(() => acquireLease(t.dataDir, () => {}), (e) => e instanceof DataDirError && new RegExp(`could not move the stale lease .* aside \\(${code}; on Windows`).test(e.message) && /nothing was taken: start again/.test(e.message));
+        leaseFs.renameSync = saved.renameSync;
+        leaseFs.rmSync = ((p: string, o: unknown) => {
+          if (String(p).includes(".stale-")) throw Object.assign(new Error(`${code}: resource busy`), { code });
+          return saved.rmSync(p, o as never);
+        }) as typeof leaseFs.rmSync;
+        assert.throws(() => acquireLease(t.dataDir, () => {}), (e) => e instanceof DataDirError && new RegExp(`could not remove the stale lease, moved aside as .* \\(${code}`).test(e.message));
+      } finally {
+        Object.assign(leaseFs, saved);
+        t.cleanup();
+      }
+    });
+  }
+
+  it("(d) a clock offset kept ahead of the journal (a crash between storing it and its line, under --supervise): the journal catches up before serving", () => {
+    const t = tempDir("ep-clock");
+    try {
+      const openWith = (clock: FixtureClock) => openDurability(new Store(), { features: ["durable"], dataDir: t.dataDir, clock, log: () => {} });
+      const c1 = new FixtureClock(memoryOffset());
+      const d1 = openWith(c1);
+      c1.advance(1000);
+      d1.close();
+      // The state folder kept 5000 ms; the journal's last clock line says 1000 ms.
+      const kept = new FixtureClock(memoryOffset(5000));
+      const d2 = openWith(kept);
+      assert.equal(kept.offsetMs(), 5000, "never moved back");
+      assert.equal(d2.journal!.report!.clockOffsetMs, 5000);
+      d2.close();
+      const clocks = readJournal(join(t.dataDir, JOURNAL_FILE)).lines.filter((l) => l.line === "clock").map((l: any) => [l.from_ms, l.to_ms]);
+      assert.deepEqual(clocks, [[0, 1000], [1000, 5000]]);
+      // A fresh state folder restores the same offset.
+      const fresh = new FixtureClock(memoryOffset());
+      openWith(fresh).close();
+      assert.equal(fresh.offsetMs(), 5000);
+    } finally {
       t.cleanup();
     }
   });

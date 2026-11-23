@@ -53,9 +53,10 @@ export interface DurabilityOptions {
   runs?: { restore(run: JournalRun): void; onAllocate: ((run: JournalRun) => void) | undefined };
   /**
    * The fixture clock (0.4.0, feature clock). Under durable its clock lines go back into it at load (restore), and its
-   * beforeMove journals each move before the offset is stored (chained before any beforeMove already set).
+   * beforeMove journals each move once the offset is stored and before it is answered; a failed line rolls the offset
+   * back (chained before any beforeMove already set).
    */
-  clock?: { restore(offsetMs: number): void; beforeMove: ((move: JournalClockMove) => void) | undefined };
+  clock?: { restore(offsetMs: number): void; offsetMs?(): number; beforeMove: ((move: JournalClockMove) => void) | undefined };
   /**
    * The point backend/after-effect-before-key (G2 fold-in 11): called with the commit sequence of a keyed write after it
    * is journalled and applied, before its key record is kept. A supervised backend child's crash check; it may exit.
@@ -101,7 +102,18 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
     if (options.clock) journal.clock = options.clock;
     journal.load();
     if (options.clock) {
-      // 0.4.0: a clock move is journalled (clock line) before the offset is stored or answered.
+      // G3a (pause note 3.3, remaining case d): an offset kept elsewhere (the supervisor's state folder) that is ahead of
+      // the journal's is a move whose clock line was never written (a crash between storing the offset and its line). The
+      // clock already runs there and never moves back, so the journal catches up with a clock line before anything is
+      // served; a fresh state folder later restores the same offset.
+      const kept = options.clock.offsetMs?.();
+      const journalled = journal.report?.clockOffsetMs ?? 0;
+      if (kept !== undefined && Number.isSafeInteger(kept) && kept > journalled) {
+        journal.recordClockMove({ from_ms: journalled, to_ms: kept, at: new Date().toISOString() });
+        if (journal.report) journal.report.clockOffsetMs = kept;
+        (options.log ?? ((m: string) => process.stderr.write(`${m}\n`)))(`tiny-tracker: the fixture clock's kept offset (${kept} ms) was ahead of the journal's (${journalled} ms): a move whose clock line was not written; the journal now records it`);
+      }
+      // 0.4.0: a clock move is journalled (clock line) before it is answered; a failed line rolls the offset back.
       const clock = options.clock;
       const next = clock.beforeMove;
       const j = journal;

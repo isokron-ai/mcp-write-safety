@@ -514,8 +514,11 @@ export function releaseLock(dir: string): void {
 // renamed to lock.d, which fails while a lock.d exists (it is never empty), so of several starters exactly one gets it.
 // The holder refreshes lock.d's mtime every heartbeatMs. A starter takes a lease over when it is stale:
 //   - its mtime is older than staleMs (the holder stopped beating: killed on another host, paused, or hung), or
+//   - it names another hostname and its mtime is older than selfFenceMs: a holder anywhere that has not beaten for that
+//     long has fenced itself by its own rule (G3 note 26 item 5: `docker run --rm --init` gets a new hostname each run), or
 //   - on this host (same hostname), its pid is gone, or it names this pid with a text this process did not write (a
-//     container's pid 1 after an unclean stop): the fast paths, so a restart does not wait staleMs.
+//     container's pid 1 after an unclean stop): the fast paths, so a restart does not wait staleMs. On a shared hostname
+//     this takes over any pid this process cannot see, not only pid 1.
 // The takeover is a compare-and-rename: lock.d is renamed aside, and removed only if the moved directory is the one
 // judged stale (same inode, same owner text, same mtime); otherwise it is renamed back, or left aside and the start
 // refuses. The holder checks before every journal append that lock.d is still its own (inode and owner text) and that
@@ -535,6 +538,19 @@ export const loadHooks: { onLine?: () => void; beforeRefresh?: () => void } = {}
 
 /** Test seams: after a lease was judged stale and before it is taken over; after it was moved aside. */
 export const leaseHooks: { beforeTakeover?: (path: string) => void; afterAside?: (path: string) => void } = {};
+
+/**
+ * The file-system calls that move and remove lease directories (a test seam: on Windows a rename or a recursive remove of
+ * a directory another process has a handle in fails with EPERM, EBUSY or EACCES; G3 note 26 item 5).
+ */
+export const leaseFs = { renameSync, rmSync };
+
+/** EPERM/EBUSY/EACCES/ENOTEMPTY from moving or removing a lease directory, said plainly (G3 note 26 item 5); other errors pass. */
+function leaseFsRefusal(e: unknown, dir: string, what: string): unknown {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES" && code !== "ENOTEMPTY") return e;
+  return new DataDirError(`the data dir ${dir}: could not ${what} (${code}; on Windows another process may have a file in it open, or a virus scanner may be reading it); nothing was taken: start again, or once no tiny-tracker runs on this data dir remove it by hand`);
+}
 
 /** The lease is no longer this holder's: nothing more is appended. */
 export class LeaseLostError extends Error {}
@@ -608,20 +624,24 @@ function createLease(path: string, text: string): number | false {
     }
     const ino = statSync(tmp).ino;
     try {
-      renameSync(tmp, path);
+      leaseFs.renameSync(tmp, path);
     } catch (e) {
       // A lease is there (ENOTEMPTY or EEXIST on POSIX, EPERM or EACCES on Windows): not ours.
       if (existsSync(path)) return false;
-      throw e;
+      throw leaseFsRefusal(e, join(path, ".."), `rename its new lease ${tmp} into place`);
     }
     return ino;
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    try {
+      leaseFs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      // A temp folder that cannot be removed now (Windows): the leftover sweep removes it later.
+    }
   }
 }
 
 /** Removes a moved-aside lease only when it is proven to be the one judged stale; else puts it back or leaves it. */
-function removeStaleLease(path: string, seen: { ino: number; text: string | undefined; mtimeMs: number }): { result: "removed" | "restored" | "left"; aside: string } {
+function removeStaleLease(dir: string, path: string, seen: { ino: number; text: string | undefined; mtimeMs: number }): { result: "removed" | "restored" | "left"; aside: string } {
   const aside = `${path}.stale-${process.pid}-${randomBytes(6).toString("hex")}`;
   // Looked at again right before the move: a lease that is no longer the one judged stale (another start took it over
   // meanwhile) is not moved at all; the caller reads it again.
@@ -633,10 +653,10 @@ function removeStaleLease(path: string, seen: { ino: number; text: string | unde
     throw e;
   }
   try {
-    renameSync(path, aside);
+    leaseFs.renameSync(path, aside);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { result: "removed", aside };
-    throw e;
+    throw leaseFsRefusal(e, dir, `move the stale lease ${path} aside`);
   }
   leaseHooks.afterAside?.(path);
   let proven = false;
@@ -647,13 +667,17 @@ function removeStaleLease(path: string, seen: { ino: number; text: string | unde
     // unreadable: not proven stale
   }
   if (proven) {
-    rmSync(aside, { recursive: true, force: true });
+    try {
+      leaseFs.rmSync(aside, { recursive: true, force: true });
+    } catch (e) {
+      throw leaseFsRefusal(e, dir, `remove the stale lease, moved aside as ${aside}`);
+    }
     return { result: "removed", aside };
   }
   try {
     // Only into a free name: a lease created meanwhile is never empty, so the rename fails over it.
     if (existsSync(path)) return { result: "left", aside };
-    renameSync(aside, path);
+    leaseFs.renameSync(aside, path);
     return { result: "restored", aside };
   } catch {
     return { result: "left", aside };
@@ -679,7 +703,7 @@ export function sweepLeaseLeftovers(dir: string, log: (m: string) => void): numb
       // A temp directory names its writer: while that process runs it may still be creating its lease.
       const writer = kind === ".new-" ? Number(name.slice(`${LEASE_DIR}.new-`.length).split("-")[0]) : NaN;
       if (Number.isSafeInteger(writer) && writer !== process.pid && alive(writer)) continue;
-      rmSync(path, { recursive: true, force: true });
+      leaseFs.rmSync(path, { recursive: true, force: true });
       removed++;
     } catch {
       // Gone meanwhile: leave it.
@@ -728,6 +752,7 @@ export function acquireLease(dir: string, log: (m: string) => void): { fencedPid
     }
     const pid = Number(owner.pid);
     const sameHost = owner.host === host && Number.isSafeInteger(pid);
+    const otherHost = typeof owner.host === "string" && owner.host !== host;
     const age = Date.now() - st.mtimeMs;
     let why: string | undefined;
     if (sameHost && pid === process.pid) {
@@ -737,6 +762,10 @@ export function acquireLease(dir: string, log: (m: string) => void): { fencedPid
       why = `process ${pid} is gone`;
     } else if (age > leaseTiming.staleMs) {
       why = `its heartbeat stopped ${Math.round(age / 1000)} s ago`;
+    } else if (otherHost && age > leaseTiming.selfFenceMs) {
+      // G3 note 26 item 5: another hostname (a container run with --rm gets a new one each time) whose heartbeat is
+      // older than the self-fence time: that holder, wherever it runs, has stopped appending by its own rule.
+      why = `it names host ${String(owner.host)}, whose heartbeat stopped ${Math.round(age / 1000)} s ago (past the ${leaseTiming.selfFenceMs / 1000} s self-fence time)`;
     }
     // G3 note 26 item 4: any takeover by age fences the old holder, so its pid lock goes with the lease, whatever host
     // it ran on (the pid may name an unrelated live process here).
@@ -745,7 +774,7 @@ export function acquireLease(dir: string, log: (m: string) => void): { fencedPid
       throw new DataDirError(`the data dir ${dir} is locked by ${Number.isSafeInteger(pid) ? `process ${pid}` : "another start"}${owner.host !== undefined && owner.host !== host ? ` on host ${String(owner.host)}` : ""} (its lease heartbeat is ${Math.round(age / 1000)} s old); one server per data dir (more than one instance is not supported)`);
     }
     leaseHooks.beforeTakeover?.(path);
-    const taken = removeStaleLease(path, { ino: st.ino, text: seenText, mtimeMs: st.mtimeMs });
+    const taken = removeStaleLease(dir, path, { ino: st.ino, text: seenText, mtimeMs: st.mtimeMs });
     if (taken.result === "left") {
       throw new DataDirError(`the data dir ${dir}: other starts took the lease over at the same moment; this start moved a lease aside and left it as ${taken.aside} (another start may since have removed it); one server per data dir`);
     }
@@ -840,20 +869,26 @@ export function releaseLease(dir: string): void {
   if (!leaseIsOwn(held)) return;
   const aside = `${held.path}.released-${process.pid}-${randomBytes(6).toString("hex")}`;
   try {
-    renameSync(held.path, aside);
+    leaseFs.renameSync(held.path, aside);
   } catch {
     return;
   }
+  let mine = false;
   try {
-    if (statSync(aside).ino === held.ino && readOwner(aside) === held.text) {
-      rmSync(aside, { recursive: true, force: true });
-      return;
-    }
+    mine = statSync(aside).ino === held.ino && readOwner(aside) === held.text;
   } catch {
     // unreadable: put back below
   }
+  if (mine) {
+    try {
+      leaseFs.rmSync(aside, { recursive: true, force: true });
+    } catch {
+      // Released (moved off lock.d) but not removed (Windows): the leftover sweep removes the folder later.
+    }
+    return;
+  }
   try {
-    if (!existsSync(held.path)) renameSync(aside, held.path);
+    if (!existsSync(held.path)) leaseFs.renameSync(aside, held.path);
   } catch {
     // Left aside: its holder is fenced by its own check; the sweep removes the folder later.
   }

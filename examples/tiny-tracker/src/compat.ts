@@ -203,7 +203,7 @@ export const COMPAT_RULES: readonly CompatRule[] = [
       ? "fault point backend/after-effect-before-key/crash needs the durable feature: without a journal there is no key record to keep after the effect" : undefined,
   },
   // CMP-65 (G2 fold-in 9: durable with the fixture clock) is retired in 0.4.0 (coordinator note 19, item 7): the journal
-  // keeps the clock's moves (clock lines, written before the offset is stored) and restores the offset at load.
+  // keeps the clock's moves (clock lines, written before the move is answered) and restores the offset at load.
   // ---- stream F (CMP-70 to CMP-79) ----
   {
     // 0.4.0 integration: narrowed. stdio runs through the same start as `all`, so fixture-layer features, the evidence
