@@ -1,0 +1,193 @@
+# T0 worker: the tiny-tracker defect matrix. Dispatch only; there is no schedule, push or pull_request trigger.
+#
+# Builds examples/tiny-tracker and, for each build in the matrix, starts it, collects the fixture answers
+# with expected/generate.mjs (the generator the known-answer files come from) and compares them with the
+# committed row of expected/0.3.0.json: same build_hash, same FX- answers.
+#
+#   defects empty   the control set: "correct build" (known good: must match its row) and
+#                   "backend defect digest-of-current-state" (known bad, FX-DIG-1 differs: must match its own row, and that row must
+#                   differ from the correct build's). It shows the matrix itself works.
+#   defects a,b     those defects (names as in the labels of expected/builds-0.3.0.json, for example
+#                   digest-of-current-state); each must match its committed row.
+#
+# Only the fixture answers are compared here. The contract-driver and mcp-writecheck rows need a checkout of
+# those tools and are not part of this check; ci.yml and the generator's own `--check` cover the full files.
+#
+# No secrets. The first job does nothing unless the repository variable LOOP_ENABLED is exactly "true".
+
+name: defect-matrix
+
+run-name: shard ${{ inputs.shard_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_id:
+        description: T0 shard id (letters, digits, dot, underscore, hyphen; at most 64).
+        required: true
+        type: string
+      attempt_id:
+        description: Attempt id (same character set). Names the manifest artifact t0-<attempt_id>.
+        required: true
+        type: string
+      fence:
+        description: Fence token (letters, digits, dot, colon, underscore, hyphen; at most 64).
+        required: true
+        type: string
+      run_key:
+        description: Run key (same character set as fence).
+        required: true
+        type: string
+      defects:
+        description: Comma-separated defect names (lowercase letters, digits, hyphen; at most 20). Empty runs the control set only.
+        required: false
+        default: ''
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: defect-matrix-${{ inputs.shard_id }}-${{ inputs.attempt_id }}
+  cancel-in-progress: false
+
+jobs:
+  t0-start:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      go: ${{ steps.guard.outputs.go }}
+      attempt_id: ${{ steps.guard.outputs.attempt_id }}
+      fence: ${{ steps.guard.outputs.fence }}
+      run_key: ${{ steps.guard.outputs.run_key }}
+      cells: ${{ steps.guard.outputs.cells }}
+    steps:
+      - id: guard
+        name: Kill switch, then validate the inputs
+        env:
+          LOOP_ENABLED: ${{ vars.LOOP_ENABLED }}
+          IN_SHARD_ID: ${{ inputs.shard_id }}
+          IN_ATTEMPT_ID: ${{ inputs.attempt_id }}
+          IN_FENCE: ${{ inputs.fence }}
+          IN_RUN_KEY: ${{ inputs.run_key }}
+          IN_DEFECTS: ${{ inputs.defects }}
+        run: |
+          if [ "$LOOP_ENABLED" != "true" ]; then
+            echo "::notice::LOOP_ENABLED is not 'true'; this T0 worker does nothing."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bad=0
+          check() { # name value pattern
+            if ! printf '%s' "$2" | grep -Eq "$3"; then echo "::error::input $1 is empty or has a character outside its allowed set"; bad=1; fi
+          }
+          check shard_id "$IN_SHARD_ID" '^[A-Za-z0-9._-]{1,64}$'
+          check attempt_id "$IN_ATTEMPT_ID" '^[A-Za-z0-9._-]{1,64}$'
+          check fence "$IN_FENCE" '^[A-Za-z0-9._:-]{1,64}$'
+          check run_key "$IN_RUN_KEY" '^[A-Za-z0-9._:-]{1,64}$'
+          if [ -n "$IN_DEFECTS" ]; then
+            check defects "$IN_DEFECTS" '^[a-z0-9-]+(,[a-z0-9-]+){0,19}$'
+          fi
+          [ "$bad" -eq 0 ] || exit 1
+          cells="$(node -e '
+            const raw = process.env.IN_DEFECTS;
+            const cells = raw === ""
+              ? [{ kind: "known-good", label: "correct build" }, { kind: "known-bad", label: "backend defect digest-of-current-state" }]
+              : [...new Set(raw.split(","))].map((d) => ({ kind: "defect", defect: d }));
+            process.stdout.write(JSON.stringify(cells));
+          ')"
+          {
+            echo "go=true"
+            echo "attempt_id=$IN_ATTEMPT_ID"
+            echo "fence=$IN_FENCE"
+            echo "run_key=$IN_RUN_KEY"
+            echo "cells=$cells"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: t0-start
+    if: needs.t0-start.outputs.go == 'true'
+    name: build ${{ matrix.kind }} ${{ matrix.defect || matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        include: ${{ fromJSON(needs.t0-start.outputs.cells) }}
+    defaults:
+      run:
+        working-directory: examples/tiny-tracker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - name: Known-answer check
+        env:
+          KIND: ${{ matrix.kind }}
+          LABEL: ${{ matrix.label }}
+          DEFECT: ${{ matrix.defect }}
+        run: |
+          # shellcheck disable=SC2016  # the JavaScript is single-quoted on purpose
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { isDeepStrictEqual } from "node:util";
+            import { generate } from "./expected/generate.mjs";
+            const builds = "expected/builds-0.3.0.json";
+            const committed = JSON.parse(readFileSync("expected/0.3.0.json", "utf8")).builds;
+            const labels = JSON.parse(readFileSync(builds, "utf8")).builds.map((b) => b.label);
+            const { KIND, DEFECT } = process.env;
+            let label = process.env.LABEL;
+            if (KIND === "defect") {
+              const hits = labels.filter((l) => l.endsWith(` defect ${DEFECT}`) || l === `defect ${DEFECT}`);
+              if (hits.length !== 1) { console.error(`${DEFECT}: ${hits.length} builds in ${builds} carry that defect, expected 1`); process.exit(1); }
+              label = hits[0];
+            }
+            const want = committed.find((b) => b.label === label);
+            if (!want) { console.error(`no committed row for "${label}"`); process.exit(1); }
+            const doc = await generate({ builds, only: [label], repeat: 3 });
+            const got = doc.builds[0];
+            const failures = [];
+            if (got.build_hash !== want.build_hash) failures.push("build_hash differs from the committed row");
+            if (!isDeepStrictEqual(got.fixture, want.fixture)) failures.push("fixture answers differ from the committed row");
+            if (KIND === "known-bad") {
+              const good = committed.find((b) => b.label === "correct build");
+              if (isDeepStrictEqual(got.fixture, good.fixture)) failures.push("the known-bad build answers like the correct build");
+            }
+            if (failures.length) { for (const f of failures) console.error(`${label}: ${f}`); process.exit(1); }
+            console.log(`${label}: matches expected/0.3.0.json`);
+          '
+
+  t0-manifest:
+    needs: [t0-start, build]
+    if: ${{ always() && needs.t0-start.outputs.go == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Write the manifest stub
+        env:
+          ATTEMPT_ID: ${{ needs.t0-start.outputs.attempt_id }}
+          FENCE: ${{ needs.t0-start.outputs.fence }}
+          RUN_KEY: ${{ needs.t0-start.outputs.run_key }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          conclusion=success
+          for r in $RESULTS; do
+            case "$r" in failure) conclusion=failure ;; cancelled) [ "$conclusion" = failure ] || conclusion=cancelled ;; esac
+          done
+          CONCLUSION="$conclusion" node -e 'require("fs").writeFileSync("t0-manifest.json", JSON.stringify({ attempt_id: process.env.ATTEMPT_ID, fence: process.env.FENCE, run_key: process.env.RUN_KEY, conclusion: process.env.CONCLUSION }, null, 2) + "\n")'
+          cat t0-manifest.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: t0-${{ needs.t0-start.outputs.attempt_id }}
+          path: t0-manifest.json
+          if-no-files-found: error
+          retention-days: 3
