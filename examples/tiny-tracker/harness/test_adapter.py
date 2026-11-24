@@ -160,7 +160,7 @@ class CountAcrossRestart(unittest.TestCase):
 
 
 class RehearsalWindow(unittest.TestCase):
-    """R-TT-03: the scorer measures from the plant's own due_at, so a short window must never pass as a scored A5."""
+    """R-TT-03: the scorer measures from the plant's own due_at, so a short window must never pass as a contract A5 run."""
 
     def plant(self, **env):
         import subprocess, tempfile
@@ -175,9 +175,9 @@ class RehearsalWindow(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("set A5_REHEARSAL=1", r.stderr)
 
-    def test_R_TT_03_with_A5_REHEARSAL_the_run_is_announced_as_not_scored(self):
+    def test_R_TT_03_with_A5_REHEARSAL_the_run_is_announced_as_a_rehearsal(self):
         r = self.plant(A5_DELAY_HOURS="0.01", A5_REHEARSAL="1")
-        self.assertIn("NOT A SCORED A5", r.stderr)
+        self.assertIn("REHEARSAL ONLY", r.stderr)
 
 
 class EvidencePrincipal(unittest.TestCase):
