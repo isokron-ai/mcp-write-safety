@@ -2,7 +2,7 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
-## Unreleased
+## 0.4.0 (24 Nov 2026) for MWS 0.9
 
 ### Stream F (0.4.0 contract kit)
 - `tiny-tracker stdio`: the MCP server over stdin and stdout, from the same server factory as the HTTP transport, through the SDK's `./stdio` export. The state line goes to stderr.
