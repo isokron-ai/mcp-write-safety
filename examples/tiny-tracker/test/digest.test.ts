@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { canonicalize, canonicalizeText, CanonicalizationError, digestOf, fingerprintHash, domainDigest, DOMAINS, findIllFormedString, verifyServed } from "../src/digest.js";
+import { noPython, pythonRuns } from "./support/python.js";
 
 const VECTORS_PATH = fileURLToPath(new URL("../../vectors/digest-1.json", import.meta.url));
 const PY = fileURLToPath(new URL("../../verify/python/tt_digest.py", import.meta.url));
@@ -18,10 +19,10 @@ const PY_TESTS = fileURLToPath(new URL("../../verify/python/test_tt_digest.py", 
 interface Vector { name: string; input_json: string; domain: string; canonical?: string; digest?: string; expect?: "reject"; note: string }
 const vectors = JSON.parse(readFileSync(VECTORS_PATH, "utf8")) as { vectors: string; cases: Vector[] };
 
-const python = spawnSync("python3", ["--version"], { encoding: "utf8" }).status === 0 ? "python3" : undefined;
+const python = pythonRuns(["--version"]) ? "python3" : undefined;
 /** TT_GATE=1 (gate runs, CI): a missing python3 fails these tests instead of skipping them. */
 const GATE = process.env.TT_GATE === "1";
-const needPython = python || GATE ? false : "python3 is not on PATH";
+const needPython = python || GATE ? false : noPython("python3 is not on PATH");
 
 /** Seeded PRNG (mulberry32): the same seed gives the same values on every platform. */
 function prng(seed: number): () => number {

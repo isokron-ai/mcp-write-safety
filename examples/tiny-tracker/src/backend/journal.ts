@@ -537,7 +537,7 @@ export const leaseTiming = { heartbeatMs: 2_000, selfFenceMs: 10_000, staleMs: 2
 export const loadHooks: { onLine?: () => void; beforeRefresh?: () => void } = {};
 
 /** Test seams: after a lease was judged stale and before it is taken over; after it was moved aside. */
-export const leaseHooks: { beforeTakeover?: (path: string) => void; afterAside?: (path: string) => void } = {};
+export const leaseHooks: { beforeTakeover?: (path: string) => void; afterAside?: (path: string) => void; onUnreadable?: (path: string, attempt: number) => void } = {};
 
 /**
  * The file-system calls that move and remove lease directories (a test seam: on Windows a rename or a recursive remove of
@@ -749,6 +749,15 @@ export function acquireLease(dir: string, log: (m: string) => void): { fencedPid
       throw e;
     }
     const seenText = readOwner(path);
+    // A lease is created whole (its owner file is written before the folder is renamed into place), so an owner file that
+    // cannot be read is a read that failed for now: on Windows a file inside a folder that another start is opening or
+    // moving, or that a killed holder's process is still letting go of, fails to open (EBUSY, EPERM). Judged at once, it
+    // reads as "a start in progress" and every racing start refuses (R-TT-08); read again a few times before judging.
+    if (seenText === undefined && attempt < 4) {
+      leaseHooks.onUnreadable?.(path, attempt);
+      pause(40);
+      continue;
+    }
     let owner: { pid?: unknown; host?: unknown } = {};
     try {
       owner = JSON.parse(seenText ?? "");

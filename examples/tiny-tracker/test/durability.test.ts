@@ -377,7 +377,8 @@ describe("the flush limit on macOS (G2 fold-in 13)", () => {
   it("a durable start on darwin states that fsync is not F_FULLFSYNC (crash-safe, not power-cut-safe); other platforms say nothing", async () => {
     assert.match(flushLimit("darwin")!, /not F_FULLFSYNC.*survives a process crash, not a power cut/);
     assert.equal(flushLimit("linux"), undefined);
-    for (const platform of ["darwin", "linux"]) {
+    // darwin and linux check the data dir's POSIX mode, which a Windows folder does not have: there the same start is run as win32.
+    for (const platform of process.platform === "win32" ? ["win32"] : ["darwin", "linux"]) {
       const t = tempDir(`flush-${platform}`);
       const logged: string[] = [];
       try {

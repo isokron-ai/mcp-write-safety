@@ -66,7 +66,7 @@ describe("the fixture clock (unit)", () => {
       writer.advance(5 * DAY);
       assert.equal(reader.offsetMs(), 5 * DAY);
       assert.equal(new FixtureClock(folderOffset(dir)).offsetMs(), 5 * DAY);
-      assert.equal(statSync(join(dir, "clock.json")).mode & 0o777, 0o600);
+      if (process.platform !== "win32") assert.equal(statSync(join(dir, "clock.json")).mode & 0o777, 0o600); // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

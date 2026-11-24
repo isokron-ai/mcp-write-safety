@@ -14,7 +14,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir, TOKEN } from "./support/durable.js";
-import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LEASE_OWNER, LOCK_FILE, acquireLease, leaseFs, leaseTiming, loadHooks, prepareDataDir, readJournal, releaseLease, splitJoined, type CrashHook } from "../src/backend/journal.js";
+import { DataDirError, encodeLine, JOURNAL_FILE, JournalCorruptError, Journal, LEASE_DIR, LEASE_OWNER, LOCK_FILE, acquireLease, leaseFs, leaseHooks, leaseTiming, loadHooks, prepareDataDir, readJournal, releaseLease, splitJoined, type CrashHook } from "../src/backend/journal.js";
 import { openDurability } from "../src/backend/durability.js";
 import { Store } from "../src/backend/store.js";
 import { FixtureClock, memoryOffset } from "../src/fixture/clock.js";
@@ -546,6 +546,40 @@ describe("availability (G3 note 26 item 5)", () => {
     } finally {
       Object.assign(leaseFs, saved);
       t.cleanup();
+    }
+  });
+
+  it("R-TT-08: a lease whose owner file cannot be read at the first look is read again before the start is judged (Windows: racing starts over a killed holder's lease all refused)", () => {
+    const t = tempDir("ep-unreadable");
+    try {
+      prepareDataDir(t.dataDir);
+      const lease = join(t.dataDir, LEASE_DIR);
+      mkdirSync(lease, { mode: 0o700 });
+      writeFileSync(join(lease, "other"), ""); // a folder that is not empty (an empty one is renamed over) with no owner file readable: what a failed read (EBUSY, EPERM) looks like
+      const seen: number[] = [];
+      leaseHooks.onUnreadable = (_path, attempt) => {
+        seen.push(attempt);
+        // The second look finds the owner file: a holder on this host whose process is gone.
+        if (attempt === 1) writeFileSync(join(lease, LEASE_OWNER), JSON.stringify({ pid: 4_000_002, host: hostname(), nonce: "ee" }));
+      };
+      const logs: string[] = [];
+      assert.deepEqual(acquireLease(t.dataDir, (m) => void logs.push(m)), {});
+      assert.deepEqual(seen, [0, 1], "read again, not judged at the first failed read");
+      assert.match(logs.join(), /taking over a stale data-dir lease \(process 4000002 is gone\)/);
+      releaseLease(t.dataDir);
+    } finally {
+      leaseHooks.onUnreadable = undefined;
+      t.cleanup();
+    }
+    // A lease that stays unreadable and young is still held (a start in progress): refused, after the extra looks.
+    const y = tempDir("ep-unreadable-young");
+    try {
+      prepareDataDir(y.dataDir);
+      mkdirSync(join(y.dataDir, LEASE_DIR), { mode: 0o700 });
+      writeFileSync(join(y.dataDir, LEASE_DIR, "other"), "");
+      assert.throws(() => acquireLease(y.dataDir, () => {}), (e) => e instanceof DataDirError && /locked by another start/.test(e.message));
+    } finally {
+      y.cleanup();
     }
   });
 

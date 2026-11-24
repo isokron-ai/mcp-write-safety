@@ -226,6 +226,7 @@ describe("the kit's documents", () => {
     assert.deepEqual(served, ROUTES);
   });
   it("the OpenAPI file validates as OpenAPI 3.1 (verify/python/check_openapi.py; skipped without openapi-spec-validator)", async (t) => {
+    if (process.platform === "win32") { t.skip("the Python checks run on Linux and macOS only (FIXTURE.md, Windows)"); return; }
     const { py } = await import("./support/python.js");
     const python = process.env.TT_OPENAPI_PYTHON;
     const r = python

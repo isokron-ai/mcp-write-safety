@@ -8,12 +8,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FEATURE_NAMES } from "../src/profile.js";
-import { py } from "./support/python.js";
+import { noPython, py, pythonRuns } from "./support/python.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const GATE = process.env.TT_GATE === "1";
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"]).status === 0;
-const needJsonschema = jsonschema || GATE ? false : "the Python jsonschema package is not installed";
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
+const needJsonschema = jsonschema || GATE ? false : noPython("the Python jsonschema package is not installed");
 
 describe("known-answer generator (expected/)", () => {
   for (const release of ["0.2.0", "0.3.0"]) {

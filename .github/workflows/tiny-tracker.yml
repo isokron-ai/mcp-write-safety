@@ -4,8 +4,9 @@
 #                listener, integration-040, kit, the FX-DUR/FX-KEY checks). Journal, fsync, process kill and port
 #                reuse all differ by platform. On Linux and macOS the suite runs with TT_GATE=1, so the
 #                Python-backed checks (digest vectors, JSON Schemas, the OpenAPI file) fail instead of skipping, and
-#                the Python suites (the recount, the contract adapter) run too. Windows runners have no python3
-#                command, so there the suite runs without the gate and those checks are skipped.
+#                the Python suites (the recount, the contract adapter) run too. On Windows the suite runs without the
+#                gate and skips the Python-backed checks (even though the runner has a python3 command), and it skips the
+#                POSIX file-mode checks and the SIGTERM and SIGINT stops, which Windows does not have (FIXTURE.md, Windows).
 #   known-answers  each registered generator (the surface transcript, the 0.4.0 selection, a sample of the 0.4.0
 #                matrix) three times in fresh processes; any byte difference fails the job. The runs' bytes are
 #                uploaded, so anyone can compare them across platforms.

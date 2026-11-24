@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectClient } from "./support/stack.js";
+import { stoppedCode } from "./support/cli-run.js";
 
 const CLI = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 
@@ -24,17 +25,18 @@ function run(args: string[], env: Record<string, string> = {}, whileUp?: (out: a
     let stdout = "";
     let stderr = "";
     let started = false;
+    let stopped = false;
     child.stderr.on("data", (d) => { stderr += d; });
     child.stdout.on("data", (d) => {
       stdout += d;
       if (!started && stdout.includes("\n")) {
         started = true;
         const line = JSON.parse(stdout.split("\n")[0]);
-        (whileUp ? whileUp(line) : Promise.resolve()).then(() => child.kill("SIGTERM"), (e) => { child.kill("SIGKILL"); reject(e); });
+        (whileUp ? whileUp(line) : Promise.resolve()).then(() => { stopped = true; child.kill("SIGTERM"); }, (e) => { child.kill("SIGKILL"); reject(e); });
       }
     });
     const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
-    child.on("exit", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    child.on("exit", (code, signal) => { clearTimeout(timer); resolve({ code: stoppedCode(code, signal, stopped), stdout, stderr }); });
   });
 }
 

@@ -18,9 +18,10 @@ import { Rest } from "./support/stack.js";
 import { CLI } from "./support/cli-run.js";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { noPython, pythonRuns } from "./support/python.js";
 
 const CHECK = fileURLToPath(new URL("../../verify/python/check_schemas.py", import.meta.url));
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"], { encoding: "utf8" }).status === 0;
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
 
 const BACKEND = "backend-token-durable-sup-000000";
 const EVIDENCE = "evidence-token-durable-sup-00000";

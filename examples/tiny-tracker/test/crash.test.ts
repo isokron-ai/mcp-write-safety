@@ -240,7 +240,8 @@ describe("T1 in a real process: SIGKILL at a named point, then a start that take
       });
       const api = new RestClient(url, TOKEN);
       await api.send("POST", "/tickets", { project: "inbox", title: "before" }, { "idempotency-key": "kill-key-00000" });
-      const exited = new Promise<NodeJS.Signals | null>((r) => proc.on("exit", (_c, s) => r(s)));
+      // Windows reports no signal for a process that killed itself (process.kill(pid, "SIGKILL") ends it with exit code 1).
+      const exited = new Promise<string | null>((r) => proc.on("exit", (c, s) => r(s ?? (process.platform === "win32" && c === 1 ? "SIGKILL" : null))));
       const lost = await api.send("POST", "/tickets", { project: "inbox", title: "killed" }, { "idempotency-key": "kill-key-00001" }).then(() => "answered", () => "no answer");
       assert.equal(lost, "no answer");
       assert.equal(await exited, "SIGKILL");

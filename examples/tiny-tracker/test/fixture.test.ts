@@ -141,9 +141,11 @@ describe("tokens (X2): environment or a 0600 file, never argv, never printed, ne
       const missing = await runCli(["all", "--features", "evidence"], { TRACKER_BACKEND_TOKEN: BACKEND });
       assert.equal(missing.code, 2);
       assert.match(missing.stderr, /needs a token: set TRACKER_EVIDENCE_TOKEN or TRACKER_EVIDENCE_TOKEN_FILE/);
-      const loose = await runCli(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN_FILE: file("loose", EVIDENCE, 0o644) });
-      assert.equal(loose.code, 2);
-      assert.match(loose.stderr, /chmod 600/);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        const loose = await runCli(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN_FILE: file("loose", EVIDENCE, 0o644) });
+        assert.equal(loose.code, 2);
+        assert.match(loose.stderr, /chmod 600/);
+      }
       const both = await runCli(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN: EVIDENCE, TRACKER_EVIDENCE_TOKEN_FILE: file("both", EVIDENCE, 0o600) });
       assert.equal(both.code, 2);
       const argv = await runCli(["all", "--features", "evidence", "--default-project", EVIDENCE], { TRACKER_EVIDENCE_TOKEN: EVIDENCE });
@@ -213,16 +215,20 @@ describe("Phase 0 review fixes", () => {
           assert.equal((await get(`${state.control}/_fixture/clock`, CONTROL)).status, 200, "the supplied control token wins");
         });
       assert.equal(r.code, 0, r.stderr);
-      assert.equal(statSync(dir).mode & 0o777, 0o700);
-      assert.equal(statSync(join(dir, "evidence.token")).mode & 0o777, 0o600);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        assert.equal(statSync(dir).mode & 0o777, 0o700);
+        assert.equal(statSync(join(dir, "evidence.token")).mode & 0o777, 0o600);
+      }
       assert.ok(!r.stdout.includes(readFileSync(join(dir, "evidence.token"), "utf8").trim()));
       assert.throws(() => statSync(join(dir, "control.token")), "no control token generated when one was supplied");
-      const loose = join(root, "loose");
-      mkdirSync(loose, { mode: 0o755 });
-      chmodSync(loose, 0o755);
-      const bad = await runCli(["all", "--features", "evidence", "--token-dir", loose], { TRACKER_BACKEND_TOKEN: BACKEND });
-      assert.equal(bad.code, 2);
-      assert.match(bad.stderr, /chmod 700/);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        const loose = join(root, "loose");
+        mkdirSync(loose, { mode: 0o755 });
+        chmodSync(loose, 0o755);
+        const bad = await runCli(["all", "--features", "evidence", "--token-dir", loose], { TRACKER_BACKEND_TOKEN: BACKEND });
+        assert.equal(bad.code, 2);
+        assert.match(bad.stderr, /chmod 700/);
+      }
       const noEffect = await runCli(["all", "--token-dir", dir], { TRACKER_BACKEND_TOKEN: BACKEND });
       assert.equal(noEffect.code, 2);
     } finally {

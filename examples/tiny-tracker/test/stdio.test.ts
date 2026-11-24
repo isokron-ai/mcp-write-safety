@@ -179,7 +179,9 @@ async function startStdioChild(args: string[], env: Record<string, string> = {})
 // the pid lock (lock) behind. shutdown() is now one promise, and the closers run in reverse without reordering them.
 describe("tiny-tracker stdio: a signal or stdin closing releases the data dir", () => {
   for (const how of ["SIGTERM", "SIGINT", "stdin closed"] as const) {
-    it(`${how}: exit 0, and lock and lock.d are gone`, async () => {
+    // Windows cannot deliver SIGTERM or SIGINT to a handler (Node ends the process outright), so the graceful stop is promised only where signals exist.
+    const skip = process.platform === "win32" && how !== "stdin closed" && `${how} cannot be handled on Windows: the process is ended outright and releases nothing`;
+    it(`${how}: exit 0, and lock and lock.d are gone`, { skip }, async () => {
       const dir = mkdtempSync(join(tmpdir(), "tt-stdio-sig-"));
       const data = join(dir, "data");
       try {
