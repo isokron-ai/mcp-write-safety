@@ -5,6 +5,7 @@ that fixed it. Each test named here starts with its row's ID. IsoKron's cross-re
 isokron-ai/tool-qa) reads this table, so keep its four columns.
 
 - `R-INP-*`: the dispatch inputs of the T0 worker workflows (`defect-matrix.yml`).
+- `R-TT-*`: tiny-tracker's command line and server.
 
 | ID | What it was | Pinned by | Fix |
 |---|---|---|---|

@@ -2,6 +2,11 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
+## Unreleased
+
+### Fixed
+- The usage text (`tiny-tracker --help`) no longer lists a `stdio` command. 0.3.0 printed it, but the command line has no such mode (it answers with the usage and exit 2; stdio is planned for 0.4.0). Found by the performance baseline run of the published 0.3.0.
+
 ## 0.3.0 (18 Nov 2026) for MWS 0.9
 
 Durability: a journal (`durable`, opt-in with `--data-dir`), in-flight key records (`inflight`) and a stated key retention (`retention`), both on in the default profile; the fixture clock, supervised restarts and crash fault points. `--profile 0.1` keeps the surface of the published 0.1.0.
