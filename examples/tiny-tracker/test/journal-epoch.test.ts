@@ -532,7 +532,7 @@ describe("availability (G3 note 26 item 5)", () => {
     }
   });
 
-  it("on Windows a new lease's ENOTEMPTY with no lease there is a clear refusal, not a silent retry (fresh-eyes should-fix 8)", () => {
+  it("R-TT-07: on Windows a new lease's ENOTEMPTY with no lease there is a clear refusal, not a silent retry", () => {
     const t = tempDir("ep-enotempty-win");
     const saved = { ...leaseFs };
     try {

@@ -68,7 +68,7 @@ describe("known-answer generator (expected/)", () => {
     assert.equal(JSON.parse(readFileSync(join(ROOT, "expected", "0.2.0.json"), "utf8")).not_detected, undefined);
   });
 
-  it("the 0.4.0 known answers name exactly the defects they cannot tell from the correct build (fresh-eyes must-fix 3)", async () => {
+  it("R-TT-04: the 0.4.0 known answers name exactly the defects they cannot tell from the correct build", async () => {
     const list = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.4.0.json"), "utf8"));
     const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.4.0.json"), "utf8"));
     const md = readFileSync(join(ROOT, "expected", "0.4.0.md"), "utf8");

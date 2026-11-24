@@ -83,7 +83,15 @@ describe("the MCP token differs from every other token (0.4.0 integration)", () 
 });
 
 describe("container mode with the evidence listener (owner decision: evidence reachable behind its token)", () => {
-  it("the evidence listener off loopback is capped: past EVIDENCE_MAX_CONNECTIONS open sockets a new one is closed at once (fresh-eyes should-fix 7)", async () => {
+  it("R-TT-06: in container mode the broken-build banner says /mcp and the evidence routes listen on every interface, not \"Loopback only\"", async () => {
+    const r = await runCli(["all", "--features", "evidence,strict-input,execution-records,lookup,principals,ledger", "--defect", "read-merge-put", "--port", "0", "--backend-port", "0"],
+      { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: tok("mcp"), TRACKER_EVIDENCE_TOKEN: tok("ev"), TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stderr, /BROKEN BUILD[\s\S]*In container mode \/mcp and the evidence routes listen on every interface/);
+    assert.doesNotMatch(r.stderr, /Loopback only/);
+  });
+
+  it("R-TT-05: the evidence listener off loopback is capped: past EVIDENCE_MAX_CONNECTIONS open sockets a new one is closed at once", async () => {
     const r = await runCli(["all", "--features", "evidence,strict-input,execution-records,lookup,principals,ledger", "--port", "0", "--backend-port", "0"],
       { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: tok("mcp"), TRACKER_EVIDENCE_TOKEN: tok("ev"), TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" }, async (state) => {
         const port = Number(new URL(state.evidence_listener).port);
@@ -181,9 +189,6 @@ describe("container mode with the evidence listener (owner decision: evidence re
       assert.equal(r.code, 0, r.stderr);
       assert.ok(r.stateLine, r.stderr);
       for (const t of [mcp, evidence]) assert.ok(!r.stdout.includes(t) && !r.stderr.includes(t), "no token is printed");
-      // The banner says what is true in container mode, not "Loopback only" (fresh-eyes should-fix 6).
-      assert.match(r.stderr, /BROKEN BUILD[\s\S]*In container mode \/mcp and the evidence routes listen on every interface/);
-      assert.doesNotMatch(r.stderr, /Loopback only/);
     });
   }
 
