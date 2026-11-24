@@ -2,7 +2,7 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
-## Unreleased
+## 0.4.0 (24 Nov 2026) for MWS 0.9
 
 ### Stream F (0.4.0 contract kit)
 - `tiny-tracker stdio`: the MCP server over stdin and stdout, from the same server factory as the HTTP transport, through the SDK's `./stdio` export. The state line goes to stderr.
@@ -61,6 +61,7 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 - In container mode the broken-build banner says `/mcp` and the evidence routes listen on every interface, behind their tokens (it said "Loopback only").
 - The container evidence listener is capped: 64 connections, 10 s for headers, 30 s for a request (the MCP listener has 256 / 10 s / 30 s, the control listener 32 / 10 s / 10 s).
 - A start that cannot read the owner file of a lease it finds (on Windows, a file in a folder that another start is opening or moving, or that a just-killed holder is still letting go of) reads it again, up to four more times 40 ms apart, before judging the lease; it used to refuse at once, and three starts racing over a killed holder's lease could all refuse (seen once in CI on Windows, Node 24; R-TT-08).
+- On Windows a new lease's rename refused with EPERM, EACCES, EBUSY or ENOTEMPTY while a racing start's lease is moved aside is a lost race: the start looks again after a short pause, and only a refusal that lasts to its last try is reported (R-TT-09).
 - A new lease's rename that fails with ENOTEMPTY or EEXIST reads as "a lease is there" on POSIX only; on Windows it is the clear refusal it was before the integration pass.
 - The lost-response contract pin moves to `b2f2c64` (the contract's A5 scorer, #3) everywhere: the harness, the adapter's `CONTRACT`, and the contract the build descriptor declares (it is in `build_hash`). The 0.4.0 known answers are generated against it; 0.2.0 and 0.3.0 keep `92bf1ba`. The harness gains the A5 delayed-leg probe and counts across a restart (R-TT-02, R-TT-03).
 - FIXTURE.md: "Planned for 0.4.0" becomes "Not built yet" (writecheck rows for the two inflight-gated defects need a new writecheck check); a limit says FX-KEY-1 moves a durable data dir's clock for good.

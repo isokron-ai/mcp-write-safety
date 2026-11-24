@@ -611,7 +611,7 @@ function leaseIsOwn(held: HeldLease): boolean {
 }
 
 /** Creates the lease whole (temp directory with the owner file, renamed into place). Returns its inode, or false when one exists. */
-function createLease(path: string, text: string): number | false {
+function createLease(path: string, text: string, lastTry = true): number | false {
   const tmp = `${path}.new-${process.pid}-${randomBytes(6).toString("hex")}`;
   mkdirSync(tmp, { mode: 0o700 });
   try {
@@ -633,6 +633,13 @@ function createLease(path: string, text: string): number | false {
       const code = (e as NodeJS.ErrnoException)?.code;
       // Gated on the platform (fresh-eyes review 24 Nov, should-fix 8): on Windows ENOTEMPTY can be a file held open.
       if ((leaseFs.platform !== "win32" && (code === "ENOTEMPTY" || code === "EEXIST")) || existsSync(path)) return false;
+      // On Windows a racing start's lease answers EPERM or EACCES (or ENOTEMPTY) and may be moved aside a moment later, so
+      // the lease is gone by the time it is looked for. That is a lost race, not a stuck folder: while tries remain the
+      // caller looks again after a short pause; only a refusal that lasts to the last try is said plainly (R-TT-09).
+      if (!lastTry && leaseFs.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY" || code === "ENOTEMPTY")) {
+        pause(40);
+        return false;
+      }
       throw leaseFsRefusal(e, join(path, ".."), `rename its new lease ${tmp} into place`);
     }
     return ino;
@@ -732,7 +739,7 @@ export function acquireLease(dir: string, log: (m: string) => void): { fencedPid
   let fencedPid: number | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
     const text = JSON.stringify({ pid: process.pid, host, nonce: randomBytes(8).toString("hex") });
-    const ino = createLease(path, text);
+    const ino = createLease(path, text, attempt === 4);
     if (ino !== false) {
       const held: HeldLease = { path, ino, text, lastBeat: performance.now(), timer: setInterval(() => beat(held), leaseTiming.heartbeatMs) };
       held.timer.unref?.();

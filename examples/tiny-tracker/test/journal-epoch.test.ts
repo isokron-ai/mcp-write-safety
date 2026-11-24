@@ -583,6 +583,30 @@ describe("availability (G3 note 26 item 5)", () => {
     }
   });
 
+  it("R-TT-09: on Windows a new lease's rename refused (EPERM) while a racing start's lease is moved aside: this start looks again and takes the lease", () => {
+    const t = tempDir("ep-eperm-race");
+    const saved = { ...leaseFs };
+    try {
+      mkdirSync(t.dataDir, { recursive: true, mode: 0o700 });
+      leaseFs.platform = "win32";
+      let refused = 0;
+      leaseFs.renameSync = ((from: string, to: string) => {
+        if (String(from).includes(".new-") && refused === 0) {
+          refused++; // the other start's lease was there, and is gone by the time this start looks
+          throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+        }
+        return saved.renameSync(from, to);
+      }) as typeof leaseFs.renameSync;
+      acquireLease(t.dataDir, () => {});
+      assert.equal(refused, 1);
+      assert.equal(JSON.parse(readFileSync(join(t.dataDir, LEASE_DIR, LEASE_OWNER), "utf8")).pid, process.pid, "this start holds the lease");
+      releaseLease(t.dataDir);
+    } finally {
+      Object.assign(leaseFs, saved);
+      t.cleanup();
+    }
+  });
+
   it("(d) a clock offset kept ahead of the journal (a crash between storing it and its line, under --supervise): the journal catches up before serving", () => {
     const t = tempDir("ep-clock");
     try {
