@@ -623,8 +623,8 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   if (options.evidenceListen) {
     const extension = options.extension;
     if (!extension) throw new Error("an evidence listener needs the evidence namespace (feature evidence)");
-    // The one listener off loopback that answers before a token is checked (container mode): capped like the control
-    // listener (fresh-eyes review 24 Nov, should-fix 7).
+    // The one listener off loopback that answers before a token is checked (container mode): capped, as the MCP and
+    // control listeners are (fresh-eyes review 24 Nov, should-fix 7; R-TT-05).
     evidenceServer = createServer({ requestTimeout: EVIDENCE_REQUEST_TIMEOUT_MS, headersTimeout: EVIDENCE_HEADERS_TIMEOUT_MS }, (req, res) => void (async () => {
       const notHere = () => {
         res.writeHead(404, { "content-type": "application/json" });

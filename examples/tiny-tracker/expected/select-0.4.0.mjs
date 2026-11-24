@@ -172,9 +172,10 @@ export const NOT_DETECTED_DEFECTS = [
   "vague-validation-error",
 ];
 const NOT_DETECTED = `Not detected in 0.4.0: ${NOT_DETECTED_DEFECTS.join(", ")} give exactly the correct build's answers on their own rows here. ` +
-  "They are MCP-layer defects of the tool surface (what a tool says, accepts or does), which the MWS requirements cover and mcp-writecheck checks; " +
+  "They are MCP-layer defects, mostly of the tool surface (what a tool says, accepts or does), which the MWS requirements cover and mcp-writecheck checks; " +
   "these known answers hold only fx-check's FX- properties and the lost-response contract driver, and none of these rows has a contract row " +
-  "(in-progress-reported-not-applied and settle-miss-reported-not-applied trip MWS-RES-1 and MWS-RES-2). " +
+  "(no-idempotency-key, retry-without-key, key-store-in-memory and create-marked-idempotent are retry and key defects the contract driver would see on a row it ran; " +
+  "in-progress-reported-not-applied and settle-miss-reported-not-applied trip MWS-RES-1 and MWS-RES-2). " +
   "A \"held\" on these rows does not mean the defect is absent.";
 
 async function main() {

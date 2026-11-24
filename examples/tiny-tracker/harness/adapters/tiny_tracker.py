@@ -81,7 +81,7 @@ The attempt is "found" only when the operation is completed and the
 execution record's served digest recomputes and equals the operation's
 result_digest. The attempt reports the recovered digest (digest_returned).
 
-  Self-attested: the driver at 92bf1ba, on a "found" attempt, takes the
+  Self-attested: the driver at 92bf1ba and b2f2c64, on a "found" attempt, takes the
   committed digest as the recovered digest without comparing it with the
   attempt's digest (driver ask (b)). Until the driver compares, the A3
   K-only verdict rests on this adapter's classification, and every
@@ -183,7 +183,7 @@ META_RUN = META_PREFIX + "/run"
 META_OPERATION = META_PREFIX + "/operation"
 EXECUTION_ID = re.compile(r"^X-[1-9][0-9]*$")
 SELF_ATTESTED_NOTE = (
-    "self-attested: the driver at 92bf1ba takes the committed digest as the recovered digest "
+    "self-attested: the driver (92bf1ba, b2f2c64) takes the committed digest as the recovered digest "
     "on a found attempt without comparing (driver ask (b)); this attempt's own digest is "
     "digest_returned")
 
