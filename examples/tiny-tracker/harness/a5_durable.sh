@@ -17,6 +17,7 @@
 #   CONTRACT_DIR  a checkout of the contract repository at the pinned commit (harness/contract.json)
 #   A5_MCP_PORT, A5_BACKEND_PORT   fixed ports, so the plant's endpoint stays valid across the restart
 #                 (default 4710 and 4711; never 47310/47311)
+#   A5_DELAY_HOURS  the A5 window (default 24); a short value (0.01) is for rehearsals only
 #   A5_FORCE=1    `delayed` before due_at: a rehearsal only, never a scored A5
 #
 # Tokens: the backend token is generated once into A5_DIR/backend.token (0600) and given to the process in
@@ -129,7 +130,7 @@ case "${1:-}" in
     launch 0
     ;;
   plant)
-    python3 -I "$HERE/adapter_config.py" --state "$A5_DIR/state.json" --fault client --start "$(start_cmd)" >"$A5_DIR/config.json"
+    python3 -I "$HERE/adapter_config.py" --state "$A5_DIR/state.json" --fault client --delay-hours "${A5_DELAY_HOURS:-24}" --start "$(start_cmd)" >"$A5_DIR/config.json"
     out="$RUNS/$(date -u +%Y%m%dT%H%M%SZ)"
     TRACKER_EVIDENCE_TOKEN_FILE="$TOKENS/evidence.token" \
       python3 -I "$DRIVER/lost_response.py" --config "$A5_DIR/config.json" --out "$out" | tee -a "$LOG"
@@ -159,6 +160,11 @@ case "${1:-}" in
     due="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["due_at"])' "$plant")"
     if [[ "$(now)" < "$due" && "${A5_FORCE:-0}" != 1 ]]; then die "due_at is $due (now $(now)); the delayed leg runs at or after it"; fi
     [[ "${A5_FORCE:-0}" == 1 ]] && say "A5_FORCE=1: a rehearsal before due_at; the result is not a scored A5"
+    # Contract main's delayed leg dispatches nothing: it reads the K-only lookup it makes and the recorded delayed
+    # retries and counts in the plant's folder. The probe writes those through the adapter (identical retry,
+    # changed-argument retry, counts before / between / after), then the driver scores.
+    TRACKER_EVIDENCE_TOKEN_FILE="$TOKENS/evidence.token" \
+      python3 -I "$HERE/a5_delayed_probe.py" --driver "$DRIVER" --plant "$plant" | tee -a "$LOG"
     TRACKER_EVIDENCE_TOKEN_FILE="$TOKENS/evidence.token" \
       python3 -I "$DRIVER/lost_response.py" --delayed-leg "$plant" | tee -a "$LOG"
     evidence /build >"$A5_DIR/build.delayed.json"

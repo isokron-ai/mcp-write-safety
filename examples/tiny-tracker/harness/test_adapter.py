@@ -116,6 +116,40 @@ class ConfigPrinter(unittest.TestCase):
             config.config_for({"backend": "x"}, opts)
 
 
+class CountAcrossRestart(unittest.TestCase):
+    """R-TT-02: the ledger is in memory, so after a restart the count must also read the durable execution records."""
+
+    S, K = "lr-s-a1", "lr-op-s-a1"
+
+    def bare(self, ledger, executions):
+        a = adapter.Adapter.__new__(adapter.Adapter)
+        a.run_id = None
+        served = {"/ledger": {"entries": ledger}, "/executions": {"executions": executions}}
+        a._ev = lambda path: ({"http_status": 200, "body_json": served[path]}, b"")
+        return a
+
+    def record(self, xid, tag=None, key=None):
+        return {"id": xid, "operation_tag": tag or self.S, "request": {"key": key or self.K}, "boot_id": "b0",
+                "objects": ["T-1"], "committed_at": "2026-11-23T18:11:06Z"}
+
+    def test_R_TT_02_after_a_restart_an_execution_only_the_records_hold_is_counted(self):
+        _, counted = self.bare([], [self.record("X-1")])._ledger_count(self.S, self.K)
+        self.assertEqual(counted["ids"], ["X-1"], "the planted execution survives the restart in the count")
+        self.assertEqual([r["execution_id"] for r in counted["from_execution_records"]], ["X-1"])
+
+    def test_R_TT_02_an_execution_in_both_the_ledger_and_the_records_is_counted_once(self):
+        ledger = [{"seq": 1, "kind": "execution", "execution_id": "X-1", "operation_tag": self.S,
+                   "request": {"key": self.K}, "status": 201}]
+        _, counted = self.bare(ledger, [self.record("X-1")])._ledger_count(self.S, self.K)
+        self.assertEqual(counted["ids"], ["X-1"])
+        self.assertEqual(counted["from_execution_records"], [])
+
+    def test_R_TT_02_records_of_another_operation_or_key_are_not_counted(self):
+        executions = [self.record("X-2", tag="lr-s-a2"), self.record("X-3", key="lr-op-other")]
+        _, counted = self.bare([], executions)._ledger_count(self.S, self.K)
+        self.assertEqual(counted["ids"], [])
+
+
 class EvidencePrincipal(unittest.TestCase):
     """G2 fold-in 6: the delayed leg reads under the principal initialize settled on; with several and none, refuse."""
 
