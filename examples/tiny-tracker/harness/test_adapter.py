@@ -144,10 +144,40 @@ class CountAcrossRestart(unittest.TestCase):
         self.assertEqual(counted["ids"], ["X-1"])
         self.assertEqual(counted["from_execution_records"], [])
 
+    def test_R_TT_02_a_records_listing_that_does_not_answer_is_flagged_incomplete(self):
+        a = self.bare([], [])
+        a._ev = lambda path: ({"http_status": 200, "body_json": {"entries": []}}, b"") if path == "/ledger" \
+            else ({"http_status": 503, "body_json": {"error": "unavailable"}}, b"")
+        _, counted = a._ledger_count(self.S, self.K)
+        self.assertFalse(counted["records_complete"])
+        _, whole = self.bare([], [self.record("X-1")])._ledger_count(self.S, self.K)
+        self.assertTrue(whole["records_complete"])
+
     def test_R_TT_02_records_of_another_operation_or_key_are_not_counted(self):
         executions = [self.record("X-2", tag="lr-s-a2"), self.record("X-3", key="lr-op-other")]
         _, counted = self.bare([], executions)._ledger_count(self.S, self.K)
         self.assertEqual(counted["ids"], [])
+
+
+class RehearsalWindow(unittest.TestCase):
+    """R-TT-03: the scorer measures from the plant's own due_at, so a short window must never pass as a scored A5."""
+
+    def plant(self, **env):
+        import subprocess, tempfile
+        d = tempfile.mkdtemp()
+        full = {"PATH": os.environ.get("PATH", ""), "A5_DIR": d, "CONTRACT_DIR": "/nonexistent"}
+        full.update(env)
+        return subprocess.run(["bash", os.path.join(HERE, "a5_durable.sh"), "plant"], env=full,
+                              capture_output=True, text=True, timeout=30)
+
+    def test_R_TT_03_a_window_other_than_24_hours_is_refused_without_A5_REHEARSAL(self):
+        r = self.plant(A5_DELAY_HOURS="0.01")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("set A5_REHEARSAL=1", r.stderr)
+
+    def test_R_TT_03_with_A5_REHEARSAL_the_run_is_announced_as_not_scored(self):
+        r = self.plant(A5_DELAY_HOURS="0.01", A5_REHEARSAL="1")
+        self.assertIn("NOT A SCORED A5", r.stderr)
 
 
 class EvidencePrincipal(unittest.TestCase):

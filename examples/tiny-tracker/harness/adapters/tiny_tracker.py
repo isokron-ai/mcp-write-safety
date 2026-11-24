@@ -772,7 +772,9 @@ class Adapter(SystemAdapter):
             ids.append(r.get("id"))
             from_records.append({"execution_id": r.get("id"), "key": key, "key_is_K": key == operation_key,
                                  "boot_id": r.get("boot_id"), "objects": r.get("objects"), "at": r.get("committed_at")})
-        return served, {"attributed": attributed, "ids": sorted(ids, key=execution_number),
+        # A records listing that did not answer leaves the count at the ledger's: say so, rather than pass it off as whole.
+        records_complete = isinstance(records, list)
+        return served, {"attributed": attributed, "ids": sorted(ids, key=execution_number), "records_complete": records_complete,
                         "refusals": refusals, "replays": replays, "from_execution_records": from_records,
                         "executions_listing": listing}
 
@@ -808,6 +810,7 @@ class Adapter(SystemAdapter):
                 "replay_records": counted["replays"],
                 "from_execution_records": counted["from_execution_records"],
                 "executions_listing_http_status": counted["executions_listing"]["http_status"],
+                "execution_records_complete": counted["records_complete"],
             }
             return {"evidence": evidence, "files": {"ledger_%s.json" % label: served,
                                                     "executions_%s.json" % label: counted["executions_listing"]}}
