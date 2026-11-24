@@ -93,7 +93,7 @@ describe("the evidence namespace (rule 2, G3)", () => {
       assert.deepEqual(d.clock, { domain: "wall", offset_ms: 0 });
       assert.deepEqual(d.faults, { armed: [] });
       assert.equal(d.process.restart_count, 0);
-      assert.deepEqual(d.contract, { repo: "zambodotdev/lost-response-test-contract", commit: "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d" });
+      assert.deepEqual(d.contract, { repo: "zambodotdev/lost-response-test-contract", commit: "b2f2c6485086d5ad46a7b2c7359c432533224eaf" });
     }
     assert.equal(seen[0].build_hash, seen[1].build_hash);
     assert.notEqual(seen[0].process.boot_id, seen[1].process.boot_id);

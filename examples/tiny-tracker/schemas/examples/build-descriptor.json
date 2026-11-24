@@ -33,7 +33,7 @@
   },
   "contract": {
     "repo": "zambodotdev/lost-response-test-contract",
-    "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d"
+    "commit": "b2f2c6485086d5ad46a7b2c7359c432533224eaf"
   },
   "process": {
     "layout": "all",

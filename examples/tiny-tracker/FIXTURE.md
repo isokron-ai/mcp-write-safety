@@ -283,7 +283,7 @@ A backend crash after commit and an MCP-process crash after the backend replied 
 `src/fixture-properties.ts` is the only file that spells them.
 
 - **`FX-`** are properties of this fixture, not MWS requirements: FX-DIG (digests), FX-LOOK (lookup), FX-DUR (durability), FX-KEY (keys), FX-FLT (faults), FX-BLD (the build descriptor).
-- **`LRT-A1` to `LRT-A5`** refer to the assertions of the shared lost-response test contract, `zambodotdev/lost-response-test-contract`, pinned to commit `92bf1ba5f8226a67409fd8a7a68411b5c4a7258d`.
+- **`LRT-A1` to `LRT-A5`** refer to the assertions of the shared lost-response test contract, `zambodotdev/lost-response-test-contract`, pinned to commit `b2f2c6485086d5ad46a7b2c7359c432533224eaf` (0.4.0; 0.2.0 and 0.3.0 pinned `92bf1ba`).
 - **MWS IDs** stay in `src/requirements.ts`.
 - Wire names: `_meta` keys under `dev.writesafety.tiny-tracker/` (`idempotency-key`, `run`, `operation`, `build`); HTTP headers `Tiny-Tracker-*`.
 

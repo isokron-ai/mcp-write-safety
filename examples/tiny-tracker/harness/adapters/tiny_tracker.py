@@ -1,8 +1,9 @@
 """tiny-tracker adapter for the lost-response harness (tiny-tracker 0.2.0 evidence).
 
 Pinned to the contract `zambodotdev/lost-response-test-contract` at
-92bf1ba5f8226a67409fd8a7a68411b5c4a7258d (CONTRACT.md, the driver
-fixtures/harness/lost_response.py and adapters/base.py at that commit).
+b2f2c6485086d5ad46a7b2c7359c432533224eaf (CONTRACT.md, the driver
+fixtures/harness/lost_response.py with the A5 scorer from #3, and
+adapters/base.py at that commit; tiny-tracker 0.2.0 and 0.3.0 pinned 92bf1ba).
 Adapter version 0.2.0. It replaces adapter 0.1.0
 (rafe-walker/lost-response-test-contract, branch add-tiny-tracker-adapter,
 b1519f7), which ran against tiny-tracker 0.1.0. The master copy lives in
@@ -176,7 +177,7 @@ except ImportError:  # outside the contract repository (tiny-tracker's own tests
 
 ADAPTER_VERSION = "0.2.0"
 CONTRACT = {"repo": "zambodotdev/lost-response-test-contract",
-            "commit": "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d"}
+            "commit": "b2f2c6485086d5ad46a7b2c7359c432533224eaf"}
 META_PREFIX = "dev.writesafety.tiny-tracker"
 META_RUN = META_PREFIX + "/run"
 META_OPERATION = META_PREFIX + "/operation"
