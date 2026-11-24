@@ -123,7 +123,7 @@ def config_for(state, opts, env_ok=True):
         adapter_config["expected_build_hash"] = descriptor["build_hash"]
     if opts.get("principal"):
         adapter_config["principal"] = opts["principal"]
-    return {"adapter": "tiny_tracker", "system_name": label, "a5_delay_hours": int(opts["delay"]), "adapter_config": adapter_config}
+    return {"adapter": "tiny_tracker", "system_name": label, "a5_delay_hours": (lambda d: int(d) if d == int(d) else d)(float(opts["delay"])), "adapter_config": adapter_config}
 
 
 def main(argv):

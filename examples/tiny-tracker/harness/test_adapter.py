@@ -116,6 +116,70 @@ class ConfigPrinter(unittest.TestCase):
             config.config_for({"backend": "x"}, opts)
 
 
+class CountAcrossRestart(unittest.TestCase):
+    """R-TT-02: the ledger is in memory, so after a restart the count must also read the durable execution records."""
+
+    S, K = "lr-s-a1", "lr-op-s-a1"
+
+    def bare(self, ledger, executions):
+        a = adapter.Adapter.__new__(adapter.Adapter)
+        a.run_id = None
+        served = {"/ledger": {"entries": ledger}, "/executions": {"executions": executions}}
+        a._ev = lambda path: ({"http_status": 200, "body_json": served[path]}, b"")
+        return a
+
+    def record(self, xid, tag=None, key=None):
+        return {"id": xid, "operation_tag": tag or self.S, "request": {"key": key or self.K}, "boot_id": "b0",
+                "objects": ["T-1"], "committed_at": "2026-11-23T18:11:06Z"}
+
+    def test_R_TT_02_after_a_restart_an_execution_only_the_records_hold_is_counted(self):
+        _, counted = self.bare([], [self.record("X-1")])._ledger_count(self.S, self.K)
+        self.assertEqual(counted["ids"], ["X-1"], "the planted execution survives the restart in the count")
+        self.assertEqual([r["execution_id"] for r in counted["from_execution_records"]], ["X-1"])
+
+    def test_R_TT_02_an_execution_in_both_the_ledger_and_the_records_is_counted_once(self):
+        ledger = [{"seq": 1, "kind": "execution", "execution_id": "X-1", "operation_tag": self.S,
+                   "request": {"key": self.K}, "status": 201}]
+        _, counted = self.bare(ledger, [self.record("X-1")])._ledger_count(self.S, self.K)
+        self.assertEqual(counted["ids"], ["X-1"])
+        self.assertEqual(counted["from_execution_records"], [])
+
+    def test_R_TT_02_a_records_listing_that_does_not_answer_is_flagged_incomplete(self):
+        a = self.bare([], [])
+        a._ev = lambda path: ({"http_status": 200, "body_json": {"entries": []}}, b"") if path == "/ledger" \
+            else ({"http_status": 503, "body_json": {"error": "unavailable"}}, b"")
+        _, counted = a._ledger_count(self.S, self.K)
+        self.assertFalse(counted["records_complete"])
+        _, whole = self.bare([], [self.record("X-1")])._ledger_count(self.S, self.K)
+        self.assertTrue(whole["records_complete"])
+
+    def test_R_TT_02_records_of_another_operation_or_key_are_not_counted(self):
+        executions = [self.record("X-2", tag="lr-s-a2"), self.record("X-3", key="lr-op-other")]
+        _, counted = self.bare([], executions)._ledger_count(self.S, self.K)
+        self.assertEqual(counted["ids"], [])
+
+
+class RehearsalWindow(unittest.TestCase):
+    """R-TT-03: the scorer measures from the plant's own due_at, so a short window must never pass as a contract A5 run."""
+
+    def plant(self, **env):
+        import subprocess, tempfile
+        d = tempfile.mkdtemp()
+        full = {"PATH": os.environ.get("PATH", ""), "A5_DIR": d, "CONTRACT_DIR": "/nonexistent"}
+        full.update(env)
+        return subprocess.run(["bash", os.path.join(HERE, "a5_durable.sh"), "plant"], env=full,
+                              capture_output=True, text=True, timeout=30)
+
+    def test_R_TT_03_a_window_other_than_24_hours_is_refused_without_A5_REHEARSAL(self):
+        r = self.plant(A5_DELAY_HOURS="0.01")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("set A5_REHEARSAL=1", r.stderr)
+
+    def test_R_TT_03_with_A5_REHEARSAL_the_run_is_announced_as_a_rehearsal(self):
+        r = self.plant(A5_DELAY_HOURS="0.01", A5_REHEARSAL="1")
+        self.assertIn("REHEARSAL ONLY", r.stderr)
+
+
 class EvidencePrincipal(unittest.TestCase):
     """G2 fold-in 6: the delayed leg reads under the principal initialize settled on; with several and none, refuse."""
 
