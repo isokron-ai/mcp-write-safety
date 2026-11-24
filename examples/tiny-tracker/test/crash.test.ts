@@ -21,10 +21,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync, statSync, truncateSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { durableBackend, movableClock, tempDir, TOKEN, type Arm } from "./support/durable.js";
-import { JOURNAL_FILE, LOCK_FILE, readJournal } from "../src/backend/journal.js";
+import { JOURNAL_FILE, LEASE_DIR, LEASE_OWNER, LOCK_FILE, leaseTiming, prepareDataDir, readJournal } from "../src/backend/journal.js";
 import type { Rest } from "./support/stack.js";
 import { Rest as RestClient } from "./support/stack.js";
 import type { JournalCommitLine } from "../src/backend/commit.js";
@@ -239,11 +240,15 @@ describe("T1 in a real process: SIGKILL at a named point, then a start that take
       });
       const api = new RestClient(url, TOKEN);
       await api.send("POST", "/tickets", { project: "inbox", title: "before" }, { "idempotency-key": "kill-key-00000" });
-      const exited = new Promise<NodeJS.Signals | null>((r) => proc.on("exit", (_c, s) => r(s)));
+      // Windows reports no signal for a process that killed itself (process.kill(pid, "SIGKILL") ends it with exit code 1).
+      const exited = new Promise<string | null>((r) => proc.on("exit", (c, s) => r(s ?? (process.platform === "win32" && c === 1 ? "SIGKILL" : null))));
       const lost = await api.send("POST", "/tickets", { project: "inbox", title: "killed" }, { "idempotency-key": "kill-key-00001" }).then(() => "answered", () => "no answer");
       assert.equal(lost, "no answer");
       assert.equal(await exited, "SIGKILL");
       assert.equal(JSON.parse(readFileSync(join(t.dataDir, LOCK_FILE), "utf8")).pid, proc.pid, "the dead process's lock is still there");
+      // 0.4.0: and its lease, with a fresh heartbeat: the next start takes it over because the pid is gone, not by age.
+      assert.equal(JSON.parse(readFileSync(join(t.dataDir, LEASE_DIR, LEASE_OWNER), "utf8")).pid, proc.pid, "the dead process's lease is still there");
+      assert.ok(Date.now() - statSync(join(t.dataDir, LEASE_DIR)).mtimeMs < leaseTiming.staleMs);
       const b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
       try {
         const titles = (await b.api.export()).tickets.map((x) => x.title);
@@ -283,3 +288,188 @@ describe("T1 in a real process: SIGKILL at a named point, then a start that take
     assert.deepEqual(r.final, ["before", "killed"]);
   });
 });
+
+// ---- 0.4.0: the data-dir lease (coordinator note 19, item 11) ----
+describe("T1: the data-dir lease (an mkdir lease with a heartbeat; the pid lock stays as a second check)", () => {
+  const child = fileURLToPath(new URL("./support/durable-child.js", import.meta.url));
+  const FAST = { heartbeatMs: 100, selfFenceMs: 600, staleMs: 1500 };
+
+  /** Starts a durable backend in its own process; resolves with its URL, or with the refusal if it exits first. */
+  function startChild(dataDir: string, timing = FAST, env: Record<string, string> = {}) {
+    const proc = spawn(process.execPath, [child], { env: { ...process.env, DATA_DIR: dataDir, LEASE_TIMING: JSON.stringify(timing), ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    const done = new Promise<{ url?: string; refused?: string }>((resolve) => {
+      let out = "";
+      let err = "";
+      proc.stdout.on("data", (d) => { out += d; const m = /^(http:\S+)\n/m.exec(out); if (m) resolve({ url: m[1] }); });
+      proc.stderr.on("data", (d) => { err += d; });
+      proc.on("exit", (c) => resolve({ refused: `exit ${c}: ${err}` }));
+    });
+    return { proc, done };
+  }
+  const stop = async (p: ReturnType<typeof spawn>) => {
+    if (p.exitCode !== null || p.signalCode !== null) return;
+    const gone = new Promise((r) => p.once("exit", r));
+    p.kill("SIGKILL"); // only the pids this test started
+    await gone;
+  };
+
+  it("a paused holder (SIGSTOP past the stale time) loses the lease: a new start takes it over, and the holder refuses every later append", { skip: process.platform === "win32" ? "SIGSTOP does not exist on Windows" : false }, async () => {
+    const t = tempDir("lease-pause");
+    const saved = { ...leaseTiming };
+    Object.assign(leaseTiming, FAST);
+    const a = startChild(t.dataDir);
+    let b: Awaited<ReturnType<typeof durableBackend>> | undefined;
+    try {
+      const { url } = await a.done;
+      assert.ok(url, "the first start holds the lease");
+      const api = new RestClient(url!, TOKEN);
+      assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "before" }, { "idempotency-key": "lease-key-0001" })).status, 201);
+      a.proc.kill("SIGSTOP");
+      await sleep(FAST.staleMs + 500);
+      // The pid is alive (stopped), so only the heartbeat's age lets the lease go; the pid lock follows the lease.
+      b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+      const owner = JSON.parse(readFileSync(join(t.dataDir, LEASE_DIR, LEASE_OWNER), "utf8"));
+      assert.equal(owner.pid, process.pid, "the new start holds the lease");
+      assert.equal(JSON.parse(readFileSync(join(t.dataDir, LOCK_FILE), "utf8")).pid, process.pid, "and the pid lock");
+      const linesBefore = readJournal(join(t.dataDir, JOURNAL_FILE)).lines.length;
+      a.proc.kill("SIGCONT");
+      const late = await api.send("POST", "/tickets", { project: "inbox", title: "after the pause" }, { "idempotency-key": "lease-key-0002" });
+      assert.equal(late.status, 503, JSON.stringify(late.body));
+      assert.equal((late.body as any).error, "journal_unavailable");
+      assert.equal(readJournal(join(t.dataDir, JOURNAL_FILE)).lines.length, linesBefore, "the fenced holder appended nothing");
+      // Still fenced on the next try; the new holder writes.
+      assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "again" })).status, 503);
+      assert.equal((await b.api.send("POST", "/tickets", { project: "inbox", title: "new holder" }, { "idempotency-key": "lease-key-0003" })).status, 201);
+      assert.deepEqual((await b.api.export()).tickets.map((x) => x.title), ["before", "new holder"]);
+    } finally {
+      await stop(a.proc);
+      await b?.close();
+      Object.assign(leaseTiming, saved);
+      t.cleanup();
+    }
+  });
+
+  it("a holder paused past its self-fence time refuses appends even when nobody took the lease over", { skip: process.platform === "win32" ? "SIGSTOP does not exist on Windows" : false }, async () => {
+    const t = tempDir("lease-selffence");
+    const a = startChild(t.dataDir);
+    try {
+      const { url } = await a.done;
+      const api = new RestClient(url!, TOKEN);
+      assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: "before" })).status, 201);
+      a.proc.kill("SIGSTOP");
+      await sleep(FAST.selfFenceMs + 400);
+      a.proc.kill("SIGCONT");
+      const r = await api.send("POST", "/tickets", { project: "inbox", title: "late" });
+      assert.equal(r.status, 503, JSON.stringify(r.body));
+      assert.match(JSON.stringify(r.body), /lease is lost/);
+    } finally {
+      await stop(a.proc);
+      t.cleanup();
+    }
+  });
+
+  // G3 note 26 item 1 (MUST FIX), the reviewer's probe as a test: A is paused (SIGSTOP) after its lease check and before
+  // its write; B takes the lease over and acknowledges keyed writes; A is continued. A's line goes after B's (O_APPEND),
+  // carries A's epoch and is not applied at replay; A's client gets 503 lease_lost, never 201; B's acknowledged writes
+  // survive a restart. With fail: A's continued write fails after it began (an I/O error), and nothing is ever cut back.
+  const pausedCases: Array<{ line: "commit" | "pending"; fail?: boolean }> = [{ line: "commit" }, { line: "pending" }, { line: "commit", fail: true }];
+  for (const c of pausedCases) {
+    it(`a holder paused between its lease check and its ${c.line} line${c.fail ? ", whose write then fails," : ""} never overwrites or cuts the new holder's lines; its client gets 503 ${c.fail ? "journal_unavailable" : "lease_lost"}; B's acknowledged writes survive a restart`, { skip: process.platform === "win32" ? "SIGSTOP does not exist on Windows" : false }, async () => {
+      const t = tempDir(`lease-stop-${c.line}`);
+      const saved = { ...leaseTiming };
+      Object.assign(leaseTiming, FAST);
+      const a = startChild(t.dataDir, FAST, { STOP_KEY: "stop-key-000001", STOP_LINE: c.line, ...(c.fail ? { STOP_FAIL: "1" } : {}) });
+      let b: Awaited<ReturnType<typeof durableBackend>> | undefined;
+      try {
+        const { url } = await a.done;
+        assert.ok(url, "A holds the lease");
+        const apiA = new RestClient(url!, TOKEN);
+        assert.equal((await apiA.send("POST", "/tickets", { project: "inbox", title: "a-before" }, { "idempotency-key": "a-key-0000001" })).status, 201);
+        const paused = apiA.send("POST", "/tickets", { project: "inbox", title: `a-paused-${"x".repeat(300)}` }, { "idempotency-key": "stop-key-000001" });
+        // A stops itself at before-append; wait until it is stopped and its lease is stale.
+        await sleep(FAST.staleMs + 500);
+        b = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+        const acked: string[] = [];
+        for (let i = 0; i < 3; i++) {
+          const r = await b.api.send("POST", "/tickets", { project: "inbox", title: `b-acked-${i}` }, { "idempotency-key": `b-key-000000${i}` });
+          assert.equal(r.status, 201, JSON.stringify(r.body));
+          acked.push(`b-acked-${i}`);
+        }
+        const bytesBefore = readFileSync(join(t.dataDir, JOURNAL_FILE), "utf8");
+        a.proc.kill("SIGCONT");
+        const answer = await paused;
+        assert.equal(answer.status, 503, JSON.stringify(answer.body));
+        assert.equal((answer.body as any).error, c.fail ? "journal_unavailable" : "lease_lost");
+        if (!c.fail) assert.match((answer.body as any).message, /outcome is unknown/);
+        const after = readFileSync(join(t.dataDir, JOURNAL_FILE), "utf8");
+        assert.ok(after.startsWith(bytesBefore), "B's lines are untouched: A's line went after them, nothing was cut");
+        assert.ok(after.length > bytesBefore.length, "A's line is in the file");
+        const read = readJournal(join(t.dataDir, JOURNAL_FILE));
+        assert.deepEqual(read.superseded.map((s) => [s.line, s.epoch, s.by_epoch]), [[c.line, 1, 2]], "A's line is a superseded writer's");
+        assert.equal((await apiA.send("POST", "/tickets", { project: "inbox", title: "a-after" }, { "idempotency-key": "a-key-0000003" })).status, 503, "A stays fenced");
+        assert.equal((await b.api.send("POST", "/tickets", { project: "inbox", title: "b-after" }, { "idempotency-key": "b-key-9999999" })).status, 201);
+        acked.push("b-after");
+        await stop(a.proc);
+        await b.close();
+        b = undefined;
+        // The restart: B's acknowledged writes are all there, A's paused one is not; a keyed repeat to the new holder
+        // settles the unknown outcome (applies once).
+        const c2 = await durableBackend({ dataDir: t.dataDir, clock: movableClock() });
+        try {
+          assert.deepEqual((await c2.api.export()).tickets.map((x) => x.title), ["a-before", ...acked]);
+          assert.deepEqual(c2.backend.durability!.journal!.report!.superseded.map((s) => s.line), [c.line]);
+          const repeat = await c2.api.send("POST", "/tickets", { project: "inbox", title: `a-paused-${"x".repeat(300)}` }, { "idempotency-key": "stop-key-000001" });
+          assert.deepEqual([repeat.status, repeat.headers.get("idempotent-replayed")], [201, null]);
+          for (let i = 0; i < 3; i++) {
+            const again = await c2.api.send("POST", "/tickets", { project: "inbox", title: `b-acked-${i}` }, { "idempotency-key": `b-key-000000${i}` });
+            assert.equal(again.headers.get("idempotent-replayed"), "true", "B's keyed writes replay after the restart");
+          }
+        } finally {
+          await c2.close();
+        }
+        checkJournal(t.dataDir);
+      } finally {
+        a.proc.kill("SIGCONT");
+        await stop(a.proc);
+        await b?.close();
+        Object.assign(leaseTiming, saved);
+        t.cleanup();
+      }
+    });
+  }
+
+  for (const n of [2, 3]) {
+    for (const leftover of [false, true]) {
+      it(`${n} starts racing on one data dir${leftover ? " (over a killed holder's lease and lock)" : ""}: exactly one holds it, the others are refused (5 rounds)`, async () => {
+        for (let round = 0; round < 5; round++) {
+          const t = tempDir(`lease-race${n}`);
+          const procs: Array<ReturnType<typeof spawn>> = [];
+          try {
+            prepareDataDir(t.dataDir);
+            if (leftover) {
+              const dead = startChild(t.dataDir, { heartbeatMs: 2000, selfFenceMs: 10000, staleMs: 20000 });
+              procs.push(dead.proc);
+              assert.ok((await dead.done).url);
+              await stop(dead.proc);
+            }
+            // Default timing: no lease goes stale by age during the race; a dead holder is taken over by its gone pid.
+            const racers = Array.from({ length: n }, () => startChild(t.dataDir, { heartbeatMs: 2000, selfFenceMs: 10000, staleMs: 20000 }));
+            procs.push(...racers.map((r) => r.proc));
+            const results = await Promise.all(racers.map((r) => r.done));
+            const winners = results.filter((r) => r.url);
+            assert.equal(winners.length, 1, `round ${round}: ${JSON.stringify(results)}`);
+            for (const r of results.filter((x) => x.refused)) assert.match(r.refused!, /locked by process|locked by another start|took the lease over|took the lock over|could not take|already open|wrote to the journal at the same moment/, r.refused);
+            // The winner writes, and the journal reads back whole.
+            const api = new RestClient(winners[0].url!, TOKEN);
+            assert.equal((await api.send("POST", "/tickets", { project: "inbox", title: `round ${round}` })).status, 201);
+            readJournal(join(t.dataDir, JOURNAL_FILE));
+          } finally {
+            for (const p of procs) await stop(p);
+            t.cleanup();
+          }
+        }
+      });
+    }
+  }
+});
+

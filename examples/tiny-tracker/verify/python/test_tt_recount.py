@@ -174,8 +174,9 @@ class Recount(unittest.TestCase):
             self.assertIn("unknown line kind 'future-kind'", problems[0])
         finally:
             os.unlink(path)
-        # Every known kind passes; a lookup-fence line among them.
-        path = self.write_journal(records, extra=[{"line": "lookup-fence", "principal": "p-default", "key": "k-12345678", "run": None, "fenced_at": "t"}])
+        # Every known kind passes; a lookup-fence line and a clock line (0.4.0) among them.
+        path = self.write_journal(records, extra=[{"line": "lookup-fence", "principal": "p-default", "key": "k-12345678", "run": None, "fenced_at": "t"},
+                                                  {"line": "clock", "from_ms": 0, "to_ms": 60000, "at": "t"}])
         try:
             self.assertEqual(tt_recount.journal_executions(path, "p-default")[1], [])
         finally:
@@ -189,6 +190,87 @@ class Recount(unittest.TestCase):
                              "a bad last line with its newline is not a torn write")
         finally:
             os.unlink(path)
+
+    def raw_journal(self, lines, raw=None):
+        """Lines (dicts, or raw text) checksummed and written as tiny-tracker writes them (no spaces)."""
+        import hashlib
+        text = ""
+        for l in lines:
+            if isinstance(l, str):
+                text += l
+                continue
+            body = {k: v for k, v in l.items() if k != "checksum"}
+            body["checksum"] = hashlib.sha256(tt_digest.canonicalize(body).encode("utf-8")).hexdigest()
+            text += json.dumps(body, separators=(",", ":")) + "\n"
+        f = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8")
+        f.write(text + (raw or ""))
+        f.close()
+        return f.name
+
+    @staticmethod
+    def commit(jseq, seq, epoch=None, title="t"):
+        line = {"jseq": jseq, "line": "commit", "commit_seq": seq, "pending_jseq": None,
+                "tx": {"kind": "write", "seq": seq, "principal": "p-default", "attribution": {"run": None, "operation": None},
+                       "request": {"method": "POST", "path": "/tickets", "key": None}, "objects": [], "body": {"title": title}}}
+        if epoch is not None:
+            line["epoch"] = epoch
+        return line
+
+    HEADER = {"jseq": 0, "line": "header", "journal": "journal-format/1", "writer": "0.4.0", "boot_id": "0123456789abcdef", "seed": {}}
+
+    @staticmethod
+    def lease(jseq, epoch, nonce="n"):
+        return {"jseq": jseq, "line": "lease", "epoch": epoch, "pid": 7, "host": "h", "nonce": nonce}
+
+    def ids(self, path):
+        try:
+            got, problems = tt_recount.journal_executions(path)
+            return [r["id"] for r in got], problems
+        finally:
+            os.unlink(path)
+
+    def test_lease_epochs_decide_which_lines_apply(self):
+        # 0.4.0 (G3 note 26 item 1b): a paused holder (epoch 1) appended after the new holder's lease line (epoch 2).
+        lines = [self.HEADER, self.lease(1, 1), self.commit(2, 1, 1), self.lease(3, 2), self.commit(4, 2, 2, "b"),
+                 self.commit(3, 2, 1, "stale"), self.commit(5, 3, 2, "b2")]
+        self.assertEqual(self.ids(self.raw_journal(lines)), (["X-1", "X-2", "X-3"], []))
+        path = self.raw_journal(lines)
+        with open(path, encoding="utf-8") as f:
+            _, superseded, problems = tt_recount.scan_journal(f.read())
+        os.unlink(path)
+        self.assertEqual(([(s["jseq"], s["epoch"]) for s in superseded], problems), ([(3, 1)], []))
+        # The jseq rule: the stale line landed before the new lease line, after the new holder read the file.
+        lines = [self.HEADER, self.lease(1, 1), self.commit(2, 1, 1), self.commit(3, 2, 1, "stale"), self.lease(3, 2), self.commit(4, 2, 2, "b")]
+        self.assertEqual(self.ids(self.raw_journal(lines)), (["X-1", "X-2"], []))
+        # A lease line that does not raise the epoch (a start that lost the race) and a header after a lease line (one
+        # that found the file empty and lost) are superseded.
+        lines = [self.HEADER, self.lease(1, 1), self.commit(2, 1, 1), self.HEADER, self.lease(1, 1, "other"), self.commit(3, 2, 1)]
+        self.assertEqual(self.ids(self.raw_journal(lines)), (["X-1", "X-2"], []))
+
+    def test_a_0_3_0_journal_has_no_epochs_and_still_reads(self):
+        lines = [self.HEADER, self.commit(1, 1), self.commit(2, 2), self.lease(3, 1), self.commit(4, 3, 1)]
+        self.assertEqual(self.ids(self.raw_journal(lines)), (["X-1", "X-2", "X-3"], []))
+
+    def test_epoch_problems_are_named(self):
+        _, problems = self.ids(self.raw_journal([self.HEADER, self.lease(1, 1), self.commit(2, 1)]))
+        self.assertEqual(problems, ["journal: line jseq 2 (commit) has no epoch, after a lease line"])
+        _, problems = self.ids(self.raw_journal([self.HEADER, self.lease(1, 1), self.commit(2, 1, 3)]))
+        self.assertEqual(problems, ["journal: line jseq 2 has epoch 3, and no lease line before it took that epoch"])
+        _, problems = self.ids(self.raw_journal([self.HEADER, self.lease(1, 1), dict(self.commit(2, 1, 0), line="future-kind")]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("unknown line kind 'future-kind'", problems[0], "a superseded line must still be of a known kind")
+
+    def test_a_torn_fragment_a_later_write_joined_is_left_out(self):
+        # 0.4.0 never cuts the file: the next start's lease line joins a torn write on its physical line.
+        frag = '{"jseq":3,"line":"commit","commit_s'
+        lines = [self.HEADER, self.lease(1, 1), self.commit(2, 1, 1), frag, self.lease(3, 2), self.commit(4, 2, 2)]
+        self.assertEqual(self.ids(self.raw_journal(lines)), (["X-1", "X-2"], []))
+        # A fragment with no whole line after it on its line, other than the unterminated last line, is a bad line.
+        lines = [self.HEADER, self.lease(1, 1), self.commit(2, 1, 1), frag + "\n", self.lease(3, 2)]
+        self.assertEqual(self.ids(self.raw_journal(lines))[1][0], "journal: line jseq 3 has a bad jseq or checksum")
+        # A fragment can never hide an applied line: jseq stays contiguous.
+        lines = [self.HEADER, self.lease(1, 1), frag, self.commit(3, 2, 1)]
+        self.assertIn("journal: line jseq 2 has a bad jseq or checksum", self.ids(self.raw_journal(lines))[1])
 
     def test_batch_writes_limit_the_object_comparison(self):
         export, entries, records = history()

@@ -1,0 +1,277 @@
+# Public CI for examples/tiny-tracker (0.4.0, reviews C6 and T5).
+#
+#   test         the whole suite on Linux, macOS and Windows with Node 22 and 24, the 0.4.0 suites included (stdio,
+#                listener, integration-040, kit, the FX-DUR/FX-KEY checks). Journal, fsync, process kill and port
+#                reuse all differ by platform. On Linux and macOS the suite runs with TT_GATE=1, so the
+#                Python-backed checks (digest vectors, JSON Schemas, the OpenAPI file) fail instead of skipping, and
+#                the Python suites (the recount, the contract adapter) run too. On Windows the suite runs without the
+#                gate and skips the Python-backed checks (even though the runner has a python3 command), and it skips the
+#                POSIX file-mode checks and the SIGTERM and SIGINT stops, which Windows does not have (FIXTURE.md, Windows).
+#   known-answers  each registered generator (the surface transcript, the 0.4.0 selection, a sample of the 0.4.0
+#                matrix) three times in fresh processes; any byte difference fails the job. The runs' bytes are
+#                uploaded, so anyone can compare them across platforms.
+#   known-answers-matrix  Linux, Node 22 and 24: the 0.4.0 selection and the whole matrix regenerated and compared
+#                with expected/builds-0.4.0.json and expected/0.4.0.json byte for byte (fixture answers; the
+#                contract rows need the driver checkout, which the release checklist runs).
+#   container    builds the image and checks the start refusal (X1): no token, exit 2; with a token, /mcp needs it;
+#                the evidence listener (TRACKER_EVIDENCE_LISTEN) answers only with the evidence token; a defect build
+#                serves evidence off loopback behind the evidence token with no opt-in, is refused outside container
+#                mode, and the removed TRACKER_CONTAINER_ALLOW_DEFECTS is refused by name (R23 retired); a durable server
+#                killed and started again on its reused /data volume (pid 1 both times) takes its own lease and lock
+#                over and replays a keyed write.
+#
+# Read-only token, no secrets, no publish. Runs only when tiny-tracker or this file changes.
+
+name: tiny-tracker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/tiny-tracker/**"
+      - ".github/workflows/tiny-tracker.yml"
+  pull_request:
+    paths:
+      - "examples/tiny-tracker/**"
+      - ".github/workflows/tiny-tracker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tiny-tracker-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: examples/tiny-tracker
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: examples/tiny-tracker/package-lock.json
+      - name: Python with jsonschema (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --disable-pip-version-check -q "jsonschema==4.26.0" "referencing==0.37.0" "openapi-spec-validator==0.9.0"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test (TT_GATE=1)
+        if: runner.os != 'Windows'
+        env:
+          TT_GATE: "1"
+        run: npm test
+      - name: Test (no python3 command on Windows runners)
+        if: runner.os == 'Windows'
+        run: npm test
+      - name: Python suites (the recount, the contract adapter, the OpenAPI file)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -I verify/python/test_tt_recount.py
+          python3 -I harness/test_adapter.py
+          python3 -I verify/python/check_openapi.py
+
+  known-answers:
+    name: known answers reproduce (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: examples/tiny-tracker/package-lock.json
+      - name: Install and build
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Generate three times and compare
+        run: node dist/test/repro-known-answers.js --runs 3 --out "$RUNNER_TEMP/known-answers"
+      - name: Keep the runs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: known-answers-${{ matrix.os }}-node${{ matrix.node }}
+          path: ${{ runner.temp }}/known-answers
+          if-no-files-found: ignore
+          retention-days: 14
+
+  known-answers-matrix:
+    name: the 0.4.0 matrix reproduces (ubuntu, node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: examples/tiny-tracker/package-lock.json
+      - name: Install and build
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: The build selection reproduces
+        run: node expected/select-0.4.0.mjs --check
+      - name: The fixture answers reproduce (contract rows left out)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const strip = (d) => ({ ...d, builds: d.builds.map(({ contract, ...b }) => b) });
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/0.4.0.fixture.json", JSON.stringify(strip(JSON.parse(fs.readFileSync("expected/0.4.0.json", "utf8"))), null, 2) + "\n");
+            const list = JSON.parse(fs.readFileSync("expected/builds-0.4.0.json", "utf8"));
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/builds.json", JSON.stringify({ ...list, builds: list.builds.map((b) => ({ ...b, contract: false })) }));
+          '
+          node expected/generate.mjs --builds "$RUNNER_TEMP/builds.json" --out "$RUNNER_TEMP/0.4.0.fixture.json" --check
+
+  container:
+    name: container (start refusal, bearer token, evidence listener)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image
+        run: docker build -t tiny-tracker:ci .
+      - name: Without a token it refuses to start (exit 2)
+        run: |
+          set +e
+          docker run --rm tiny-tracker:ci > out.txt 2> err.txt
+          code=$?
+          set -e
+          cat err.txt
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 without a token, got $code"; exit 1; }
+          [ ! -s out.txt ] || { echo "::error::printed a state line without a token"; exit 1; }
+          grep -q "needs a bearer token for /mcp" err.txt
+      - name: With a token, /mcp needs it
+        run: |
+          token="$(openssl rand -hex 24)"
+          docker run -d --name tt -p 127.0.0.1:47310:47310 -e TRACKER_MCP_TOKEN="$token" tiny-tracker:ci
+          trap 'docker logs tt; docker rm -f tt >/dev/null' EXIT
+          for _ in $(seq 1 50); do docker logs tt > logs.txt 2>/dev/null; grep -q '"mcp"' logs.txt && break; sleep 0.2; done
+          body='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+          hdr=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
+          none="$(curl -s -o /dev/null -w '%{http_code}' "${hdr[@]}" -d "$body" http://127.0.0.1:47310/mcp)"
+          good="$(curl -s -o /dev/null -w '%{http_code}' "${hdr[@]}" -H "authorization: Bearer $token" -d "$body" http://127.0.0.1:47310/mcp)"
+          echo "without token: $none, with token: $good"
+          [ "$none" = "401" ]
+          [ "$good" = "200" ]
+          docker logs tt > logs.txt 2>&1
+          if grep -qF -- "$token" logs.txt; then echo "::error::the MCP token appears in the logs"; exit 1; fi
+      - name: The evidence listener answers only with the evidence token
+        run: |
+          mcp="$(openssl rand -hex 24)"
+          ev="$(openssl rand -hex 24)"
+          docker run -d --name tt-ev -p 127.0.0.1:47310:47310 -p 127.0.0.1:47312:47312 \
+            -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+            tiny-tracker:ci all --port 47310 --features evidence,strict-input,execution-records,lookup,principals,ledger
+          trap 'docker logs tt-ev; docker rm -f tt-ev >/dev/null' EXIT
+          for _ in $(seq 1 50); do docker logs tt-ev > logs.txt 2>/dev/null; grep -q '"evidence_listener"' logs.txt && break; sleep 0.2; done
+          none="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47312/build)"
+          good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
+          api="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/tickets)"
+          echo "evidence without token: $none, with: $good, API path: $api"
+          [ "$none" = "404" ]
+          [ "$good" = "200" ]
+          [ "$api" = "404" ]
+          docker logs tt-ev > logs.txt 2>&1
+          if grep -qF -e "$ev" -e "$mcp" logs.txt; then echo "::error::a token appears in the logs"; exit 1; fi
+      - name: A defect build serves evidence behind the evidence token with no opt-in; outside container mode it is refused (R23 retired)
+        run: |
+          mcp="$(openssl rand -hex 24)"
+          ev="$(openssl rand -hex 24)"
+          set +e
+          docker run --rm -e TRACKER_CONTAINER=0 -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+            tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put > out.txt 2> err.txt
+          code=$?
+          set -e
+          cat err.txt
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 for a defect build off loopback outside container mode, got $code"; exit 1; }
+          grep -q "keeps every listener on loopback outside container mode" err.txt
+          set +e
+          docker run --rm -e TRACKER_CONTAINER_ALLOW_DEFECTS=1 -e TRACKER_MCP_TOKEN="$mcp" tiny-tracker:ci > out.txt 2> err.txt
+          code=$?
+          set -e
+          cat err.txt
+          [ "$code" = "2" ] || { echo "::error::expected exit 2 with the removed TRACKER_CONTAINER_ALLOW_DEFECTS, got $code"; exit 1; }
+          grep -q "TRACKER_CONTAINER_ALLOW_DEFECTS was removed in 0.4.0" err.txt
+          docker run -d --name tt-r23 -p 127.0.0.1:47312:47312 \
+            -e TRACKER_MCP_TOKEN="$mcp" -e TRACKER_EVIDENCE_TOKEN="$ev" -e TRACKER_EVIDENCE_LISTEN=0.0.0.0:47312 \
+            tiny-tracker:ci all --port 47310 --features evidence,strict-input --defect read-merge-put
+          trap 'docker logs tt-r23; docker rm -f tt-r23 >/dev/null' EXIT
+          for _ in $(seq 1 50); do docker logs tt-r23 > logs.txt 2>/dev/null; grep -q '"evidence_listener"' logs.txt && break; sleep 0.2; done
+          none="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47312/build)"
+          good="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $ev" http://127.0.0.1:47312/build)"
+          echo "defect build, evidence without token: $none, with: $good"
+          [ "$none" = "404" ]
+          [ "$good" = "200" ]
+          if grep -qF -e "$ev" -e "$mcp" err.txt; then echo "::error::a token appears in the refusal"; exit 1; fi
+          docker logs tt-r23 > logs.txt 2>&1
+          if grep -qF -e "$ev" -e "$mcp" logs.txt; then echo "::error::a token appears in the logs"; exit 1; fi
+      - name: A durable server restarted on its reused /data replays a keyed write (pid 1 both times)
+        run: |
+          token="$(openssl rand -hex 24)"
+          docker volume create tt-data >/dev/null
+          # No --init: tiny-tracker is pid 1 in both runs, so the lease and the pid lock name the same pid each time.
+          docker run -d --name tt-dur -p 127.0.0.1:47310:47310 -v tt-data:/data -e TRACKER_MCP_TOKEN="$token" \
+            tiny-tracker:ci all --port 47310 --features durable,strict-input --data-dir /data
+          trap 'docker logs tt-dur; docker rm -f tt-dur >/dev/null; docker volume rm tt-data >/dev/null' EXIT
+          up() { for _ in $(seq 1 50); do docker logs tt-dur > logs.txt 2>/dev/null; [ "$(grep -c '"mcp"' logs.txt)" -ge "$1" ] && return 0; sleep 0.2; done; return 1; }
+          call() {
+            local url=http://127.0.0.1:47310/mcp sid
+            local hdr=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H "authorization: Bearer $token")
+            local init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+            sid="$(curl -s -D - -o /dev/null "${hdr[@]}" -d "$init" "$url" | tr -d '\r' | awk -F': ' 'tolower($1)=="mcp-session-id"{print $2}')"
+            if [ -n "$sid" ]; then hdr+=(-H "mcp-session-id: $sid"); fi
+            curl -s -o /dev/null "${hdr[@]}" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' "$url"
+            curl -s "${hdr[@]}" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_ticket","arguments":{"project":"inbox","title":"ci restart","idempotency_key":"ci-restart-key-0001"}}}' "$url" \
+              | sed -n 's/^data: //; /^{/p'
+          }
+          up 1
+          first="$(call)"
+          echo "first: $first"
+          grep -q 'replayed\\":false' <<< "$first"
+          docker kill tt-dur >/dev/null
+          docker start tt-dur >/dev/null
+          up 2
+          second="$(call)"
+          echo "second: $second"
+          grep -q 'replayed\\":true' <<< "$second"
+          grep -q 'T-1' <<< "$second"
+          docker logs tt-dur > logs.txt 2>&1
+          grep -q "taking over a stale data-dir lease" logs.txt
+          if grep -qF -- "$token" logs.txt; then echo "::error::the MCP token appears in the logs"; exit 1; fi
+      - name: The image runs as an unprivileged user with a 0700 data dir
+        run: |
+          [ "$(docker run --rm --entrypoint id tiny-tracker:ci -u)" != "0" ]
+          [ "$(docker run --rm --entrypoint stat tiny-tracker:ci -c '%a %U' /data)" = "700 node" ]

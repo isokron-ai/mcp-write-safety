@@ -11,11 +11,11 @@ import { Writable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fxCheck, main, recomputeDescriptorHashes, type FxCheckReport } from "../src/fx-check.js";
 import { startFakeFixture, type FakeDefects, type FakeFixture } from "./support/fake-fixture.js";
-import { py } from "./support/python.js";
+import { noPython, py, pythonRuns } from "./support/python.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const GATE = process.env.TT_GATE === "1";
-const needPython = spawnSync("python3", ["--version"]).status === 0 || GATE ? false : "python3 is not on PATH";
+const needPython = pythonRuns(["--version"]) || GATE ? false : noPython("python3 is not on PATH");
 
 const verdicts = (r: FxCheckReport) => Object.fromEntries(r.findings.map((f) => [f.id, f.verdict]));
 const run = (f: FakeFixture, extra: { probe?: boolean; second?: boolean } = {}) => fxCheck({

@@ -8,12 +8,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FEATURE_NAMES } from "../src/profile.js";
-import { py } from "./support/python.js";
+import { noPython, py, pythonRuns } from "./support/python.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const GATE = process.env.TT_GATE === "1";
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"]).status === 0;
-const needJsonschema = jsonschema || GATE ? false : "the Python jsonschema package is not installed";
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
+const needJsonschema = jsonschema || GATE ? false : noPython("the Python jsonschema package is not installed");
 
 describe("known-answer generator (expected/)", () => {
   for (const release of ["0.2.0", "0.3.0"]) {
@@ -38,9 +38,16 @@ describe("known-answer generator (expected/)", () => {
     const labels = list.builds.map((b: any) => b.label);
     for (const b of old.builds) assert.ok(labels.includes(b.label), b.label);
     const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.3.0.json"), "utf8"));
+    // Keyed by 0.3.0 for good: a release's known answers reproduce at its own tag (docs/STABILITY.md), so this file is
+    // not compared with package.json, which moves on at the next version bump.
     assert.equal(doc.package.version, "0.3.0");
-    assert.equal(doc.package.version, JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version);
     assert.deepEqual(doc.builds.map((b: any) => b.label).sort(), [...labels].sort());
+  });
+
+  it("the current release's known answers are keyed by package.json's version", () => {
+    const version = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+    const doc = JSON.parse(readFileSync(join(ROOT, "expected", `${version}.json`), "utf8"));
+    assert.equal(doc.package.version, version);
   });
 
   it("the 0.3.0 known answers name the defects they cannot tell from the correct build (follow-up F1)", () => {
@@ -59,6 +66,35 @@ describe("known-answer generator (expected/)", () => {
     for (const label of undetected) assert.deepEqual(answers(row(label)), answers(row("correct build")), label);
     // The 0.2.0 list has no such statement, so its file is unchanged.
     assert.equal(JSON.parse(readFileSync(join(ROOT, "expected", "0.2.0.json"), "utf8")).not_detected, undefined);
+  });
+
+  it("R-TT-04: the 0.4.0 known answers name exactly the defects they cannot tell from the correct build", async () => {
+    const list = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.4.0.json"), "utf8"));
+    const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.4.0.json"), "utf8"));
+    const md = readFileSync(join(ROOT, "expected", "0.4.0.md"), "utf8");
+    const { NOT_DETECTED_DEFECTS } = await import(pathToFileURL(join(ROOT, "expected", "select-0.4.0.mjs")).href);
+    assert.ok(typeof list.not_detected === "string" && list.not_detected.startsWith("Not detected in 0.4.0: "));
+    assert.equal(doc.not_detected, list.not_detected, "the generator carries the build list's statement");
+    assert.ok(md.split("\n## ")[0].includes(list.not_detected), "the table states it in its header");
+    for (const name of NOT_DETECTED_DEFECTS) assert.ok(list.not_detected.includes(name), name);
+    // Exact both ways: a single-defect row with the correct build's answers is named, and every named defect has one.
+    const byLabel = new Map(doc.builds.map((b: any) => [b.label, b]));
+    const correct = new Map<string, any>();
+    for (const b of list.builds) {
+      const f = b.factors;
+      if (f.mcp === "-" && f.backend === "-" && f.variant === "-") correct.set(f.level, byLabel.get(b.label));
+    }
+    const same = new Set<string>();
+    for (const b of list.builds) {
+      const f = b.factors;
+      const set = [f.mcp, f.backend, f.variant].filter((v: string) => v !== "-");
+      const row: any = byLabel.get(b.label);
+      const c = correct.get(f.level);
+      if (set.length !== 1 || !c) continue;
+      const contractSame = row.contract && c.contract ? JSON.stringify(row.contract.answers) === JSON.stringify(c.contract.answers) : !row.contract;
+      if (JSON.stringify(row.fixture) === JSON.stringify(c.fixture) && contractSame) same.add(set[0]);
+    }
+    assert.deepEqual([...same].sort(), [...NOT_DETECTED_DEFECTS].sort());
   });
 
   it("generates schema-valid, time-free answers keyed by build_hash, the same on every run", { skip: needJsonschema }, async () => {
@@ -80,5 +116,24 @@ describe("known-answer generator (expected/)", () => {
     const check = await py([join(ROOT, "verify", "python", "check_schemas.py"), "--instance", "expected"], {}, text);
     assert.equal(check.code, 0, check.stdout + check.stderr);
     assert.match(gen.table(a), /^# Known answers for tiny-tracker 0\.1\.0/);
+  });
+
+  it("writes the two-principal file whenever principals are in effect, so FX-LOOK-3 is checked on the Lv rows (note 19 item 6)", async () => {
+    const gen = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);
+    // Named, or from the default profile (the Lv level), yes; profile 0.1 or a list that leaves it out, no.
+    assert.equal(gen.principalsInEffect(["--features", "evidence,principals"]), true);
+    assert.equal(gen.principalsInEffect(["--features", "evidence,strict-input,ledger,faults"]), true);
+    assert.equal(gen.principalsInEffect(["--profile", "0.1"]), false);
+    assert.equal(gen.principalsInEffect(["--profile=0.1"]), false);
+    const run = await gen.startBuild(["--features", "evidence,strict-input,ledger,faults"]);
+    try {
+      assert.ok(run.env.TRACKER_BACKEND_TOKENS_FILE, "the Lv build gets the principals file");
+      const { fxCheck } = await import("../src/fx-check.js");
+      const r = await fxCheck({ backend: run.state.backend, mcp: run.state.mcp, control: run.state.control, tokens: run.tokens, probe: true });
+      const look3 = r.findings.find((f) => f.id === "FX-LOOK-3")!;
+      assert.equal(look3.verdict, "held", look3.reason);
+    } finally {
+      await run.stop();
+    }
   });
 });

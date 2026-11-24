@@ -134,8 +134,9 @@ export interface JournalSeam extends CommitSink {
   load(): void;
   /**
    * Appends a `run-alloc` line (seams v2.1) and flushes it; called by RunRegistry.onAllocate before the run is
-   * registered or answered. A throw refuses the allocation (503 journal_unavailable), nothing registered. After a
-   * failed append the journal truncates back to the last good line, or fails stop (decision 0003 section 5).
+   * registered or answered. A throw refuses the allocation (503 journal_unavailable, or lease_lost), nothing registered.
+   * Nothing is cut from the file: an append that fails once its write has begun stops the journal (decision 0003
+   * section 5, as revised in 0.4.0).
    */
   recordRun(run: { run_id: string; principal: string; created_at: string; label: string | null }): void;
   close(): void;

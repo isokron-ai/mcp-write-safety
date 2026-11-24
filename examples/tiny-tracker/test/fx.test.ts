@@ -29,6 +29,7 @@ import { NO_RECORD } from "../src/backend/lookup.js";
 import { createBuild } from "../src/mcp/build.js";
 import { connectClient, Rest } from "./support/stack.js";
 import { runCli } from "./support/cli-run.js";
+import { noPython, pythonRuns } from "./support/python.js";
 
 const ALICE = "alice-token-fx-000000000000";
 const BOB = "bob-token-fx-0000000000000000";
@@ -37,9 +38,9 @@ const FEATURES = ["execution-records", "lookup", "principals"] as const;
 const XH = EXECUTION_HEADER.toLowerCase();
 
 const CHECK = new URL("../../verify/python/check_schemas.py", import.meta.url).pathname;
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"], { encoding: "utf8" }).status === 0;
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
 /** TT_GATE=1: a missing jsonschema fails the schema test instead of skipping it (as in test/schemas.test.ts). */
-const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : "the Python jsonschema package is not installed";
+const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : noPython("the Python jsonschema package is not installed");
 
 async function backendWith(opts: { defects?: string[]; features?: readonly string[] } = {}): Promise<RunningBackend> {
   return startBackend({ token: ALICE, port: 0, principals: PRINCIPALS, features: opts.features ?? FEATURES, defects: opts.defects, bootId: "0123456789abcdef" });
@@ -283,10 +284,12 @@ describe("principals (rule 7, G8): two tokens, the principal in every record", (
       const shared = await runCli(["all", "--features", "principals", "--port", "0", "--backend-port", "0"], { ...env, TRACKER_EVIDENCE_TOKEN: BOB });
       assert.equal(shared.code, 2);
       assert.match(shared.stderr, /token and the .* token must differ/);
-      chmodSync(file, 0o644);
-      const loose = await runCli(["all", "--features", "principals", "--port", "0", "--backend-port", "0"], env);
-      assert.equal(loose.code, 2);
-      assert.match(loose.stderr, /chmod 600/);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        chmodSync(file, 0o644);
+        const loose = await runCli(["all", "--features", "principals", "--port", "0", "--backend-port", "0"], env);
+        assert.equal(loose.code, 2);
+        assert.match(loose.stderr, /chmod 600/);
+      }
       // Profile 0.1 never reads the file, as 0.1.0 did not.
       const old = await runCli(["all", "--profile", "0.1", "--port", "0", "--backend-port", "0"], env);
       assert.equal(old.code, 0, old.stderr);

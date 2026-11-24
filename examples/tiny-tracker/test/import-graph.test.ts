@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SRC = fileURLToPath(new URL("../../src/", import.meta.url));
 const CLI = fileURLToPath(new URL("../src/cli.js", import.meta.url));
@@ -42,7 +42,7 @@ function runAndLog(args: string[], env: Record<string, string>, portBase: number
   const log = join(dir, "imports.log");
   writeFileSync(log, "");
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, ["--import", PRELOAD, CLI, ...args, "--port", String(portBase), "--backend-port", String(portBase + 1)],
+    const child = spawn(process.execPath, ["--import", pathToFileURL(PRELOAD).href, CLI, ...args, "--port", String(portBase), "--backend-port", String(portBase + 1)],
       { env: { PATH: process.env.PATH ?? "", TT_IMPORT_LOG: log, ...env } });
     let stdout = "";
     let stderr = "";

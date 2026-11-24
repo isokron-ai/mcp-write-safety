@@ -364,19 +364,37 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
     assert.match(checkCompat({ ...f, supervise: false, features: ["evidence", "strict-input", "ledger", "faults", "durable"], dataDir: "/x" }).join(), /need tiny-tracker all --supervise/);
   });
 
-  it("CMP-65 (G2 fold-in 9): durable with the fixture clock is refused at start, supervised or not; each alone starts", async () => {
+  it("CMP-65 retired (0.4.0, note 19 item 7): durable with the fixture clock starts; a move is journalled and the offset survives a restart", async () => {
     const d = { ...base, features: ["durable", "strict-input"], dataDir: "/x", fixtureControl: true };
-    assert.deepEqual(checkCompat(d), []);
-    assert.deepEqual(checkCompat({ ...base, features: ["clock"], fixtureControl: true }), []);
-    assert.match(checkCompat({ ...d, features: ["durable", "strict-input", "clock"] }).join(), /durable feature does not run with the fixture clock/);
-    assert.match(checkCompat({ ...d, features: ["durable", "strict-input", "clock"], supervise: true }).join(), /does not run with the fixture clock/);
+    assert.deepEqual(checkCompat({ ...d, features: ["durable", "strict-input", "clock"] }), []);
+    assert.deepEqual(checkCompat({ ...d, features: ["durable", "strict-input", "clock"], supervise: true }), []);
     const t = tempDir("cmp65");
+    const env = { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000", TRACKER_CONTROL_TOKEN: "cli-control-token-0000000000" };
+    const args = ["all", "--features", "durable,strict-input,clock", "--fixture-control", "--data-dir", t.dataDir, "--port", "0", "--backend-port", "0", "--control-port", "0"];
+    const clock = async (control: string, body?: unknown) => (await fetch(`${control}/_fixture/clock`, {
+      method: body === undefined ? "GET" : "POST", headers: { authorization: `Bearer ${env.TRACKER_CONTROL_TOKEN}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) })).json() as any;
     try {
-      const r = await runCli(["all", "--features", "durable,strict-input,clock", "--fixture-control", "--data-dir", t.dataDir, "--port", "0", "--backend-port", "0", "--control-port", "0"],
-        { TRACKER_BACKEND_TOKEN: "cli-backend-token-0000000000" });
-      assert.equal(r.code, 2);
-      assert.match(r.stderr, /journal does not keep the clock offset/);
-      assert.equal(r.stdout, "", "nothing started");
+      const first = await runCli(args, env, async (state) => {
+        assert.equal((await clock(state.control, { advance_ms: 3_600_000 })).offset_ms, 3_600_000);
+        assert.equal((await clock(state.control, { advance_ms: 60_000 })).offset_ms, 3_660_000);
+      });
+      assert.ok(first.stateLine, first.stderr);
+      const { readJournal } = await import("../src/backend/journal.js");
+      const lines = readJournal(join(t.dataDir, "journal.jsonl")).lines.filter((l) => l.line === "clock") as any[];
+      assert.deepEqual(lines.map((l) => [l.from_ms, l.to_ms]), [[0, 3_600_000], [3_600_000, 3_660_000]]);
+      // A restart on the same data dir: the offset is back before anything is served (record time never moves back).
+      const second = await runCli(args, env, async (state) => {
+        const now = await clock(state.control);
+        assert.equal(now.domain, "fixture");
+        assert.equal(now.offset_ms, 3_660_000);
+      });
+      assert.ok(second.stateLine, second.stderr);
+      // Without the clock feature the data dir refuses to load: on wall time its record time would move back.
+      const wall = await runCli(["all", "--features", "durable,strict-input", "--data-dir", t.dataDir, "--port", "0", "--backend-port", "0"], env);
+      assert.equal(wall.code, 2, wall.stderr);
+      assert.match(wall.stderr, /moved the fixture clock to an offset of 3660000 ms/);
+      assert.equal(wall.stdout, "", "nothing started");
     } finally {
       t.cleanup();
     }
@@ -547,7 +565,7 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
       let second: Awaited<ReturnType<typeof runCli>> | undefined;
       const first = await runCli(["backend", "--features", "durable,strict-input,inflight,retention", "--data-dir", t.dataDir, "--key-retention", "2d", "--port", "0"], env, async (state) => {
         assert.equal(state.journal.data_dir, t.dataDir);
-        assert.match(state.journal.head, /^0:[0-9a-f]{16}$/);
+        assert.match(state.journal.head, /^1:[0-9a-f]{16}$/, "a new journal's head is this start's lease line (jseq 1)");
         const rest = new Rest(state.backend, env.TRACKER_BACKEND_TOKEN);
         assert.equal((await rest.send("POST", "/tickets", { project: "inbox", title: "a" }, { "idempotency-key": "cli-key-000001" })).status, 201);
         second = await runCli(["backend", "--features", "durable,strict-input", "--data-dir", t.dataDir, "--port", "0"], env);
@@ -556,7 +574,7 @@ describe("compatibility rules CMP-50 to CMP-54 and the command line", () => {
       assert.equal(second!.code, 2);
       assert.match(second!.stderr, /locked by process/);
       const again = await runCli(["backend", "--features", "durable,strict-input,inflight,retention", "--data-dir", t.dataDir, "--port", "0"], env, async (state) => {
-        assert.match(state.journal.head, /^2:/, "header, pending, commit");
+        assert.match(state.journal.head, /^4:/, "header, lease, pending, commit, then this start's lease line");
       });
       assert.equal(again.code, 0, again.stderr);
       const flag = await runCli(["backend", "--profile", "0.1", "--key-expiry", "forget", "--port", "0"], env);

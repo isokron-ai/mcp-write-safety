@@ -32,9 +32,12 @@ export function checkArgv(argv: readonly string[], tokens: Record<string, string
   }
 }
 
-/** Constant-time comparison of a presented bearer token. */
+/**
+ * Constant-time comparison of a presented bearer token. The scheme name is matched without regard to case (RFC 7235
+ * section 2.1: "Bearer", "bearer" and "BEARER" are the same scheme); the token itself is compared exactly.
+ */
 export function bearerMatches(header: string | undefined, token: string): boolean {
-  const presented = Buffer.from(header?.startsWith("Bearer ") ? header.slice(7) : "");
+  const presented = Buffer.from(header !== undefined && /^bearer /i.test(header) ? header.slice(7) : "");
   const expected = Buffer.from(token);
   return presented.length === expected.length && timingSafeEqual(presented, expected);
 }

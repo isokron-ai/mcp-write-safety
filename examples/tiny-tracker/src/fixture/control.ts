@@ -94,7 +94,11 @@ export class RunRegistry {
     try {
       this.onAllocate?.({ ...run });
     } catch (e) {
-      throw new ControlError(503, "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}`);
+      // lease_lost (G3 note 26 item 1c): the run-alloc line was written, then the lease was found taken over.
+      // append_failed: the write had begun when it failed, so the line may be in the file and the next start decides it.
+      const code = (e as { code?: unknown } | null)?.code;
+      const lost = code === "lease_lost";
+      throw new ControlError(503, lost ? "lease_lost" : "journal_unavailable", `the run could not be recorded: ${(e as Error)?.message ?? String(e)}${lost || code === "append_failed" ? "; whether a restart keeps it is unknown" : ""}`);
     }
     this.runs.push(run);
     return { ...run };
@@ -187,7 +191,8 @@ export async function startControl(options: ControlOptions): Promise<RunningCont
       if (clockAnswer) return clockAnswer;
       // ---- end stream E ----
       if (method === "GET") return { status: 200, body: { domain: descriptor.clockOffsetMs === 0 ? "wall" : "fixture", offset_ms: descriptor.clockOffsetMs } };
-      if (method === "POST") throw notBuilt("0.3.0", "moving the fixture clock");
+      // The clock is built since 0.3.0 but off in this process: not_enabled, as openapi.yaml says (note 27 item 5).
+      if (method === "POST") throw new ControlError(501, "not_enabled", "moving the fixture clock needs the clock feature, which this process does not run", { feature: "clock", available_from: "0.3.0" });
     }
     if (path === "/_fixture/faults") {
       if (method === "GET") return { status: 200, body: faults ? { ...faults.list(), points: FAULT_POINTS } : { armed: [], points: FAULT_POINTS } };
@@ -236,7 +241,7 @@ export async function startControl(options: ControlOptions): Promise<RunningCont
         dropped = backend.dropRun({ principal: run.principal }, run.run_id);
       } catch (e) {
         if (e instanceof ApiError) throw new ControlError(e.status, e.code, e.message);
-        if (e instanceof CommitSinkError || e instanceof JournalError) throw new ControlError(503, e instanceof JournalError ? "journal_unavailable" : "stopped", e.message);
+        if (e instanceof CommitSinkError || e instanceof JournalError) throw new ControlError(503, e instanceof JournalError ? e.code : "stopped", e.message);
         throw e;
       }
       const entry = ledger.list({ kind: "run-reset", run: run.run_id, principal: run.principal }).at(-1);

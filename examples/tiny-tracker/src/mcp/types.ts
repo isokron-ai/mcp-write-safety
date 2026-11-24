@@ -34,4 +34,6 @@ export interface Build {
   validation: Validation;
   configRules: ConfigRules;
   defects: string[];
+  /** The stated key retention (feature retention, FX-KEY-2), also carried in the server instructions (0.4.0). */
+  retention?: string;
 }

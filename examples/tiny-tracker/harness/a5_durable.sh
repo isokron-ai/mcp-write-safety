@@ -4,7 +4,7 @@
 # offset 0, no fault listener) and a restart in the middle of the 24-hour
 # window. Plan and procedure: docs/a5-durable.md.
 #
-#   A5_DIR=~/a5-run CONTRACT_DIR=~/contract-92bf1ba harness/a5_durable.sh start
+#   A5_DIR=~/a5-run CONTRACT_DIR=~/contract-b2f2c64 harness/a5_durable.sh start
 #   harness/a5_durable.sh plant      # A1-A5 with the driver; A5 is planted (unproven today)
 #   harness/a5_durable.sh restart    # some hours later, before due_at: stop, start again on the same data dir
 #   harness/a5_durable.sh check      # read-only: /build, and the planted K and receipt id still answer

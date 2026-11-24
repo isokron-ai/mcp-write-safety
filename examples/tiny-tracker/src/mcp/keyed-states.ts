@@ -47,12 +47,15 @@ export function keyedStateResult(res: ApiResponse, what: string, w?: WriteContex
 }
 
 /**
- * With the retention feature, every key-accepting tool states the retention (FX-KEY-2). null: the retention is not
- * known (follow-up F2: a `server` whose backend states none), and the tools say that rather than name a default.
+ * With the retention feature, every key-accepting tool states the retention (FX-KEY-2), and so do the server instructions
+ * (0.4.0). `retentionMs` is the configured retention when the process knows it (`all`, `stdio`, or the retention a
+ * `server`'s backend states, follow-up F2); null: the retention is not known (a `server` whose backend states none), and
+ * the tools and instructions say that rather than name a default.
  */
 export function applyRetentionStatement(build: Build, features: readonly string[], retentionMs: number | null = DEFAULT_RETENTION_MS): void {
   if (!features.includes("retention")) return;
   const sentence = retentionMs === null ? UNKNOWN_RETENTION_SENTENCE : retentionSentence(retentionMs);
+  build.retention = sentence;
   for (const [name, tool] of build.tools) {
     const props = (tool.input as { properties?: Record<string, unknown> }).properties ?? {};
     if (!("idempotency_key" in props)) continue;

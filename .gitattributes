@@ -1,0 +1,4 @@
+# tiny-tracker is byte-exact: known answers, golden files and the tests that read the Dockerfile and the workflow compare text
+# byte for byte, so a Windows checkout must not turn line feeds into CRLF.
+examples/tiny-tracker/** text=auto eol=lf
+.github/workflows/tiny-tracker.yml text eol=lf

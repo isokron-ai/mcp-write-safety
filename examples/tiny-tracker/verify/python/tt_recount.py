@@ -16,7 +16,8 @@ the raw files:
               canonical bytes, and the bytes are RFC 8785 (tt_digest.py); from the journal, the digest is
               recomputed from each committed body and must equal the record's served digest;
   journal     every line's jseq is contiguous and its checksum holds, commit_seq is contiguous, and an unknown line
-              kind is refused (only a torn last line, unterminated and not decodable, is tolerated).
+              kind is refused (only a torn last line, unterminated and not decodable, is tolerated, and from 0.4.0 a
+              torn fragment a later write joined); from 0.4.0 a superseded writer's lines (lease epochs) are left out.
               The journal holds every principal's writes: --principal keeps the one the ledger was read for.
 
   python3 -I tt_recount.py --export export.json --ledger ledger.json [--executions executions.json]
@@ -84,8 +85,125 @@ def find_records(value, kind, out=None, depth=0):
     return out
 
 
-# journal-format/1's line kinds (tiny-tracker INTERFACES 1.9; lookup-fence is the additive 0.3.0 kind).
-JOURNAL_LINE_KINDS = frozenset(["header", "commit", "pending", "aborted", "fence", "run-alloc", "lookup-fence"])
+# journal-format/1's line kinds (tiny-tracker INTERFACES 1.9; lookup-fence is the additive 0.3.0 kind, clock the
+# additive 0.4.0 kind: a fixture clock move, lease the additive 0.4.0 kind: a start took the data-dir lease).
+JOURNAL_LINE_KINDS = frozenset(["header", "commit", "pending", "aborted", "fence", "run-alloc", "lookup-fence", "clock", "lease"])
+
+# Where a line can start inside a physical line: a torn fragment that a later write joined (tiny-tracker 0.4.0 never cuts
+# the file, so the bytes of a write cut short stay in front of the next line).
+LINE_START = re.compile(r'\{"jseq"\s*:')
+
+
+def _decode(text):
+    """One journal line, or None when it does not parse, has no integer jseq, or its checksum does not hold."""
+    try:
+        line = json.loads(text)
+        if not isinstance(line, dict) or not isinstance(line.get("jseq"), int) or isinstance(line.get("jseq"), bool):
+            return None
+        body = {k: v for k, v in line.items() if k != "checksum"}
+        if hashlib.sha256(tt_digest.canonicalize(body).encode("utf-8")).hexdigest() != line.get("checksum"):
+            return None
+        return line
+    except (ValueError, AttributeError, TypeError, tt_digest.CanonicalizationError):
+        return None
+
+
+def split_joined(text):
+    """A physical line split into ("line", obj) and ("junk", text) pieces: a torn fragment, then the whole line that joined it."""
+    whole = _decode(text)
+    if whole is not None:
+        return [("line", whole)]
+    for m in LINE_START.finditer(text, 1):
+        tail = _decode(text[m.start():])
+        if tail is not None:
+            return split_joined(text[:m.start()]) + [("line", tail)]
+    return [("junk", text)]
+
+
+def _epoch(line):
+    return 0 if line.get("line") == "header" else (line.get("epoch") or 0)
+
+
+def scan_journal(text):
+    """The lines a tiny-tracker start applies, as tiny-tracker's own reader decides them (0.4.0, G3 note 26 item 1).
+
+    Returns (applied, superseded, problems). A fragment followed by a whole line on its physical line is left out; a
+    physical line that holds no whole line is a problem, except an unterminated last one (a torn write). Epochs: a line
+    whose epoch is lower than a lease line before it is a superseded writer's; a lease line also supersedes the lines
+    before it with a jseq of its own or higher (of a lower epoch); a lease line whose epoch is not above the current one,
+    or a header after a lease line, is a start that lost the race. Every line after a lease line carries an epoch; a line
+    without one there, or with an epoch no lease line took, is a problem. Superseded lines must still be of a known kind.
+    """
+    problems = []
+    parts = text.split("\n")
+    terminated = parts[-1] == ""
+    if terminated:
+        parts.pop()
+    lines = []
+    for i, part in enumerate(parts):
+        pieces = split_joined(part)
+        if len(pieces) == 1 and pieces[0][0] == "junk":
+            if i == len(parts) - 1 and not terminated:
+                break  # a torn write: an unterminated last line that does not decode (decision 0003)
+            lines.append(None)  # a bad line: named at its place below
+            continue
+        lines.extend(obj for kind, obj in pieces if kind == "line")
+    applied, superseded = [], []
+    epoch = 0
+    for line in lines:
+        expected = len(applied)
+        if line is None:
+            problems.append("journal: line jseq %d has a bad jseq or checksum" % expected)
+            applied.append(None)
+            continue
+        kind = line.get("line")
+        if not applied:
+            if kind != "header" or line.get("jseq") != 0:
+                problems.append("journal: line jseq 0 is not the header")
+            applied.append(line)
+            continue
+        if kind not in JOURNAL_LINE_KINDS:
+            problems.append("journal: line jseq %d has an unknown line kind %r; this reader knows %s and does not skip a line"
+                            % (expected, kind, ", ".join(sorted(JOURNAL_LINE_KINDS))))
+            applied.append(None)
+            continue
+        ep = line.get("epoch")
+        if ep is not None and (not isinstance(ep, int) or isinstance(ep, bool) or ep < 0):
+            problems.append("journal: line jseq %d has an epoch that is not a non-negative integer" % line.get("jseq"))
+            continue
+        if kind == "header":
+            if epoch == 0:
+                problems.append("journal: line jseq %d is a second header" % expected)
+            else:
+                superseded.append(line)
+            continue
+        if kind == "lease":
+            if not isinstance(ep, int) or ep < 1:
+                problems.append("journal: line jseq %d is a lease line without a positive epoch" % line.get("jseq"))
+                continue
+            if ep <= epoch:
+                superseded.append(line)
+                continue
+            while len(applied) > 1 and applied[-1] is not None and applied[-1].get("jseq") >= line.get("jseq"):
+                popped = applied.pop()
+                if _epoch(popped) >= ep:
+                    problems.append("journal: the lease line of epoch %d (jseq %d) follows a line of epoch %d with jseq %d"
+                                    % (ep, line.get("jseq"), _epoch(popped), popped.get("jseq")))
+                superseded.append(popped)
+            epoch = ep
+            applied.append(line)
+            continue
+        if epoch > 0 and ep is None:
+            problems.append("journal: line jseq %d (%s) has no epoch, after a lease line" % (line.get("jseq"), kind))
+            continue
+        if (ep or 0) < epoch:
+            superseded.append(line)
+            continue
+        if (ep or 0) > epoch:
+            problems.append("journal: line jseq %d has epoch %d, and no lease line before it took that epoch" % (line.get("jseq"), ep))
+            continue
+        applied.append(line)
+    return applied, superseded, problems
 
 
 def journal_executions(path, principal=None):
@@ -95,44 +213,28 @@ def journal_executions(path, principal=None):
     is derived from it here: id X-<commit_seq>, principal, run and operation tag, key, objects, and the result
     digest recomputed from the committed body (RFC 8785 bytes under the execution-result domain tag). Every line's
     jseq and checksum (SHA-256 of the line's RFC 8785 bytes without the checksum member) are checked, as tiny-tracker's
-    own reader does (G2 fold-in 10): the first line is the header, commit_seq is contiguous from 1 over every
-    principal's commits, and a line kind this reader does not know is refused, never skipped (an older reader must not
-    pass over a fence). Only a torn write is tolerated: an unterminated last line that does not decode. Returns
-    (records, problems). `principal` keeps one principal's writes (the ledger and
-    the export a third party reads are filtered by ?principal=; the journal holds every principal's).
+    own reader does (G2 fold-in 10): the first line is the header, jseq is contiguous over the lines a start applies,
+    commit_seq is contiguous from 1 over every principal's commits, and a line kind this reader does not know is refused,
+    never skipped (an older reader must not pass over a fence). From 0.4.0 the lease epochs decide which lines apply
+    (scan_journal): a superseded writer's line is left out, as a torn fragment a later write joined is. Only a torn
+    write is tolerated otherwise: an unterminated last line that does not decode. Returns (records, problems).
+    `principal` keeps one principal's writes (the ledger and the export a third party reads are filtered by
+    ?principal=; the journal holds every principal's).
     """
-    records, problems = [], []
+    records = []
     with open(path, encoding="utf-8") as f:
-        lines = [l for l in f.read().split("\n")]
-    terminated = bool(lines) and lines[-1] == ""
-    if terminated:
-        lines.pop()
+        applied, _superseded, problems = scan_journal(f.read())
     last_commit = 0
-    for i, text in enumerate(lines):
-        last = i == len(lines) - 1
-        try:
-            line = json.loads(text)
-            body = {k: v for k, v in line.items() if k != "checksum"}
-            decodes = isinstance(line, dict) and isinstance(line.get("jseq"), int) and \
-                hashlib.sha256(tt_digest.canonicalize(body).encode("utf-8")).hexdigest() == line.get("checksum")
-        except (ValueError, AttributeError, tt_digest.CanonicalizationError):
-            decodes = False
-        if not decodes:
-            if last and not terminated:
-                break  # a torn write: an unterminated last line that does not decode (decision 0003)
-            problems.append("journal: line jseq %d has a bad jseq or checksum" % i)
+    for i, line in enumerate(applied):
+        if line is None:
             last_commit = None  # a bad line may have been a commit: the next commit line sets the count again
             continue
         if line.get("jseq") != i:
             problems.append("journal: line jseq %d has a bad jseq or checksum" % i)
             continue
         kind = line.get("line")
-        if (i == 0) != (kind == "header"):
-            problems.append("journal: line jseq %d is %s" % (i, "not the header" if i == 0 else "a second header"))
-            continue
-        if kind not in JOURNAL_LINE_KINDS:
-            problems.append("journal: line jseq %d has an unknown line kind %r; this reader knows %s and does not skip a line"
-                            % (i, kind, ", ".join(sorted(JOURNAL_LINE_KINDS))))
+        if i > 0 and kind == "header":
+            problems.append("journal: line jseq %d is a second header" % i)
             continue
         if kind != "commit":
             continue

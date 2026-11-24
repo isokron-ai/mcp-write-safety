@@ -12,6 +12,7 @@ import type { ServerExtras } from "./mcp/server.js";
 import type { BackendExtension, BackendFaultHooks } from "./backend/http.js";
 import { loadPrincipalsFile, PrincipalError, type Principal } from "./principals.js";
 import type { Clock } from "./clock.js";
+import { containerMode, resolveTransport, TransportError } from "./transport.js"; // stream F
 
 const USAGE = `usage:
   tiny-tracker all     [--port N] [--backend-port N] [--defect NAME]... [--backend-defect lost-update]
@@ -19,6 +20,10 @@ const USAGE = `usage:
   tiny-tracker backend [--port N] [--backend-defect lost-update]      (needs TRACKER_BACKEND_TOKEN)
   tiny-tracker server  [--port N] [--defect NAME]... [--backend-url URL] [--read-only VALUE] [--tools a,b]
                                                                       (needs TRACKER_BACKEND_TOKEN)
+  tiny-tracker stdio   [--backend-port N] [--defect NAME]... [--backend-defect lost-update] [--backend-url URL]
+                       [--read-only VALUE] [--tools a,b] [--default-project KEY]
+                       MCP over stdin/stdout, with the options of \`all\` (or of \`server\` with --backend-url) except
+                       --port and --supervise; the state line goes to stderr (stdio --help).
 Defect names are listed in the README; --defect also takes a requirement ID (e.g. MWS-CONC-3) or "all".
 Fixture options (see FIXTURE.md):
   --profile 0.1|default    0.1: exactly the surface of the published 0.1.0 (no features). Default: default.
@@ -29,6 +34,14 @@ Fixture options (see FIXTURE.md):
   --fault POINT[:once]     arm a fault point at start (process/position/action, src/fault-points.ts); the
                            supervisor keeps the arming, so a once fault does not re-arm on a restart.
 Tokens are read from the environment or a 0600 file, never from the command line.`;
+
+/**
+ * Settings that existed in a pre-release of 0.4.0 and were removed before it shipped. A start that still sets one is
+ * refused, naming it, so a stale setting is never ignored without a word.
+ */
+const RETIRED_ENV: Record<string, string> = {
+  TRACKER_CONTAINER_ALLOW_DEFECTS: "was removed in 0.4.0: in container mode a build with defects serves its evidence off loopback behind the evidence token, with no opt-in; unset it",
+};
 
 /** The probe key: a peek (fence: false) at a key no tool makes; any answer of the fence route states the retention. */
 const RETENTION_PROBE_KEY = "tiny-tracker.retention-probe";
@@ -88,7 +101,24 @@ async function main(): Promise<void> {
       help: { type: "boolean" },
     },
   });
-  const mode = positionals[0];
+  let mode = positionals[0];
+  // ---- stream F: the stdio transport (src/stdio.ts) ----
+  // `tiny-tracker stdio` is `all` (or `server` with --backend-url) whose MCP layer speaks over stdin and stdout instead of
+  // an HTTP listener: the same features, fixture layer, evidence and control listeners. stdout carries protocol messages
+  // only, so the usage, the state line, the banner and every refusal go to stderr.
+  const stdio = mode === "stdio";
+  if (stdio) {
+    const { STDIO_USAGE } = await import("./stdio.js");
+    if (values.help) {
+      process.stderr.write(`${STDIO_USAGE}\n`);
+      process.exit(0);
+    }
+    if (positionals.length > 1) fail(`stdio takes no positional arguments (got ${positionals.slice(1).join(" ")}). Not starting.`);
+    if (values.port !== undefined) fail("--port has no effect over stdio (there is no MCP listener; --backend-port and --control-port name the others). Not starting.");
+    mode = (values["backend-url"] ?? process.env.TRACKER_BACKEND_URL) !== undefined ? "server" : "all";
+    if (mode === "server" && values["backend-port"] !== undefined) fail("--backend-port has no effect with --backend-url (the backend is another process). Not starting.");
+  }
+  // ---- end stream F ----
   if (values.help || !["all", "backend", "server"].includes(mode ?? "")) {
     process.stdout.write(`${USAGE}\n`);
     process.exit(values.help ? 0 : 2);
@@ -150,7 +180,9 @@ async function main(): Promise<void> {
   const refusals = checkCompat({
     layout, profile, features: named, defects: mcpDefects, backendDefects, variants: variantNames, faults: faultArgs.map((f) => f.point),
     fixtureControl, dataDir: values["data-dir"], supervise, keyExpiry: values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY,
+    transport: stdio ? "stdio" : "http",
   });
+  for (const [name, why] of Object.entries(RETIRED_ENV)) if (env[name] !== undefined) refusals.push(`${name} ${why}`);
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
   if (tokenDir !== undefined && !needsFixtureLayer(features, fixtureControl)) refusals.push("--token-dir has no effect without a fixture feature or --fixture-control");
@@ -187,7 +219,19 @@ async function main(): Promise<void> {
     else {
       evidenceListen = { host: m[1].replace(/^\[|\]$/g, ""), port: Number(m[2]) };
       const loopback = ["127.0.0.1", "localhost", "::1"].includes(evidenceListen.host);
-      if (!loopback && (mcpDefects.length > 0 || backendDefects.length > 0)) refusals.push("a build with defects keeps every listener on loopback; TRACKER_EVIDENCE_LISTEN on another address is refused");
+      // 0.4.0 (owner decision, 16 Nov: evidence reachable behind its token, no opt-in): in container mode, which already
+      // refuses to start without a bearer token on /mcp, a defect build serves its read-only evidence on the
+      // container's interfaces behind the evidence token, so an outside harness can check a defect build. Outside a
+      // container a defect build keeps every listener on loopback.
+      let container = false;
+      try {
+        container = containerMode(env);
+      } catch {
+        // An unrecognized value is refused by the transport checks below.
+      }
+      if (!loopback && !container && (mcpDefects.length > 0 || backendDefects.length > 0)) {
+        refusals.push("a build with defects keeps every listener on loopback outside container mode; TRACKER_EVIDENCE_LISTEN on another address is refused");
+      }
     }
   }
   // ---- end stream A ----
@@ -195,9 +239,10 @@ async function main(): Promise<void> {
   const keyRetention = values["key-retention"] ?? env.TRACKER_KEY_RETENTION;
   const keyExpiry = values["key-expiry"] ?? env.TRACKER_KEY_EXPIRY;
   let durability: import("./backend/durability.js").DurabilityOptions | undefined;
-  // `server` (0.3.0 default flip): retention comes from the profile and the backend is another process. The tools state
-  // the retention the backend states (follow-up F2, read at start below); --key-retention given here must agree with it.
-  // null: the backend did not state one and none was given, so the tools say the retention is not known.
+  // `server` (0.3.0 default flip): retention comes from the profile and the backend is another process. The tools and
+  // (0.4.0) the server instructions state the retention the backend states (follow-up F2, read at start below);
+  // --key-retention given here must agree with it. null: the backend did not state one and none was given, so the tools
+  // say the retention is not known.
   let statedRetentionMs: number | null | undefined;
   let givenRetentionMs: number | undefined;
   if ((keyRetention !== undefined || keyExpiry !== undefined) && !features.includes("retention")) {
@@ -234,6 +279,19 @@ async function main(): Promise<void> {
     if (e instanceof TokenError) fail(e.message);
     throw e;
   }
+
+  // ---- stream F: transport settings (src/transport.ts): container mode needs a bearer token for /mcp (X1) ----
+  let mcpToken: string | undefined;
+  try {
+    // Principal tokens join the MCP token's distinctness check (A's principals file; F's integration note).
+    // (The backend token is one of them, so it is named once, as in the token check above.)
+    const principalTokens = Object.fromEntries((principals ?? []).filter((p) => p.token !== env.TRACKER_BACKEND_TOKEN).map((p) => [`principal ${p.id}`, p.token]));
+    mcpToken = resolveTransport(stdio ? "stdio" : layout, env, process.argv.slice(2), process.platform, principalTokens)?.bearerToken;
+  } catch (e) {
+    if (e instanceof TransportError) fail(e.message);
+    throw e;
+  }
+  // ---- end stream F ----
 
   // ---- stream E: --supervise hands over to the supervisor (src/supervisor.ts), which starts this command twice ----
   if (supervise) {
@@ -281,6 +339,7 @@ async function main(): Promise<void> {
         variants: layout === "backend" ? null : variantNames,
         env, argv: process.argv.slice(2), backendToken: env.TRACKER_BACKEND_TOKEN, tokenDir, clock,
         ...(principals ? { principals } : {}), // stream A
+        ...(mcpToken !== undefined ? { mcpToken } : {}), // 0.4.0: evidence and control tokens differ from the MCP token
         // 0.3.0 integration: the descriptor's durability block (part of build_hash: it is what the build is).
         durability: features.includes("durable") ? { mode: "journal", journal_format: "journal-format/1" } : { mode: "memory", journal_format: null },
       });
@@ -322,14 +381,21 @@ async function main(): Promise<void> {
   // ---- end stream E ----
 
   const closers: Array<() => Promise<void>> = [];
-  const shutdown = async () => {
-    for (const close of closers.reverse()) await close().catch(() => {});
-    process.exit(0);
-  };
+  // One shutdown per process (note 27 item 1): a signal, stdin closing over stdio and a supervisor going away may all
+  // ask for it, and a closer may ask again while it runs (closing the stdio server fires its onClose). Every caller gets
+  // the same promise, and the closers run last-started first without reordering the array, so each runs exactly once
+  // and the backend (the lease and the pid lock) is closed before the process exits.
+  let stopping: Promise<never> | undefined;
+  const shutdown = (code = 0): Promise<never> => stopping ??= (async () => {
+    for (const close of [...closers].reverse()) await close().catch(() => {});
+    process.exit(code);
+  })();
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
   const out: Record<string, unknown> = {};
+  /** Over stdio: starts reading stdin; called after every other listener is up (note 27 item 5). */
+  let serveStdio: (() => void) | undefined;
   let backend: RunningBackend | undefined;
   const runsBackend = (mode === "all" || mode === "backend") && child?.role !== "mcp";
   const runsServer = (mode === "all" || mode === "server") && child?.role !== "backend";
@@ -338,6 +404,8 @@ async function main(): Promise<void> {
     // 0.3.0 integration (seams v2.1): the run registry goes to the journal before the backend opens it, and so before
     // the control listener can allocate: run-alloc lines are restored at load, and each new run is journalled.
     if (durability && fixture) durability.runs = fixture.runs;
+    // 0.4.0 (note 19 item 7): the fixture clock's moves are journalled and its offset is restored at load.
+    if (durability && clock && "restore" in clock) durability.clock = clock as import("./fixture/clock.js").FixtureClock;
     try {
       backend = await startBackend({
         token: env.TRACKER_BACKEND_TOKEN!, port: port(mode === "all" ? values["backend-port"] : values.port), defects: backendDefects,
@@ -381,9 +449,28 @@ async function main(): Promise<void> {
   if (runsServer) {
     if (backend) env.TRACKER_BACKEND_URL = backend.url;
     try {
-      const server = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras, ...((durability?.retentionMs ?? statedRetentionMs) !== undefined ? { retentionMs: durability?.retentionMs ?? statedRetentionMs } : {}) });
+      let server: { build: import("./mcp/types.js").Build; config: import("./mcp/config.js").ServerConfig; variants: string[]; close(): Promise<void> };
+      if (stdio) {
+        // ---- stream F: the MCP layer over stdio; stdin closing stops the process as SIGTERM would ----
+        // Checked here, served last (note 27 item 5): stdin is read only once the control listener is up and --fault
+        // is armed, just before the state line. A connection the transport closed on an error (a message over the
+        // 4 MiB cap) is logged with its reason, and the process exits 1.
+        const { prepareStdioServer } = await import("./stdio.js");
+        const prepared = prepareStdioServer({ env, defects, features, extras: serverExtras, retentionMs: durability?.retentionMs ?? statedRetentionMs,
+          onClose: (failure) => {
+            if (failure) process.stderr.write(`tiny-tracker: ${failure}. Stopping.\n`);
+            fixture?.close();
+            void shutdown(failure ? 1 : 0);
+          } });
+        serveStdio = prepared.serve;
+        server = prepared;
+        out.transport = "stdio";
+      } else {
+        const http = await startServer({ env, defects, port: port(values.port), features, extras: serverExtras, retentionMs: durability?.retentionMs ?? statedRetentionMs });
+        server = http;
+        out.mcp = http.url;
+      }
       closers.push(server.close);
-      out.mcp = server.url;
       if (fixture) {
         fixture.descriptor.serverSettings = {
           read_only: server.config.readOnly, tools: server.config.tools, deny_tools: server.config.deny,
@@ -437,7 +524,11 @@ async function main(): Promise<void> {
   if ((out.defects as string[] | undefined)?.length || bannerBackend.length) {
     process.stderr.write("\n*** tiny-tracker BROKEN BUILD (teaching fixture): "
       + `${[...((out.defects as string[]) ?? []), ...bannerBackend.map((d) => `backend:${d}`)].join(", ")}.\n`
-      + "*** Deliberately unsafe. Loopback only. Never point it at data you care about. ***\n\n");
+      + (containerMode(env)
+        // Container mode puts /mcp and the evidence routes on every interface, behind their tokens (fresh-eyes review 24 Nov).
+        ? "*** Deliberately unsafe. In container mode /mcp and the evidence routes listen on every interface, behind their tokens:\n"
+          + "*** keep the container on a test network. Never point it at data you care about. ***\n\n"
+        : "*** Deliberately unsafe. Loopback only. Never point it at data you care about. ***\n\n"));
   }
   if (featuresOff.length) {
     out.features_off = featuresOff.map(featureOffText);
@@ -451,7 +542,10 @@ async function main(): Promise<void> {
     process.on("disconnect", () => void shutdown());
   }
   // ---- end stream E ----
-  process.stdout.write(`${JSON.stringify(out)}\n`);
+  // The MCP transport over stdio starts last, as the state line comes last over HTTP.
+  serveStdio?.();
+  // stdout carries protocol messages only over stdio: the state line goes to stderr there.
+  (stdio ? process.stderr : process.stdout).write(`${JSON.stringify(out)}\n`);
 }
 
 main().catch((e) => fail((e as Error).stack ?? String(e)));

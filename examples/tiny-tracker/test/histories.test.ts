@@ -26,6 +26,7 @@ import { JOURNAL_FILE, JournalCorruptError, readJournal, lineChecksum } from "..
 import { DAY_MS } from "../src/backend/expiry.js";
 import type { CommitSink, CommittedTransaction, JournalCommitLine } from "../src/backend/commit.js";
 import { Ledger } from "../src/fixture/ledger.js";
+import { noPython, pythonRuns } from "./support/python.js";
 
 const POINTS = [
   { point: "before-append", line: "pending" }, { point: "after-fsync", line: "pending" },
@@ -173,13 +174,27 @@ describe("T2: seeded random histories", () => {
 
 // ---------------------------------------------------------------- T3
 
+/** A physical journal line as plain JSON: the line itself, or the whole line that joined a torn fragment (undefined: a torn last line). */
+function parseJoined(text: string): any {
+  for (let i = 0; i >= 0; i = text.indexOf('{"jseq":', i + 1)) {
+    try {
+      return JSON.parse(text.slice(i));
+    } catch {
+      // not a whole line from here
+    }
+  }
+  return undefined;
+}
+
 /** The recount written a second time: plain JSON over the journal file, no code from src/. */
 function recount(file: string) {
   const tickets = new Map<string, { version: number; title: string }>();
   const effects = new Map<string, number>();
   let commits = 0;
   for (const text of readFileSync(file, "utf8").split("\n").filter(Boolean)) {
-    const l = JSON.parse(text);
+    // 0.4.0 (G3a): a torn write is never cut, so the next line may join it; the whole line is the suffix that parses.
+    const l = parseJoined(text);
+    if (l === undefined) continue;
     if (l.line !== "commit") continue;
     commits++;
     for (const tk of l.tx.post.upserts.tickets) tickets.set(tk.id, { version: tk.version, title: tk.title });
@@ -292,8 +307,8 @@ describe("T3: the oracles tested against each other", () => {
     }
   });
 
-  const python = spawnSync("python3", ["-I", "-c", "import json"], { encoding: "utf8" }).status === 0;
-  it("an external recount in Python from the journal file agrees with the export", { skip: python || process.env.TT_GATE === "1" ? false : "python3 is not installed" }, async () => {
+  const python = pythonRuns(["-I", "-c", "import json"]);
+  it("an external recount in Python from the journal file agrees with the export", { skip: python || process.env.TT_GATE === "1" ? false : noPython("python3 is not installed") }, async () => {
     assert.ok(python, "TT_GATE=1 needs python3");
     const t = tempDir("t3p");
     try {
@@ -319,7 +334,7 @@ describe("T3: the oracles tested against each other", () => {
 // execution records, journal) must agree, and each sabotage is caught by the recount.
 
 describe("T3 with stream B's ledger and stream C's tt_recount.py (ledger, export, executions, journal)", () => {
-  const python = spawnSync("python3", ["-I", "-c", "import json"], { encoding: "utf8" }).status === 0;
+  const python = pythonRuns(["-I", "-c", "import json"]);
   const root = fileURLToPath(new URL("../../", import.meta.url));
   const RECOUNT = join(root, "verify", "python", "tt_recount.py");
   const BOOT = "d0d0d0d0d0d0d0d0";
@@ -351,7 +366,7 @@ describe("T3 with stream B's ledger and stream C's tt_recount.py (ledger, export
     return { code: r.status, out: r.stdout ? JSON.parse(r.stdout) : null, err: r.stderr };
   };
 
-  it("clean: four sources, no disagreement; the counts agree", { skip: python || process.env.TT_GATE === "1" ? false : "python3 is not installed" }, async () => {
+  it("clean: four sources, no disagreement; the counts agree", { skip: python || process.env.TT_GATE === "1" ? false : noPython("python3 is not installed") }, async () => {
     const t = tempDir("t3r");
     try {
       const r = recountOf(await realRun(t));
@@ -363,7 +378,7 @@ describe("T3 with stream B's ledger and stream C's tt_recount.py (ledger, export
     }
   });
 
-  it("sabotage: a ledger that loses an execution, a journal line forged with a valid checksum, a line changed without its checksum: each is caught", { skip: python || process.env.TT_GATE === "1" ? false : "python3 is not installed" }, async () => {
+  it("sabotage: a ledger that loses an execution, a journal line forged with a valid checksum, a line changed without its checksum: each is caught", { skip: python || process.env.TT_GATE === "1" ? false : noPython("python3 is not installed") }, async () => {
     const t = tempDir("t3rs");
     try {
       const f = await realRun(t);

@@ -10,15 +10,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startFakeFixture, type FakeFixture, type FakeOptions } from "./support/fake-fixture.js";
-import { py } from "./support/python.js";
+import { noPython, py, pythonRuns } from "./support/python.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const HARNESS = join(ROOT, "harness");
 const GATE = process.env.TT_GATE === "1";
-const python = spawnSync("python3", ["--version"]).status === 0;
-const needPython = python || GATE ? false : "python3 is not on PATH";
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"]).status === 0;
-const needJsonschema = jsonschema || GATE ? false : "the Python jsonschema package is not installed";
+const python = pythonRuns(["--version"]);
+const needPython = python || GATE ? false : noPython("python3 is not on PATH");
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
+const needJsonschema = jsonschema || GATE ? false : noPython("the Python jsonschema package is not installed");
 const CONTRACT_DIR = process.env.TT_CONTRACT_DIR;
 
 const fakeEnv = (f: FakeFixture) => ({ TRACKER_EVIDENCE_TOKEN: f.tokens.evidence, TRACKER_CONTROL_TOKEN: f.tokens.control, TRACKER_BACKEND_TOKEN: f.tokens.backend });

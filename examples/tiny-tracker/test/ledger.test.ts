@@ -31,6 +31,7 @@ import { RECORD_FIELDS, type ExecutionRecord, type LedgerEntry, type OperationRe
 import { wallClock } from "../src/clock.js";
 import { connectClient, Rest, type Mcp } from "./support/stack.js";
 import { runCli } from "./support/cli-run.js";
+import { noPython, pythonRuns } from "./support/python.js";
 
 const BACKEND = "backend-token-ledger-test-0000000";
 const EVIDENCE = "evidence-token-ledger-test-000000";
@@ -40,8 +41,8 @@ const DROP = "mcp/after-backend-reply/drop";
 const BOOT = "0123456789abcdef";
 
 const CHECK = fileURLToPath(new URL("../../verify/python/check_schemas.py", import.meta.url));
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"], { encoding: "utf8" }).status === 0;
-const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : "the Python jsonschema package is not installed";
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
+const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : noPython("the Python jsonschema package is not installed");
 
 async function call(method: string, url: string, token: string | undefined, body?: unknown) {
   const res = await fetch(url, {
