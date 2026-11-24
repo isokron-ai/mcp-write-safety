@@ -543,7 +543,7 @@ export const leaseHooks: { beforeTakeover?: (path: string) => void; afterAside?:
  * The file-system calls that move and remove lease directories (a test seam: on Windows a rename or a recursive remove of
  * a directory another process has a handle in fails with EPERM, EBUSY or EACCES; G3 note 26 item 5).
  */
-export const leaseFs = { renameSync, rmSync };
+export const leaseFs: { renameSync: typeof renameSync; rmSync: typeof rmSync; platform: string } = { renameSync, rmSync, platform: process.platform };
 
 /** EPERM/EBUSY/EACCES/ENOTEMPTY from moving or removing a lease directory, said plainly (G3 note 26 item 5); other errors pass. */
 function leaseFsRefusal(e: unknown, dir: string, what: string): unknown {
@@ -631,7 +631,8 @@ function createLease(path: string, text: string): number | false {
       // the caller looks again (integration pass: racing starts over a killed holder's lease read ENOTEMPTY as a
       // Windows refusal). On Windows the code is ambiguous, so the lease must still be there.
       const code = (e as NodeJS.ErrnoException)?.code;
-      if (code === "ENOTEMPTY" || code === "EEXIST" || existsSync(path)) return false;
+      // Gated on the platform (fresh-eyes review 24 Nov, should-fix 8): on Windows ENOTEMPTY can be a file held open.
+      if ((leaseFs.platform !== "win32" && (code === "ENOTEMPTY" || code === "EEXIST")) || existsSync(path)) return false;
       throw leaseFsRefusal(e, join(path, ".."), `rename its new lease ${tmp} into place`);
     }
     return ino;

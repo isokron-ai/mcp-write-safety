@@ -147,11 +147,35 @@ export async function select() {
   return {
     release: "0.4.0",
     note: "Selected by expected/select-0.4.0.mjs (pairwise over feature level, MCP-layer defect, backend defect and variant; legal per src/compat.ts, each defect's requires and the selector's matrix-only needs). Do not edit by hand.",
+    not_detected: NOT_DETECTED,
     coverage: { factors: Object.fromEntries(names.map((n) => [n, factors[n].length])), legal_candidates: candidates.length, pairs: coverable, builds: builds.length },
     levels: Object.fromEntries(LEVELS.map((l) => [l.id, l.features.join(",") + (l.dataDir ? " --data-dir {DATA_DIR}" : "")])),
     builds,
   };
 }
+
+/**
+ * What these known answers cannot tell from the correct build (fresh-eyes review 24 Nov, must-fix 3; as 0.3.0's
+ * follow-up F1). Every defect named here gives exactly its level's correct-build fixture answers on its single-defect
+ * row, with no contract row; test/expected.test.ts checks the list is exact, both ways.
+ */
+export const NOT_DETECTED_DEFECTS = [
+  "add-label-replaces-list", "bulk-misreports-partial", "bulk-without-transaction", "close-before-confirm",
+  "coerce-types", "comment-id-dropped", "comment-marked-read-only", "conflict-as-generic-error",
+  "convert-numeric-strings", "create-marked-idempotent", "delete-refetches-version", "drop-unknown-args",
+  "force-by-default", "ignore-unknown-args-with-notice", "in-progress-reported-not-applied", "key-store-in-memory",
+  "label-by-position", "missing-annotations", "no-idempotency-key", "read-merge-put", "read-only-by-annotation",
+  "read-only-strict-true", "receipt-missing-version", "retry-without-key", "set-labels-non-destructive",
+  "settle-miss-reported-not-applied", "shape-claims-applied", "shape-missing-failed", "shape-text-says-all-saved",
+  "shape-text-says-failed", "shape-unknown-as-failed", "shape-wrong-version", "skip-limits", "token-in-error",
+  "undeclared-title-limit", "unknown-denied-tools-ignored", "unknown-tools-ignored", "update-adds-defaults",
+  "vague-validation-error",
+];
+const NOT_DETECTED = `Not detected in 0.4.0: ${NOT_DETECTED_DEFECTS.join(", ")} give exactly the correct build's answers on their own rows here. ` +
+  "They are MCP-layer defects of the tool surface (what a tool says, accepts or does), which the MWS requirements cover and mcp-writecheck checks; " +
+  "these known answers hold only fx-check's FX- properties and the lost-response contract driver, and none of these rows has a contract row " +
+  "(in-progress-reported-not-applied and settle-miss-reported-not-applied trip MWS-RES-1 and MWS-RES-2). " +
+  "A \"held\" on these rows does not mean the defect is absent.";
 
 async function main() {
   const { values } = parseArgs({ options: { out: { type: "string" }, check: { type: "boolean" } } });

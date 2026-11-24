@@ -68,6 +68,35 @@ describe("known-answer generator (expected/)", () => {
     assert.equal(JSON.parse(readFileSync(join(ROOT, "expected", "0.2.0.json"), "utf8")).not_detected, undefined);
   });
 
+  it("the 0.4.0 known answers name exactly the defects they cannot tell from the correct build (fresh-eyes must-fix 3)", async () => {
+    const list = JSON.parse(readFileSync(join(ROOT, "expected", "builds-0.4.0.json"), "utf8"));
+    const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.4.0.json"), "utf8"));
+    const md = readFileSync(join(ROOT, "expected", "0.4.0.md"), "utf8");
+    const { NOT_DETECTED_DEFECTS } = await import(pathToFileURL(join(ROOT, "expected", "select-0.4.0.mjs")).href);
+    assert.ok(typeof list.not_detected === "string" && list.not_detected.startsWith("Not detected in 0.4.0: "));
+    assert.equal(doc.not_detected, list.not_detected, "the generator carries the build list's statement");
+    assert.ok(md.split("\n## ")[0].includes(list.not_detected), "the table states it in its header");
+    for (const name of NOT_DETECTED_DEFECTS) assert.ok(list.not_detected.includes(name), name);
+    // Exact both ways: a single-defect row with the correct build's answers is named, and every named defect has one.
+    const byLabel = new Map(doc.builds.map((b: any) => [b.label, b]));
+    const correct = new Map<string, any>();
+    for (const b of list.builds) {
+      const f = b.factors;
+      if (f.mcp === "-" && f.backend === "-" && f.variant === "-") correct.set(f.level, byLabel.get(b.label));
+    }
+    const same = new Set<string>();
+    for (const b of list.builds) {
+      const f = b.factors;
+      const set = [f.mcp, f.backend, f.variant].filter((v: string) => v !== "-");
+      const row: any = byLabel.get(b.label);
+      const c = correct.get(f.level);
+      if (set.length !== 1 || !c) continue;
+      const contractSame = row.contract && c.contract ? JSON.stringify(row.contract.answers) === JSON.stringify(c.contract.answers) : !row.contract;
+      if (JSON.stringify(row.fixture) === JSON.stringify(c.fixture) && contractSame) same.add(set[0]);
+    }
+    assert.deepEqual([...same].sort(), [...NOT_DETECTED_DEFECTS].sort());
+  });
+
   it("generates schema-valid, time-free answers keyed by build_hash, the same on every run", { skip: needJsonschema }, async () => {
     assert.ok(jsonschema, "TT_GATE=1 needs python3 with jsonschema and referencing");
     const gen = await import(pathToFileURL(join(ROOT, "expected", "generate.mjs")).href);

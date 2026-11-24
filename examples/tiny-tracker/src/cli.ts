@@ -524,7 +524,11 @@ async function main(): Promise<void> {
   if ((out.defects as string[] | undefined)?.length || bannerBackend.length) {
     process.stderr.write("\n*** tiny-tracker BROKEN BUILD (teaching fixture): "
       + `${[...((out.defects as string[]) ?? []), ...bannerBackend.map((d) => `backend:${d}`)].join(", ")}.\n`
-      + "*** Deliberately unsafe. Loopback only. Never point it at data you care about. ***\n\n");
+      + (containerMode(env)
+        // Container mode puts /mcp and the evidence routes on every interface, behind their tokens (fresh-eyes review 24 Nov).
+        ? "*** Deliberately unsafe. In container mode /mcp and the evidence routes listen on every interface, behind their tokens:\n"
+          + "*** keep the container on a test network. Never point it at data you care about. ***\n\n"
+        : "*** Deliberately unsafe. Loopback only. Never point it at data you care about. ***\n\n"));
   }
   if (featuresOff.length) {
     out.features_off = featuresOff.map(featureOffText);

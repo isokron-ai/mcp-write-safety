@@ -512,6 +512,7 @@ describe("availability (G3 note 26 item 5)", () => {
     const saved = { ...leaseFs };
     try {
       fakeLease(t.dataDir, "elsewhere", leaseTiming.selfFenceMs - 4000); // held: another host's, fresh
+      leaseFs.platform = "linux"; // the POSIX reading of ENOTEMPTY (the Windows one is the next test)
       let raced = 0;
       leaseFs.renameSync = ((from: string, to: string) => {
         if (String(from).includes(".new-") && raced === 0) {
@@ -525,6 +526,23 @@ describe("availability (G3 note 26 item 5)", () => {
       assert.equal(raced, 1);
       assert.equal(JSON.parse(readFileSync(join(t.dataDir, LEASE_DIR, LEASE_OWNER), "utf8")).pid, process.pid, "this start holds the lease");
       releaseLease(t.dataDir);
+    } finally {
+      Object.assign(leaseFs, saved);
+      t.cleanup();
+    }
+  });
+
+  it("on Windows a new lease's ENOTEMPTY with no lease there is a clear refusal, not a silent retry (fresh-eyes should-fix 8)", () => {
+    const t = tempDir("ep-enotempty-win");
+    const saved = { ...leaseFs };
+    try {
+      mkdirSync(t.dataDir, { recursive: true, mode: 0o700 });
+      leaseFs.platform = "win32";
+      leaseFs.renameSync = ((from: string, to: string) => {
+        if (String(from).includes(".new-")) throw Object.assign(new Error("ENOTEMPTY: directory not empty, rename"), { code: "ENOTEMPTY" });
+        return saved.renameSync(from, to);
+      }) as typeof leaseFs.renameSync;
+      assert.throws(() => acquireLease(t.dataDir, () => {}), (e) => e instanceof DataDirError && /\(ENOTEMPTY; on Windows/.test(e.message));
     } finally {
       Object.assign(leaseFs, saved);
       t.cleanup();

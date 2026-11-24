@@ -18,6 +18,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import { connect as netConnect } from "node:net";
+import { EVIDENCE_MAX_CONNECTIONS } from "../src/backend/http.js";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { runCli } from "./support/cli-run.js";
 import { resolveTransport, TransportError } from "../src/transport.js";
@@ -81,6 +83,31 @@ describe("the MCP token differs from every other token (0.4.0 integration)", () 
 });
 
 describe("container mode with the evidence listener (owner decision: evidence reachable behind its token)", () => {
+  it("the evidence listener off loopback is capped: past EVIDENCE_MAX_CONNECTIONS open sockets a new one is closed at once (fresh-eyes should-fix 7)", async () => {
+    const r = await runCli(["all", "--features", "evidence,strict-input,execution-records,lookup,principals,ledger", "--port", "0", "--backend-port", "0"],
+      { TRACKER_CONTAINER: "1", TRACKER_MCP_TOKEN: tok("mcp"), TRACKER_EVIDENCE_TOKEN: tok("ev"), TRACKER_EVIDENCE_LISTEN: "0.0.0.0:0" }, async (state) => {
+        const port = Number(new URL(state.evidence_listener).port);
+        const open = (): Promise<ReturnType<typeof netConnect>> => new Promise((resolve, reject) => {
+          const s = netConnect(port, "127.0.0.1", () => resolve(s));
+          s.once("error", reject);
+        });
+        const held = [];
+        try {
+          for (let i = 0; i < EVIDENCE_MAX_CONNECTIONS; i++) held.push(await open());
+          await new Promise((resolve) => setTimeout(resolve, 100)); // let the server count them
+          const extra = await open();
+          const closed = await new Promise<boolean>((resolve) => {
+            extra.once("close", () => resolve(true));
+            setTimeout(() => resolve(false), 2000);
+          });
+          assert.ok(closed, "a connection past the cap is closed by the server");
+        } finally {
+          for (const s of held) s.destroy();
+        }
+      });
+    assert.equal(r.code, 0, r.stderr);
+  });
+
   const features = "evidence,strict-input,execution-records,lookup,principals,ledger";
   for (const defect of [undefined, "read-merge-put"]) {
     it(`TRACKER_CONTAINER=1 serves /mcp behind the bearer token and the evidence routes on 0.0.0.0 behind the evidence token${defect ? ` (defect build ${defect}, no opt-in)` : ""}`, async () => {
@@ -154,6 +181,9 @@ describe("container mode with the evidence listener (owner decision: evidence re
       assert.equal(r.code, 0, r.stderr);
       assert.ok(r.stateLine, r.stderr);
       for (const t of [mcp, evidence]) assert.ok(!r.stdout.includes(t) && !r.stderr.includes(t), "no token is printed");
+      // The banner says what is true in container mode, not "Loopback only" (fresh-eyes should-fix 6).
+      assert.match(r.stderr, /BROKEN BUILD[\s\S]*In container mode \/mcp and the evidence routes listen on every interface/);
+      assert.doesNotMatch(r.stderr, /Loopback only/);
     });
   }
 
