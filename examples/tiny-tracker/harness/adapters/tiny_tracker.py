@@ -924,8 +924,30 @@ class Adapter(SystemAdapter):
             elif e.get("kind") == "replay":
                 replays.append(row)
             attributed.append(row)
-        return served, {"attributed": attributed, "ids": sorted(ids, key=execution_number),
-                        "refusals": refusals, "replays": replays}
+        # The ledger is kept in memory, for one boot: after a restart it holds only that boot's entries. The execution
+        # records (GET /executions) are durable and carry the same attribution (operation tag, key), so an execution
+        # the ledger no longer holds is counted from its record. Each id is counted once; ids that only a record
+        # names are listed under from_execution_records.
+        listing, _ = self._ev("/executions")
+        records = listing.get("body_json") if listing.get("http_status") == 200 else None
+        records = records.get("executions") if isinstance(records, dict) else None
+        from_records = []
+        for r in records if isinstance(records, list) else []:
+            if not isinstance(r, dict) or r.get("operation_tag") != session_id:
+                continue
+            if self.run_id and r.get("run") not in (self.run_id, None):
+                continue
+            key = (r.get("request") or {}).get("key")
+            if key not in (operation_key, None) or r.get("id") in ids:
+                continue
+            ids.append(r.get("id"))
+            from_records.append({"execution_id": r.get("id"), "key": key, "key_is_K": key == operation_key,
+                                 "boot_id": r.get("boot_id"), "objects": r.get("objects"), "at": r.get("committed_at")})
+        # A records listing that did not answer leaves the count at the ledger's: say so, rather than pass it off as whole.
+        records_complete = isinstance(records, list)
+        return served, {"attributed": attributed, "ids": sorted(ids, key=execution_number), "records_complete": records_complete,
+                        "refusals": refusals, "replays": replays, "from_execution_records": from_records,
+                        "executions_listing": listing}
 
     def _title_count(self, session_id, operation_key):
         listing, _ = self.backend.call("GET", "/tickets?title_prefix=" + quote(operation_key, safe=""))
@@ -949,15 +971,20 @@ class Adapter(SystemAdapter):
                 "counter": "ledger",
                 "method": "GET <backend>/ledger (evidence token), read directly, not through MCP; each entry of kind "
                           "execution whose operation tag is the session identity and whose key is K or absent is "
-                          "one committed execution of the operation",
+                          "one committed execution of the operation; GET <backend>/executions adds the executions "
+                          "the in-memory ledger no longer holds after a restart (same attribution, counted once)",
                 "listing_http_status": served["http_status"],
                 "attributed_records": counted["attributed"],
                 "execution_record_ids": counted["ids"],
                 "external_effect_count": len(counted["ids"]),
                 "refusal_records": counted["refusals"],
                 "replay_records": counted["replays"],
+                "from_execution_records": counted["from_execution_records"],
+                "executions_listing_http_status": counted["executions_listing"]["http_status"],
+                "execution_records_complete": counted["records_complete"],
             }
-            return {"evidence": evidence, "files": {"ledger_%s.json" % label: served}}
+            return {"evidence": evidence, "files": {"ledger_%s.json" % label: served,
+                                                    "executions_%s.json" % label: counted["executions_listing"]}}
         listing, attributed, ids = self._title_count(session_id, operation_key)
         evidence = {
             "label": label, "session_id": session_id, "K": operation_key, "at": utcnow(),

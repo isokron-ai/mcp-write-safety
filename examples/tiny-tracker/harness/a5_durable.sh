@@ -17,6 +17,7 @@
 #   CONTRACT_DIR  a checkout of the contract repository at the pinned commit (harness/contract.json)
 #   A5_MCP_PORT, A5_BACKEND_PORT   fixed ports, so the plant's endpoint stays valid across the restart
 #                 (default 4710 and 4711; never 47310/47311)
+#   A5_DELAY_HOURS  the A5 window (default 24); any other value needs A5_REHEARSAL=1 and is a rehearsal only
 #   A5_FORCE=1    `delayed` before due_at: a rehearsal only, never a scored A5
 #
 # Tokens: the backend token is generated once into A5_DIR/backend.token (0600) and given to the process in
@@ -129,7 +130,13 @@ case "${1:-}" in
     launch 0
     ;;
   plant)
-    python3 -I "$HERE/adapter_config.py" --state "$A5_DIR/state.json" --fault client --start "$(start_cmd)" >"$A5_DIR/config.json"
+    # A scored A5 uses the contract's 24-hour window. The scorer measures from the plant's own due_at, so a shorter
+    # window would score like a real one: it needs A5_REHEARSAL=1 and is announced as a rehearsal.
+    if [[ "${A5_DELAY_HOURS:-24}" != 24 ]]; then
+      [[ "${A5_REHEARSAL:-0}" == 1 ]] || die "A5_DELAY_HOURS=${A5_DELAY_HOURS} is not the contract's 24 hours; set A5_REHEARSAL=1 for a rehearsal"
+      say "REHEARSAL ONLY, not a contract A5 run: a ${A5_DELAY_HOURS} h window"
+    fi
+    python3 -I "$HERE/adapter_config.py" --state "$A5_DIR/state.json" --fault client --delay-hours "${A5_DELAY_HOURS:-24}" --start "$(start_cmd)" >"$A5_DIR/config.json"
     out="$RUNS/$(date -u +%Y%m%dT%H%M%SZ)"
     TRACKER_EVIDENCE_TOKEN_FILE="$TOKENS/evidence.token" \
       python3 -I "$DRIVER/lost_response.py" --config "$A5_DIR/config.json" --out "$out" | tee -a "$LOG"
@@ -159,6 +166,14 @@ case "${1:-}" in
     due="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["due_at"])' "$plant")"
     if [[ "$(now)" < "$due" && "${A5_FORCE:-0}" != 1 ]]; then die "due_at is $due (now $(now)); the delayed leg runs at or after it"; fi
     [[ "${A5_FORCE:-0}" == 1 ]] && say "A5_FORCE=1: a rehearsal before due_at; the result is not a scored A5"
+    hours="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("delay_hours"))' "$plant")"
+    python3 -I -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= 24 else 1)' "$hours" 2>/dev/null \
+      || say "REHEARSAL ONLY, not a contract A5 run: the plant's window is ${hours} h, not the contract's 24"
+    # Contract main's delayed leg dispatches nothing: it reads the K-only lookup it makes and the recorded delayed
+    # retries and counts in the plant's folder. The probe writes those through the adapter (identical retry,
+    # changed-argument retry, counts before / between / after), then the driver scores.
+    TRACKER_EVIDENCE_TOKEN_FILE="$TOKENS/evidence.token" \
+      python3 -I "$HERE/a5_delayed_probe.py" --driver "$DRIVER" --plant "$plant" | tee -a "$LOG"
     TRACKER_EVIDENCE_TOKEN_FILE="$TOKENS/evidence.token" \
       python3 -I "$DRIVER/lost_response.py" --delayed-leg "$plant" | tee -a "$LOG"
     evidence /build >"$A5_DIR/build.delayed.json"
