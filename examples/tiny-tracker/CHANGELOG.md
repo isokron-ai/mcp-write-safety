@@ -55,6 +55,9 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 - The data-dir lease: `lock.d` in the data dir, an mkdir lease with a 2 s heartbeat and a 20 s stale time, taken over by compare-and-rename. Before every journal append the holder checks it still owns the lease and beat within 10 s; otherwise it is fenced (writes answer 503 `journal_unavailable`; restart it). The 0.3.0 pid lock stays as a second check for this release. `fx-check` FX-DUR-2 counts `lock.d` among the data dir's files.
 - The known-answer generator writes the second principal's file whenever principals are in effect (the profile included), so FX-LOOK-3 is checked on the matrix's Lv rows.
 
+### Fixed
+- 0.3.0's usage text (`tiny-tracker --help`) listed a `stdio` command that 0.3.0 did not have (it answered with the usage and exit 2; R-TT-01). 0.4.0 has `tiny-tracker stdio`, so the line is accurate again. Found by the performance baseline run of the published 0.3.0.
+
 ## 0.3.0 (18 Nov 2026) for MWS 0.9
 
 Durability: a journal (`durable`, opt-in with `--data-dir`), in-flight key records (`inflight`) and a stated key retention (`retention`), both on in the default profile; the fixture clock, supervised restarts and crash fault points. `--profile 0.1` keeps the surface of the published 0.1.0.

@@ -15,13 +15,13 @@
 import type { ResourceSpec } from '../core/manifest.js';
 import { render } from '../core/template.js';
 import { deepEqual, diff, getPath, short, withoutIgnored } from '../core/util.js';
+import { isMutating } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
 import { scratch } from './scratch.js';
 import { brief, notRun, toolByName, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'input-required';
 const VERSION = '1';
-const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 interface IrObs {
   tool: string;
@@ -33,7 +33,8 @@ interface IrObs {
   retry: CallBrief | null;
   changed_after_retry: string[] | null;
   /** Backend requests from the start of the call to the input_required result (gate only). */
-  backend: { method: string; path: string; status: number | null }[] | null;
+  /** `mutating`: the gate's own classification (the wire gate's verbs, UPDATE or SET, are not HTTP methods); absent in older evidence. */
+  backend: { method: string; path: string; status: number | null; mutating?: boolean }[] | null;
   steps: string[];
 }
 
@@ -80,7 +81,7 @@ export const inputRequiredCheck: CheckModule = {
       const c1 = await ctx.session.call(label, ir.tool, args, { step: step1, meta });
       o.first = brief(c1);
       o.steps.push(step1);
-      if (ctx.gate && mark !== null) o.backend = (await ctx.gate.since(mark)).map((q) => ({ method: q.method, path: q.path, status: q.status }));
+      if (ctx.gate && mark !== null) o.backend = (await ctx.gate.since(mark)).map((q) => ({ method: q.method, path: q.path, status: q.status, mutating: q.mutating }));
       if (c1.result_type !== 'input_required') continue;
       const r1 = await d.readOnce(label, ctx.session.stepId('retry3.read2'));
       const ign = res.read.ignore;
@@ -128,7 +129,9 @@ export function inputRequiredVerdicts(obs: IrObs[], res: ResourceSpec): Result[]
     else if (o.changed_before_retry.length) out.push(result('MWS-RETRY-3', w, sc, 'not tested', `${o.tool} answered input_required and the object changed before the retry (${o.changed_before_retry.join(', ')}), but not in the declared effect of the write; whether it was staged state the retry completed is not established in this preview`, { notes: [retryNote] }));
     else out.push(result('MWS-RETRY-3', w, sc, 'not observed', `${o.tool} answered input_required and the object read back unchanged before the retry. The black-box test sees only the state it reads (spec 8.2, rule 8).`, { notes: [retryNote] }));
     if (o.backend) {
-      const writes = o.backend.filter((q) => MUTATING.has(q.method.toUpperCase()) && q.status !== null && q.status < 400);
+      // why: B1 review: a write is the gate's own classification where it gives one; by HTTP method alone a database write before
+      // input_required was not seen, and the record said held.
+      const writes = o.backend.filter((q) => isMutating(q) && q.status !== null && q.status < 400);
       if (!writes.length) out.push(result('MWS-RETRY-3', w, scp, 'held', `No backend request the server made before the input_required result was a write the backend accepted (${o.backend.length} request(s) seen at the gate).`));
       else if (o.changed_before_retry?.length) out.push(result('MWS-RETRY-3', w, scp, 'violated', `Before the input_required result the server sent ${writes.map((q) => `${q.method} ${q.path} (${q.status})`).join(', ')}, and the declared state changed.`, { steps: o.steps.slice(0, 1) }));
       else out.push(result('MWS-RETRY-3', w, scp, 'not tested', `Before the input_required result the server sent ${writes.map((q) => `${q.method} ${q.path} (${q.status})`).join(', ')}; whether that was staged state the retry completes is not established in this preview`));

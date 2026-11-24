@@ -9,6 +9,9 @@
  *                       starts the server with NAME pointing at it; the forwarder sends every request
  *                       on to the real backend (the tester's own value of NAME) with normal TLS
  *                       verification, and holds or fails the request it is told to.
+ *                       When the variable holds a database URL (postgres://, redis://, mongodb://),
+ *                       the wire gate (wire/proxy.ts) stands in instead: a loopback TCP listener that
+ *                       reads the database protocol to name, hold and fail requests (docs/WIRE-GATE.md).
  *   node_import: true   the in-process hook (outbound.ts) loaded with `node --import` into a Node
  *                       server: it wraps fetch inside the server. Results through this route say so
  *                       (MWS 7.3: the server's author controls where a cooperative hook sits).
@@ -24,6 +27,31 @@ import type { Manifest } from '../core/manifest.js';
 import { WritecheckError } from '../core/util.js';
 import { Forwarder } from './forwarder.js';
 import { HookGate } from './hookgate.js';
+import { MongoSession, sharedMongo } from './wire/mongodb.js';
+import { PostgresSession } from './wire/postgres.js';
+import { WireGate } from './wire/proxy.js';
+import { RedisSession } from './wire/redis.js';
+import { PG_ROUTING_ENV, wireProtocolOf, wireRefusal } from './wire/url.js';
+
+/** What the wire gate knows of a request beyond method and path (docs/WIRE-GATE.md §4, §5). */
+export interface WireInfo {
+  protocol: string;
+  /** The request with every value removed. */
+  statement: string;
+  /** Why the write-or-read classification is not certain. */
+  uncertain?: string;
+  statements?: number;
+  /** The backend's answer class (CommandComplete UPDATE 1, -WRONGTYPE, ok:1 n:1). */
+  reply?: string;
+  /** Transaction state after the request. */
+  txn?: string;
+  /** The answer the server received was written by the gate, not the backend. */
+  synthetic?: boolean;
+  /** What the gate did to keep client and backend in step, or could not do. */
+  note?: string;
+  /** A commit_then_* fault on a write inside a transaction, applied at the commit (seq `to`). */
+  deferred?: { to: number | null; outcome: 'pending' | 'committed' | 'not committed' };
+}
 
 export interface GateRequest {
   /** Order of arrival at the gate (1-based, per gate). */
@@ -33,8 +61,10 @@ export interface GateRequest {
   path: string;
   t_ms: number;
   mutating: boolean;
-  /** The status the server received (null while in flight, or when the connection was cut). */
+  /** The status the server received (null while in flight, or when the connection was cut). Wire gate: the HTTP equivalent (docs/WIRE-GATE.md §5.4). */
   status: number | null;
+  /** Wire gate only. */
+  wire?: WireInfo;
 }
 
 /** Hold the nth request (1-based) matching method and exact path, counted from when hold() is called. */
@@ -74,11 +104,13 @@ export interface FaultSpec {
 export interface FaultHandle {
   /** The faulted request once the fault has been applied, or null after `ms`. */
   waitHit(ms: number): Promise<GateRequest | null>;
+  /** Wire gate: why the request the fault matched was let through without the fault (its write failed, was rolled back, or could not be answered in step); null otherwise. */
+  readonly why?: string | null;
   clear(): void;
 }
 
 export interface Gate {
-  readonly route: 'base_url' | 'node_import';
+  readonly route: 'base_url' | 'node_import' | 'wire';
   /** How long a scheduler waits for writer B while A is held before it records "serialized by the server". */
   readonly holdTimeoutMs: number;
   /** One sentence: how the server's backend traffic is routed (for every gated result). */
@@ -99,9 +131,14 @@ export interface Gate {
 
 export const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/** A write: the gate's own classification when it gave one (the wire gate always does), else the HTTP method. */
+export function isMutating(r: Pick<GateRequest, 'method'> & { mutating?: boolean }): boolean {
+  return typeof r.mutating === 'boolean' ? r.mutating : MUTATING.has(r.method.toUpperCase());
+}
+
 /** The request a gated pair holds: the last mutating request of the learning pass (null: none). */
-export function lastMutating<T extends Pick<GateRequest, 'method'>>(reqs: T[]): T | null {
-  for (let i = reqs.length - 1; i >= 0; i--) if (MUTATING.has(reqs[i]!.method.toUpperCase())) return reqs[i]!;
+export function lastMutating<T extends Pick<GateRequest, 'method'> & { mutating?: boolean }>(reqs: T[]): T | null {
+  for (let i = reqs.length - 1; i >= 0; i--) if (isMutating(reqs[i]!)) return reqs[i]!;
   return null;
 }
 
@@ -118,6 +155,20 @@ export function createGate(m: Manifest, env: NodeJS.ProcessEnv, o: { stateDir: s
   if (g.rewrite_env) {
     const upstream = env[g.rewrite_env];
     if (!upstream) throw new WritecheckError(`backend.gate.rewrite_env: ${g.rewrite_env} is not set in the tester's environment (it must hold the real backend URL; the server is given the gate's URL instead)`, 2);
+    const wire = wireProtocolOf(upstream);
+    if (wire) {
+      const why = wireRefusal(upstream);
+      if (why) throw new WritecheckError(`backend.gate.rewrite_env: ${g.rewrite_env} holds a ${wire} URL the wire gate cannot stand in for: ${why}`, 2);
+      if (wire === 'postgres') {
+        const given = [...m.server.env_passthrough, ...m.server.env_public, ...Object.keys(m.server.env ?? {})];
+        const route = PG_ROUTING_ENV.find((k) => given.includes(k));
+        if (route) throw new WritecheckError(`backend.gate.rewrite_env: the server is given ${route}, which would route its Postgres client around the wire gate; leave it out`, 2);
+      }
+      // why: Mongo transactions belong to a session (lsid) that may use several pooled connections; their state is shared per gate.
+      const shared = sharedMongo();
+      const codec = wire === 'postgres' ? (k: string) => new PostgresSession(k) : wire === 'redis' ? (k: string) => new RedisSession(k) : (k: string) => new MongoSession(k, shared);
+      return new WireGate(wire, g.rewrite_env, upstream, o.egress, g.hold_timeout_ms, codec);
+    }
     return new Forwarder(g.rewrite_env, upstream, o.egress, g.hold_timeout_ms);
   }
   return new HookGate(o.stateDir, m.server.env_passthrough, g.hold_timeout_ms);

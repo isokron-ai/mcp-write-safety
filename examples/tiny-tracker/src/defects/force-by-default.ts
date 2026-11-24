@@ -10,8 +10,8 @@
 //
 // Mirrors: Grafana GF-01 (`Overwrite: true` set unconditionally) and Payload
 // PAY-01 / PAY-02 (`overrideLock` defaults to true; REST refuses with 423).
-//   https://isokron.ai/research/grafana-mcp-server-audit#findings-register
-//   https://isokron.ai/research/payload-mcp-server-audit#payload-findings
+//   https://isokron.ai/research/grafana-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
+//   https://isokron.ai/research/payload-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#payload-findings
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

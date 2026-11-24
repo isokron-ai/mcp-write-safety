@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
+import { IN5_READING } from '../../src/checks/in5search.js';
 import { REQUIREMENTS } from '../../src/requirements.js';
 import { writePathKey, type Result } from '../../src/report/verdicts.js';
 import { runTT, startTinyTracker, tinyTrackerDir } from '../tiny-tracker/harness.js';
@@ -44,13 +45,26 @@ const saidNo = (rs: Result[]) => rs.filter((r) => r.verdict === 'self-attested' 
  *                             not additive either (ANN-5)
  *   drop-unknown-args         an argument dropped silently (IN-2) was also not rejected (IN-7)
  *   shape-missing-failed      bulk_update_tickets writes one by one, so a failed call leaves the
- *                             earlier writes in place (ATOM-2); the shape's lie is ATOM-1
+ *                             earlier writes in place (ATOM-2); the shape's lie is ATOM-1. When the
+ *                             answer to its last write is lost, that ticket is applied and the
+ *                             result neither identifies it nor says its outcome is unknown (RES-2)
  *   shape-text-says-all-saved bulk_update_tickets writes one by one, so a failed call leaves the
  *                             earlier writes in place (ATOM-2); its sentence says all tickets were
- *                             saved beside a correct shape, read by patterns.applied_all (ATOM-1)
+ *                             saved beside a correct shape, read by patterns.applied_all (ATOM-1).
+ *                             When the answer to its last write is lost, its shape gives that
+ *                             applied ticket as not applied (RES-2)
+ *   conflict-as-generic-error set_labels words every refusal "Request failed ... Nothing was
+ *                             written."; after a lost backend answer (the write applied) that is a
+ *                             failure stated for a write in effect (RES-2, kind stated-failure). Its
+ *                             own finding (CONC-6) is review-only, below
  *   coerce-types              a conversion that changes the meaning (IN-1) is also a value of
  *                             another type that was accepted (IN-6; spec: "a record here and under
- *                             MWS-IN-1")
+ *                             MWS-IN-1"); a list sent for delete_project's key is converted to the
+ *                             key "1", and the not-found that follows does not name the argument
+ *                             (IN-4; spec: a rejection after a conversion that changes the meaning)
+ *   skip-limits               an out-of-bounds value reaches the backend, whose refusal is passed on
+ *                             without naming the argument (IN-4; spec MWS-IN-3: a refusal by the
+ *                             backend that is passed on is a rejection, and MWS-IN-4 judges its form)
  * Two defects are found by review-only clauses, so the record is self-attested with the answer "no"
  * (asserted below), never `violated` (spec 8.2, rule 11):
  *   stale-unannounced         MWS-CONC-5: delete_project's description no longer says that a stale
@@ -66,7 +80,7 @@ const EXPECT: Record<string, string[]> = {
   'read-merge-put': ['MWS-CONC-3'],
   'conflict-without-iserror': ['MWS-CONC-4'],
   'stale-unannounced': [],
-  'conflict-as-generic-error': [],
+  'conflict-as-generic-error': ['MWS-RES-2'],
   'ignore-project-scope': ['MWS-TGT-1'],
   'empty-filter-deletes-all': ['MWS-TGT-2'],
   'create-overwrites': ['MWS-ANN-2', 'MWS-ANN-5', 'MWS-TGT-3'],
@@ -76,8 +90,8 @@ const EXPECT: Record<string, string[]> = {
   'shape-text-says-failed': ['MWS-RES-2'],
   'shape-text-invites-retry': ['MWS-RES-2'],
   'shape-wrong-version': ['MWS-RES-4'],
-  'shape-missing-failed': ['MWS-ATOM-1', 'MWS-ATOM-2'],
-  'shape-text-says-all-saved': ['MWS-ATOM-1', 'MWS-ATOM-2'],
+  'shape-missing-failed': ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-2'],
+  'shape-text-says-all-saved': ['MWS-ATOM-1', 'MWS-ATOM-2', 'MWS-RES-2'],
   'error-as-text': ['MWS-RES-2'],
   'comment-id-dropped': ['MWS-RES-3'],
   'receipt-missing-version': ['MWS-RES-4'],
@@ -89,9 +103,9 @@ const EXPECT: Record<string, string[]> = {
   'retry-without-key': ['MWS-RETRY-2'],
   'key-store-in-memory': ['MWS-RETRY-2'],
   'close-before-confirm': ['MWS-RETRY-3'],
-  'coerce-types': ['MWS-IN-1', 'MWS-IN-6'],
+  'coerce-types': ['MWS-IN-1', 'MWS-IN-4', 'MWS-IN-6'],
   'drop-unknown-args': ['MWS-IN-2', 'MWS-IN-7'],
-  'skip-limits': ['MWS-IN-3'],
+  'skip-limits': ['MWS-IN-3', 'MWS-IN-4'],
   'vague-validation-error': ['MWS-IN-4'],
   'undeclared-title-limit': ['MWS-IN-5'],
   'convert-numeric-strings': ['MWS-IN-6'],
@@ -114,10 +128,36 @@ const EXPECT: Record<string, string[]> = {
   'token-in-error': ['MWS-SEC-1'],
 };
 
+/**
+ * B-GAP F2 (B3): the input defects are found on the write tools other than the update tool too (src/checks/inputwrites.ts). Each
+ * listed write path must be violated for the defect's requirement.
+ */
+const ON_WRITE_TOOLS: Record<string, [string, string[]]> = {
+  'coerce-types': ['MWS-IN-1', ['ticket:create_ticket', 'ticket:bulk_update_tickets']],
+  'drop-unknown-args': ['MWS-IN-2', ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project']],
+  // close_ticket is not listed: its old MWS-IN-3 violation came only from reading the intermediate input_required
+  // answer as acceptance. With the declared answers the final result refuses the invalid id (owner-approved, 19 Nov 2026).
+  'skip-limits': ['MWS-IN-3', ['ticket:create_ticket', 'ticket:delete_tickets', 'project:create_project']],
+  'vague-validation-error': ['MWS-IN-4', ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project']],
+};
+
+/** The write tools whose MWS-IN-1 to IN-4 the correct build must hold (B-GAP F2), and the cells spec R15-4 leaves not tested. */
+const IN_WRITE_TOOLS = ['ticket:create_ticket', 'ticket:add_comment', 'ticket:add_label', 'ticket:remove_label', 'ticket:set_labels', 'ticket:close_ticket', 'ticket:bulk_update_tickets', 'ticket:delete_ticket', 'ticket:delete_tickets', 'project:create_project', 'project:delete_project', 'ticket:update_ticket', 'ticket-replace:replace_ticket'];
+const IN_NOT_HELD: Record<string, RegExp> = {
+  // delete_project's only argument is its key; the counterpart of the probe 5 is the key "5", another project, so the control is
+  // not sent to a deleting tool (spec R15-4) and the probe is not judged.
+  'MWS-IN-1 project:delete_project': /delete_project deletes or acts on more than one object/,
+  'MWS-IN-4 project:delete_project': /delete_project deletes or acts on more than one object/,
+};
+
 /** Review-only findings each defect must give as self-attested "no". */
 const SAID_NO: Record<string, string[]> = {
   'stale-unannounced': ['MWS-CONC-5 project:delete_project'],
   'conflict-as-generic-error': ['MWS-CONC-6 ticket:set_labels'],
+  // B-GAP F2: the review-only reason clause of MWS-IN-4 is now asked on every write tool. Under these defects a value reaches the
+  // backend, whose refusal (a not-found after a converted key; a length or pattern refusal) is passed on without the reason.
+  'coerce-types': ['MWS-IN-4 project:delete_project'],
+  'skip-limits': ['MWS-IN-4 ticket:add_comment'],
 };
 
 test('the expectations cover every tiny-tracker defect the default profile runs', { skip }, async () => {
@@ -166,6 +206,10 @@ for (const protocol of [undefined, '2025-11-25']) {
       assert.equal(v('MWS-CFG-3', '(server):TRACKER_READ_ONLY'), 'held');
       assert.equal(v('MWS-SEC-1', '(server):get_ticket'), 'not observed');
       assert.ok(!rs.some((x) => ['MWS-ANN-1', 'MWS-ANN-2', 'MWS-ANN-3', 'MWS-ANN-5', 'MWS-SEC-1', 'MWS-IN-5'].includes(x.requirement) && x.verdict === 'held'), 'spec 8.2 rule 8: never held');
+      // MWS-IN-5, the scoped search: the update tool searched on scratch objects, the scope in numbers, nothing confirmed.
+      const in5 = rs.find((x) => x.requirement === 'MWS-IN-5' && x.scenario.id === 'in5-search' && x.write_path.tool === 'update_ticket')!;
+      assert.equal(in5.verdict, 'not observed');
+      assert.ok(Number(in5.numbers['args_probed']) >= 3 && Number(in5.numbers['probes']) > 20 && in5.numbers['confirmed'] === 0, JSON.stringify(in5.numbers));
       assert.ok(rs.filter((x) => x.verdict === 'violated' || x.verdict === 'platform').every((x) => x.attribution !== undefined), 'spec 8.2 rule 3: every record carries the attribution field');
       assert.ok(!rs.some((x) => x.scenario.id === 'barrier-pairs' && x.verdict === 'held'), 'spec 8.2 rule 5: pairs are never held');
       assert.ok(rs.filter((x) => x.verdict === 'self-attested').every((x) => x.numbers['answer'] === true));
@@ -175,6 +219,18 @@ for (const protocol of [undefined, '2025-11-25']) {
         assert.equal(v('MWS-RETRY-2', path, 'idempotency-replay.concurrent'), protocol ? 'not tested' : 'not observed', `${path}: spec 8.2 rule 6`);
       }
       assert.ok(!rs.some((x) => x.requirement === 'MWS-RETRY-2' && /outcome not established|key record not kept/.test(x.reason)), 'held without a note');
+      // B-GAP F2: MWS-IN-1 to IN-4 on every write tool (over 2025-11-25 close_ticket answers no input_required, so its base call differs).
+      if (!protocol) {
+        for (const path of IN_WRITE_TOOLS) {
+          for (const req of ['MWS-IN-1', 'MWS-IN-2', 'MWS-IN-3', 'MWS-IN-4']) {
+            const recs = rs.filter((x) => x.requirement === req && writePathKey(x.write_path) === path && !x.scenario.id.endsWith('.review'));
+            const why = IN_NOT_HELD[`${req} ${path}`];
+            assert.ok(recs.length >= 1, `${req} ${path} has a record`);
+            if (why) assert.ok(recs.every((x) => x.verdict === 'not tested' && why.test(x.reason)), `${req} ${path}: ${recs.map((x) => `${x.verdict}: ${x.reason}`).join(' | ')}`);
+            else assert.ok(recs.every((x) => x.verdict === 'held'), `${req} ${path}: ${recs.map((x) => `${x.verdict}: ${x.reason}`).join(' | ')}`);
+          }
+        }
+      }
       assert.ok(rs.find((x) => x.scenario.id === 'idempotency-replay' && x.write_path.tool === 'create_project')!.notes.some((n) => /^Step \(b\): held\..*name check/.test(n)), 'a new key for a project key that exists is refused by the declared name check, on its own merits');
       const held = rs.find((x) => x.scenario.id === 'held-request' && x.requirement === 'MWS-CONC-3' && x.write_path.tool === 'update_ticket')!;
       assert.ok(held.notes.some((n) => /^hold A, run B: held #\d+ PATCH \/tickets\/T-\d+, released after the other writer finished/.test(n)), 'the record says which request was held and when it was released');
@@ -193,6 +249,8 @@ for (const [defect, expect] of Object.entries(EXPECT)) {
     try {
       const r = await runTT(t);
       assert.deepEqual(violatedIds(r.doc.results), [...expect].sort(), violatedKeys(r.doc.results).join('; '));
+      const onWrite = ON_WRITE_TOOLS[defect];
+      if (onWrite) for (const path of onWrite[1]) assert.ok(r.doc.results.some((x) => x.requirement === onWrite[0] && writePathKey(x.write_path) === path && x.verdict === 'violated'), `${onWrite[0]} ${path} violated: ${violatedKeys(r.doc.results).join('; ')}`);
       assert.deepEqual(r.doc.leftovers, []);
       assert.deepEqual(saidNo(r.doc.results).sort(), SAID_NO[defect] ?? []);
     } finally {
@@ -200,6 +258,36 @@ for (const [defect, expect] of Object.entries(EXPECT)) {
     }
   });
 }
+
+// MWS-IN-5 with no declaration (lane F7): the shipped manifest's try_values and fixed_constraints are removed, and the search
+// still finds the hidden title limit by itself, with the boundary found by bisection and the reading recorded as the tester's.
+test('--defect undeclared-title-limit with no try_values or fixed_constraints: the IN-5 search finds maxLength 100 (a candidate by default, violated with --in5-reading=tester)', { skip }, async () => {
+  const bare = (text: string) => text.replace(/\n    try_values:\n(      - .*\n)+/, '\n').replace(/\n    fixed_constraints:\n(      - .*\n)+/, '\n');
+  const t = await startTinyTracker(dir!, { defects: ['undeclared-title-limit'], pairs: 10, gateReps: 1, edit: (x) => {
+    const y = bare(x);
+    assert.ok(!/try_values|fixed_constraints/.test(y.replace(/#.*$/gm, '')), 'the declaration is removed');
+    return y;
+  } });
+  try {
+    const d = await runTT(t);
+    const cand = d.doc.results.find((x) => x.requirement === 'MWS-IN-5' && x.scenario.id === 'in5-search' && x.write_path.tool === 'update_ticket')!;
+    assert.equal(cand.verdict, 'not observed', 'by default the differential reading alone gives no violated (draft 0.10)');
+    assert.ok(cand.notes.some((n) => /^Candidate constraint, seen, not judged: title: maxLength 100/.test(n)), cand.notes.join('\n'));
+    assert.deepEqual(violatedIds(d.doc.results), []);
+    IN5_READING.value = 'tester';
+    const r = await runTT(t).finally(() => (IN5_READING.value = 'declaration'));
+    assert.deepEqual(violatedIds(r.doc.results), ['MWS-IN-5']);
+    const rec = r.doc.results.find((x) => x.requirement === 'MWS-IN-5' && x.verdict === 'violated')!;
+    assert.equal(rec.write_path.tool, 'update_ticket');
+    assert.equal(rec.scenario.id, 'in5-search');
+    assert.match(rec.reason, /title: maxLength 100 \(100 characters accepted, 101 characters refused\)/);
+    assert.ok(rec.notes.some((n) => /Reading by: tester \(differential probe\)/.test(n)));
+    assert.ok(rec.steps.length >= 3);
+    assert.deepEqual(r.doc.leftovers, []);
+  } finally {
+    await t.close();
+  }
+});
 
 // With every defect on, ignore-project-scope makes MWS-TGT-1 violated, so the selector probes of MWS-TGT-2 are not sent (spec 7.3:
 // only after MWS-TGT-1 is held on the scope-named container); TGT-2 is then not tested, by the tester's own safety rule. For the

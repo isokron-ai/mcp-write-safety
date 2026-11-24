@@ -68,15 +68,16 @@ export class Driver {
 
   /**
    * Read until `until(obj)` holds or the settle window has passed; the last read is returned with
-   * `settled` saying whether the expectation held. With no window, one read.
+   * `settled` saying whether the expectation held. With no window, one read. `done` ends the wait on a read that did not return
+   * the object (a read that shows it gone), which `until` is not given.
    */
-  async readSettled(label: string, stepPrefix: string, until?: (obj: unknown) => boolean): Promise<ReadResult> {
+  async readSettled(label: string, stepPrefix: string, until?: (obj: unknown) => boolean, done?: (r: ReadResult) => boolean): Promise<ReadResult> {
     const deadline = Date.now() + this.res.read.settle_ms;
     let n = 0;
     for (;;) {
       const r = await this.readOnce(label, this.session.stepId(`${stepPrefix}.read`));
       n++;
-      const holds = !until || (r.ok && until(r.obj));
+      const holds = !until || (r.ok && until(r.obj)) || (!!done && done(r));
       if (holds || Date.now() >= deadline) return { ...r, reads: n, settled: holds };
       await sleep(Math.max(20, Math.min(200, this.res.read.settle_ms / 10)));
     }
@@ -93,7 +94,7 @@ export class Driver {
     return withOverride(this.res, render(this.res.update!.args, this.vars({ field: field.arg, value, version: base?.version ?? null })));
   }
 
-  async update(label: string, field: FieldSpec, value: unknown, o: { step: string; base?: { obj: unknown; version: unknown } | null; paced?: boolean; counted?: boolean }): Promise<CallResult> {
+  async update(label: string, field: FieldSpec, value: unknown, o: { step: string; base?: { obj: unknown; version: unknown } | null; paced?: boolean; counted?: boolean }): Promise<CallResult & { sent_args?: unknown }> {
     let base = o.base ?? null;
     if (!base && needsBase(this.res)) {
       const r = await this.readOnce(label, this.session.stepId(`${o.step}.base`));
@@ -105,27 +106,53 @@ export class Driver {
     const r = await this.session.call(label, this.res.update!.tool, args, { step: o.step, ...(o.paced ? { paced: true } : {}), ...(o.counted ? { counted: true } : {}) });
     // why: B-9 "How a tester uses it": same_key / same_version name the key or the version only where the call carried one; the
     // trial records which it carried, so the reading does not take them as given.
-    return { ...r, carried: carriedBy(this.res, this.res.update!.tool, args, sent) };
+    // why: sent_args: the arguments as sent, for MWS-RES-4's echo filter (src/checks/echo.ts): a value the answer only repeats from them is no receipt.
+    return { ...r, carried: carriedBy(this.res, this.res.update!.tool, args, sent), sent_args: args };
   }
 
-  /** Put both fields back to the baseline (sequentially), and check it took. */
+  /** Put both fields back to the baseline, and check it took. */
   async reset(label = 'RESET'): Promise<boolean> {
     if (!this.baseline) return true;
-    for (const [i, f] of this.fields.entries()) {
-      const cur = await this.readOnce(label, this.session.stepId(`reset.${this.res.name}.read`));
+    const baseline = this.baseline;
+    const atBase = (o: unknown, i: number): boolean => JSON.stringify(getPath(o, this.fields[i]!.path)) === JSON.stringify(baseline[i]);
+    const allAtBase = (o: unknown): boolean => this.fields.every((_, i) => atBase(o, i));
+    let cur = await this.readOnce(label, this.session.stepId(`reset.${this.res.name}.read`));
+    if (!cur.ok) return false;
+    // why: a full_replace write carries every field from the read it was built from. Where the server applies an update
+    // after answering it, a read taken just after one field's write can still show that field's old value, and the next
+    // field's write would send the old value back. So every differing field goes back in one write built from one read.
+    if (this.res.update!.mode === 'full_replace') {
+      const differ = this.fields.map((_, i) => i).filter((i) => !atBase(cur.obj, i));
+      if (!differ.length) return true;
+      const last = differ[differ.length - 1]!;
+      const obj = differ.slice(0, -1).reduce((o, i) => setPath(o, this.fields[i]!.path, baseline[i]), cur.obj);
+      const r = await this.update(label, this.fields[last]!, baseline[last], { step: this.session.stepId(`reset.${this.res.name}.all`), base: { obj, version: cur.version } });
+      // why: only a refusal falls back to one field at a time (so a field the tool refuses can go back through the control). A
+      // success, or an unknown outcome (timed out, transport error, a result that is not complete), is judged by the settled read:
+      // the write may have landed, and sending more writes after it could undo it.
+      const refused = !r.ok && !r.timed_out && r.transport_error === null && (!r.result_type || r.result_type === 'complete');
+      if (!refused) return (await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase)).settled;
+      cur = await this.readSettled(label, `reset.${this.res.name}.reread`);
       if (!cur.ok) return false;
-      if (JSON.stringify(getPath(cur.obj, f.path)) === JSON.stringify(this.baseline[i])) continue;
-      const r = await this.update(label, f, this.baseline[i], { step: this.session.stepId(`reset.${this.res.name}.${i}`), base: { obj: cur.obj, version: cur.version } });
+    }
+    for (const [i, f] of this.fields.entries()) {
+      if (atBase(cur.obj, i)) continue;
+      const r = await this.update(label, f, baseline[i], { step: this.session.stepId(`reset.${this.res.name}.${i}`), base: { obj: cur.obj, version: cur.version } });
       if (!r.ok) {
         // why: research builds N3: a server that refuses to take over a field another writer (the control arm) owns cannot be
         // reset through the tool under test; the tester puts its own object back through the declared control.patch instead.
         if (!this.res.control?.patch) return false;
         this.resetViaControl++;
-        const c = await this.controlPatch(f, this.baseline[i], this.session.stepId(`reset.${this.res.name}.${i}.control`)).catch(() => null);
+        const c = await this.controlPatch(f, baseline[i], this.session.stepId(`reset.${this.res.name}.${i}.control`)).catch(() => null);
         if (!c?.ok) return false;
       }
+      // why: the next field's write is built from this read (its version, and in full_replace mode the whole object), so it
+      // waits, within the settle window, until this field shows its baseline value. The check below covers the last field.
+      if (i === this.fields.length - 1) break;
+      cur = await this.readSettled(label, `reset.${this.res.name}.${i}.after`, (o) => atBase(o, i));
+      if (!cur.ok || !cur.settled) return false;
     }
-    const after = await this.readSettled(label, `reset.${this.res.name}.check`, (o) => this.fields.every((f, i) => JSON.stringify(getPath(o, f.path)) === JSON.stringify(this.baseline![i])));
+    const after = await this.readSettled(label, `reset.${this.res.name}.check`, allAtBase);
     return after.settled;
   }
 
@@ -183,7 +210,7 @@ export class Driver {
   async controlPatch(field: FieldSpec, value: unknown, step: string, o: { paced?: boolean; counted?: boolean } = {}): Promise<HttpResult> {
     const t = this.res.control?.patch;
     if (!t) throw new WritecheckError(`${this.res.name}: no control.patch`);
-    // why: writesafe self-test T3: a platform API may name the field otherwise than the read path (Strapi: summary, not data.summary).
+    // why: writesafe self-test T3: a platform API may name the field otherwise than the read path (for example `summary`, not `data.summary`).
     return this.controlRequest(t, { field: field.control_key ?? field.path, value }, step, o);
   }
 
@@ -255,16 +282,46 @@ export function baseVars(res: ResourceSpec, prefix: string, extra: Env = {}): En
  * the resource apart from any other and fails closed.
  */
 export function callKind(res: ResourceSpec, call: { tool: string; args: unknown }): string | null {
+  const r = renderFixed(res, call.args);
+  return r === undefined ? null : `${call.tool}|${JSON.stringify(r)}`;
+}
+
+const HOLE = '\u0000{{';
+/** A call's arguments with the resource's vars filled in and every per-call variable a placeholder; undefined when they cannot be rendered so. */
+function renderFixed(res: ResourceSpec, args: unknown): unknown {
   // why: review B1: the kind was built from the unrendered arguments with every string holding {{id}} dropped, so two
   // collections that differ only in a vars value, or in the text around the id, were one.
-  const hole = (name: string) => `\u0000{{${name}}}\u0000`;
+  const hole = (name: string) => `${HOLE}${name}}}\u0000`;
   const env = baseVars(res, hole('prefix'));
   for (const [k, v] of Object.entries(env)) if (v === null && !Object.hasOwn(res.vars, k)) env[k] = hole(k);
   try {
-    return `${call.tool}|${JSON.stringify(render(call.args, env))}`;
+    return render(args, env) ?? null;
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+/**
+ * Do two calls of one tool carry the same fixed arguments? Each is rendered as callKind renders it; a top-level argument
+ * both calls carry must be equal, unless one of the two holds a per-call variable (the argument that names the object).
+ * `read_records {table: a, conditions: {id: "{{id}}"}}` and `read_records {table: a}` agree; the same calls on tables a
+ * and b do not. False where the tools differ or either call cannot be rendered. It does not show that the two calls reach
+ * the same objects (a caller that needs that compares what they answer); it shows where they cannot.
+ */
+export function sameFixedArgs(a: ResourceSpec, callA: { tool: string; args: unknown }, b: ResourceSpec, callB: { tool: string; args: unknown }): boolean {
+  if (callA.tool !== callB.tool) return false;
+  const ra = renderFixed(a, callA.args);
+  const rb = renderFixed(b, callB.args);
+  if (ra === undefined || rb === undefined) return false;
+  const map = (v: unknown): Record<string, unknown> => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+  const [ma, mb] = [map(ra), map(rb)];
+  for (const k of Object.keys(ma)) {
+    if (!Object.hasOwn(mb, k)) continue;
+    const [ja, jb] = [JSON.stringify(ma[k]), JSON.stringify(mb[k])];
+    if (ja.includes(JSON.stringify(HOLE).slice(1, -1)) || jb.includes(JSON.stringify(HOLE).slice(1, -1))) continue;
+    if (ja !== jb) return false;
+  }
+  return true;
 }
 
 /**

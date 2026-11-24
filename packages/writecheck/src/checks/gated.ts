@@ -15,7 +15,10 @@
  *                   hold its last mutating request, change the other field through the platform's
  *                   API, release, and see whether the tool's write went over that change
  *   MWS-RES-2       fail the update's last mutating request (status 500, not forwarded): the answer
- *                   must not be a success, and whatever stayed applied must be named
+ *                   must not be a success, and whatever stayed applied must be named. Then the lost
+ *                   answer: the request reaches the backend and its answer is cut (lostAnswerVerdict,
+ *                   shared with the write-faults and multi-item checks); where the error names the
+ *                   version the call carried, the follow-through repeat with it (R10-11)
  *   MWS-ATOM-1/2    a composite update (several backend writes in one call): fail its second and its
  *                   last mutating request; the answer must not be a success and must name what stayed
  *                   applied (ATOM-1); nothing should stay applied (ATOM-2)
@@ -27,19 +30,24 @@
 import { hasControl, needsBase, valueAt, type Driver } from '../core/driver.js';
 import type { FieldSpec, ResourceSpec } from '../core/manifest.js';
 import { deepEqual, diff, setPath, short, sleep, withoutIgnored } from '../core/util.js';
-import { lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
-import { result, VIOLATED_CAVEAT, type Result } from '../report/verdicts.js';
+import { isMutating, lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
+import { result, VIOLATED_CAVEAT, type Result, type WritePath } from '../report/verdicts.js';
 import { ignoredPaths } from './readback.js';
 import { ruleNote } from './rules.js';
 import { fromDeclaration, outcomeByField, saidBy, says } from './says.js';
+import { conflictSignal } from './signals.js';
 import { decidedByShape, quoteField, shapeNamesField, shapeOf, type WriteResult } from './shape.js';
-import { appliedAllSaid, appliedAllUnread, brief, failedKind, identifiesChangeText, KNOWN_RESULT_TYPES, mayBeUnknown, notAppliedText, proseOf, readSecondClause, res2Judge, saysUnknownText, valueMentioned, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
+import { appliedAllSaid, appliedAllUnread, brief, failedKind, identifiesChangeText, KNOWN_RESULT_TYPES, mayBeUnknown, notAppliedText, proseOf, readSecondClause, res2Judge, saysUnknownText, valueMentioned, wp, type CallBrief, type CheckModule, type FollowThroughRead, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
 const ID = 'held-request';
-const VERSION = '1';
+// why: spec 13.6: version 2 adds the follow-through of the lost-answer trial (R10-11: an out-of-band change, the call sent again
+// once with the version it carried, a read-back) and counts a success over a failed request as the server's own retry only
+// where the gate shows the request sent again; both can change a verdict, and the version enters every record's test_hash.
+const VERSION = '2';
 
-type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null };
-const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status });
+type Req = Pick<GateRequest, 'seq' | 'method' | 'path'> & { status?: number | null; mutating?: boolean };
+// why: `mutating` is the gate's own classification; the wire gate's verbs (UPDATE, SET, update) are not HTTP methods.
+const reqOf = (r: GateRequest): Req => ({ seq: r.seq, method: r.method, path: r.path, status: r.status, mutating: r.mutating });
 const showReq = (r: Req) => `#${r.seq} ${r.method} ${r.path}`;
 
 export interface HeldTrial {
@@ -74,7 +82,7 @@ export interface GatedObs {
   /** changed: null when a read around the call failed; applied: the state asked for is in effect afterwards. */
   res2: { skipped?: string; faulted: Req | null; call: CallBrief | null; changed: string[] | null; applied?: boolean | null; object?: unknown } | null;
   /** MWS-RES-2, unknown outcome: the backend applied the last mutating request and its answer was cut. */
-  res2u?: { skipped?: string; faulted: Req | null; call: CallBrief | null; changed: string[] | null; applied: boolean | null; object?: unknown; requests?: Req[]; version_sent?: unknown } | null;
+  res2u?: LostAnswerObs | null;
   atom: { skipped?: string; trials: { nth: number; faulted: Req | null; call: CallBrief | null; changed: string[] | null; applied?: boolean | null }[] } | null;
 }
 
@@ -163,12 +171,13 @@ export const gatedCheck: CheckModule = {
       ...(res.update!.mode === 'full_replace' && hasControl(res, 'read', 'patch', 'write') ? [`control x${n * 2}: control read; control write ${res.fields![1].path} from it; control write ${res.fields![0].path} from the same read; control read`] : hasControl(res, 'read', 'patch') ? [`control x${n * 2}: control patch ${res.fields![1].path}; control patch ${res.fields![0].path}; control read`] : []),
       ...(!res.version?.arg && hasControl(res, 'read', 'patch', 'write') ? [`MWS-CONC-1 x${n}: hold the tool's last mutating request, change ${res.fields![1].path} through the platform's API, release`] : []),
       `MWS-RES-2: fail ${res.update!.tool}'s last mutating backend request (status 500); ${res.read.tool}`,
+      `MWS-RES-2, lost answer: let that request through and cut its answer; ${res.read.tool}; where the error names the version the call carried, change ${res.fields![0].path} out of band${hasControl(res, 'patch') ? ' (control.patch)' : ` (${res.update!.tool})`} and send the call again once with that version (R10-11); ${res.read.tool}`,
       ...(res.update!.mode === 'composite' ? ['MWS-ATOM-1/2: fail the second and the last mutating backend request of the composite update; read back'] : []),
     ];
-    // why: every write path the plan lists for MWS-CONC-1 gets a record (gate-2 Grafana N3): a field patch with no version is the
+    // why: every write path the plan lists for MWS-CONC-1 gets a record (gate-2 N3): a field patch with no version is the
     // gated check's alone (the stale-write check defers to it), so a missing control.write is reported here, never dropped.
     const nr = !res.version?.arg && res.update!.mode !== 'full_replace' && !hasControl(res, 'read', 'patch', 'write') ? [result('MWS-CONC-1', w, { id: ID, version: VERSION }, 'not tested', `${res.update!.tool} takes no version, so MWS-CONC-1 is tested by holding its write; the control arm, which shows whether the platform's API refuses a write from outdated state, needs a control block with read, patch and write (missing: ${(['read', 'patch', 'write'] as const).filter((k) => !hasControl(res, k)).map((k) => `control.${k}`).join(', ')})`)] : [];
-    return { ...base, runs: true, calls, writes: 4 + n * 2 * 6 + n * 4 + n * 4 + 4 + 6, notRun: nr };
+    return { ...base, runs: true, calls, writes: 4 + n * 2 * 6 + n * 4 + n * 4 + 4 + 6 + 2, notRun: nr };
   },
   async collect(ctx: RunContext, res: ResourceSpec): Promise<Observation> {
     const gate = ctx.gate;
@@ -195,7 +204,7 @@ export const gatedCheck: CheckModule = {
     // The control arm of the held-request procedure (spec 7.4): A's write, carrying what A read, sent to the platform API after B's
     // write has been applied. The two writers match the tool arm's: there both are calls through the same server, so here both are
     // the same declared write. For a whole-object tool each is control.write from the read before either wrote, with its own change
-    // (gate-2 K8s B3: a partial patch for B is another kind of writer, and where the platform's control is field ownership it is
+    // (gate-2 B3: a partial patch for B is another kind of writer, and where the platform's control is field ownership it is
     // refused for a reason the tool arm does not have); for a field patch each is control.patch of its field. Forced like the tool
     // arm, never left to timing. A whole-object tool with no control.write has no like-for-like control: kind 'patch' below, and
     // the verdict keeps the attribution unresolved.
@@ -265,7 +274,7 @@ export const gatedCheck: CheckModule = {
       f.clear();
       const after = await d.readSettled('R', 'gate.res2.after', () => false);
       obs.res2 = { object: d.id, faulted: hit ? reqOf(hit) : null, call: brief(r), changed: before.ok && after.ok ? withoutIgnored(diff(before.obj, after.obj), ignoredPaths(res)).map((e) => e.path) : null, applied: after.ok ? deepEqual(valueAt(after.obj, f0.path), f0.values[1]) : null };
-      if (!hit) obs.res2.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
+      if (!hit) obs.res2.skipped = f.why ? `the fault was not applied: ${f.why}` : 'the fault was not applied (different backend requests than in the learning pass)';
       // Unknown outcome: the backend applies the request, and the connection closes before the server reads the answer.
       await d.reset();
       const b2 = await d.readOnce('R', ctx.session.stepId('gate.res2u.before'));
@@ -277,11 +286,26 @@ export const gatedCheck: CheckModule = {
       const reqsU = await gate.since(markU);
       const a2 = await d.readSettled('R', 'gate.res2u.after', () => false);
       obs.res2u = { object: d.id, faulted: hitu ? reqOf(hitu) : null, call: brief(ru), changed: b2.ok && a2.ok ? withoutIgnored(diff(b2.obj, a2.obj), ignoredPaths(res)).map((e) => e.path) : null, applied: a2.ok ? deepEqual(valueAt(a2.obj, f0.path), f0.values[1]) : null, requests: reqsU.map(reqOf), version_sent: b2.ok && res.version?.arg && !res.version.optional ? b2.version : null };
-      if (!hitu) obs.res2u.skipped = 'the fault was not applied (different backend requests than in the learning pass)';
+      // why: the wire gate does not apply a lost-answer fault to a write that was refused or not kept (no trial), and says why.
+      if (!hitu) obs.res2u.skipped = fu.why ? `the fault was not applied: ${fu.why}` : 'the fault was not applied (different backend requests than in the learning pass)';
+      // R10-11: the error names the version the call carried: send the call again once with that version, with no fault, and read
+      // back. The first write was applied, so a repeat that is applied again shows that the version did not guard it.
+      else if (a2.ok && obs.res2u.applied && obs.res2u.call && namesCarriedVersion(obs.res2u.call, res.version?.arg ?? null, obs.res2u.version_sent)) {
+        // why: review of f4: the object is changed out of band first, so a repeat that the version does not guard shows as applied.
+        const oob = await changeOutOfBand(d, res, a2.obj, 'R', ctx.session.stepId('gate.res2u.oob'));
+        const mid = await d.readSettled('R', 'gate.res2u.oob.after', () => false);
+        if (!oob || !oob.ok || !mid.ok || (deepEqual(mid.version, a2.version) && !withoutIgnored(diff(a2.obj, mid.obj), ignoredPaths(res)).length)) obs.res2u.follow = { applied_again: null, how: `the object could not be changed out of band before the repeat (${oob ? oob.how : 'no control.patch and no declared field'}), so an unguarded repeat would not show` };
+        else {
+          const rep = await d.update(A, f0, f0.values[1], { step: ctx.session.stepId('gate.res2u.follow'), ...(b2.ok ? { base: { obj: b2.obj, version: b2.version } } : {}) });
+          const a3 = await d.readSettled('R', 'gate.res2u.follow.after', () => false);
+          const fr = followRead(brief(rep), mid, a3, !!res.version, res.version?.read ?? null, ignoredPaths(res));
+          obs.res2u.follow = { ...fr, how: `out of band, ${oob.how}; ${fr.how}` };
+        }
+      }
     }
     // A composite update: fail its second and its last mutating backend request.
     if (res.update!.mode === 'composite') {
-      const muts = la.requests.filter((q) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(q.method));
+      const muts = la.requests.filter((q) => isMutating(q));
       obs.atom = { trials: [] };
       if (muts.length < 2) obs.atom.skipped = `${res.update!.tool} made ${muts.length} mutating backend request(s) in the learning pass: there is no later step to fail`;
       else
@@ -336,7 +360,7 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
   }
   // MWS-CONC-1 (proxy-assisted)
   if (!o.conc1 && !res.version?.arg && hasControl(res, 'read', 'patch', 'write')) {
-    // why: planned but not run: the record says why (gate-2 Grafana N3), never dropped.
+    // why: planned but not run: the record says why (gate-2 N3), never dropped.
     const la = o.learned[0];
     const why = o.independent === false ? o.skipped ?? 'the two fields are not independent one after the other; see MWS-UPD-1' : la && !la.hold ? `${res.update!.tool} sent no mutating request to the backend in the learning pass, so its write could not be held` : 'the held-request procedure did not run';
     out.push(result('MWS-CONC-1', w, sc, 'not tested', `held request: ${why}`, { notes: [route] }));
@@ -350,7 +374,7 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
       const notes = [route, ...t.map((x) => `held ${showReq(x.held!)} while the platform's API changed ${res.fields![1].path}; released; the tool ${x.tool!.ok ? 'reported success' : 'was refused'}${x.overwrote ? ' and the other change is gone' : ''}`)];
       if (t.every((x) => x.control_refuses === null)) out.push(result('MWS-CONC-1', w, sc, 'not tested', 'the control arm could not establish whether the platform\'s API refuses a write from outdated state', { notes }));
       else if (!refuses) out.push(result('MWS-CONC-1', w, sc, 'not applicable', 'the backend did not apply the declared control (the platform\'s API accepted a write from outdated state).', { notes: [...notes, 'Only a version check sent with the write was declared and tried; another kind of control (such as a lock held by another user) is not staged in this preview.'] }));
-      else if (over.length) out.push(result('MWS-CONC-1', w, sc, 'violated', `The platform's API refuses a write from outdated state, but ${res.update!.tool}'s write, held until another writer changed the object and then released, went over that change in ${over.length} of ${t.length} trials.`, { notes: [VIOLATED_CAVEAT, ...notes] }));
+      else if (over.length) out.push(result('MWS-CONC-1', w, sc, 'violated', `The platform's API refuses a write from outdated state, but ${res.update!.tool}'s write, held until another writer changed the object and then released, went over that change in ${over.length} of ${t.length} trials.`, { steps: over.map((x) => x.tool!.step), notes: [VIOLATED_CAVEAT, ...notes] }));
       else out.push(result('MWS-CONC-1', w, sc, 'held', `In ${t.length} forced trials the tool's held write did not go over the other writer's change (refused, or re-read).`, { notes }));
     }
   }
@@ -368,126 +392,21 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
     }
   }
   // MWS-RES-2 (proxy-assisted), unknown outcome, and the clause on a settled outcome (spec 96d3691, R9-1, R10-11)
-  if (o.res2u) {
-    const r = o.res2u;
-    const su = { id: `${ID}.unknown-outcome`, version: VERSION };
-    const what = r.faulted ? `the backend applied ${showReq(r.faulted)} and the connection closed before the server received the answer` : '';
-    const textOf = (c: CallBrief) => `${c.text ?? ''} ${c.rpc_error?.message ?? ''}`.trim();
-    const quoteOf = (c: CallBrief) => JSON.stringify(short(textOf(c), 200));
-    // why: review (4): what a success says is read in its prose, never in a value of its data (a status "Unknown").
-    // why: rule 11 (R14-5): an adopted result shape that says unknown is a statement of its own, beside the text; either one counts.
-    const shapeUnknown = (c: CallBrief) => shapeOf(c)?.outcome === 'unknown';
-    const textUnknown = (c: CallBrief) => (c.ok ? says('outcome_unknown', proseOf(c.text)) : saysUnknownText(c));
-    const unknownIn = (c: CallBrief) => shapeUnknown(c) || textUnknown(c);
-    const unknownDecl = (c: CallBrief) => { if (shapeUnknown(c)) return true; const f = outcomeByField(c); return f ? f.outcome === 'unknown' : fromDeclaration('outcome_unknown') && textUnknown(c); };
-    const unknownBy = (c: CallBrief) => (shapeUnknown(c) ? decidedByShape([['outcome', 'unknown']], c) : `What the results say (outcome unknown) was decided by the declaration's pattern patterns.outcome_unknown, on the answers quoted above (spec 7.3, rule 11).`);
-    let rec: Result;
-    const extraNotes: string[] = [];
-    if (r.skipped || !r.call) rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${r.skipped ?? 'the call was not made'}`, { notes: [route] });
-    else if (r.call.indeterminate) rec = result('MWS-RES-2', w, su, 'not tested', 'unknown outcome: the tool call itself timed out or lost the connection', { notes: [route] });
-    else if (r.call.result_type && !KNOWN_RESULT_TYPES.includes(r.call.result_type)) rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: the result has resultType ${JSON.stringify(r.call.result_type)}, which the tester does not recognize; it is invalid under the MCP specification, so the trial is indeterminate (spec 7.3, rule 5)`, { notes: [route] });
-    else if (r.applied === null || r.changed === null) rec = result('MWS-RES-2', w, su, 'not tested', 'unknown outcome: the object did not read back after the call, so the condition was not established', { notes: [route] });
-    else if (r.applied === false) {
-      // why: R6-4: the backend applied the write (the interposer let it through) and the read-back does not show it, so the
-      // server undid it; the trial is judged as any failed write: what the answer says is compared with what remains applied.
-      const j = res2Judge(r.call, r.changed, 'backend', `Unknown outcome: ${what}; the read-back does not show the write, so the server undid it`, res.fields ? { [f0path(res)]: res.fields[0].values[1] } : {}, { async: asyncOps.includes(res.update!.tool), object: r.object });
-      rec = result('MWS-RES-2', w, su, j.verdict, j.reason, { steps: j.verdict === 'violated' ? [r.call.step] : [], notes: [route, ...j.notes] });
-    } else if (r.call.result_type && r.call.result_type !== 'complete') rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: the answer was a ${r.call.result_type} result; judging it on its final state is not built in this preview`, { notes: [route] });
-    else if (r.call.ok) {
-      // why (review of note 8, 4; R9-1 kind no-error-flag): the success's prose is read, never a value of its data, and only a
-      // declared pattern decides (rule 11).
-      const prose = notAppliedText(r.call);
-      const failedD = fromDeclaration('not_applied') && says('not_applied', prose);
-      const unknownD = unknownDecl(r.call);
-      // why: rule 11 (B-9 v2): a success whose adopted result shape says not_applied, partial or unknown states a failure or an open
-      // outcome without isError, as the same words in text would; read on its own beside the text (R14-5).
-      const so = shapeOf(r.call)?.outcome;
-      const shapeD = so === 'not_applied' || so === 'partial' || so === 'unknown';
-      const SAYS: Record<string, string> = { unknown: 'that it is not known whether the write was applied', partial: 'that the write was applied in part', not_applied: 'that the write was not applied' };
-      if (shapeD && !failedD) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and the result has no isError: true while its adopted result shape says ${SAYS[so!]} (${quoteField('outcome', so)}) (third clause; kind no-error-flag).`, { steps: [r.call.step], notes: [route, decidedByShape([['outcome', so]], r.call)] });
-      else if (failedD || unknownD) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and the result has no isError: true while its content says ${failedD ? 'that the write failed or that nothing was changed' : 'that it is not known whether the write was applied'}: ${JSON.stringify(short(prose, 200))} (third clause; kind no-error-flag)${shapeD ? `; its adopted result shape also says ${quoteField('outcome', so)}` : ''}.`, { steps: [r.call.step], notes: [route, failedD ? saidBy('not_applied', prose) : saidBy('outcome_unknown', textOf(r.call)), ...(shapeD ? [decidedByShape([['outcome', so]], r.call)] : [])] });
-      else if (says('not_applied', prose) || unknownIn(r.call)) rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the write is in effect and the tool answered with a success whose text only the tester's default patterns read as saying the write failed or that the outcome is not known: ${JSON.stringify(short(prose, 200))}. A default pattern alone does not decide (spec 7.3, rule 11): declare patterns.not_applied and patterns.outcome_unknown, or read it`, { notes: [route, saidBy('not_applied', prose), saidBy('outcome_unknown', textOf(r.call))] });
-      else rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the tool answered with a success${so ? ` (${quoteField('outcome', so)} in its adopted result shape)` : ''}, which reports no failure, so this trial adds no verdict here (whether the success is true is MWS-RES-1)`, { notes: [route, ...(so ? [decidedByShape([['outcome', so]], r.call)] : [])] });
-    } else if (r.call.rpc_error) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, and ${res.update!.tool} returned a JSON-RPC error (${r.call.rpc_error.code}); the lost answer is a failure of the backend, so it must be a tool execution error (third clause; kind protocol-error).`, { steps: [r.call.step], notes: [route] });
-    else {
-      // why: gate-2 re-run on 378f32f (note 19, R9, R10; rule 11): only declared patterns decide what the error says.
-      const text = textOf(r.call);
-      const vals: Record<string, unknown> = res.fields ? { [f0path(res)]: res.fields[0].values[1] } : {};
-      // R9-1 (2), R10-11: an invitation to repeat the write whose outcome is open, naming neither a read, nor the key, nor the version
-      // the call carried, is retry-invited. A read is named by the read tool or the object; the version by the value the call carried.
-      const invites = says('retry_invited', text);
-      // why: review (2, 7): a read is named by the read tool's name, or by a declared patterns.read_named; an object id alone may be
-      // only the subject of the sentence, so it leaves the question open (no held, no retry-invited violated). The version is named
-      // by the value the call carried, or by the version argument's name ("the same expected_version").
-      const toolNamed = new RegExp(`(^|[^A-Za-z0-9_])${res.read.tool.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text);
-      const declaredRead = fromDeclaration('read_named') && says('read_named', text);
-      const objectOnly = !toolNamed && !declaredRead && r.object !== undefined && r.object !== null && valueMentioned(r.call, r.object);
-      const namesRead = toolNamed || declaredRead;
-      const namesVersion = !!res.version?.arg && ((r.version_sent !== undefined && r.version_sent !== null && valueMentioned(r.call, r.version_sent)) || new RegExp(`(^|[^A-Za-z0-9_])${res.version.arg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text));
-      // why: B-9 v2 ("How a tester uses it"): repeat is read as the tester can check it. The trial sends the declared update
-      // arguments and adds no idempotency key; the version it carried is known where the declaration requires one.
-      // (what the call carried is recorded by the driver, CallBrief.carried; older evidence leaves it open, and then no held.)
-      const rd = readSecondClause(r.call, (r.changed ?? []).length ? r.changed! : res.fields ? [f0path(res)] : [], vals, { lostAnswer: true, textNamesRead: namesRead ? true : objectOnly ? 'maybe' : false });
-      // why: D-2 (owner, 15 Nov): a declared patterns.repeat_invited is the declarer's statement that what it matches invites a
-      // repeat without a read first and without the key or version: kind retry-invited, beside a correct shape too (R14-5).
-      const prose = proseOf(r.call.text);
-      const repInv = fromDeclaration('repeat_invited') && says('repeat_invited', prose);
-      let blockHeld: string | null = null;
-      if (repInv) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and by the declared patterns.repeat_invited the error invites the caller to send the call again, naming no read to make first and no key or version to repeat it with (second clause; kind retry-invited): ${quoteOf(r.call)}.`, { steps: [r.call.step], notes: [route, saidBy('repeat_invited', prose), ...rd.notes] });
-      else if (invites && !namesRead && !namesVersion && objectOnly) {
-        blockHeld = `the error invites a repeat and names the object ${short(r.object, 40)}, but whether it names it as a read to make first is decided by patterns.read_named, which the declaration does not give (spec 7.3, rule 11): ${quoteOf(r.call)}`;
-        rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the write is in effect; ${blockHeld}`, { notes: [route, saidBy('retry_invited', text), ...rd.notes] });
-      } else if (invites && !namesRead && !namesVersion && fromDeclaration('retry_invited')) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and the error tells the caller to repeat the call without naming a read to make first, the idempotency key or the version the call carried (second clause; kind retry-invited): ${quoteOf(r.call)}.`, { steps: [r.call.step], notes: [route, saidBy('retry_invited', text), ...rd.notes] });
-      else {
-        if (invites && !namesRead && !namesVersion) blockHeld = `only the tester's default pattern reads the error as telling the caller to repeat the call (declare patterns.retry_invited, or read it): ${quoteOf(r.call)}`;
-        if (invites && namesVersion && !namesRead) blockHeld = `the error invites a repeat with the version the call carried; the follow-through (send the call again once with that version, with no fault, and read back) is not built in this preview, so whether the version guards the repeat is not known`;
-        if (rd.v === 'held' && !blockHeld) rec = result('MWS-RES-2', w, su, 'held', `Unknown outcome: ${what}; the error ${rd.why}: ${JSON.stringify(short(r.call.text ?? '', 200))}.`, { notes: [route, ...rd.notes] });
-        else if (rd.v === 'violated') {
-          // why: review (14): which kind is a reading too; without a declared not_applied pattern it is not decided. Where only the
-          // adopted result shape gives the violation, its members give the kind (B-9 v2), where they give one.
-          const fk = failedKind(true);
-          const textKind = !fromDeclaration(fk) ? 'stated-failure or bare-transport, not decided: declare patterns.write_failed' : says(fk, text) ? 'stated-failure' : 'bare-transport';
-          const kind = rd.text?.v === 'violated' ? (rd.shape?.v === 'violated' && rd.shape.kind && rd.shape.kind !== textKind ? `${textKind} (text); ${rd.shape.kind} (shape)` : textKind) : rd.shape?.kind ?? 'not named by the shape';
-          rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect; ${rd.why} (second clause; kind ${kind}): ${JSON.stringify(short(r.call.text ?? '', 200))}.`, { steps: [r.call.step], notes: [route, ...rd.notes] });
-        } else rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the write is in effect; ${rd.v === 'held' ? `the error ${rd.why}, but ${blockHeld}` : rd.why}${blockHeld && rd.v !== 'held' ? `; also, ${blockHeld}` : ''}`, { notes: [route, ...rd.notes] });
-      }
-      // why: rule 11 (R14-5): a forbidden statement in the adopted result shape gives its verdict whatever the text reading gave.
-      if (rec.verdict !== 'violated' && rd.shape?.v === 'violated') rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect; by the adopted result shape, ${rd.shape.why} (second clause; kind ${rd.shape.kind ?? 'not named by the shape'}). The text reading gave: ${rec.reason}`, { steps: [r.call.step], notes: [route, ...rd.shape.notes, ...rec.notes.filter((x) => x !== route)] });
-    }
-    // R9-1 (3): a settled outcome reported as not known, kind unknown-when-settled. These runs add violated or nothing, never held.
-    const settled: string[] = [];
-    const settledBy: string[] = [];
-    const delivered = (q: Req) => typeof q.status === 'number' && q.status !== 202 && ((q.status >= 200 && q.status < 300) || (q.status >= 400 && q.status < 500));
-    for (const l of o.learned) {
-      // why: review (5): NF-19, an operation the declaration lists as completed asynchronously, is not such a statement.
-      if (asyncOps.includes(res.update!.tool)) continue;
-      if (!l.call || l.call.indeterminate || !l.requests.length || !l.requests.every(delivered) || !unknownIn(l.call)) continue;
-      const mut = l.requests.filter((q) => !/^(GET|HEAD|OPTIONS)$/i.test(q.method));
-      const allDone = mut.length > 0 && mut.every((q) => q.status! < 300);
-      const allRefused = mut.length > 0 && mut.every((q) => q.status! >= 400);
-      const agrees = (allDone && l.applied === true) || (allRefused && l.applied === false);
-      if (!agrees) continue;
-      const line = `in the run without a fault (${res.fields![l.field]!.path}), the interposer delivered the backend's own answer to each of ${l.requests.length} request(s) (${l.requests.map((q) => `${q.method} ${q.path} ${q.status}`).join(', ')}), the read-back agrees, and the result says it is not known whether the write was applied: ${quoteOf(l.call)}`;
-      if (unknownDecl(l.call!)) settled.push(line), settledBy.push(unknownBy(l.call!));
-      else extraNotes.push(`Seen, not judged (rule 11: only the default pattern for outcome unknown reads it): ${line}.`);
-    }
-    if (r.faulted && r.call && !r.call.indeterminate && r.applied === true && !asyncOps.includes(res.update!.tool) && unknownIn(r.call)) {
-      const again = (r.requests ?? []).filter((q) => q.seq > r.faulted!.seq && q.method === r.faulted!.method && q.path === r.faulted!.path && typeof q.status === 'number' && q.status !== 202 && q.status >= 200 && q.status < 300);
-      if (again.length) {
-        const line = `in the lost-answer trial the server sent the cut request again (${again.map((q) => `#${q.seq} ${q.method} ${q.path} ${q.status}`).join(', ')}) and received the backend's answer that it was carried out, yet the result says it is not known whether the write was applied: ${quoteOf(r.call)}`;
-        if (unknownDecl(r.call)) settled.push(line), settledBy.push(unknownBy(r.call));
-        else extraNotes.push(`Seen, not judged (rule 11): ${line}.`);
-      }
-    }
-    if (settled.length) {
-      const why = `A settled outcome was reported as not known (second clause; kind unknown-when-settled): ${settled.join('; ')}.`;
-      const by = [...new Set(settledBy)];
-      rec = rec.verdict === 'violated' ? { ...rec, reason: `${rec.reason} ${why}`, notes: [...rec.notes, ...by] } : { ...rec, verdict: 'violated', reason: `${why} ${rec.verdict === 'held' ? `(The lost-answer trial alone: ${rec.reason})` : ''}`.trim(), notes: [...rec.notes, ...by] };
-    }
-    if (extraNotes.length) rec = { ...rec, notes: [...rec.notes, ...extraNotes] };
-    if (r.faulted && r.call && !r.call.indeterminate && r.applied === true && r.call.ok && !(r.requests ?? []).some((q) => q.seq > r.faulted!.seq)) rec = { ...rec, notes: [...rec.notes, 'Observation: unverified-success (the server made no further backend request after the cut, and answered with a success).'] };
-    out.push(rec);
-  }
+  if (o.res2u)
+    out.push(
+      lostAnswerVerdict(o.res2u, {
+        w,
+        sc: { id: `${ID}.unknown-outcome`, version: VERSION },
+        route,
+        tool: res.update!.tool,
+        readTool: res.read.tool,
+        versionArg: res.version?.arg ?? null,
+        values: res.fields ? { [f0path(res)]: res.fields[0].values[1] } : {},
+        fallbackChanged: res.fields ? [f0path(res)] : [],
+        async: asyncOps.includes(res.update!.tool),
+        learned: o.learned.map((l) => ({ label: res.fields![l.field]!.path, requests: l.requests, call: l.call, applied: l.applied })),
+      }),
+    );
   // MWS-ATOM-1 and MWS-ATOM-2 for a composite update
   if (o.atom) {
     if (o.atom.skipped) out.push(...(['MWS-ATOM-1', 'MWS-ATOM-2'] as const).map((id) => result(id, w, sc, 'not applicable', o.atom!.skipped!, { notes: [route] })));
@@ -557,3 +476,224 @@ export function gatedVerdicts(o: GatedObs, res: ResourceSpec, asyncOps: string[]
 }
 
 const f0path = (res: ResourceSpec): string => res.fields![0].path;
+
+/** The run without a fault of a write (R9-1): its backend requests, its answer and whether the write read back as in effect. */
+export interface SettledRun {
+  /** What the run wrote (a field path, or the write call), for the record. */
+  label: string;
+  requests: Req[];
+  call?: CallBrief;
+  applied?: boolean | null;
+}
+
+/** The lost-answer trial's observation: the backend applied the call's last mutating request and its answer was cut. */
+export interface LostAnswerObs {
+  skipped?: string;
+  faulted: Req | null;
+  call: CallBrief | null;
+  changed: string[] | null;
+  applied: boolean | null;
+  object?: unknown;
+  requests?: Req[];
+  version_sent?: unknown;
+  /** R10-11: the repeat sent once with the version the call carried, with no fault, where the error named that version. */
+  follow?: FollowThroughRead | null;
+}
+
+/**
+ * MWS-RES-2, the lost-answer trial (spec 96d3691, R9-1, R10-11), and the clause on a settled outcome read in the runs without a
+ * fault: one record for one write path. Used by the update tool's held-request check and by the write-faults check for every
+ * other declared write call; the verdict rules are the same for both.
+ */
+export function lostAnswerVerdict(r: LostAnswerObs, x: { w: WritePath; sc: { id: string; version: string }; route: string; tool: string; readTool: string; versionArg: string | null; values: Record<string, unknown>; fallbackChanged: string[]; async: boolean; learned: SettledRun[] }): Result {
+  const su = x.sc;
+  const w = x.w;
+  const route = x.route;
+  const what = r.faulted ? `the backend applied ${showReq(r.faulted)} and the connection closed before the server received the answer` : '';
+  const textOf = (c: CallBrief) => `${c.text ?? ''} ${c.rpc_error?.message ?? ''}`.trim();
+  const quoteOf = (c: CallBrief) => JSON.stringify(short(textOf(c), 200));
+  // why: review (4): what a success says is read in its prose, never in a value of its data (a status "Unknown").
+  // why: rule 11 (R14-5): an adopted result shape that says unknown is a statement of its own, beside the text; either one counts.
+  const shapeUnknown = (c: CallBrief) => shapeOf(c)?.outcome === 'unknown';
+  const textUnknown = (c: CallBrief) => (c.ok ? says('outcome_unknown', proseOf(c.text)) : saysUnknownText(c));
+  const unknownIn = (c: CallBrief) => shapeUnknown(c) || textUnknown(c);
+  const unknownDecl = (c: CallBrief) => { if (shapeUnknown(c)) return true; const f = outcomeByField(c); return f ? f.outcome === 'unknown' : fromDeclaration('outcome_unknown') && textUnknown(c); };
+  const unknownBy = (c: CallBrief) => (shapeUnknown(c) ? decidedByShape([['outcome', 'unknown']], c) : `What the results say (outcome unknown) was decided by the declaration's pattern patterns.outcome_unknown, on the answers quoted above (spec 7.3, rule 11).`);
+  let rec: Result;
+  const extraNotes: string[] = [];
+  if (r.skipped || !r.call) rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${r.skipped ?? 'the call was not made'}`, { notes: [route] });
+  else if (r.call.indeterminate) rec = result('MWS-RES-2', w, su, 'not tested', 'unknown outcome: the tool call itself timed out or lost the connection', { notes: [route] });
+  else if (r.call.result_type && !KNOWN_RESULT_TYPES.includes(r.call.result_type)) rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: the result has resultType ${JSON.stringify(r.call.result_type)}, which the tester does not recognize; it is invalid under the MCP specification, so the trial is indeterminate (spec 7.3, rule 5)`, { notes: [route] });
+  else if (r.applied === null || r.changed === null) rec = result('MWS-RES-2', w, su, 'not tested', 'unknown outcome: the object did not read back after the call, so the condition was not established', { notes: [route] });
+  else if (r.applied === false) {
+    // why: R6-4: the backend applied the write (the interposer let it through) and the read-back does not show it, so the
+    // server undid it; the trial is judged as any failed write: what the answer says is compared with what remains applied.
+    const j = res2Judge(r.call, r.changed, 'backend', `Unknown outcome: ${what}; the read-back does not show the write, so the server undid it`, x.values, { async: x.async, object: r.object });
+    rec = result('MWS-RES-2', w, su, j.verdict, j.reason, { steps: j.verdict === 'violated' ? [r.call.step] : [], notes: [route, ...j.notes] });
+  } else if (r.call.result_type && r.call.result_type !== 'complete') rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: the answer was a ${r.call.result_type} result; judging it on its final state is not built in this preview`, { notes: [route] });
+  else if (r.call.ok) {
+    // why (review of note 8, 4; R9-1 kind no-error-flag): the success's prose is read, never a value of its data, and only a
+    // declared pattern decides (rule 11).
+    const prose = notAppliedText(r.call);
+    const failedD = fromDeclaration('not_applied') && says('not_applied', prose);
+    const unknownD = unknownDecl(r.call);
+    // why: rule 11 (B-9 v2): a success whose adopted result shape says not_applied, partial or unknown states a failure or an open
+    // outcome without isError, as the same words in text would; read on its own beside the text (R14-5).
+    const so = shapeOf(r.call)?.outcome;
+    const shapeD = so === 'not_applied' || so === 'partial' || so === 'unknown';
+    const SAYS: Record<string, string> = { unknown: 'that it is not known whether the write was applied', partial: 'that the write was applied in part', not_applied: 'that the write was not applied' };
+    if (shapeD && !failedD) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and the result has no isError: true while its adopted result shape says ${SAYS[so!]} (${quoteField('outcome', so)}) (third clause; kind no-error-flag).`, { steps: [r.call.step], notes: [route, decidedByShape([['outcome', so]], r.call)] });
+    else if (failedD || unknownD) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and the result has no isError: true while its content says ${failedD ? 'that the write failed or that nothing was changed' : 'that it is not known whether the write was applied'}: ${JSON.stringify(short(prose, 200))} (third clause; kind no-error-flag)${shapeD ? `; its adopted result shape also says ${quoteField('outcome', so)}` : ''}.`, { steps: [r.call.step], notes: [route, failedD ? saidBy('not_applied', prose) : saidBy('outcome_unknown', textOf(r.call)), ...(shapeD ? [decidedByShape([['outcome', so]], r.call)] : [])] });
+    else if (says('not_applied', prose) || unknownIn(r.call)) rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the write is in effect and the tool answered with a success whose text only the tester's default patterns read as saying the write failed or that the outcome is not known: ${JSON.stringify(short(prose, 200))}. A default pattern alone does not decide (spec 7.3, rule 11): declare patterns.not_applied and patterns.outcome_unknown, or read it`, { notes: [route, saidBy('not_applied', prose), saidBy('outcome_unknown', textOf(r.call))] });
+    else rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the tool answered with a success${so ? ` (${quoteField('outcome', so)} in its adopted result shape)` : ''}, which reports no failure, so this trial adds no verdict here (whether the success is true is MWS-RES-1)`, { notes: [route, ...(so ? [decidedByShape([['outcome', so]], r.call)] : [])] });
+  } else if (r.call.rpc_error) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, and ${x.tool} returned a JSON-RPC error (${r.call.rpc_error.code}); the lost answer is a failure of the backend, so it must be a tool execution error (third clause; kind protocol-error).`, { steps: [r.call.step], notes: [route] });
+  else {
+    // why: gate-2 re-run on 378f32f (note 19, R9, R10; rule 11): only declared patterns decide what the error says.
+    const text = textOf(r.call);
+    const vals: Record<string, unknown> = x.values;
+    // R9-1 (2), R10-11: an invitation to repeat the write whose outcome is open, naming neither a read, nor the key, nor the version
+    // the call carried, is retry-invited. A read is named by the read tool or the object; the version by the value the call carried.
+    const invites = says('retry_invited', text);
+    // why: review (2, 7): a read is named by the read tool's name, or by a declared patterns.read_named; an object id alone may be
+    // only the subject of the sentence, so it leaves the question open (no held, no retry-invited violated). The version is named
+    // by the value the call carried, or by the version argument's name ("the same expected_version").
+    const toolNamed = new RegExp(`(^|[^A-Za-z0-9_])${x.readTool.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text);
+    const declaredRead = fromDeclaration('read_named') && says('read_named', text);
+    const objectOnly = !toolNamed && !declaredRead && r.object !== undefined && r.object !== null && valueMentioned(r.call, r.object);
+    const namesRead = toolNamed || declaredRead;
+    const namesVersion = textNamesVersion(r.call, x.versionArg, r.version_sent);
+    // why: B-9 v2 ("How a tester uses it"): repeat is read as the tester can check it. The trial sends the declared update
+    // arguments and adds no idempotency key; the version it carried is known where the declaration requires one.
+    // (what the call carried is recorded by the driver, CallBrief.carried; older evidence leaves it open, and then no held.)
+    const rd = readSecondClause(r.call, (r.changed ?? []).length ? r.changed! : x.fallbackChanged, vals, { lostAnswer: true, textNamesRead: namesRead ? true : objectOnly ? 'maybe' : false, followThrough: r.follow ?? null });
+    // why: D-2 (owner, 15 Nov): a declared patterns.repeat_invited is the declarer's statement that what it matches invites a
+    // repeat without a read first and without the key or version: kind retry-invited, beside a correct shape too (R14-5).
+    const prose = proseOf(r.call.text);
+    const repInv = fromDeclaration('repeat_invited') && says('repeat_invited', prose);
+    let blockHeld: string | null = null;
+    let followViolates: string | null = null;
+    if (repInv) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and by the declared patterns.repeat_invited the error invites the caller to send the call again, naming no read to make first and no key or version to repeat it with (second clause; kind retry-invited): ${quoteOf(r.call)}.`, { steps: [r.call.step], notes: [route, saidBy('repeat_invited', prose), ...rd.notes] });
+    else if (invites && !namesRead && !namesVersion && objectOnly) {
+      blockHeld = `the error invites a repeat and names the object ${short(r.object, 40)}, but whether it names it as a read to make first is decided by patterns.read_named, which the declaration does not give (spec 7.3, rule 11): ${quoteOf(r.call)}`;
+      rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the write is in effect; ${blockHeld}`, { notes: [route, saidBy('retry_invited', text), ...rd.notes] });
+    } else if (invites && !namesRead && !namesVersion && fromDeclaration('retry_invited')) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect, and the error tells the caller to repeat the call without naming a read to make first, the idempotency key or the version the call carried (second clause; kind retry-invited): ${quoteOf(r.call)}.`, { steps: [r.call.step], notes: [route, saidBy('retry_invited', text), ...rd.notes] });
+    else {
+      if (invites && !namesRead && !namesVersion) blockHeld = `only the tester's default pattern reads the error as telling the caller to repeat the call (declare patterns.retry_invited, or read it): ${quoteOf(r.call)}`;
+      // why: R10-11: an error that invites a repeat with the version the call carried is decided by the follow-through: the call sent
+      // again once with that version, with no fault, and read back. Applied again: retry-invited; a conflict or nothing applied again: met.
+      if (invites && namesVersion && !namesRead) {
+        if (r.follow?.applied_again === true) followViolates = `the error invites a repeat with the version the call carried, and the follow-through repeat with that version, sent with no fault, was applied again: the version did not guard the repeat (${r.follow.how})`;
+        else if (r.follow?.applied_again !== false) blockHeld = `the error invites a repeat with the version the call carried; ${r.follow ? `the follow-through repeat with that version could not show whether it was applied again (${r.follow.how})` : 'the follow-through repeat with that version was not sent in this trial'}, so whether the version guards the repeat is not known`;
+      }
+      if (followViolates) rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect; ${followViolates} (second clause; kind retry-invited): ${quoteOf(r.call)}.`, { steps: [r.call.step], notes: [route, saidBy('retry_invited', text), ...rd.notes] });
+      else if (rd.v === 'held' && !blockHeld) rec = result('MWS-RES-2', w, su, 'held', `Unknown outcome: ${what}; the error ${rd.why}: ${JSON.stringify(short(r.call.text ?? '', 200))}.`, { notes: [route, ...rd.notes] });
+      else if (rd.v === 'violated') {
+        // why: review (14): which kind is a reading too; without a declared not_applied pattern it is not decided. Where only the
+        // adopted result shape gives the violation, its members give the kind (B-9 v2), where they give one.
+        const fk = failedKind(true);
+        const textKind = !fromDeclaration(fk) ? 'stated-failure or bare-transport, not decided: declare patterns.write_failed' : says(fk, text) ? 'stated-failure' : 'bare-transport';
+        const kind = rd.text?.v === 'violated' ? (rd.shape?.v === 'violated' && rd.shape.kind && rd.shape.kind !== textKind ? `${textKind} (text); ${rd.shape.kind} (shape)` : textKind) : rd.shape?.kind ?? 'not named by the shape';
+        rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect; ${rd.why} (second clause; kind ${kind}): ${JSON.stringify(short(r.call.text ?? '', 200))}.`, { steps: [r.call.step], notes: [route, ...rd.notes] });
+      } else rec = result('MWS-RES-2', w, su, 'not tested', `unknown outcome: ${what}; the write is in effect; ${rd.v === 'held' ? `the error ${rd.why}, but ${blockHeld}` : rd.why}${blockHeld && rd.v !== 'held' ? `; also, ${blockHeld}` : ''}`, { notes: [route, ...rd.notes] });
+    }
+    // why: rule 11 (R14-5): a forbidden statement in the adopted result shape gives its verdict whatever the text reading gave.
+    if (rec.verdict !== 'violated' && rd.shape?.v === 'violated') rec = result('MWS-RES-2', w, su, 'violated', `Unknown outcome: ${what}, the write is in effect; by the adopted result shape, ${rd.shape.why} (second clause; kind ${rd.shape.kind ?? 'not named by the shape'}). The text reading gave: ${rec.reason}`, { steps: [r.call.step], notes: [route, ...rd.shape.notes, ...rec.notes.filter((x) => x !== route)] });
+  }
+  // R9-1 (3): a settled outcome reported as not known, kind unknown-when-settled. These runs add violated or nothing, never held.
+  const settled: string[] = [];
+  const settledBy: string[] = [];
+  const delivered = (q: Req) => typeof q.status === 'number' && q.status !== 202 && ((q.status >= 200 && q.status < 300) || (q.status >= 400 && q.status < 500));
+  for (const l of x.learned) {
+    // why: review (5): NF-19, an operation the declaration lists as completed asynchronously, is not such a statement.
+    if (x.async) continue;
+    if (!l.call || l.call.indeterminate || !l.requests.length || !l.requests.every(delivered) || !unknownIn(l.call)) continue;
+    const mut = l.requests.filter((q) => isMutating(q));
+    const allDone = mut.length > 0 && mut.every((q) => q.status! < 300);
+    const allRefused = mut.length > 0 && mut.every((q) => q.status! >= 400);
+    const agrees = (allDone && l.applied === true) || (allRefused && l.applied === false);
+    if (!agrees) continue;
+    const line = `in the run without a fault (${l.label}), the interposer delivered the backend's own answer to each of ${l.requests.length} request(s) (${l.requests.map((q) => `${q.method} ${q.path} ${q.status}`).join(', ')}), the read-back agrees, and the result says it is not known whether the write was applied: ${quoteOf(l.call)}`;
+    if (unknownDecl(l.call!)) settled.push(line), settledBy.push(unknownBy(l.call!));
+    else extraNotes.push(`Seen, not judged (rule 11: only the default pattern for outcome unknown reads it): ${line}.`);
+  }
+  if (r.faulted && r.call && !r.call.indeterminate && r.applied === true && !x.async && unknownIn(r.call)) {
+    const again = (r.requests ?? []).filter((q) => q.seq > r.faulted!.seq && q.method === r.faulted!.method && q.path === r.faulted!.path && typeof q.status === 'number' && q.status !== 202 && q.status >= 200 && q.status < 300);
+    if (again.length) {
+      const line = `in the lost-answer trial the server sent the cut request again (${again.map((q) => `#${q.seq} ${q.method} ${q.path} ${q.status}`).join(', ')}) and received the backend's answer that it was carried out, yet the result says it is not known whether the write was applied: ${quoteOf(r.call)}`;
+      if (unknownDecl(r.call)) settled.push(line), settledBy.push(unknownBy(r.call));
+      else extraNotes.push(`Seen, not judged (rule 11): ${line}.`);
+    }
+  }
+  if (settled.length) {
+    const why = `A settled outcome was reported as not known (second clause; kind unknown-when-settled): ${settled.join('; ')}.`;
+    const by = [...new Set(settledBy)];
+    rec = rec.verdict === 'violated' ? { ...rec, reason: `${rec.reason} ${why}`, notes: [...rec.notes, ...by] } : { ...rec, verdict: 'violated', reason: `${why} ${rec.verdict === 'held' ? `(The lost-answer trial alone: ${rec.reason})` : ''}`.trim(), notes: [...rec.notes, ...by] };
+  }
+  if (r.follow) extraNotes.push(/^the object could not be changed out of band/.test(r.follow.how) ? `Follow-through (R10-11): not sent: ${r.follow.how}.` : `Follow-through (R10-11): the object was changed out of band, and the call was sent again once with the version it carried (${short(r.version_sent, 40)}), with no fault; ${r.follow.applied_again === true ? 'it was applied again' : r.follow.applied_again === false ? 'it was not applied again' : 'whether the version guards the repeat could not be read'} (${r.follow.how}).`);
+  if (extraNotes.length) rec = { ...rec, notes: [...rec.notes, ...extraNotes] };
+  if (r.faulted && r.call && !r.call.indeterminate && r.applied === true && r.call.ok && !(r.requests ?? []).some((q) => q.seq > r.faulted!.seq)) rec = { ...rec, notes: [...rec.notes, 'Observation: unverified-success (the server made no further backend request after the cut, and answered with a success).'] };
+  return rec;
+}
+
+/** Does the error's text name the version the call carried (its value) or the version argument ("the same expected_version")? */
+export function textNamesVersion(c: CallBrief, versionArg: string | null, versionSent: unknown): boolean {
+  if (!versionArg) return false;
+  const text = `${c.text ?? ''} ${c.rpc_error?.message ?? ''}`.trim();
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // why: review of f4: a bare number is named as the version only beside the version argument's name or the word "version"
+  // ("expected_version 3", "version: 3", "3 (the version)"); a number elsewhere in the text (an id, a count) is not.
+  const byValue = versionSent !== undefined && versionSent !== null && (typeof versionSent === 'number' || /^\d+$/.test(String(versionSent)) ? new RegExp(`\\b(${esc(versionArg)}|version)\\b[^.\\n\\d]{0,24}(^|[^A-Za-z0-9_-])${esc(String(versionSent))}($|[^A-Za-z0-9_-])|(^|[^A-Za-z0-9_-])${esc(String(versionSent))}\\W{1,4}(the )?(${esc(versionArg)}|version)\\b`, 'i').test(text) : valueMentioned(c, versionSent));
+  return byValue || new RegExp(`(^|[^A-Za-z0-9_])${versionArg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_])`).test(text);
+}
+
+/**
+ * Whether the lost-answer trial sends the follow-through (R10-11): the call carried a version, the write is in effect, and the
+ * error names that version, by its adopted result shape (repeat: same_version) or in its text.
+ */
+export function namesCarriedVersion(c: CallBrief, versionArg: string | null, versionSent: unknown): boolean {
+  if (c.ok || c.indeterminate || versionSent === null || versionSent === undefined) return false;
+  return shapeOf(c)?.repeat === 'same_version' || textNamesVersion(c, versionArg, versionSent);
+}
+
+/**
+ * What the follow-through repeat did (R10-11). The object was changed out of band after the lost-answer trial (`mid` is the read
+ * after that change), so a repeat that is applied again shows: the version moved, or the state changed, from `mid` to `after`.
+ * A repeat that changed nothing meets the requirement only where it was refused as a conflict (a structured signal, or a declared
+ * patterns.conflict) or answered as a replay (an adopted shape's replayed: true); any other answer that changed nothing (a plain
+ * success, a refusal of another kind) does not show what the version did, and gives null: not tested. A backend that leaves the
+ * version alone for a write that changes nothing would otherwise give an unearned held.
+ */
+export function followRead(rep: { ok: boolean; text: string | null; rpc_error: { code: number; message: string } | null; data?: unknown; shape?: CallBrief['shape']; tool?: string; timed_out?: boolean; transport_error?: string | null }, mid: { ok: boolean; obj: unknown; version: unknown }, after: { ok: boolean; obj: unknown; version: unknown }, versioned: boolean, versionPath: string | null, ignore: string[]): FollowThroughRead {
+  const answer = rep.timed_out || rep.transport_error ? 'the repeat timed out or lost its connection' : rep.ok ? 'the repeat was answered as a success' : `the repeat was refused (${JSON.stringify(short(rep.text ?? rep.rpc_error?.message ?? '', 100))})`;
+  if (rep.timed_out || rep.transport_error) return { applied_again: null, how: answer };
+  if (!mid.ok || !after.ok) return { applied_again: null, how: `${answer}; the object did not read back around it` };
+  const moved = versioned && !deepEqual(mid.version, after.version);
+  const changed = withoutIgnored(diff(mid.obj, after.obj), [...ignore, ...(versionPath ? [versionPath] : [])]).map((e) => e.path);
+  const seen = `${versioned ? `the version read ${short(mid.version, 30)} before it and ${short(after.version, 30)} after it; ` : ''}the state ${changed.length ? `changed (${changed.join(', ')})` : 'read back unchanged'}`;
+  if (moved || changed.length) return { applied_again: true, how: `${answer}; ${seen}` };
+  const conflict = !rep.ok ? (conflictSignal(rep as never)?.source ?? (fromDeclaration('conflict') && says('conflict', `${rep.text ?? ''} ${rep.rpc_error?.message ?? ''}`) ? 'the declared patterns.conflict' : null)) : null;
+  if (conflict) return { applied_again: false, how: `${answer}, as a conflict (${conflict}); ${seen}` };
+  if (rep.ok && shapeOf(rep as never)?.replayed === true) return { applied_again: false, how: `${answer}, as a replay (mws.replayed = true); ${seen}` };
+  return { applied_again: null, how: `${answer}; ${seen}; it was neither refused as a conflict nor answered as a replay, so it does not show whether the version guards a repeat` };
+}
+
+/**
+ * The out-of-band change before the follow-through repeat (R10-11): one declared field set to a value it does not hold, through
+ * the platform's API (control.patch) where declared, else through the update tool with the current version. Null where neither is
+ * declared or the object has no declared field.
+ */
+export async function changeOutOfBand(d: Driver, res: ResourceSpec, cur: unknown, label: string, step: string): Promise<{ ok: boolean; how: string } | null> {
+  const f = res.fields?.[0];
+  if (!f) return null;
+  const now = valueAt(cur, f.path);
+  const v = f.values.find((x) => !deepEqual(x, now)) ?? f.values[0];
+  if (hasControl(res, 'patch')) {
+    const r = await d.controlPatch(f, v, step).catch(() => null);
+    return { ok: !!r?.ok, how: `${f.path} set to ${short(v, 30)} through control.patch${r?.ok ? '' : ` (refused: HTTP ${r?.status ?? '?'})`}` };
+  }
+  if (res.update) {
+    const r = await d.update(label, f, v, { step });
+    return { ok: r.ok, how: `${f.path} set to ${short(v, 30)} through ${res.update.tool}${r.ok ? '' : ' (refused)'}` };
+  }
+  return null;
+}

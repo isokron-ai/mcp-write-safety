@@ -12,7 +12,7 @@
 // Mirrors: rule 9 of the published MCP development rules (annotations must be
 // honest); a write tool that claims to be read-only is the most harmful
 // annotation error, because clients may run such tools without asking.
-//   https://isokron.ai/mcp-development
+//   https://isokron.ai/mcp-development?utm_source=tiny-tracker-source&utm_medium=source
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

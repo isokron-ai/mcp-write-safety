@@ -12,7 +12,7 @@ A maintainer of a cited project may ask, by an issue in this repository, for a d
 
 ## GitHub MCP server
 
-Server and version tested: github/github-mcp-server v2.1.0. Article published 9 November 2026: [findings register in the article](https://isokron.ai/research/github-mcp-server-audit#findings-register).
+Server and version tested: github/github-mcp-server v2.1.0. Article published 9 November 2026: [findings register in the article](https://isokron.ai/research/github-mcp-server-audit?utm_source=mws-spec&utm_medium=spec#findings-register).
 
 | ID | Statement | Trials | Upstream | Cited under |
 |---|---|---|---|---|
@@ -32,7 +32,7 @@ Server and version tested: github/github-mcp-server v2.1.0. Article published 9 
 
 ## Grafana MCP server
 
-Server and version tested: grafana/mcp-grafana v2.2.0. Article published 10 November 2026: [findings register in the article](https://isokron.ai/research/grafana-mcp-server-audit#findings-register).
+Server and version tested: grafana/mcp-grafana v2.2.0. Article published 10 November 2026: [findings register in the article](https://isokron.ai/research/grafana-mcp-server-audit?utm_source=mws-spec&utm_medium=spec#findings-register).
 
 | ID | Statement | Trials | Upstream | Cited under |
 |---|---|---|---|---|
@@ -47,7 +47,7 @@ Server and version tested: grafana/mcp-grafana v2.2.0. Article published 10 Nove
 
 ## PostHog MCP server
 
-Server and version tested: PostHog/posthog `services/mcp` and the hosted server, November 2026. Article published 10 November 2026: [findings register in the article](https://isokron.ai/research/posthog-mcp-server-audit#findings-register).
+Server and version tested: PostHog/posthog `services/mcp` and the hosted server, November 2026. Article published 10 November 2026: [findings register in the article](https://isokron.ai/research/posthog-mcp-server-audit?utm_source=mws-spec&utm_medium=spec#findings-register).
 
 | ID | Statement | Trials | Upstream | Cited under |
 |---|---|---|---|---|
@@ -61,7 +61,7 @@ Server and version tested: PostHog/posthog `services/mcp` and the hosted server,
 
 ## Kubernetes MCP server
 
-Server and version tested: containers/kubernetes-mcp-server v0.1.2. Article published 12 November 2026: [findings register in the article](https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register).
+Server and version tested: containers/kubernetes-mcp-server v0.1.2. Article published 12 November 2026: [findings register in the article](https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=mws-spec&utm_medium=spec#findings-register).
 
 | ID | Statement | Trials | Upstream | Cited under |
 |---|---|---|---|---|
@@ -83,7 +83,7 @@ Server and version tested: containers/kubernetes-mcp-server v0.1.2. Article publ
 
 ## Payload MCP plugin
 
-Server and version tested: @payloadcms/plugin-mcp 3.93.0. Article published 14 November 2026: [findings register in the article](https://isokron.ai/research/payload-mcp-server-audit#payload-findings).
+Server and version tested: @payloadcms/plugin-mcp 3.93.0. Article published 14 November 2026: [findings register in the article](https://isokron.ai/research/payload-mcp-server-audit?utm_source=mws-spec&utm_medium=spec#payload-findings).
 
 | ID | Statement | Trials | Upstream | Cited under |
 |---|---|---|---|---|

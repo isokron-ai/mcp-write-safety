@@ -302,7 +302,92 @@ export interface GuardCall {
 export interface GuardHooks {
   /** Called before each guard call is sent: the run appends it to the ledger and counts it in the report. */
   onCall?: (c: GuardCall) => void;
+  /** Called before each read of the state compared around a declared guard call (a fixture, a canary, a list): the run and cleanup
+   * record it in the ledger. These reads go out before the tenant check has matched. They are not guard calls and are not counted as writes. */
+  onStateRead?: (r: GuardStateRead) => void;
 }
+/** One read of the state compared around a declared guard call (review F4 on 1b7e1e1). */
+export interface GuardStateRead {
+  step: string;
+  tool: string;
+  phase: 'before' | 'after';
+  what: string;
+}
+
+/** The tools the manifest reads through: every resource's read and list, and every canary. */
+export const manifestReadTools = (m: Manifest): string[] => [...new Set([...m.resources.flatMap((r) => [r.read.tool, ...(r.list ? [r.list.tool] : [])]), ...m.canaries.map((c) => c.tool)])];
+
+/** Does the manifest declare state a declared guard call can be compared against (a fixture, a canary, a list needing no object)? */
+const guardStateDeclared = (m: Manifest): boolean =>
+  m.canaries.length > 0 || m.resources.some((r) => !!r.fixture || (!!(r.list ?? (r.read.items ? r.read : null)) && !/\{\{\s*(json:)?\s*(id|marker|key|scope)\b/.test(JSON.stringify((r.list ?? r.read).args ?? null))));
+
+/**
+ * Tools in tools/list, other than the guard's, that could be an unannotated read route (review F3 on 1b7e1e1): any tool that
+ * declares neither readOnlyHint: false nor destructiveHint: true.
+ */
+export const possibleReadRoutes = (tools: { name?: unknown; annotations?: Record<string, unknown> }[], guardTool: string): string[] =>
+  tools.filter((t) => t.name !== guardTool && t.annotations?.['readOnlyHint'] !== false && t.annotations?.['destructiveHint'] !== true).map((t) => String(t.name));
+
+/** Every string (keys and values) in the guard's arguments. */
+const stringsIn = (v: unknown, out: string[] = []): string[] => {
+  if (typeof v === 'string') out.push(v);
+  else if (Array.isArray(v)) for (const x of v) stringsIn(x, out);
+  else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) (out.push(k), stringsIn(x, out));
+  return out;
+};
+
+// why: review F2 on 1b7e1e1: once the tool declares itself destructive, only the operator's word stands between the guard's
+// arguments and a write; a conservative word list refuses what looks like a write, a lock or a side effect. A heuristic that
+// fails closed: a false match only refuses, and the operator can rephrase the read.
+const WRITE_WORDS = /\b(insert|update|delete|replace|merge|upsert|drop|alter|create|truncate|rename|grant|revoke|call|exec|execute|load|lock|unlock|set|handler|do|copy|into|outfile|dumpfile|vacuum|analyze|optimize|repair|flush|reset|kill|shutdown|install|uninstall|prepare|deallocate|begin|commit|rollback|savepoint|start|attach|detach|pragma|import|export|refresh|reindex|cluster|notify|listen|discard|comment|security|nextval|setval|get_lock|release_lock|release_all_locks|lo_import|lo_export|dblink\w*|pg_\w*lock\w*|pg_terminate_backend|pg_cancel_backend|sp_\w+|xp_\w+)\b|for\s+(update|share|no\s+key\s+update|key\s+share)|\block\s+in\s+share\s+mode/i;
+
+// why: review of the lane (should-fix 1): the word list cannot name every function that changes state (lo_unlink(),
+// pg_drop_replication_slot(), set_config(), sys_exec(), any user-defined function). So any call is refused, fail-closed,
+// unless its name is on this short list of built-in functions that only compute a value. Names are compared without regard
+// to case. A schema-qualified name is accepted only under pg_catalog (any other schema may hold a user-defined function of the
+// same name); a quoted name ("count", `count`) is always refused, since quoting makes it a different, possibly user-defined,
+// function. The text is scanned as written, string literals included: a literal that reads like a call refuses too.
+// Keep this list minimal: a name added here is trusted never to write.
+export const GUARD_READ_FUNCTIONS: ReadonlySet<string> = new Set(['count', 'coalesce', 'nullif', 'now', 'lower', 'upper', 'length', 'max', 'min', 'sum', 'avg', 'cast', 'abs', 'round', 'trim', 'concat']);
+// SQL keywords that are not function calls but may stand before a parenthesis in a read (`IN (`, `EXISTS (`, `AS (`, `OVER (`).
+const PAREN_KEYWORDS: ReadonlySet<string> = new Set(['in', 'exists', 'any', 'all', 'some', 'not', 'and', 'or', 'on', 'using', 'as', 'from', 'join', 'lateral', 'where', 'select', 'having', 'over', 'filter', 'when', 'then', 'else', 'union', 'intersect', 'except']);
+// A name part: a bare identifier (letters, digits, _ and $ in any order, as some dialects allow) or a quoted one.
+const NAME_PART = '(?:[\\p{L}\\p{N}_$]+|"(?:[^"]|"")*"|`[^`]*`)';
+const CALL = new RegExp(`(${NAME_PART}(?:\\s*\\.\\s*${NAME_PART})*)\\s*\\(`, 'gu');
+
+/** The first call in `text` of a function not on the read-only list, or null. */
+export function unlistedFunctionCall(text: string): string | null {
+  for (const m of text.matchAll(CALL)) {
+    const parts = m[1]!.split(/\s*\.\s*/);
+    const name = parts[parts.length - 1]!;
+    if (/^["`]/.test(name)) return m[1]!;
+    const lower = name.toLowerCase();
+    if (parts.length === 1 && PAREN_KEYWORDS.has(lower)) continue;
+    if (!GUARD_READ_FUNCTIONS.has(lower)) return m[1]!;
+    if (parts.length > 2 || (parts.length === 2 && parts[0]!.toLowerCase() !== 'pg_catalog')) return m[1]!;
+  }
+  return null;
+}
+
+/** Why the guard's arguments look like they may write, or null (review F2 on 1b7e1e1). Comments are stripped before matching, and any comment marker or a `;` that is not the last character refuses on its own. Any function call whose name is not in GUARD_READ_FUNCTIONS refuses too. */
+export function guardArgsProblem(args: unknown): string | null {
+  for (const raw of stringsIn(args)) {
+    // why: MySQL runs the body of /*! ... */ and /*+ ... */ comments, so a comment is refused outright rather than trusted.
+    if (/\/\*|\*\/|--|#/.test(raw)) return `${JSON.stringify(short(raw, 80))} contains a comment marker (/*, */, -- or #)`;
+    const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(--|#)[^\n]*/g, '');
+    if (/;/.test(stripped.replace(/;\s*$/, ''))) return `${JSON.stringify(short(raw, 80))} contains more than one statement (;)`;
+    for (const t of [raw, stripped]) {
+      const w = WRITE_WORDS.exec(t);
+      if (w) return `${JSON.stringify(short(raw, 80))} contains ${JSON.stringify(w[0])}, a word that can write, lock or have a side effect`;
+    }
+    const f = unlistedFunctionCall(raw);
+    if (f) return `${JSON.stringify(short(raw, 80))} calls ${f}(), a function not on the read-only list (${[...GUARD_READ_FUNCTIONS].join(', ')}; schema-qualified only under pg_catalog), so it may have side effects`;
+  }
+  return null;
+}
+
+/** A guard declared read-only call by call (read_only_call) through a tool that declares destructiveHint: true (t12's dispatcher). */
+export const destructiveDispatcherGuard = (g: NonNullable<Manifest['target']['guard']>, def: { annotations?: Record<string, unknown> } | undefined): boolean => !!g.read_only_call && def?.annotations?.['destructiveHint'] === true;
 
 export const guardBasis = (g: NonNullable<Manifest['target']['guard']>): GuardCall['basis'] => (g.read_only_call ? 'operator' : g.read_only ? 'declared' : 'annotation');
 
@@ -319,17 +404,33 @@ function sentText(g: NonNullable<Manifest['target']['guard']>, calls: GuardCall[
  * no object, marker or scope, each read to the end. A key per list or canary; the value is canonical JSON with the declared
  * ignored fields left out, or null where the read failed (that one is not compared).
  */
-async function stateSnapshot(m: Manifest, s: Session, label: string, step: string): Promise<Map<string, string | null>> {
+async function stateSnapshot(m: Manifest, s: Session, label: string, step: string, o: { whole?: boolean; phase?: GuardStateRead['phase']; onStateRead?: GuardHooks['onStateRead']; listIds?: Map<string, string> } = {}): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
+  const phase = o.phase ?? 'before';
+  const announce = (st: string, tool: string, what: string): string => (o.onStateRead?.({ step: st, tool, phase, what }), st);
+  // why: t12: a guard through a tool that declares destructiveHint: true (a dispatcher that is the server's only read route) is
+  // also checked against every pre-made fixture; in that mode (whole) nothing is left out of any read: read.ignore, list.ignore
+  // and a canary's ignore are not applied (review F1 on 1b7e1e1), and a list that could be read only in part counts as unread.
+  if (o.whole) {
+    for (const r of m.resources) {
+      if (!r.fixture) continue;
+      const k = `fixture ${r.name} ${JSON.stringify(r.fixture.id)}`;
+      if (out.has(k)) continue;
+      const st = announce(s.stepId(`${step}.fixture.${r.name}`), r.read.tool, k);
+      const got = await s.call(label, r.read.tool, render(r.read.args, baseVars(r, '', { id: r.fixture.id })), { write: false, step: st });
+      out.set(k, got.ok ? canonical(got.data !== null && got.data !== undefined ? got.data : (got.text ?? null)) : null);
+    }
+  }
   for (const c of m.canaries) {
     const k = `canary ${c.name}`;
-    const r = await s.call(label, c.tool, c.args, { write: false, step: s.stepId(`${step}.canary.${c.name}`) });
+    const st = announce(s.stepId(`${step}.canary.${c.name}`), c.tool, k);
+    const r = await s.call(label, c.tool, c.args, { write: false, step: st });
     if (!r.ok) {
       out.set(k, null);
       continue;
     }
     let v = c.path ? getPath(r.data, c.path) : r.data;
-    for (const p of c.ignore) v = unsetPath(v, p);
+    if (!o.whole) for (const p of c.ignore) v = unsetPath(v, p);
     out.set(k, canonical(v ?? null));
   }
   for (const r of m.resources) {
@@ -338,12 +439,13 @@ async function stateSnapshot(m: Manifest, s: Session, label: string, step: strin
     const args = render(l.args, baseVars(r, '', {}));
     const k = `list ${l.tool} ${canonical(args ?? null)}`;
     if (out.has(k)) continue;
-    const got = await listAll(s, label, l, args, s.stepId(`${step}.list.${r.name}`));
-    if (!got.ok) {
+    o.listIds?.set(k, l.id);
+    const got = await listAll(s, label, l, args, announce(s.stepId(`${step}.list.${r.name}`), l.tool, k));
+    if (!got.ok || (o.whole && got.partial)) {
       out.set(k, null);
       continue;
     }
-    const ignore = [...r.read.ignore, ...l.ignore];
+    const ignore = o.whole ? [] : [...r.read.ignore, ...l.ignore];
     const items = got.items.map((it) => {
       let v = it;
       for (const p of ignore) v = unsetPath(v, p);
@@ -354,14 +456,78 @@ async function stateSnapshot(m: Manifest, s: Session, label: string, step: strin
   return out;
 }
 
-export async function tenantGuard(m: Manifest, s: Session, label: string, o: GuardHooks = {}): Promise<{ matched: string; step: string; basis?: 'operator'; calls: GuardCall[]; state?: string }> {
+/** The paths at which two values differ (at most `max`): `a.b`, `[0].c`; `(whole value)` where the root itself differs. */
+function changedPaths(a: unknown, b: unknown, path: string, out: string[], max: number): void {
+  if (out.length >= max || canonical(a ?? null) === canonical(b ?? null)) return;
+  const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+  if (obj(a) && obj(b)) {
+    for (const key of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) changedPaths(a[key], b[key], /^[A-Za-z_$][\w$]*$/.test(key) ? (path ? `${path}.${key}` : key) : `${path}[${JSON.stringify(key)}]`, out, max);
+    return;
+  }
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+    a.forEach((x, i) => changedPaths(x, b[i], `${path}[${i}]`, out, max));
+    return;
+  }
+  out.push(path || '(whole value)');
+}
+
+/** What changed in one compared read (its canonical form before and after); a list's rows are matched by its id path where it can be. */
+function stateChanges(key: string, before: string, after: string, idPath: string | undefined, max = 5): string[] {
+  const out: string[] = [];
+  try {
+    const a = JSON.parse(before) as unknown;
+    const b = JSON.parse(after) as unknown;
+    if (key.startsWith('list ') && Array.isArray(a) && Array.isArray(b)) {
+      const rows = (x: unknown[]): unknown[] => x.map((r) => JSON.parse(String(r)) as unknown);
+      const ra = rows(a);
+      const rb = rows(b);
+      const byId = (x: unknown[]): Map<string, unknown> | null => {
+        if (!idPath) return null;
+        const mp = new Map<string, unknown>();
+        for (const r of x) {
+          const id = getPath(r, idPath);
+          if (id === undefined || id === null || mp.has(canonical(id))) return null;
+          mp.set(canonical(id), r);
+        }
+        return mp;
+      };
+      const ma = byId(ra);
+      const mb = byId(rb);
+      if (ma && mb) {
+        for (const [id, r] of ma) if (mb.has(id)) changedPaths(r, mb.get(id), `[${idPath}=${id}]`, out, max);
+        for (const id of ma.keys()) if (!mb.has(id) && out.length < max) out.push(`[${idPath}=${id}] (row gone)`);
+        for (const id of mb.keys()) if (!ma.has(id) && out.length < max) out.push(`[${idPath}=${id}] (row added)`);
+        return out;
+      }
+      changedPaths(ra, rb, '', out, max);
+      return out;
+    }
+    changedPaths(a, b, '', out, max);
+  } catch {
+    // not JSON (cannot happen for canonical output): name nothing rather than guess
+  }
+  return out;
+}
+
+/** The field a changed path ends in (`[0].last_read_at` -> last_read_at), or null for a whole value, a row or an index. */
+const leafField = (p: string): string | null => {
+  if (/\((row gone|row added|whole value)\)$/.test(p)) return null;
+  const m = /(?:^|\.)([A-Za-z_$][\w$]*)$/.exec(p) ?? /\["((?:[^"\\]|\\.)*)"\]$/.exec(p);
+  return m ? m[1]! : null;
+};
+
+/** An answer that says the server has no connection yet (the hint toward session.init). */
+const NOT_CONNECTED = /\bnot connected\b|\bno (?:active |open )?connection\b|\bconnect first\b|\bcall (?:the )?connect\b|\bnot (?:yet )?(?:logged in|authenticated|initiali[sz]ed)\b|\bconnection (?:is )?(?:not|required)\b/i;
+
+export async function tenantGuard(m: Manifest, s: Session, label: string, o: GuardHooks = {}): Promise<{ matched: string; step: string; basis?: 'operator'; calls: GuardCall[]; state?: string; destructive?: true }> {
   const g = m.target.guard;
   if (!g) throw new WritecheckError('target.guard is required: a read-only tool call whose result must match a pattern (for example the tenant or workspace name) before any write', 2);
   const tools = await s.listTools(label);
   const def = tools.find((t) => t['name'] === g.tool) as { annotations?: Record<string, unknown> } | undefined;
   if (!def) throw new WritecheckError(`target.guard: ${g.tool} is not in tools/list`, 3);
-  const gp = guardProblem(g, def, { writeTools: new Set(declaredWriteTools(m, tools as never).keys()), anyAnnotated: tools.some((t) => t['annotations'] && typeof t['annotations'] === 'object' && Object.keys(t['annotations'] as object).length > 0), readOnlyTools: readOnlyToolsOf(tools) });
+  const gp = guardProblem(g, def, { writeTools: new Set(declaredWriteTools(m, tools as never).keys()), anyAnnotated: tools.some((t) => t['annotations'] && typeof t['annotations'] === 'object' && Object.keys(t['annotations'] as object).length > 0), readOnlyTools: readOnlyToolsOf(tools), manifest: m, tools: tools as never });
   if (gp) throw new WritecheckError(gp, 3);
+  const dispatcher = destructiveDispatcherGuard(g, def);
   const basis = guardBasis(g);
   const calls: GuardCall[] = [];
   const step = s.stepId('guard');
@@ -373,7 +539,12 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
     o.onCall?.(c);
     calls.push(c);
     const r = await s.call(label, g.tool, render(g.args, {}), { step: st, write: false });
-    if (!r.ok) throw new WritecheckError(`target.guard: ${g.tool} failed (${short(r.text ?? r.rpc_error?.message ?? r.transport_error ?? 'error', 160)}); ${sentText(g, calls)}`, 3);
+    if (!r.ok) {
+      const said = r.text ?? r.rpc_error?.message ?? r.transport_error ?? 'error';
+      // why: review of PR #14 (minor): a server that answers "not connected" before a connect call needs session.init.
+      const hint = !m.session?.init.length && NOT_CONNECTED.test(said) ? ' (the server says it is not connected: if it connects only after a tool call that carries connection settings, declare that call under session.init; MANIFEST.md, session)' : '';
+      throw new WritecheckError(`target.guard: ${g.tool} failed (${short(said, 160)})${hint}; ${sentText(g, calls)}`, 3);
+    }
     const v = g.path ? getPath(r.data, g.path) : r.text;
     const text = typeof v === 'string' ? v : JSON.stringify(v ?? null);
     if (!new RegExp(g.pattern).test(text)) throw new WritecheckError(`target.guard: ${g.tool}${g.path ? ` at ${g.path}` : ''} returned ${short(text, 80)}, which does not match ${g.pattern}; ${sentText(g, calls)}`, 3);
@@ -388,25 +559,39 @@ export async function tenantGuard(m: Manifest, s: Session, label: string, o: Gua
   // third, and the same call made twice more must answer exactly as the first did. Any error, a different answer, or a changed
   // list or canary refuses the run. A write that changes nothing the manifest lets the tester read, and answers the same each
   // time, would still pass: the results say the guard rests on the declaration.
-  const before = await stateSnapshot(m, s, label, 'guard.state.before');
+  const listIds = new Map<string, string>();
+  const before = await stateSnapshot(m, s, label, 'guard.state.before', { whole: dispatcher, phase: 'before', listIds, ...(o.onStateRead ? { onStateRead: o.onStateRead } : {}) });
   const first = await once(step, 'check');
   const differs = () => `target.guard: ${g.tool} is declared read-only (read_only_call), but the same call answered differently when made again, so it may change state; ${sentText(g, calls)}`;
   if ((await once(s.stepId('guard.dry'), 'dry')).whole !== first.whole) throw new WritecheckError(differs(), 3);
   if ((await once(s.stepId('guard.after'), 'after')).whole !== first.whole) throw new WritecheckError(differs(), 3);
-  const after = await stateSnapshot(m, s, label, 'guard.state.after');
+  const after = await stateSnapshot(m, s, label, 'guard.state.after', { whole: dispatcher, phase: 'after', ...(o.onStateRead ? { onStateRead: o.onStateRead } : {}) });
   const compared: string[] = [];
   for (const [k, v] of before) {
     if (v === null) continue;
     const w = after.get(k);
     if (w === null || w === undefined) throw new WritecheckError(`target.guard: ${g.tool} is declared read-only (read_only_call); ${k} answered before the guard's calls and not after them, so whether they changed state is not known; ${sentText(g, calls)}`, 3);
-    if (w !== v) throw new WritecheckError(`target.guard: ${g.tool} is declared read-only (read_only_call), but ${k} changed across its three calls, so the call may change state (or something else changed the target meanwhile; either way the guard cannot be trusted); ${sentText(g, calls)}`, 3);
+    if (w !== v) {
+      // why: review of the lane (should-fix 2): a field that changes on every read (a last-read time) refused the run without
+      // saying which field; the error names the changed paths and says how such a field can be left out.
+      const paths = stateChanges(k, v, w, listIds.get(k));
+      const fields = [...new Set(paths.map(leafField).filter((f): f is string => !!f))];
+      const hint = !fields.length ? '' : dispatcher
+        ? `. If ${fields.join(', ')} changes on every read, no ignore applies here (through a tool that declares destructiveHint: true every fixture, canary and list is compared whole; read.ignore, list.ignore and a canary's ignore are not applied): declare that read so it leaves the field out (name the columns it selects)`
+        : `. If ${fields.join(', ')} changes on every read by itself, declare it ignored: ${k.startsWith('canary ') ? `the canary's ignore (canaries[].ignore: [${fields[0]}])` : `the resource's read.ignore or its list.ignore ([${fields[0]}])`}`;
+      throw new WritecheckError(`target.guard: ${g.tool} is declared read-only (read_only_call), but ${k} changed across its three calls${paths.length ? ` (changed: ${paths.join(', ')})` : ''}, so the call may change state (or something else changed the target meanwhile; either way the guard cannot be trusted); ${sentText(g, calls)}${hint}`, 3);
+    }
     compared.push(k);
   }
   const unread = [...before].filter(([, v]) => v === null).map(([k]) => k);
+  // why: t12: for a destructive-annotated dispatcher the comparison is the only evidence the call did not write: every fixture,
+  // canary and object-free list must have been read on both sides, and at least one must have been compared.
+  if (dispatcher && unread.length) throw new WritecheckError(`target.guard: ${g.tool} declares destructiveHint: true and is accepted as the guard only when the state around its calls is compared in full; ${unread.join(', ')} could not be read before the calls, so whether they changed state is not known; ${sentText(g, calls)}`, 3);
+  if (dispatcher && !compared.length) throw new WritecheckError(`target.guard: ${g.tool} declares destructiveHint: true and is accepted as the guard only when the state around its calls is compared; the manifest declares no fixture, canary or list that needs no object, so nothing was compared; ${sentText(g, calls)}`, 3);
   const state = compared.length
     ? `${compared.join(', ')} read the same before and after the three calls${unread.length ? ` (${unread.join(', ')} could not be read, so not compared)` : ''}`
     : `the manifest declares no canary and no list that needs no object${unread.length ? ` that could be read (${unread.join(', ')} failed)` : ''}, so no state was compared around the three calls`;
-  return { matched: short(first.text, 80), step, basis: 'operator', calls, state };
+  return { matched: short(first.text, 80), step, basis: 'operator', calls, state, ...(dispatcher ? { destructive: true as const } : {}) };
 }
 
 /**
@@ -429,7 +614,7 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
         await s.listTools(label);
         return null;
       } catch (e) {
-        if (['RateLimited', 'BudgetExhausted', 'Interrupted'].includes((e as Error).constructor?.name ?? '')) throw e;
+        if (['RateLimited', 'BudgetExhausted', 'Interrupted', 'SessionInitFailed'].includes((e as Error).constructor?.name ?? '')) throw e;
         why = `tools/list did not answer (${short((e as Error).message, 160)})`;
       }
       continue;
@@ -447,7 +632,7 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
       } else why = `${g.tool} failed (${short(r.text ?? r.rpc_error?.message ?? r.transport_error ?? (r.timed_out ? 'timed out' : 'error'), 160)})`;
     } catch (e) {
       // why: review: a rate limit, the budget or an interruption is its own stop; the caller handles it, and no second request goes out.
-      if (['RateLimited', 'BudgetExhausted', 'Interrupted'].includes((e as Error).constructor?.name ?? '')) throw e;
+      if (['RateLimited', 'BudgetExhausted', 'Interrupted', 'SessionInitFailed'].includes((e as Error).constructor?.name ?? '')) throw e;
       why = `${g.tool} could not be called (${short((e as Error).message, 160)})`;
     }
   }
@@ -459,19 +644,35 @@ export async function targetStopped(m: Manifest, s: Session, label: string, o: G
  * by the declaration (target.guard.read_only: true). A tool that declares readOnlyHint: false or destructiveHint:
  * true is refused either way. Shared by plan (which warns before the run) and the run.
  */
-export function guardProblem(g: NonNullable<Manifest['target']['guard']>, def: { annotations?: Record<string, unknown> } | undefined, o: { writeTools?: Set<string>; anyAnnotated?: boolean; readOnlyTools?: string[] } = {}): string | null {
+export function guardProblem(g: NonNullable<Manifest['target']['guard']>, def: { annotations?: Record<string, unknown> } | undefined, o: { writeTools?: Set<string>; anyAnnotated?: boolean; readOnlyTools?: string[]; manifest?: Manifest; tools?: { name?: unknown; annotations?: Record<string, unknown> }[] } = {}): string | null {
   if (!def) return `target.guard: ${g.tool} is not in tools/list`;
   // why: PostHog cli mode (research builds): a server whose only tool is a dispatcher can be guarded only by a call the operator
   // declares read-only; the run verifies it (tenantGuard) and the record says the guard rests on that declaration.
   const a = def.annotations ?? {};
   if (g.read_only_call) {
     // why: review: the declaration is for a server whose only route is a dispatcher; it never turns the other protections off.
-    if (a['destructiveHint'] === true) return `target.guard: ${g.tool} declares destructiveHint: true; even a declared read-only call through it cannot be the guard`;
     if (o.readOnlyTools?.length) return `target.guard: read_only_call is for a server whose only tool is a dispatcher; this server offers read-only tools (${o.readOnlyTools.slice(0, 3).join(', ')}): use one of them`;
+    if (a['destructiveHint'] === true) {
+      // why: t12: a SQL dispatcher (mysql_query) that writes when writes are on declares destructiveHint: true, and it is the
+      // server's only tool, so no other guard exists. Such a tool is accepted only as the server's only read route, only for
+      // arguments with no word that can write, and only when there is state to compare around its calls (tenantGuard then reads
+      // the fixtures, lists and canaries with no ignored field left out, and requires every read).
+      const refused = `target.guard: ${g.tool} declares destructiveHint: true; a declared read-only call through it can be the guard only where it is the server's only read route`;
+      if (!o.manifest || !o.tools) return `${refused} (not known here)`;
+      const routes = possibleReadRoutes(o.tools, g.tool);
+      if (routes.length) return `${refused}, and this server offers ${routes.slice(0, 3).join(', ')}, which declare neither readOnlyHint: false nor destructiveHint: true and may read: guard through one of them (read_only_call, or read_only on a server that annotates no tool)`;
+      const ap = guardArgsProblem(g.args);
+      if (ap) return `target.guard: ${g.tool} declares destructiveHint: true, and the declared call's arguments ${ap}; through a destructive tool the guard must be a plain read`;
+      const others = manifestReadTools(o.manifest).filter((t) => t !== g.tool);
+      if (others.length) return `${refused}, and this manifest reads through ${others.slice(0, 3).join(', ')}: guard with a read-only tool`;
+      if (!manifestReadTools(o.manifest).includes(g.tool)) return `${refused}, and this manifest reads nothing through it`;
+      if (!guardStateDeclared(o.manifest)) return `${refused} and the manifest declares a fixture, a canary or a list that needs no object to compare around its calls; this manifest declares none`;
+      return null;
+    }
     return null;
   }
   if (a['readOnlyHint'] === true) return null;
-  if (a['readOnlyHint'] === false || a['destructiveHint'] === true) return `target.guard: ${g.tool} declares readOnlyHint: false or destructiveHint: true; the positive tenant check must be a tool that only reads`;
+  if (a['readOnlyHint'] === false || a['destructiveHint'] === true) return `target.guard: ${g.tool} declares readOnlyHint: false or destructiveHint: true; the positive tenant check must be a tool that only reads${g.read_only && a['destructiveHint'] === true ? ' (for a dispatcher that is the server\'s only read route, declare the exact call instead: target.guard.read_only_call: true)' : ''}`;
   // why: read_only is for a server that annotates no tool, and never for a tool the same manifest declares as a write (review).
   if (g.read_only && o.writeTools?.has(g.tool)) return `target.guard: ${g.tool} is declared as a write tool in this manifest; it cannot be the guard`;
   if (g.read_only && o.anyAnnotated) return `target.guard: read_only: true is for a server that annotates no tool, and this server annotates some; choose a tool that declares readOnlyHint: true`;

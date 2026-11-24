@@ -146,21 +146,40 @@ test('GitHub Action review B1: a CI cancel (SIGINT, then SIGTERM, with stdout cl
 });
 
 test('review S4: a second SIGTERM after the first signal still forces the exit at once', async () => {
+  // why: the signals are sent while the clean-up is known to be running (its deletes are held at the backend), each after the run
+  // has answered the one before; fixed sleeps let a fast run finish first, so a SIGTERM met a process that had already removed
+  // its handlers and died by the signal (exit null; CI run 44452412733).
   const f = await startFake({ pairs: 30 });
+  let release = () => {};
   try {
-    const child = spawnRun(f, await hashOf(f));
+    const child = spawnRun(f, await hashOf(f), 'pipe');
+    let out = '';
+    child.stdout!.on('data', (b: Buffer) => (out += b.toString('utf8')));
     const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
+    const until = async (ok: () => boolean, what: string, ms = 20_000) => {
+      const end = Date.now() + ms;
+      while (!ok()) {
+        if (Date.now() > end) throw new Error(`timed out waiting for ${what}; stdout: ${out.slice(-600)}`);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
     await untilCreated(join(f.dir, 'state'));
+    f.backend.holdDeletes = new Promise<void>((r) => (release = r));
     child.kill('SIGINT');
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => /SIGINT: stopping; cleaning up/.test(out), 'the run to take the SIGINT');
+    await until(() => f.backend.deletesSeen > 0, 'the clean-up to reach a delete');
     child.kill('SIGTERM');
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => /SIGTERM: ignored once while the clean-up runs/.test(out), 'the first SIGTERM to be ignored');
     const t0 = Date.now();
     child.kill('SIGTERM');
     assert.equal(await exited, 130);
     assert.ok(Date.now() - t0 < 4000, 'the second SIGTERM exits without waiting for the forced clean-up');
+    assert.ok(f.backend.tickets.size >= 1, 'it exited while the clean-up was still held, so the exit did not wait for it');
+    release();
+    f.backend.holdDeletes = null;
     await cleanupCommand({ manifest: f.manifest, stateDir: join(f.dir, 'state'), confirmTarget: 'fake-tracker', env: f.env, log: quiet });
   } finally {
+    release();
     await f.close();
   }
 });

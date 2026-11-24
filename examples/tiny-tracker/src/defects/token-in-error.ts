@@ -11,7 +11,7 @@
 //
 // Mirrors: GitHub GH-09 (tokenized private-repo download URLs in directory
 // listings). The class is the same: a credential in a tool result.
-//   https://isokron.ai/research/github-mcp-server-audit#findings-register
+//   https://isokron.ai/research/github-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

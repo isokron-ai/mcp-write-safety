@@ -11,7 +11,7 @@
 //
 // Mirrors: Kubernetes K8S-01 (apply stops at the first refusal and does not
 // say what was applied) and K8S-06 / K8S-15 (items dropped with success).
-//   https://isokron.ai/research/kubernetes-mcp-server-audit#findings-register
+//   https://isokron.ai/research/kubernetes-mcp-server-audit?utm_source=tiny-tracker-source&utm_medium=source#findings-register
 
 import type { Defect } from "./types.js";
 import { patchTool } from "./types.js";

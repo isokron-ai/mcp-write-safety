@@ -38,9 +38,16 @@ describe("known-answer generator (expected/)", () => {
     const labels = list.builds.map((b: any) => b.label);
     for (const b of old.builds) assert.ok(labels.includes(b.label), b.label);
     const doc = JSON.parse(readFileSync(join(ROOT, "expected", "0.3.0.json"), "utf8"));
+    // Keyed by 0.3.0 for good: a release's known answers reproduce at its own tag (docs/STABILITY.md), so this file is
+    // not compared with package.json, which moves on at the next version bump.
     assert.equal(doc.package.version, "0.3.0");
-    assert.equal(doc.package.version, JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version);
     assert.deepEqual(doc.builds.map((b: any) => b.label).sort(), [...labels].sort());
+  });
+
+  it("the current release's known answers are keyed by package.json's version", () => {
+    const version = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+    const doc = JSON.parse(readFileSync(join(ROOT, "expected", `${version}.json`), "utf8"));
+    assert.equal(doc.package.version, version);
   });
 
   it("the 0.3.0 known answers name the defects they cannot tell from the correct build (follow-up F1)", () => {

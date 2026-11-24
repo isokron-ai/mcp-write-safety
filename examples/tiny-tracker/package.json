@@ -11,7 +11,7 @@
     "test-server",
     "conformance"
   ],
-  "homepage": "https://isokron.ai/mws",
+  "homepage": "https://isokron.ai/mws?utm_source=tiny-tracker-npm&utm_medium=npm",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/isokron-ai/mcp-write-safety.git",

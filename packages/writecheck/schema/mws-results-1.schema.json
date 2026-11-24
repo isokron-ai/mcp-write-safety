@@ -99,6 +99,25 @@
         },
         "processes_started": {
           "type": "integer"
+        },
+        "cut_at": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "record",
+            "observation"
+          ],
+          "description": "Where a run cut short (write budget, rate limit, interrupt) was cut: the index in results of the first record made after the cut, and the index in observations of the first observation made after it. Absent when the run was not cut short.",
+          "properties": {
+            "record": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "observation": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -318,6 +337,98 @@
               "type": "string"
             }
           },
+          "test_hash": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "What defines this record's test (MANIFEST.md \"test_hash\"). Under mws-test-hash/2: sha256 of the canonical JSON of { format, tester, rest, tools, probed, subject, extras } from test_inputs; under mws-test-hash/1 (files written before it) as that release documented. Absent in files written before mws-test-hash/1."
+          },
+          "test_hash_core": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "Only on a record whose requirement judges part of the tool entry (the probed arguments' schema for MWS-IN-2/3/5/6/7, and the description for MWS-IN-5; the annotations for MWS-ANN-*; the description for MWS-CONC-5, MWS-RETRY-2 and MWS-TGT-3): the test hash without that part."
+          },
+          "test_inputs": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scheme",
+              "tester",
+              "rest",
+              "tools"
+            ],
+            "description": "mws-test-hash/2: what compare reads to decide whether two records are the same test (rule A; MANIFEST.md \"test_hash\"). Argument names and hashes only, never a value the run sent.",
+            "properties": {
+              "scheme": {
+                "type": "string"
+              },
+              "tester": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "version",
+                  "commit"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "commit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "dirty": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "rest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "context": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "tools": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/test_tool_shape"
+                }
+              },
+              "probed": {
+                "$ref": "#/$defs/test_tool_shape"
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "extras": {
+                "type": "object"
+              },
+              "chosen": {
+                "type": "object",
+                "description": "What the procedure chose from the schemas where that choice changes its calls: further (the MWS-UPD-1 further probes), address (per list-edit tool, which address arguments it declares), version_left_out (MWS-CONC-2: per tool, whether the run without the version argument is made), misspelled (MWS-IN-2: the argument the probe misspells and the misspelling)."
+              }
+            }
+          },
+          "case": {
+            "type": "string",
+            "description": "The case of a procedure that makes several records on one write path (a declared failure; the create and the update of MWS-RES-4), so that compare joins records one to one. Absent where the procedure makes one record per write path."
+          },
           "attribution": {
             "enum": [
               "server",
@@ -326,6 +437,152 @@
               null
             ],
             "description": "Spec 8.2 rule 3: for a requirement that lists platform, every violated or platform record carries server, platform or unresolved; null otherwise. A violated record is never quoted without it."
+          },
+          "cell": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+@.+$",
+            "description": "The cell this record belongs to (docs/CELLS.md): <requirement>@<tool>, or <requirement>@(server) for a server-level requirement. Absent on records that belong to no cell."
+          },
+          "validity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "class",
+              "counts",
+              "failed",
+              "synthetic_fault",
+              "evidence"
+            ],
+            "description": "Evidence validity (docs/CELLS.md): present on every violated record.",
+            "properties": {
+              "class": {
+                "enum": [
+                  "valid",
+                  "platform",
+                  "harness-suspect"
+                ]
+              },
+              "counts": {
+                "type": "boolean"
+              },
+              "failed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "synthetic_fault": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "acknowledged": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "read_back": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "synthetic_fault": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "cells": {
+      "type": "array",
+      "description": "One entry per cell: a MUST requirement on a declared write tool, or a server-level MUST requirement (docs/CELLS.md). Not an aggregate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "requirement",
+          "tool",
+          "scope",
+          "verdict",
+          "applicable",
+          "rule",
+          "reason",
+          "resources",
+          "records"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string",
+            "pattern": "^MWS-[A-Z]+-[0-9]+$"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "tool",
+              "server"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "violated",
+              "platform",
+              "held",
+              "not observed",
+              "not tested",
+              "not applicable",
+              "self-attested"
+            ]
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "rule": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "validity": {
+            "enum": [
+              "valid",
+              "platform",
+              "harness-suspect"
+            ]
           }
         }
       }
@@ -411,9 +668,17 @@
           "const": "SHA256SUMS"
         },
         "signature": {
-          "type": [
-            "string",
-            "null"
+          "oneOf": [
+            {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "null: results.json is not signed. A string: the file name of the ssh signature of SHA256SUMS (--sign)."
+            },
+            {
+              "$ref": "#/$defs/results_signature"
+            }
           ]
         }
       }
@@ -522,6 +787,501 @@
           "items": {
             "type": "object"
           }
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The run's identity (MANIFEST.md, \"Run identity\"): which tester build, spec, manifest, plan, tools and server build the results come from. Every member is stated or null; gaps lists each one not stated or not pinned. Optional in mws-results/1 (absent in files written before it).",
+      "required": [
+        "format",
+        "tester",
+        "spec",
+        "manifest_sha256",
+        "plan_hash",
+        "tools_fingerprint",
+        "test_hash",
+        "server",
+        "backend",
+        "runner",
+        "started",
+        "finished",
+        "provenance",
+        "gaps"
+      ],
+      "properties": {
+        "format": {
+          "const": "mws-identity/1"
+        },
+        "tester": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version",
+            "commit",
+            "dirty"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$",
+              "description": "The git commit the tester was built from (build stamp); null for an unstamped build."
+            },
+            "dirty": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "The tester's sources had uncommitted changes when it was built."
+            },
+            "stale": {
+              "type": "boolean",
+              "description": "The compiled code is newer than the build stamp."
+            }
+          }
+        },
+        "spec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            }
+          }
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "plan_hash": {
+          "type": "string"
+        },
+        "tools_fingerprint": {
+          "type": "string",
+          "description": "sha256 over the canonical, name-sorted tools/list entries (tools only)."
+        },
+        "test_hash": {
+          "enum": [
+            "mws-test-hash/1",
+            "mws-test-hash/2"
+          ],
+          "description": "The scheme of the records' test_hash written by the run (a recheck by a later release may add records under a later scheme; each such record names its scheme in test_inputs)."
+        },
+        "server": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repo",
+            "commit",
+            "tag",
+            "image",
+            "recipe",
+            "launch",
+            "transport"
+          ],
+          "properties": {
+            "repo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+            },
+            "tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "OCI image reference; pinned only with @sha256:<digest>."
+            },
+            "recipe": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "launch": {
+              "type": "string",
+              "description": "How the tester reached or started the server (redacted)."
+            },
+            "transport": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "backend": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "image",
+              "version"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "image": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "runner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "os",
+            "arch",
+            "node",
+            "ci"
+          ],
+          "properties": {
+            "os": {
+              "type": "string"
+            },
+            "arch": {
+              "type": "string"
+            },
+            "node": {
+              "type": "string"
+            },
+            "ci": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "provider",
+                    "run_id",
+                    "run_attempt",
+                    "url",
+                    "workflow_ref"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "const": "github-actions"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "run_attempt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "workflow_ref": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "started": {
+          "type": "string"
+        },
+        "finished": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sources",
+            "overridden"
+          ],
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "overridden": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Each identity member not stated or not pinned, with why."
+        },
+        "hash_inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Inputs of the test hashes that are not in the manifest copy the run keeps: the --pair-budget given and the sha256 of each MWS-IN-5 document.",
+          "properties": {
+            "pair_budget": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "repeats": {
+                  "type": "integer"
+                },
+                "pairs": {
+                  "type": "integer"
+                }
+              }
+            },
+            "in5_docs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "rechecked_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version",
+            "commit",
+            "at",
+            "records_rehashed"
+          ],
+          "description": "Set by recheck on its copy.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dirty": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "at": {
+              "type": "string"
+            },
+            "records_rehashed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "original_signature": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "key_id",
+                "pinned"
+              ],
+              "description": "The results signature of the file that was rechecked, as recheck verified it.",
+              "properties": {
+                "status": {
+                  "enum": [
+                    "valid",
+                    "valid-unpinned",
+                    "unsigned",
+                    "ssh-only",
+                    "invalid"
+                  ]
+                },
+                "key_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pinned": {
+                  "type": "boolean"
+                },
+                "allow_unsigned": {
+                  "type": "boolean",
+                  "description": "The copy was signed with --allow-unsigned although the original was not signed by a pinned key."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "results_signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "alg",
+        "key_id",
+        "public_key_pem",
+        "digest",
+        "value",
+        "sums"
+      ],
+      "description": "An Ed25519 signature of this document with evidence.signature replaced by { format, alg, key_id, sums }: value = base64(Ed25519(\"mcp-writecheck/results-signature/1\\n\" + RFC 8785 canonical JSON)). Trust it only against a key pinned out of band.",
+      "properties": {
+        "format": {
+          "const": "mws-results-signature/1"
+        },
+        "alg": {
+          "const": "ed25519"
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^ed25519-[0-9a-f]{16}$",
+          "description": "ed25519- and the first 16 hex characters of sha256 of the public key's SPKI DER (the kronicle-lite key id)."
+        },
+        "public_key_pem": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "value": {
+          "type": "string"
+        },
+        "sums": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The ssh signature file of SHA256SUMS, where one was also made (--sign)."
+        }
+      }
+    },
+    "test_shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "h"
+      ],
+      "properties": {
+        "h": {
+          "type": "string"
+        },
+        "p": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/test_shape"
+          }
+        },
+        "r": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "i": {
+          "$ref": "#/$defs/test_shape"
+        }
+      }
+    },
+    "test_tool_shape": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "h",
+        "p",
+        "r",
+        "ro"
+      ],
+      "properties": {
+        "h": {
+          "type": "string"
+        },
+        "p": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/test_shape"
+          }
+        },
+        "r": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ro": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "x": {
+          "const": true,
+          "description": "The schema allows no undeclared argument (additionalProperties: false)."
         }
       }
     }
