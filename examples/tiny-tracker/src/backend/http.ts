@@ -17,6 +17,11 @@ import { applyBackendDefects, BACKEND_DEFECTS } from "./defects/index.js";
 import { correctInputRules, type InputRules } from "./input.js";
 // ---- stream D: durability (import) ----
 import { DURABILITY_DEFECTS, openDurability, type Durability, type DurabilityOptions } from "./durability.js";
+
+/** Caps on the evidence listener (container mode puts it on every interface). */
+export const EVIDENCE_MAX_CONNECTIONS = 64;
+export const EVIDENCE_HEADERS_TIMEOUT_MS = 10_000;
+export const EVIDENCE_REQUEST_TIMEOUT_MS = 30_000;
 // ---- end stream D ----
 
 export interface BackendOptions {
@@ -597,7 +602,8 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
       await sendCommitted(committedWrite.reply, committedWrite.tx);
     } catch (error) {
       if (error instanceof JournalError) {
-        send(503, { error: "journal_unavailable", message: error.message });
+        // journal_unavailable, or lease_lost (G3 note 26 item 1c: the line was written, then the lease was found taken over).
+        send(503, { error: error.code, message: error.message });
       } else if (error instanceof CommitSinkError) {
         send(503, { error: "stopped", message: error.message });
       } else if (error instanceof ApiError) {
@@ -617,7 +623,9 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
   if (options.evidenceListen) {
     const extension = options.extension;
     if (!extension) throw new Error("an evidence listener needs the evidence namespace (feature evidence)");
-    evidenceServer = createServer((req, res) => void (async () => {
+    // The one listener off loopback that answers before a token is checked (container mode): capped, as the MCP and
+    // control listeners are (fresh-eyes review 24 Nov, should-fix 7; R-TT-05).
+    evidenceServer = createServer({ requestTimeout: EVIDENCE_REQUEST_TIMEOUT_MS, headersTimeout: EVIDENCE_HEADERS_TIMEOUT_MS }, (req, res) => void (async () => {
       const notHere = () => {
         res.writeHead(404, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "not_found", message: "this listener serves the read-only evidence routes only, with the evidence token" }));
@@ -634,6 +642,7 @@ export async function startBackend(options: BackendOptions): Promise<RunningBack
     })());
     await new Promise<void>((resolve, reject) => {
       evidenceServer!.once("error", reject);
+      evidenceServer!.maxConnections = EVIDENCE_MAX_CONNECTIONS;
       evidenceServer!.listen(options.evidenceListen!.port, options.evidenceListen!.host, resolve);
     });
     const a = evidenceServer.address() as AddressInfo;

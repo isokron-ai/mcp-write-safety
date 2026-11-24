@@ -10,14 +10,15 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runCli } from "./support/cli-run.js";
+import { noPython, pythonRuns } from "./support/python.js";
 
 const DIR = fileURLToPath(new URL("../../schemas/", import.meta.url));
 const CHECK = fileURLToPath(new URL("../../verify/python/check_schemas.py", import.meta.url));
 const BASE = "https://writesafety.dev/schemas/tiny-tracker/";
 
-const jsonschema = spawnSync("python3", ["-I", "-c", "import jsonschema, referencing"], { encoding: "utf8" }).status === 0;
+const jsonschema = pythonRuns(["-I", "-c", "import jsonschema, referencing"]);
 /** TT_GATE=1 (gate runs, CI): a missing jsonschema fails these tests instead of skipping them. */
-const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : "the Python jsonschema package is not installed";
+const needJsonschema = jsonschema || process.env.TT_GATE === "1" ? false : noPython("the Python jsonschema package is not installed");
 
 describe("JSON Schemas", () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".schema.json"));

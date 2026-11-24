@@ -1,0 +1,1062 @@
+# tiny-tracker backend, evidence and control APIs (review C2).
+#
+# Written from the routes in this tree (src/backend/http.ts, src/backend/durability.ts, src/backend/lookup.ts,
+# src/fixture/evidence.ts, src/fixture/control.ts, src/fixture/faults.ts, src/fixture/clock.ts) for 0.4.0, and checked
+# by test/openapi.test.ts (the file validates as OpenAPI 3.1; every route the source serves is here).
+# The JSON Schemas under schemas/ are the source of truth for record shapes; this file refers to them by $id.
+openapi: 3.1.0
+info:
+  title: tiny-tracker backend, evidence and control
+  version: fixture-api/1
+  summary: The REST API behind the tiny-tracker MCP server, its read-only evidence namespace and its control listener.
+  description: |
+    Three surfaces, three tokens. All tokens come from the environment or a 0600 file, never the command line, and
+    every token differs from every other.
+
+    - **Backend API** (`backendToken`): projects, tickets, comments, labels, batch, export. The MCP server is its only
+      client in normal use; harnesses call it directly to set up state and read the truth. Loopback only.
+    - **Evidence** (`evidenceToken`, feature `evidence`): read-only, served on the backend listener beside the API.
+      A request on an evidence path without the evidence token is not served there: it goes on to the API, which
+      needs the backend token (so `GET /export` with the backend token works as in 0.1.0). With
+      `TRACKER_EVIDENCE_LISTEN=HOST:PORT` (container mode) the evidence routes alone are also served on that address,
+      for any Host, behind the evidence token; anything else there answers 404.
+    - **The `?principal=` rule** (evidence reads): with one configured principal it may be left out; with more than
+      one, `/ledger`, `/executions`, `/export` and `/operations/{key}` need it (400 `principal_required`, listing the
+      principals); an unknown id is 400 `unknown_principal`. `/executions/{id}` takes it optionally, because execution
+      ids are global.
+    - **Control** (`controlToken`, `--fixture-control`): a separate listener. Refuses any request with an `Origin`
+      header, needs `application/json` on POST, bodies up to 64 KiB.
+
+    Every listener except the evidence listener accepts only a loopback `Host`. A route whose feature is off answers
+    501 `not_enabled` with the feature and `available_from`; a fault point not built yet answers 501 `not_built`.
+    Keyed writes (POST with `Idempotency-Key`) answer the key states of decision 0004 (responses `KeyedRefusal` and
+    `KeyExpired`). Stability: docs/STABILITY.md.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://127.0.0.1:{port}
+    description: The backend listener (API and evidence). The port is printed in the state line as `backend`.
+    variables:
+      port:
+        default: "47311"
+security:
+  - backendToken: []
+tags:
+  - name: projects
+  - name: tickets
+  - name: export
+  - name: evidence
+    description: Read-only evidence namespace (feature `evidence`).
+  - name: control
+    description: The control listener (`--fixture-control`), on its own port.
+
+paths:
+  /projects:
+    get:
+      tags: [projects]
+      operationId: listProjects
+      responses:
+        "200":
+          description: Every project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects]
+                properties:
+                  projects: { type: array, items: { $ref: "#/components/schemas/Project" } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      tags: [projects]
+      operationId: createProject
+      description: Creates a project. An existing key is refused (409). A keyed POST is applied once per principal and key.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, name]
+              properties:
+                key: { type: string }
+                name: { type: string }
+      responses:
+        "201":
+          description: Created.
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { type: object, required: [project], properties: { project: { $ref: "#/components/schemas/Project" } } }
+        "409": { $ref: "#/components/responses/KeyedRefusal" }
+        "410": { $ref: "#/components/responses/KeyExpired" }
+        "422": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /projects/{key}:
+    parameters:
+      - { name: key, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [projects]
+      operationId: getProject
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema: { type: object, required: [project], properties: { project: { $ref: "#/components/schemas/Project" } } }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [projects]
+      operationId: upsertProject
+      description: Create or replace. The correct MCP layer never uses it to create.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name], properties: { name: { type: string } } }
+      responses:
+        "200":
+          description: Replaced.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectUpsert" }
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectUpsert" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [projects]
+      operationId: deleteProject
+      description: Deletes an empty project; a project with tickets is refused (409). Projects carry no version check.
+      responses:
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /tickets:
+    get:
+      tags: [tickets]
+      operationId: listTickets
+      parameters:
+        - { name: project, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/Status" } }
+        - { name: title_prefix, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Matching tickets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tickets]
+                properties:
+                  tickets: { type: array, items: { $ref: "#/components/schemas/Ticket" } }
+    post:
+      tags: [tickets]
+      operationId: createTicket
+      description: Creates a ticket, optionally with a first comment. A keyed POST is applied once per principal and key.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/TicketFields"
+                - type: object
+                  required: [title]
+                  properties:
+                    project: { type: string, description: Default `inbox`. }
+                    comment: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/TicketCreated" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/KeyedRefusal" }
+        "410": { $ref: "#/components/responses/KeyExpired" }
+        "422": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /tickets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+    get:
+      tags: [tickets]
+      operationId: getTicket
+      responses:
+        "200": { $ref: "#/components/responses/TicketOk" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [tickets]
+      operationId: patchTicket
+      description: Changes only the fields sent; `details` sets only the sub-fields named. A re-sent conditional write that was already applied is answered as a replay.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketFields" }
+      responses:
+        "200": { $ref: "#/components/responses/TicketWritten" }
+        "412": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      tags: [tickets]
+      operationId: putTicket
+      description: Replaces the scalar fields. Needs `If-Match` or `?force=true` (428 otherwise).
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - { name: force, in: query, schema: { type: string, enum: ["true"] } }
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketFields" }
+      responses:
+        "200": { $ref: "#/components/responses/TicketWritten" }
+        "412": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [tickets]
+      operationId: deleteTicket
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      responses:
+        "204": { description: Deleted. }
+        "412": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/Error" }
+  /tickets/{id}/comments:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+    post:
+      tags: [tickets]
+      operationId: addComment
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, minLength: 1, maxLength: 5000 } } }
+      responses:
+        "201":
+          description: The comment and the ticket after it.
+          headers: { ETag: { $ref: "#/components/headers/ETag" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, comment]
+                properties:
+                  ticket: { $ref: "#/components/schemas/Ticket" }
+                  comment: { $ref: "#/components/schemas/Comment" }
+        "409": { $ref: "#/components/responses/KeyedRefusal" }
+        "410": { $ref: "#/components/responses/KeyExpired" }
+        default: { $ref: "#/components/responses/Error" }
+  /tickets/{id}/labels:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+    post:
+      tags: [tickets]
+      operationId: addLabel
+      description: Adds a label by name. A name the ticket already has changes nothing (200, `created` false).
+      parameters:
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name], properties: { name: { type: string } } }
+      responses:
+        "200": { $ref: "#/components/responses/LabelAdded" }
+        "201": { $ref: "#/components/responses/LabelAdded" }
+        "409": { $ref: "#/components/responses/KeyedRefusal" }
+        "410": { $ref: "#/components/responses/KeyExpired" }
+        default: { $ref: "#/components/responses/Error" }
+  /tickets/{id}/labels/{labelId}:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+      - { name: labelId, in: path, required: true, schema: { type: string, pattern: "^L-[0-9]+$" } }
+    delete:
+      tags: [tickets]
+      operationId: removeLabel
+      description: Removes a label by its stable row id.
+      parameters:
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      responses:
+        "200": { $ref: "#/components/responses/TicketOk" }
+        "404": { $ref: "#/components/responses/Error" }
+  /batch:
+    post:
+      tags: [tickets]
+      operationId: batch
+      description: All-or-nothing patch and delete operations (1 to 100). Every operation is checked against the state as it would be after the earlier ones; only if all pass is anything applied.
+      parameters:
+        - $ref: "#/components/parameters/Run"
+        - $ref: "#/components/parameters/Operation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ops]
+              properties:
+                ops: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/BatchOp" } }
+      responses:
+        "200":
+          description: Every operation applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, op]
+                      properties:
+                        id: { type: string }
+                        op: { type: string, enum: [patch, delete] }
+                        version: { type: integer }
+                        changed: { type: array, items: { type: string } }
+        "409": { $ref: "#/components/responses/KeyedRefusal" }
+        "410": { $ref: "#/components/responses/KeyExpired" }
+        default:
+          description: Nothing applied. The error names the failing operation (`index`, `id`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /export:
+    get:
+      tags: [export, evidence]
+      operationId: export
+      description: |
+        Every project and ticket, as stored. With the backend token (API) the body is `{projects, tickets}`, as in
+        0.1.0. With the evidence token (feature `evidence`) it is one principal's view: the whole store (the seed has
+        no owner), plus that principal's execution records (feature `execution-records`) and ledger entries (feature
+        `ledger`, with the fixture's own entries, principal null). `?principal=` follows the rule of `/ledger`.
+      security:
+        - backendToken: []
+        - evidenceToken: []
+      parameters:
+        - $ref: "#/components/parameters/Principal"
+      responses:
+        "200":
+          description: The whole store, and with the evidence token the principal's records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects, tickets]
+                properties:
+                  principal: { $ref: "#/components/schemas/PrincipalId" }
+                  projects: { type: array, items: { $ref: "#/components/schemas/Project" } }
+                  tickets: { type: array, items: { $ref: "#/components/schemas/Ticket" } }
+                  executions: { type: array, items: { $ref: "https://writesafety.dev/schemas/tiny-tracker/execution-record-1.schema.json" } }
+                  ledger: { type: array, items: { $ref: "https://writesafety.dev/schemas/tiny-tracker/ledger-entry-1.schema.json" } }
+        "400": { $ref: "#/components/responses/PrincipalError" }
+
+  /build:
+    get:
+      tags: [evidence]
+      operationId: getBuild
+      description: The build descriptor (decision 0005). Readiness is read here too.
+      security: [{ evidenceToken: [] }]
+      responses:
+        "200":
+          description: The build descriptor.
+          headers:
+            Tiny-Tracker-Build: { description: The descriptor's `build_hash`., schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "https://writesafety.dev/schemas/tiny-tracker/build-descriptor-1.schema.json" }
+        "403": { $ref: "#/components/responses/Error" }
+        "405": { $ref: "#/components/responses/Error" }
+  /ledger:
+    get:
+      tags: [evidence]
+      operationId: getLedger
+      description: |
+        The execution ledger (feature `ledger`): one entry per write, replay, refusal, run allocation, run reset, fault
+        arming and firing, for one principal, with the fixture's own entries (principal null). Pages of at most 10000
+        entries: a full page names `next_after`; ask again with `?after=<next_after>`. `?format=jsonl` gives one entry per
+        line (no envelope).
+      security: [{ evidenceToken: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Principal"
+        - { name: key, in: query, schema: { type: string } }
+        - { name: run, in: query, schema: { type: string } }
+        - { name: operation, in: query, schema: { type: string } }
+        - { name: kind, in: query, schema: { type: string, description: "One of the ledger entry kinds (ledger-entry-1 `kind`)." } }
+        - { name: after, in: query, schema: { type: integer, minimum: 0, maximum: 1000000000 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 10000, default: 10000 } }
+        - { name: format, in: query, schema: { type: string, enum: [json, jsonl], default: json } }
+      responses:
+        "200":
+          description: Ledger entries in order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [principal, entries, next_after]
+                properties:
+                  principal: { $ref: "#/components/schemas/PrincipalId" }
+                  entries: { type: array, items: { $ref: "https://writesafety.dev/schemas/tiny-tracker/ledger-entry-1.schema.json" } }
+                  next_after: { type: [integer, "null"] }
+            application/x-ndjson:
+              schema: { type: string, description: One ledger-entry-1 object per line. }
+        "400": { $ref: "#/components/responses/PrincipalError" }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+  /executions:
+    get:
+      tags: [evidence]
+      operationId: listExecutions
+      description: Every execution record of one principal (feature `execution-records`).
+      security: [{ evidenceToken: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Principal"
+      responses:
+        "200":
+          description: Execution records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [principal, executions]
+                properties:
+                  principal: { $ref: "#/components/schemas/PrincipalId" }
+                  executions: { type: array, items: { $ref: "https://writesafety.dev/schemas/tiny-tracker/execution-record-1.schema.json" } }
+        "400": { $ref: "#/components/responses/PrincipalError" }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+  /executions/{id}:
+    get:
+      tags: [evidence]
+      operationId: getExecution
+      description: |
+        One execution record, id `X-<seq>` (feature `execution-records`). Execution ids are global, so `?principal=` is
+        optional here under any number of principals; a record of another principal, or a principal that is not
+        configured, answers exactly as an unknown id (404 `not_found`). With a backend (principal) token the API
+        listener serves the caller's own records only.
+      security:
+        - evidenceToken: []
+        - backendToken: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^X-[0-9]+$" } }
+        - { name: principal, in: query, required: false, schema: { $ref: "#/components/schemas/PrincipalId" } }
+      responses:
+        "200":
+          description: The execution record.
+          headers:
+            Tiny-Tracker-Execution: { description: The record's id., schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "https://writesafety.dev/schemas/tiny-tracker/execution-record-1.schema.json" }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+  /operations/{key}:
+    get:
+      tags: [evidence]
+      operationId: getOperation
+      description: |
+        The operation record of an idempotency key (feature `lookup`), scoped to one principal: with the evidence
+        token, the principal named by `?principal=` (required when more than one is configured); with a backend
+        (principal) token on the API, the caller's own. A miss is 404 `no_record`, "no record of this key now", which
+        never means nothing was written.
+      security:
+        - evidenceToken: []
+        - backendToken: []
+      parameters:
+        - { name: key, in: path, required: true, schema: { $ref: "#/components/schemas/IdempotencyKey" } }
+        - $ref: "#/components/parameters/Principal"
+      responses:
+        "200":
+          description: The operation record.
+          content:
+            application/json:
+              schema: { $ref: "https://writesafety.dev/schemas/tiny-tracker/operation-record-1.schema.json" }
+        "400": { $ref: "#/components/responses/PrincipalError" }
+        "404":
+          description: No record of this key now (`no_record`), which never means nothing was written.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - { type: object, properties: { error: { const: no_record }, key: { type: string } } }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+  /operations/{key}/fence:
+    post:
+      tags: [tickets]
+      operationId: fenceOperation
+      description: |
+        Settle a lost answer by lookup (feature `inflight`; the `settle-by-lookup` variant uses it). In one synchronous
+        step the backend returns the key's record or, when it has none, closes the key for the caller's principal, so
+        the original request is refused (409 `key_fenced`) if it arrives later. Body `{"fence": false}` looks without
+        closing. The fence is journalled with `durable` and survives a restart; fences never expire. With `retention`,
+        every answer of this route (any status) carries `retention_ms`, the configured key retention (0.3.0 follow-up
+        F2: `tiny-tracker server` reads it at start with a `{"fence": false}` peek and states it).
+      parameters:
+        - { name: key, in: path, required: true, schema: { $ref: "#/components/schemas/IdempotencyKey" } }
+        - $ref: "#/components/parameters/Run"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, properties: { fence: { type: boolean, default: true } } }
+      responses:
+        "200":
+          description: The key's state now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, state]
+                properties:
+                  key: { type: string }
+                  state: { type: string, enum: [completed, expired, fenced] }
+                  principal: { type: string, description: "completed and expired: the caller's principal (G2 fold-in 1)" }
+                  fingerprint_hash: { type: string, description: "completed and expired: the hash of the request the key was used for (G2 fold-in 1)" }
+                  retention_ms: { type: integer, minimum: 1, description: "With retention: the configured key retention (0.3.0 follow-up F2)" }
+                  execution_id: { type: string }
+                  status: { type: integer }
+                  body: {}
+                  committed_at: { type: string, format: date-time }
+                  result_digest: { type: string }
+                  objects: { type: array, items: { type: object } }
+                  fenced_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "404":
+          description: "No record of the key (and, unless the body was `{\"fence\": false}`, the key is now fenced)."
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - { type: object, properties: { error: { const: no_record }, key: { type: string }, state: { const: none } } }
+        "409": { $ref: "#/components/responses/KeyedRefusal" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /_fixture/runs:
+    servers:
+      - url: http://127.0.0.1:{port}
+        description: The control listener. The port is printed in the state line as `control`.
+        variables:
+          port: { default: "0" }
+    get:
+      tags: [control]
+      operationId: listRuns
+      security: [{ controlToken: [] }]
+      responses:
+        "200":
+          description: Runs allocated by this process.
+          content:
+            application/json:
+              schema: { type: object, required: [runs], properties: { runs: { type: array, items: { $ref: "#/components/schemas/Run" } } } }
+    post:
+      tags: [control]
+      operationId: allocateRun
+      description: |
+        Allocates a run id for one configured principal (default `p-default`). Send it as the run tag in request
+        `_meta` (`dev.writesafety.tiny-tracker/run`) and as `Tiny-Tracker-Run` on direct backend calls. At most 1000
+        runs per process. With `durable`, run allocations are journalled and restored at the next start.
+      security: [{ controlToken: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, maxLength: 200 }
+                principal: { $ref: "#/components/schemas/PrincipalId" }
+      responses:
+        "201":
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /_fixture/runs/{run}/reset:
+    servers:
+      - url: http://127.0.0.1:{port}
+        description: The control listener. The port is printed in the state line as `control`.
+        variables:
+          port: { default: "0" }
+    post:
+      tags: [control]
+      operationId: resetRun
+      description: |
+        Removes the objects and key records one principal's run made, as one commit through the commit path (needs
+        the `ledger` feature: the ledger records the reset from that commit). A write of the run still waiting to
+        commit gets 409 `run_reset` (or `key_fenced` with a pending key record); its key stays fenced for the life of
+        the data dir.
+      security: [{ controlToken: [] }]
+      parameters:
+        - { name: run, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: What was removed, and the ledger entry that records it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, principal, dropped, ledger_seq]
+                properties:
+                  run_id: { type: string }
+                  principal: { $ref: "#/components/schemas/PrincipalId" }
+                  dropped: { type: object, required: [objects, keys], properties: { objects: { type: integer }, keys: { type: integer } } }
+                  ledger_seq: { type: [integer, "null"] }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+        "503": { $ref: "#/components/responses/Error" }
+  /_fixture/faults:
+    servers:
+      - url: http://127.0.0.1:{port}
+        description: The control listener. The port is printed in the state line as `control`.
+        variables:
+          port: { default: "0" }
+    get:
+      tags: [control]
+      operationId: listFaults
+      security: [{ controlToken: [] }]
+      responses:
+        "200":
+          description: Armed and spent faults, held answers, the caps, and the legal fault points.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [armed, points]
+                properties:
+                  armed: { type: array, items: { $ref: "#/components/schemas/ArmedFault" } }
+                  spent: { type: array, items: { $ref: "#/components/schemas/ArmedFault" } }
+                  held: { type: integer }
+                  caps: { type: object }
+                  points: { type: array, items: { $ref: "#/components/schemas/FaultPoint" } }
+    post:
+      tags: [control]
+      operationId: armFault
+      description: |
+        Arms a fault point (feature `faults`), `process/position/action`. Built: `mcp/after-backend-reply/drop` (the
+        MCP answer is held after the backend committed: the lost response, server-side) and the crash points
+        `backend/before-commit/crash`, `backend/after-commit/crash`, `mcp/after-backend-reply/crash` and
+        `backend/after-effect-before-key/crash` (keyed writes; without `durable`, 400 `needs_feature`). A crash point
+        takes no selector but `{"once": true}` and needs `--supervise` (409 `needs_supervise` in one process). Every
+        arming and firing is a ledger entry. At most 32 armed faults.
+      security: [{ controlToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [point]
+              additionalProperties: false
+              properties:
+                point: { type: string, description: process/position/action }
+                selector:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    tool: { type: string, pattern: "^[a-z_]{1,64}$", description: MCP points only. }
+                    run: { type: string }
+                    operation: { type: string }
+                    nth: { type: integer, minimum: 1 }
+                    count: { type: integer, minimum: 1 }
+                    once: { type: boolean }
+                    hold_ms: { type: integer, minimum: 0, maximum: 600000 }
+      responses:
+        "201":
+          description: The armed fault.
+          content:
+            application/json:
+              schema: { type: object, required: [fault], properties: { fault: { $ref: "#/components/schemas/ArmedFault" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "415": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+        "503": { $ref: "#/components/responses/Error" }
+  /_fixture/clock:
+    servers:
+      - url: http://127.0.0.1:{port}
+        description: The control listener. The port is printed in the state line as `control`.
+        variables:
+          port: { default: "0" }
+    get:
+      tags: [control]
+      operationId: getClock
+      security: [{ controlToken: [] }]
+      responses:
+        "200":
+          description: The clock domain and offset (with the `clock` feature also the fixture's now and the wall clock).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClockState" }
+    post:
+      tags: [control]
+      operationId: moveClock
+      description: |
+        Moves the fixture clock forward (feature `clock`, with `--fixture-control`). Every record carries
+        `clock_offset_ms`; an A5 run that counts shows offset 0 with control off. Without the `clock` feature: 501.
+        With `durable` the move is journalled (a `clock` line) once the offset is stored and before it is answered, and
+        the offset is restored at the next start; if the line cannot be written the offset is put back (503
+        `journal_unavailable`; if the write had begun when it failed, the line may be in the file and whether a restart
+        keeps the move is unknown); if the line was written and the data-dir lease was then found taken over, the answer
+        is 503 `lease_lost` and whether a restart keeps the move is unknown.
+      security: [{ controlToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [advance_ms], additionalProperties: false, properties: { advance_ms: { type: integer, minimum: 0 } } }
+      responses:
+        "200":
+          description: The clock after the move.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ClockState"
+                  - type: object
+                    properties:
+                      moved: { type: object, properties: { from_ms: { type: integer }, to_ms: { type: integer }, at: { type: string } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/NotBuilt" }
+        "503": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    backendToken:
+      type: http
+      scheme: bearer
+      description: TRACKER_BACKEND_TOKEN, or one principal's token from TRACKER_BACKEND_TOKENS_FILE.
+    evidenceToken:
+      type: http
+      scheme: bearer
+      description: TRACKER_EVIDENCE_TOKEN or _FILE, or generated in --token-dir. Read-only.
+    controlToken:
+      type: http
+      scheme: bearer
+      description: TRACKER_CONTROL_TOKEN or _FILE, or generated in --token-dir.
+  parameters:
+    Principal:
+      name: principal
+      in: query
+      required: false
+      description: The principal an evidence read is for; required when more than one principal is configured.
+      schema: { $ref: "#/components/schemas/PrincipalId" }
+    TicketId:
+      { name: id, in: path, required: true, schema: { type: string, pattern: "^T-[0-9]+$" } }
+    IfMatch:
+      name: If-Match
+      in: header
+      description: A quoted version (`"3"`, weak form accepted) or `*`.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: "With `strict-input`, 8 to 128 of `A-Z a-z 0-9 . _ : -` (400 `bad_idempotency_key`). The same key with a different request is refused (422 `idempotency_key_reused`)."
+      schema: { $ref: "#/components/schemas/IdempotencyKey" }
+    Run:
+      name: Tiny-Tracker-Run
+      in: header
+      description: The run tag. A value outside the tag format is ignored (recorded as null).
+      schema: { type: string }
+    Operation:
+      name: Tiny-Tracker-Operation
+      in: header
+      description: The operation tag. A value outside the tag format is ignored (recorded as null).
+      schema: { type: string }
+  headers:
+    ETag:
+      description: The ticket's version, quoted.
+      schema: { type: string }
+    IdempotentReplayed:
+      description: "`true` when the answer is a replay of an earlier write."
+      schema: { type: string, enum: ["true"] }
+  responses:
+    PrincipalError:
+      description: "`principal_required` (more than one principal is configured; `principals` lists them), `unknown_principal`, or another bad query parameter."
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  principals: { type: array, items: { $ref: "#/components/schemas/PrincipalId" } }
+    KeyedRefusal:
+      description: |
+        A keyed write that was not applied now, by its key's state (decision 0004, INTERFACES §1.1):
+        `in_progress` (a request with this key is still pending: repeat later with the same key; `since`;
+        features `inflight`), `key_fenced` (the key was closed by a run reset while pending, or by a lookup fence:
+        nothing was applied and the key cannot be used again), `run_reset` (the run was reset while this request waited
+        to commit: nothing was applied). Also `exists` and `not_empty` on projects.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  error: { enum: [in_progress, key_fenced, run_reset, exists, not_empty] }
+                  since: { type: string, format: date-time }
+    KeyExpired:
+      description: |
+        410 `key_expired` (feature `retention`, policy `refuse`): the same request's key record has expired and only
+        its tombstone is kept. The write WAS applied: this is a replay of the tombstone (`Idempotent-Replayed: true`,
+        `Tiny-Tracker-Execution`); read the object. A different request with the expired key is 422
+        `idempotency_key_reused`.
+      headers:
+        Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+        Tiny-Tracker-Execution: { description: The execution record of the original write., schema: { type: string } }
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, message, execution_id, result_digest, committed_at]
+            properties:
+              error: { const: key_expired }
+              message: { type: string }
+              execution_id: { type: string }
+              result_digest: { type: string }
+              committed_at: { type: string, format: date-time }
+              objects: { type: array, items: { type: object } }
+    Error:
+      description: An error. `error` is a stable code; `message` is for people.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotBuilt:
+      description: The feature is off in this process (`not_enabled`), or not built in this version (`not_built`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/NotBuilt" }
+    Conflict:
+      description: Precondition failed (412 `precondition_failed`); `current` holds the ticket as it is now. Nothing was written.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  current: { $ref: "#/components/schemas/Ticket" }
+    TicketOk:
+      description: The ticket.
+      headers: { ETag: { $ref: "#/components/headers/ETag" } }
+      content:
+        application/json:
+          schema: { type: object, required: [ticket], properties: { ticket: { $ref: "#/components/schemas/Ticket" } } }
+    TicketCreated:
+      description: "Created, or a replay of a keyed create (`Idempotent-Replayed: true`)."
+      headers:
+        ETag: { $ref: "#/components/headers/ETag" }
+        Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+      content:
+        application/json:
+          schema: { type: object, required: [ticket], properties: { ticket: { $ref: "#/components/schemas/Ticket" } } }
+    TicketWritten:
+      description: Written, with the fields that changed.
+      headers:
+        ETag: { $ref: "#/components/headers/ETag" }
+        Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" }
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ticket, changed]
+            properties:
+              ticket: { $ref: "#/components/schemas/Ticket" }
+              changed: { type: array, items: { type: string } }
+    LabelAdded:
+      description: The label and the ticket after it.
+      headers: { ETag: { $ref: "#/components/headers/ETag" } }
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ticket, label, created]
+            properties:
+              ticket: { $ref: "#/components/schemas/Ticket" }
+              label: { $ref: "#/components/schemas/Label" }
+              created: { type: boolean }
+  schemas:
+    Status: { type: string, enum: [open, in_progress, closed, archived] }
+    IdempotencyKey: { type: string, pattern: "^[A-Za-z0-9._:-]{8,128}$" }
+    PrincipalId: { type: string, pattern: "^p-[a-z0-9-]{1,62}$" }
+    Project:
+      type: object
+      required: [key, name, version, created_at, updated_at]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProjectUpsert:
+      type: object
+      required: [project, created]
+      properties:
+        project: { $ref: "#/components/schemas/Project" }
+        created: { type: boolean }
+    Label:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, pattern: "^L-[0-9]+$" }
+        name: { type: string }
+    Comment:
+      type: object
+      required: [id, body, created_at]
+      properties:
+        id: { type: string, pattern: "^C-[0-9]+$" }
+        body: { type: string }
+        created_at: { type: string, format: date-time }
+    Details:
+      type: object
+      required: [component, severity]
+      properties:
+        component: { type: [string, "null"] }
+        severity: { enum: [low, medium, high, null] }
+    Ticket:
+      type: object
+      required: [id, project, title, status, assignee, priority, description, details, labels, comments, version, created_at, updated_at]
+      properties:
+        id: { type: string, pattern: "^T-[0-9]+$" }
+        project: { type: string }
+        title: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        assignee: { type: [string, "null"] }
+        priority: { type: integer }
+        description: { type: string }
+        details: { $ref: "#/components/schemas/Details" }
+        labels: { type: array, items: { $ref: "#/components/schemas/Label" } }
+        comments: { type: array, items: { $ref: "#/components/schemas/Comment" } }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TicketFields:
+      type: object
+      description: Unknown members and values outside the limits are refused (422 `validation`, naming the field and the reason).
+      properties:
+        title: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        assignee: { type: [string, "null"] }
+        priority: { type: integer }
+        description: { type: string }
+        details:
+          type: object
+          properties:
+            component: { type: [string, "null"] }
+            severity: { enum: [low, medium, high, null] }
+        labels: { type: array, items: { type: string }, maxItems: 20 }
+    BatchOp:
+      type: object
+      required: [op, id]
+      properties:
+        op: { type: string, enum: [patch, delete] }
+        id: { type: string }
+        project: { type: string, description: When given, the ticket must be in this project. }
+        if_match: { type: integer, description: The version the ticket must be at. }
+        set: { $ref: "#/components/schemas/TicketFields" }
+    Run:
+      type: object
+      required: [run_id, principal, created_at, label]
+      properties:
+        run_id: { type: string }
+        principal: { $ref: "#/components/schemas/PrincipalId" }
+        created_at: { type: string, format: date-time }
+        label: { type: [string, "null"] }
+    ArmedFault:
+      type: object
+      required: [id, point, selector, armed_at, ledger_seq, state]
+      properties:
+        id: { type: string, description: "F-<n>" }
+        point: { type: string }
+        selector: { type: object }
+        armed_at: { type: string, format: date-time }
+        ledger_seq: { type: integer }
+        state: { type: string, enum: [armed, spent] }
+        matched: { type: integer }
+        fired: { type: integer }
+        skipped_at_cap: { type: integer }
+        released: { type: integer }
+    ClockState:
+      type: object
+      required: [domain, offset_ms]
+      properties:
+        domain: { type: string, enum: [wall, fixture] }
+        offset_ms: { type: integer }
+        now: { type: string, format: date-time }
+        wall_now: { type: string, format: date-time }
+    FaultPoint:
+      type: object
+      required: [id, process, position, action, since, note]
+      properties:
+        id: { type: string, description: process/position/action }
+        process: { type: string, enum: [mcp, backend] }
+        position: { type: string, enum: [before-commit, after-commit, after-backend-reply, after-effect-before-key] }
+        action: { type: string, enum: [drop, close, crash, delay, error] }
+        since: { type: [string, "null"] }
+        note: { type: string }
+    Error:
+      type: object
+      required: [error, message]
+      additionalProperties: true
+      properties:
+        error:
+          type: string
+          description: |
+            A stable code. Backend: unauthorized (401), run_not_allocated and run_not_owned (403), not_found,
+            no_record and no_route (404), bad_json, bad_if_match, bad_idempotency_key and not_well_formed (400),
+            exists, not_empty, in_progress, key_fenced and run_reset (409), key_expired (410), precondition_failed
+            (412), too_large (413), validation (422, with `field` and `reason`), idempotency_key_reused (422),
+            precondition_required (428), journal_unavailable, lease_lost and stopped (503), internal (500). Evidence: bad query
+            parameters, principal_required and unknown_principal (400), forbidden (403), read_only (405), not_enabled
+            (501). Control: bad_json, bad_body, bad_request, bad_selector, bad_principal, unknown_principal,
+            unknown_point, not_planned and needs_feature (400), unauthorized (401), forbidden (403), no_route and no_such_run (404),
+            method_not_allowed (405), needs_supervise (409), too_large (413), unsupported_media_type (415),
+            too_many_runs and too_many_faults (429), not_enabled and not_built (501), ledger_stopped, stopped,
+            journal_unavailable and lease_lost (503). `lease_lost` (durable, 0.4.0): the journal line was written and
+            flushed, then the data-dir lease was found taken over by another start, so the outcome is unknown (the new
+            holder decides it; a keyed repeat to it tells which); this server appends nothing more and must be restarted.
+            `journal_unavailable`: nothing was appended, or the append failed. If it failed once its write had begun, the
+            line may be in the file and the next start decides it: the outcome is unknown, and the message says so.
+            Read the code as "not applied by this process", never as "never applied".
+        message: { type: string }
+    NotBuilt:
+      type: object
+      required: [error, available_from, message]
+      properties:
+        error: { type: string, enum: [not_enabled, not_built], description: "`not_enabled`: the feature is built but off in this process; `not_built`: not in this version." }
+        feature: { type: string }
+        available_from: { type: string, description: The release that builds it. }
+        message: { type: string }

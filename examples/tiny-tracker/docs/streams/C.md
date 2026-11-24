@@ -4,7 +4,7 @@ The lane lead merges these sections into FIXTURE.md at release. Commands assume 
 
 ## Running the lost-response contract
 
-Our adapter for the shared lost-response test contract lives in `harness/adapters/tiny_tracker.py`, pinned to the contract at `92bf1ba5f8226a67409fd8a7a68411b5c4a7258d` (`harness/contract.json`). It needs only the Python standard library.
+Our adapter for the shared lost-response test contract lives in `harness/adapters/tiny_tracker.py`, pinned to the contract at `b2f2c6485086d5ad46a7b2c7359c432533224eaf` from 0.4.0 (`92bf1ba5f8226a67409fd8a7a68411b5c4a7258d` through 0.3.0; `harness/contract.json`). It needs only the Python standard library.
 
 ```sh
 umask 077; mkdir -p ~/.tt-tokens

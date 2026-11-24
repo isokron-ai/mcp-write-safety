@@ -10,7 +10,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -399,8 +399,13 @@ describe("tiny-tracker all --supervise", () => {
     assert.ok(line.features.includes("evidence"), "the 0.2.0 default features come first");
     const d = (await get(`${line.backend}/build`, EVIDENCE)).body;
     assert.equal(d.supervision.supervisor_boot_id, line.supervise.boot_id);
-    const code = await new Promise<number | null>((resolve) => { child.on("exit", resolve); child.kill("SIGTERM"); });
-    assert.equal(code, 0, err);
+    const code = await new Promise<number | null>((resolve) => {
+      child.on("exit", resolve);
+      // Windows cannot deliver SIGTERM to a handler: the supervisor would be ended outright and its children left running.
+      // There the whole process tree is ended instead, so the checks below that the children are gone still hold.
+      if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]); else child.kill("SIGTERM");
+    });
+    if (process.platform !== "win32") assert.equal(code, 0, err); // the clean exit 0 on SIGTERM is POSIX-only
     await assert.rejects(fetch(`${line.backend}/build`), "the backend child is gone");
     await assert.rejects(fetch(line.mcp), "the MCP child is gone");
     assert.ok(![BACKEND, EVIDENCE, CONTROL].some((t) => out.includes(t) || err.includes(t)));

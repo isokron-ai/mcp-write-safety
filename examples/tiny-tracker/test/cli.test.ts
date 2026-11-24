@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectClient } from "./support/stack.js";
+import { stoppedCode } from "./support/cli-run.js";
 
 const CLI = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 
@@ -24,17 +25,18 @@ function run(args: string[], env: Record<string, string> = {}, whileUp?: (out: a
     let stdout = "";
     let stderr = "";
     let started = false;
+    let stopped = false;
     child.stderr.on("data", (d) => { stderr += d; });
     child.stdout.on("data", (d) => {
       stdout += d;
       if (!started && stdout.includes("\n")) {
         started = true;
         const line = JSON.parse(stdout.split("\n")[0]);
-        (whileUp ? whileUp(line) : Promise.resolve()).then(() => child.kill("SIGTERM"), (e) => { child.kill("SIGKILL"); reject(e); });
+        (whileUp ? whileUp(line) : Promise.resolve()).then(() => { stopped = true; child.kill("SIGTERM"); }, (e) => { child.kill("SIGKILL"); reject(e); });
       }
     });
     const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
-    child.on("exit", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    child.on("exit", (code, signal) => { clearTimeout(timer); resolve({ code: stoppedCode(code, signal, stopped), stdout, stderr }); });
   });
 }
 
@@ -59,17 +61,15 @@ describe("tiny-tracker command line", () => {
     assert.equal(help.status, 0);
     const listed = [...help.stdout.matchAll(/^  tiny-tracker (\w+)/gm)].map((m) => m[1]);
     // The modes src/cli.ts accepts. Add a mode here when it is built, in the same change that adds it to the usage.
-    assert.deepEqual([...listed].sort(), ["all", "backend", "server"]);
+    assert.deepEqual([...listed].sort(), ["all", "backend", "server", "stdio"]);
     // Every listed mode is one the command knows: an unknown mode answers with the usage text and exit 2.
     for (const mode of listed) {
       const r = cli([mode, "--port", "not-a-port"], { TRACKER_BACKEND_TOKEN: "t".repeat(24) });
       assert.doesNotMatch(r.stdout, /^usage:/, `${mode} is listed but answered with the usage text`);
     }
-    // The one 0.3.0 listed without building it: stdio is refused, and the usage no longer names it (README: "stdio is not offered").
-    const stdio = cli(["stdio"]);
-    assert.equal(stdio.status, 2);
-    assert.match(stdio.stdout, /^usage:/);
-    assert.doesNotMatch(stdio.stdout, /stdio/);
+    // 0.3.0 listed stdio without building it; 0.4.0 builds it, so `stdio --help` answers with its own help, not the usage text.
+    const stdio = cli(["stdio", "--help"]);
+    assert.doesNotMatch(stdio.stdout, /^usage:/);
   });
 
   it("an unrecognized read-only value stops the server (exit 2)", async () => {

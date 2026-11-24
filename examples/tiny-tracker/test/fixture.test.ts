@@ -93,7 +93,7 @@ describe("the evidence namespace (rule 2, G3)", () => {
       assert.deepEqual(d.clock, { domain: "wall", offset_ms: 0 });
       assert.deepEqual(d.faults, { armed: [] });
       assert.equal(d.process.restart_count, 0);
-      assert.deepEqual(d.contract, { repo: "zambodotdev/lost-response-test-contract", commit: "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d" });
+      assert.deepEqual(d.contract, { repo: "zambodotdev/lost-response-test-contract", commit: "b2f2c6485086d5ad46a7b2c7359c432533224eaf" });
     }
     assert.equal(seen[0].build_hash, seen[1].build_hash);
     assert.notEqual(seen[0].process.boot_id, seen[1].process.boot_id);
@@ -141,9 +141,11 @@ describe("tokens (X2): environment or a 0600 file, never argv, never printed, ne
       const missing = await runCli(["all", "--features", "evidence"], { TRACKER_BACKEND_TOKEN: BACKEND });
       assert.equal(missing.code, 2);
       assert.match(missing.stderr, /needs a token: set TRACKER_EVIDENCE_TOKEN or TRACKER_EVIDENCE_TOKEN_FILE/);
-      const loose = await runCli(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN_FILE: file("loose", EVIDENCE, 0o644) });
-      assert.equal(loose.code, 2);
-      assert.match(loose.stderr, /chmod 600/);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        const loose = await runCli(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN_FILE: file("loose", EVIDENCE, 0o644) });
+        assert.equal(loose.code, 2);
+        assert.match(loose.stderr, /chmod 600/);
+      }
       const both = await runCli(["all", "--features", "evidence"], { TRACKER_EVIDENCE_TOKEN: EVIDENCE, TRACKER_EVIDENCE_TOKEN_FILE: file("both", EVIDENCE, 0o600) });
       assert.equal(both.code, 2);
       const argv = await runCli(["all", "--features", "evidence", "--default-project", EVIDENCE], { TRACKER_EVIDENCE_TOKEN: EVIDENCE });
@@ -213,16 +215,20 @@ describe("Phase 0 review fixes", () => {
           assert.equal((await get(`${state.control}/_fixture/clock`, CONTROL)).status, 200, "the supplied control token wins");
         });
       assert.equal(r.code, 0, r.stderr);
-      assert.equal(statSync(dir).mode & 0o777, 0o700);
-      assert.equal(statSync(join(dir, "evidence.token")).mode & 0o777, 0o600);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        assert.equal(statSync(dir).mode & 0o777, 0o700);
+        assert.equal(statSync(join(dir, "evidence.token")).mode & 0o777, 0o600);
+      }
       assert.ok(!r.stdout.includes(readFileSync(join(dir, "evidence.token"), "utf8").trim()));
       assert.throws(() => statSync(join(dir, "control.token")), "no control token generated when one was supplied");
-      const loose = join(root, "loose");
-      mkdirSync(loose, { mode: 0o755 });
-      chmodSync(loose, 0o755);
-      const bad = await runCli(["all", "--features", "evidence", "--token-dir", loose], { TRACKER_BACKEND_TOKEN: BACKEND });
-      assert.equal(bad.code, 2);
-      assert.match(bad.stderr, /chmod 700/);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        const loose = join(root, "loose");
+        mkdirSync(loose, { mode: 0o755 });
+        chmodSync(loose, 0o755);
+        const bad = await runCli(["all", "--features", "evidence", "--token-dir", loose], { TRACKER_BACKEND_TOKEN: BACKEND });
+        assert.equal(bad.code, 2);
+        assert.match(bad.stderr, /chmod 700/);
+      }
       const noEffect = await runCli(["all", "--token-dir", dir], { TRACKER_BACKEND_TOKEN: BACKEND });
       assert.equal(noEffect.code, 2);
     } finally {
@@ -275,7 +281,9 @@ describe("the control listener (rule 2, X4)", () => {
       assert.deepEqual(faults.body.armed, []);
       assert.ok(faults.body.points.some((p: any) => p.id === "mcp/after-backend-reply/drop" && p.since === "0.2.0"));
       assert.equal((await post(`${c}/_fixture/faults`, CONTROL, { point: "mcp/after-backend-reply/drop" })).status, 501);
-      assert.equal((await post(`${c}/_fixture/clock`, CONTROL, { advance_ms: 1000 })).status, 501);
+      // Without the clock feature: 501 not_enabled with the feature (openapi.yaml), not not_built (note 27 item 5).
+      const clock = await post(`${c}/_fixture/clock`, CONTROL, { advance_ms: 1000 });
+      assert.deepEqual([clock.status, clock.body.error, clock.body.feature, clock.body.available_from], [501, "not_enabled", "clock", "0.3.0"]);
       assert.equal((await get(`${state.backend}/projects`, CONTROL)).status, 401, "the control token opens nothing on the backend");
     });
     assert.equal(r.code, 0, r.stderr);

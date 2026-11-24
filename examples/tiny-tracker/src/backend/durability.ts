@@ -18,7 +18,7 @@ import type { KeyRecordSeam } from "./seams.js";
 import type { Store } from "./store.js";
 import type { CommittedTransaction } from "./commit.js";
 import { DurableKeyRecords, fingerprintHashOf, type KeptReply } from "./keyrecords.js";
-import { Journal, type CrashHook, type JournalRun } from "./journal.js";
+import { Journal, type CrashHook, type JournalClockMove, type JournalRun } from "./journal.js";
 import { keyExpiry, DEFAULT_RETENTION_MS, type ExpiryPolicy } from "./expiry.js";
 import { PACKAGE_VERSION } from "../profile.js";
 import { KEY_PATTERN } from "./input.js";
@@ -51,6 +51,12 @@ export interface DurabilityOptions {
    * listener can allocate.
    */
   runs?: { restore(run: JournalRun): void; onAllocate: ((run: JournalRun) => void) | undefined };
+  /**
+   * The fixture clock (0.4.0, feature clock). Under durable its clock lines go back into it at load (restore), and its
+   * beforeMove journals each move once the offset is stored and before it is answered; a failed line rolls the offset
+   * back (chained before any beforeMove already set).
+   */
+  clock?: { restore(offsetMs: number): void; offsetMs?(): number; beforeMove: ((move: JournalClockMove) => void) | undefined };
   /**
    * The point backend/after-effect-before-key (G2 fold-in 11): called with the commit sequence of a keyed write after it
    * is journalled and applied, before its key record is kept. A supervised backend child's crash check; it may exit.
@@ -94,7 +100,29 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
     if (features.inflight) keys.lines = journal;
     journal.replayObservers = options.replayObservers ?? [];
     if (options.runs) journal.runs = options.runs;
+    if (options.clock) journal.clock = options.clock;
     journal.load();
+    if (options.clock) {
+      // G3a (pause note 3.3, remaining case d): an offset kept elsewhere (the supervisor's state folder) that is ahead of
+      // the journal's is a move whose clock line was never written (a crash between storing the offset and its line). The
+      // clock already runs there and never moves back, so the journal catches up with a clock line before anything is
+      // served; a fresh state folder later restores the same offset.
+      const kept = options.clock.offsetMs?.();
+      const journalled = journal.report?.clockOffsetMs ?? 0;
+      if (kept !== undefined && Number.isSafeInteger(kept) && kept > journalled) {
+        journal.recordClockMove({ from_ms: journalled, to_ms: kept, at: new Date().toISOString() });
+        if (journal.report) journal.report.clockOffsetMs = kept;
+        (options.log ?? ((m: string) => process.stderr.write(`${m}\n`)))(`tiny-tracker: the fixture clock's kept offset (${kept} ms) was ahead of the journal's (${journalled} ms): a move whose clock line was not written; the journal now records it`);
+      }
+      // 0.4.0: a clock move is journalled (clock line) before it is answered; a failed line rolls the offset back.
+      const clock = options.clock;
+      const next = clock.beforeMove;
+      const j = journal;
+      clock.beforeMove = (move) => {
+        j.recordClockMove(move);
+        next?.(move);
+      };
+    }
     if (options.runs) {
       // Seams v2.1: a run allocation is journalled before it is registered or answered (run-alloc line).
       const runs = options.runs;
@@ -163,7 +191,11 @@ export function openDurability(store: Store, options: DurabilityOptions): Durabi
     try {
       s = keys.fence({ principal }, key, run, write);
     } catch (e) {
-      // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed.
+      // The lookup-fence line could not be written: no fence, and the caller is not told the key is closed. lease_lost
+      // (G3 note 26 item 1c): it was written, then the lease was found taken over, so whether it holds is unknown.
+      if ((e as { code?: unknown } | null)?.code === "lease_lost") return { status: 503, body: { error: "lease_lost", message: `the fence line was written, then the data-dir lease was found taken over: ${(e as Error).message}; whether the key is fenced is unknown (ask the new holder)` } };
+      // append_failed: the write had begun, so the line may be in the file and the next start decides it.
+      if ((e as { code?: unknown } | null)?.code === "append_failed") return { status: 503, body: { error: "journal_unavailable", message: `the fence line failed once its write had begun: ${(e as Error).message}; the line may be in the file, so whether a restart keeps the fence is unknown; this server appends nothing more: restart it` } };
       return { status: 503, body: { error: "journal_unavailable", message: `the fence could not be recorded: ${(e as Error).message}; nothing was fenced` } };
     }
     if (!s && forgets) {

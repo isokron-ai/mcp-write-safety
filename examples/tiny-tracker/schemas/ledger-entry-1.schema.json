@@ -25,7 +25,7 @@
       "pattern": "^[0-9a-f]{16}$"
     },
     "kind": {
-      "description": "journal-unavailable: a write whose journal append failed; nothing was applied and the caller got 503 (status 503, execution_id null). run-reset: one principal's run removed through the commit path; objects lists what was removed.",
+      "description": "journal-unavailable: a write whose journal append failed and whose caller got 503 (status 503, execution_id null). It records the answer, not the outcome: nothing was applied in this process, but an append that failed once its write had begun, and one answered 503 lease_lost, may be applied by the next start. run-reset: one principal's run removed through the commit path; objects lists what was removed.",
       "enum": [
         "start",
         "execution",

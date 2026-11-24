@@ -66,7 +66,7 @@ describe("the fixture clock (unit)", () => {
       writer.advance(5 * DAY);
       assert.equal(reader.offsetMs(), 5 * DAY);
       assert.equal(new FixtureClock(folderOffset(dir)).offsetMs(), 5 * DAY);
-      assert.equal(statSync(join(dir, "clock.json")).mode & 0o777, 0o600);
+      if (process.platform !== "win32") assert.equal(statSync(join(dir, "clock.json")).mode & 0o777, 0o600); // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -178,3 +178,69 @@ describe("the clock feature on the command line", () => {
     assert.ok(![BACKEND, EVIDENCE, CONTROL].some((t) => r.stdout.includes(t) || r.stderr.includes(t)));
   });
 });
+
+describe("the fixture clock with the durable journal (0.4.0, note 19 item 7)", () => {
+  it("a move is stored, then handed to beforeMove (the journal line) before it is answered; a failed line rolls the offset back (503) (G3 note 26 item 5)", async () => {
+    const seen: number[] = [];
+    const c = new FixtureClock(memoryOffset(), () => 1_000_000);
+    c.beforeMove = (m) => { seen.push(c.offsetMs(), m.from_ms, m.to_ms); };
+    c.advance(5000);
+    assert.deepEqual(seen, [5000, 0, 5000], "beforeMove sees the stored offset: a store that cannot keep it never leaves a journal line ahead of the answer");
+    c.beforeMove = () => { throw new Error("disk full"); };
+    assert.throws(() => c.advance(5000), (e: any) => e.status === 503 && e.code === "journal_unavailable" && /the clock did not move/.test(e.message));
+    assert.equal(c.offsetMs(), 5000, "rolled back");
+    const answer = await clockRoute(c, "POST", async () => ({ advance_ms: 1 }));
+    assert.equal(answer!.status, 503);
+    assert.equal(c.offsetMs(), 5000);
+    // The line was written, then the lease was found taken over (G3 note 26 item 1c): outcome unknown, 503 lease_lost.
+    c.beforeMove = () => { throw Object.assign(new Error("taken over"), { code: "lease_lost" }); };
+    const lost = await clockRoute(c, "POST", async () => ({ advance_ms: 7 }));
+    assert.deepEqual([lost!.status, (lost!.body as any).error], [503, "lease_lost"]);
+    assert.match((lost!.body as any).message, /whether a restart keeps the move is unknown/);
+    assert.equal(c.offsetMs(), 5000);
+    // A store that cannot put the offset back says so.
+    let fail = false;
+    const store = { v: 5000, get() { return this.v; }, set(n: number) { if (fail) throw new Error("read-only"); this.v = n; } };
+    const c2 = new FixtureClock(store, () => 1_000_000);
+    c2.beforeMove = () => { fail = true; throw new Error("disk full"); };
+    assert.throws(() => c2.advance(10), (e: any) => e.code === "journal_unavailable" && /could not be put back \(read-only\), so it stays at 5010 ms/.test(e.message));
+  });
+
+  it("restore puts back a recorded offset, forward only, within the cap", () => {
+    const c = new FixtureClock(memoryOffset(7000));
+    c.restore(5000);
+    assert.equal(c.offsetMs(), 7000, "an offset already further (the supervisor's state folder) stays");
+    c.restore(9000);
+    assert.equal(c.offsetMs(), 9000);
+    assert.throws(() => c.restore(MAX_OFFSET_MS + 1));
+    assert.throws(() => c.restore(-1));
+  });
+
+  it("a journal replays its clock lines into the clock, and refuses to load clock lines without one", async () => {
+    const { Journal } = await import("../src/backend/journal.js");
+    const { Store } = await import("../src/backend/store.js");
+    const dir = mkdtempSync(join(tmpdir(), "tt-clockj-"));
+    const data = join(dir, "data");
+    try {
+      const open = (clock?: FixtureClock) => {
+        const j = new Journal(new Store(), undefined, { dataDir: data, writer: "test", log: () => {} });
+        if (clock) j.clock = clock;
+        j.load();
+        return j;
+      };
+      const j1 = open(new FixtureClock());
+      j1.recordClockMove({ from_ms: 0, to_ms: 120_000, at: "2026-11-17T00:00:00.000Z" });
+      j1.recordClockMove({ from_ms: 120_000, to_ms: 180_000, at: "2026-11-17T00:00:01.000Z" });
+      j1.close();
+      const restored = new FixtureClock();
+      const j2 = open(restored);
+      assert.equal(restored.offsetMs(), 180_000);
+      assert.equal(j2.report!.clockOffsetMs, 180_000);
+      j2.close();
+      assert.throws(() => open(), /moved the fixture clock to an offset of 180000 ms/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+

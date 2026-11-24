@@ -16,7 +16,10 @@
 // The offset only moves forward, in steps of at most MAX_STEP_MS, to at most
 // MAX_OFFSET_MS (X5). Under --supervise the offset is kept in the supervisor's
 // state folder: the backend child writes it, the MCP child reads it, and it
-// survives a restart of either.
+// survives a restart of either. With durable (0.4.0) every move is also a
+// journal line, written once the offset is stored and before the move is
+// answered (a failed line rolls the offset back), and the journal puts the
+// offset back at load, so it survives a restart of the whole server too.
 
 import { clockPath, readJson, writeJsonDurable } from "../supervision.js";
 import type { Clock } from "../clock.js";
@@ -82,6 +85,25 @@ export class FixtureClock implements Clock {
     return this.store.get();
   }
 
+  /**
+   * Called with each move once the offset is stored, before the move is told or answered (0.4.0: the durable journal
+   * writes its clock line here). A throw rolls the offset back to where it was, as the commit path puts the store back
+   * when its journal line fails (G3 note 26 item 5), and the route answers 503: journal_unavailable, or lease_lost when
+   * the line was written and the lease was then found taken over (whether a restart keeps the move is then unknown).
+   * The offset is stored first so that a store that cannot keep it (the supervisor's state folder) never leaves a
+   * journal line ahead of the answer.
+   */
+  beforeMove: ((move: ClockMove) => void) | undefined;
+
+  /**
+   * Puts back an offset the journal recorded (0.4.0, at load, before anything is served). Forward only: an offset kept
+   * elsewhere that is already further (the supervisor's state folder) stays.
+   */
+  restore(offsetMs: number): void {
+    if (!Number.isSafeInteger(offsetMs) || offsetMs < 0 || offsetMs > MAX_OFFSET_MS) throw new ClockError(500, "bad_offset", `a restored clock offset must be an integer from 0 to ${MAX_OFFSET_MS}`);
+    if (offsetMs > this.store.get()) this.store.set(offsetMs);
+  }
+
   /** Called on every move (the ledger records control actions). Listeners run synchronously, after the offset is stored. */
   onMove(listener: (move: ClockMove) => void): void {
     this.listeners.push(listener);
@@ -95,8 +117,29 @@ export class FixtureClock implements Clock {
     const from = this.store.get();
     const to = from + ms;
     if (to > MAX_OFFSET_MS) throw new ClockError(409, "offset_cap", `the offset may not pass ${MAX_OFFSET_MS} ms (about 10 years); it is ${from} ms`);
-    this.store.set(to);
     const move: ClockMove = { from_ms: from, to_ms: to, at: this.wallNow().toISOString() };
+    this.store.set(to);
+    if (this.beforeMove) {
+      try {
+        this.beforeMove(move);
+      } catch (e) {
+        let rollback = "";
+        try {
+          this.store.set(from);
+        } catch (r) {
+          rollback = `; the offset could not be put back (${(r as Error)?.message ?? String(r)}), so it stays at ${to} ms without a journal line`;
+        }
+        const code = (e as { code?: unknown } | null)?.code;
+        const lost = code === "lease_lost";
+        // append_failed: the write had begun when it failed, so the line may be in the file and the next start decides
+        // it (the journal takes nothing more). The code stays journal_unavailable; the message does not say "did not move".
+        throw new ClockError(503, lost ? "lease_lost" : "journal_unavailable", lost
+          ? `the clock move was journalled, then the data-dir lease was found taken over: ${(e as Error).message}; whether a restart keeps the move is unknown${rollback || "; the offset here was put back"}`
+          : code === "append_failed"
+            ? `the clock move's journal line failed once its write had begun: ${(e as Error).message}; the line may be in the file, so whether a restart keeps the move is unknown; this server appends nothing more: restart it${rollback || "; the offset here was put back"}`
+            : `the clock move could not be journalled: ${(e as Error).message}${rollback || "; the clock did not move"}`);
+      }
+    }
     for (const l of this.listeners) l(move);
     return move;
   }

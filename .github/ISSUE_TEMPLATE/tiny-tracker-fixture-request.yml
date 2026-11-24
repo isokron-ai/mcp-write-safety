@@ -1,0 +1,39 @@
+name: tiny-tracker fixture request
+description: Ask for a defect, fault point or feature in tiny-tracker, the sample server and shared fixture.
+title: "[tiny-tracker] "
+labels: ["tiny-tracker"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask for something tiny-tracker should be able to show: a defect a harness should catch, a fault point it should survive, or a feature it needs to check evidence. You need not write the code. How a change is built is in [examples/tiny-tracker/CONTRIBUTING.md](https://github.com/isokron-ai/mcp-write-safety/blob/main/examples/tiny-tracker/CONTRIBUTING.md).
+
+        Issues are public. Do not use this form to report a vulnerability: see the Security section of the repository's CONTRIBUTING.md.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What do you need?
+      options:
+        - A defect (a deliberate fault a check should detect)
+        - A fault point (a place where the fixture fails on request)
+        - A feature (something the fixture should do or record)
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: show
+    attributes:
+      label: What should it show?
+      description: The behaviour, and the requirement (MWS-…), fixture property (FX-…) or contract assertion (LRT-…) it concerns, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: case
+    attributes:
+      label: Where does it happen?
+      description: A published finding, an upstream issue, or a description of real servers that behave this way. Links help.
+  - type: textarea
+    id: harness
+    attributes:
+      label: Who would use it?
+      description: The harness or test suite that would run against it, and how it would tell the correct build from the broken one.

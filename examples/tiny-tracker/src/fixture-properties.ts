@@ -35,7 +35,7 @@ export type FixturePropertyId = keyof typeof FIXTURE_PROPERTIES;
 /** The shared lost-response test contract: the commit its references are pinned to. A draft under joint review. */
 export const CONTRACT = {
   repo: "zambodotdev/lost-response-test-contract",
-  commit: "92bf1ba5f8226a67409fd8a7a68411b5c4a7258d",
+  commit: "b2f2c6485086d5ad46a7b2c7359c432533224eaf",
   status: "draft, under joint review; runs before it freezes are historical baselines and are repeated after the freeze",
 } as const;
 

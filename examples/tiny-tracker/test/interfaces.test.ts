@@ -191,9 +191,11 @@ describe("principals and key-record scoping (D5)", () => {
     try {
       const f = join(dir, "p.json");
       writeFileSync(f, JSON.stringify({ principals: [{ id: "p-a", token: "token-a-00000000000000" }] }));
-      chmodSync(f, 0o644);
-      assert.throws(() => loadPrincipalsFile(f), /chmod 600/);
-      chmodSync(f, 0o600);
+      if (process.platform !== "win32") { // POSIX file modes are not checked on Windows: the folder's ACL is the operator's (FIXTURE.md)
+        chmodSync(f, 0o644);
+        assert.throws(() => loadPrincipalsFile(f), /chmod 600/);
+        chmodSync(f, 0o600);
+      }
       assert.deepEqual(loadPrincipalsFile(f), [{ id: "p-a", token: "token-a-00000000000000" }]);
       assert.throws(() => parsePrincipals('{"principals":[{"id":"alice","token":"token-a-00000000000000"}]}'), PrincipalError);
       assert.throws(() => parsePrincipals('{"principals":[{"id":"p-a","token":"t-000000000000000000"},{"id":"p-b","token":"t-000000000000000000"}]}'), /shares a token/);
@@ -739,16 +741,16 @@ describe("seams v2: --token-dir and the argv check", () => {
       mkdirSync(real, { mode: 0o700 });
       const link = join(base, "link");
       symlinkSync(real, link);
-      assert.throws(() => loadToken("evidence", {}, "linux", link), /symbolic link/);
+      assert.throws(() => loadToken("evidence", {}, process.platform, link), /symbolic link/);
       const dir = join(base, "tokens");
       mkdirSync(dir, { mode: 0o700 });
       writeFileSync(join(dir, "evidence.token"), "", { mode: 0o600 });
-      assert.throws(() => loadToken("evidence", {}, "linux", dir), /another tiny-tracker is starting/);
+      assert.throws(() => loadToken("evidence", {}, process.platform, dir), /another tiny-tracker is starting/);
       symlinkSync(join(dir, "evidence.token"), join(dir, "control.token"));
-      assert.throws(() => loadToken("control", {}, "linux", dir), /symbolic link/);
+      assert.throws(() => loadToken("control", {}, process.platform, dir), /symbolic link/);
       const fresh = join(base, "fresh");
-      const t = loadToken("evidence", {}, "linux", fresh);
-      assert.equal(loadToken("evidence", {}, "linux", fresh), t, "reused on restart");
+      const t = loadToken("evidence", {}, process.platform, fresh);
+      assert.equal(loadToken("evidence", {}, process.platform, fresh), t, "reused on restart");
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
@@ -976,10 +978,10 @@ describe("seams v2.1: run ids and the token folder", () => {
     const base = mkdtempSync(join(tmpdir(), "tt-tokenlink-"));
     try {
       const dir = join(base, "tokens");
-      const t = loadToken("evidence", {}, "linux", dir);
+      const t = loadToken("evidence", {}, process.platform, dir);
       assert.match(t, /^[0-9a-f]{48}$/);
       assert.deepEqual(readdirSync(dir), ["evidence.token"]);
-      assert.equal(loadToken("evidence", {}, "linux", dir), t);
+      assert.equal(loadToken("evidence", {}, process.platform, dir), t);
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

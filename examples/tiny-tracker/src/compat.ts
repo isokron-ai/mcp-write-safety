@@ -30,6 +30,8 @@ export interface Combination {
   supervise?: boolean;
   /** --key-expiry or TRACKER_KEY_EXPIRY as given (0.3.0, feature retention): refuse (the default) or forget. */
   keyExpiry?: string;
+  /** How the MCP layer is reached (stream F, 0.4.0). Absent: Streamable HTTP. */
+  transport?: "http" | "stdio";
 }
 
 /**
@@ -200,15 +202,19 @@ export const COMPAT_RULES: readonly CompatRule[] = [
     check: (c) => c.faults.includes("backend/after-effect-before-key/crash") && !has(c.features, "durable")
       ? "fault point backend/after-effect-before-key/crash needs the durable feature: without a journal there is no key record to keep after the effect" : undefined,
   },
+  // CMP-65 (G2 fold-in 9: durable with the fixture clock) is retired in 0.4.0 (coordinator note 19, item 7): the journal
+  // keeps the clock's moves (clock lines, written before the move is answered) and restores the offset at load.
+  // ---- stream F (CMP-70 to CMP-79) ----
   {
-    // G2 fold-in 9 (refused, not journalled): the fixture clock's offset lives in memory, or under --supervise in the
-    // supervisor's state folder, which goes when the supervisor stops; the journal does not keep it. After a restart
-    // the record time would move back, and tombstones would read as completed records again. Journalling the offset
-    // would take a new journal-format/1 line kind; a durable run is a wall-clock run (the A5 plan), so it is refused.
-    id: "CMP-65", post01: true,
-    check: (c) => has(c.features, "durable") && has(c.features, "clock")
-      ? "the durable feature does not run with the fixture clock: the journal does not keep the clock offset, so after a restart record time would move back and expired keys would read as live again (run durable on the wall clock: drop clock)" : undefined,
+    // 0.4.0 integration: narrowed. stdio runs through the same start as `all`, so fixture-layer features, the evidence
+    // listener and --fixture-control work over stdio. What is left: --supervise runs the MCP layer as a separate child
+    // process, which cannot hold the client's stdin and stdout across a restart.
+    id: "CMP-70", post01: false,
+    check: (c) => c.transport === "stdio" && c.supervise
+      ? "--supervise runs over Streamable HTTP only: its MCP child is a separate process that a restart replaces, and the client's stdin and stdout cannot move with it"
+      : undefined,
   },
+  // ---- end stream F ----
 ];
 
 /** The rules a combination breaks, as messages. Empty: it may start. */
