@@ -2,7 +2,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +49,27 @@ describe("tiny-tracker command line", () => {
     });
     assert.equal(r.code, 0);
     assert.doesNotMatch(r.stderr, /BROKEN BUILD/);
+  });
+
+  it("R-TT-01: the usage text lists only commands the command line runs (0.3.0 listed a stdio mode that does not exist)", () => {
+    // Output that is not the one-line JSON `run` expects, so this test reads the command's output directly.
+    const cli = (args: string[], env: Record<string, string> = {}) =>
+      spawnSync(process.execPath, [CLI, ...args], { env: { PATH: process.env.PATH ?? "", ...env }, encoding: "utf8", timeout: 15000 });
+    const help = cli(["--help"]);
+    assert.equal(help.status, 0);
+    const listed = [...help.stdout.matchAll(/^  tiny-tracker (\w+)/gm)].map((m) => m[1]);
+    // The modes src/cli.ts accepts. Add a mode here when it is built, in the same change that adds it to the usage.
+    assert.deepEqual([...listed].sort(), ["all", "backend", "server"]);
+    // Every listed mode is one the command knows: an unknown mode answers with the usage text and exit 2.
+    for (const mode of listed) {
+      const r = cli([mode, "--port", "not-a-port"], { TRACKER_BACKEND_TOKEN: "t".repeat(24) });
+      assert.doesNotMatch(r.stdout, /^usage:/, `${mode} is listed but answered with the usage text`);
+    }
+    // The one 0.3.0 listed without building it: stdio is refused, and the usage no longer names it (README: "stdio is not offered").
+    const stdio = cli(["stdio"]);
+    assert.equal(stdio.status, 2);
+    assert.match(stdio.stdout, /^usage:/);
+    assert.doesNotMatch(stdio.stdout, /stdio/);
   });
 
   it("an unrecognized read-only value stops the server (exit 2)", async () => {

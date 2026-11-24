@@ -5,7 +5,9 @@ that fixed it. Each test named here starts with its row's ID. IsoKron's cross-re
 isokron-ai/tool-qa) reads this table, so keep its four columns.
 
 - `R-INP-*`: the dispatch inputs of the T0 worker workflows (`defect-matrix.yml`).
+- `R-TT-*`: tiny-tracker's command line and server.
 
 | ID | What it was | Pinned by | Fix |
 |---|---|---|---|
 | R-INP-01 | LOW. Found by: review. The defect-matrix T0 worker checked each dispatch input with `printf '%s' "$v" \| grep -Eq`, which matches line by line: a value with a newline passed when one of its lines did, and its second line then went into `$GITHUB_OUTPUT` as an output of its own (for example a forged `run_key`). Only someone who can dispatch the workflow could send one. The check is now a whole-string `[[ "$v" =~ $pattern ]]` match. | `scripts/ci/workflow-inputs.test.mjs` › `R-INP-01: every T0 worker refuses a dispatch input with a newline in it`<br>`scripts/ci/workflow-inputs.test.mjs` › `R-INP-01: the old grep check let a newline through, so the test above can fail` | 21b09c9 |
+| R-TT-01 | LOW. Found by: the performance baseline run of tiny-tracker 0.3.0. `tiny-tracker --help` listed a `stdio` command (with a pointer to `stdio --help`) that the command line does not have: running it answered with the usage text and exit 2, and the README says stdio is not offered. Anyone following the usage text, or a harness built from it, was sent to a mode that does not exist. The line is removed until stdio is built (0.4.0). | `examples/tiny-tracker/test/cli.test.ts` › `R-TT-01: the usage text lists only commands the command line runs (0.3.0 listed a stdio mode that does not exist)` | 87e0041 |

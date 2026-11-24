@@ -19,8 +19,6 @@ const USAGE = `usage:
   tiny-tracker backend [--port N] [--backend-defect lost-update]      (needs TRACKER_BACKEND_TOKEN)
   tiny-tracker server  [--port N] [--defect NAME]... [--backend-url URL] [--read-only VALUE] [--tools a,b]
                                                                       (needs TRACKER_BACKEND_TOKEN)
-  tiny-tracker stdio   [--defect NAME]... [--backend-url URL] [--read-only VALUE] [--tools a,b]
-                       MCP over stdin/stdout; the backend runs in-process unless a URL is given (stdio --help).
 Defect names are listed in the README; --defect also takes a requirement ID (e.g. MWS-CONC-3) or "all".
 Fixture options (see FIXTURE.md):
   --profile 0.1|default    0.1: exactly the surface of the published 0.1.0 (no features). Default: default.
