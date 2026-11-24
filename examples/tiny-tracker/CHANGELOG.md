@@ -55,6 +55,14 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 - The data-dir lease: `lock.d` in the data dir, an mkdir lease with a 2 s heartbeat and a 20 s stale time, taken over by compare-and-rename. Before every journal append the holder checks it still owns the lease and beat within 10 s; otherwise it is fenced (writes answer 503 `journal_unavailable`; restart it). The 0.3.0 pid lock stays as a second check for this release. `fx-check` FX-DUR-2 counts `lock.d` among the data dir's files.
 - The known-answer generator writes the second principal's file whenever principals are in effect (the profile included), so FX-LOOK-3 is checked on the matrix's Lv rows.
 
+### 0.4.0 fresh-eyes review (24 Nov)
+- The 0.4.0 known answers are regenerated at version 0.4.0 (`build_hash` covers the package version), and name the 39 defects they cannot tell from the correct build (`not_detected`, carried into `0.4.0.json` and the table's header): MCP-layer defects of the tool surface, which fx-check and the contract driver do not measure.
+- `journal-unavailable` in the ledger schema and FIXTURE.md records the answer, not the outcome: after an append that had begun, or a 503 `lease_lost`, the next start may apply the line.
+- In container mode the broken-build banner says `/mcp` and the evidence routes listen on every interface, behind their tokens (it said "Loopback only").
+- The container evidence listener is capped like the control listener: 64 connections, 10 s for headers, 30 s for a request.
+- A new lease's rename that fails with ENOTEMPTY or EEXIST reads as "a lease is there" on POSIX only; on Windows it is the clear refusal it was before the integration pass.
+- FIXTURE.md: "Planned for 0.4.0" becomes "Not built yet" (writecheck rows for the two inflight-gated defects need a new writecheck check); a limit says FX-KEY-1 moves a durable data dir's clock for good.
+
 ### Fixed
 - 0.3.0's usage text (`tiny-tracker --help`) listed a `stdio` command that 0.3.0 did not have (it answered with the usage and exit 2; R-TT-01). 0.4.0 has `tiny-tracker stdio`, so the line is accurate again. Found by the performance baseline run of the published 0.3.0.
 

@@ -4,9 +4,10 @@
     "name": "@mcp-write-safety/tiny-tracker",
     "version": "0.4.0"
   },
+  "not_detected": "Not detected in 0.4.0: add-label-replaces-list, bulk-misreports-partial, bulk-without-transaction, close-before-confirm, coerce-types, comment-id-dropped, comment-marked-read-only, conflict-as-generic-error, convert-numeric-strings, create-marked-idempotent, delete-refetches-version, drop-unknown-args, force-by-default, ignore-unknown-args-with-notice, in-progress-reported-not-applied, key-store-in-memory, label-by-position, missing-annotations, no-idempotency-key, read-merge-put, read-only-by-annotation, read-only-strict-true, receipt-missing-version, retry-without-key, set-labels-non-destructive, settle-miss-reported-not-applied, shape-claims-applied, shape-missing-failed, shape-text-says-all-saved, shape-text-says-failed, shape-unknown-as-failed, shape-wrong-version, skip-limits, token-in-error, undeclared-title-limit, unknown-denied-tools-ignored, unknown-tools-ignored, update-adds-defaults, vague-validation-error give exactly the correct build's answers on their own rows here. They are MCP-layer defects of the tool surface (what a tool says, accepts or does), which the MWS requirements cover and mcp-writecheck checks; these known answers hold only fx-check's FX- properties and the lost-response contract driver, and none of these rows has a contract row (in-progress-reported-not-applied and settle-miss-reported-not-applied trip MWS-RES-1 and MWS-RES-2). A \"held\" on these rows does not mean the defect is absent.",
   "builds": [
     {
-      "build_hash": "f437ca65878fb1a54b07d1610220eeaed65487c0750ee2312f2aeea2965bb64a",
+      "build_hash": "163aa322f7b1734cd549a3e804882563e2143bcc16efa644a63074b140f05cfe",
       "label": "L2 correct build",
       "start": [
         "tiny-tracker",
@@ -87,7 +88,7 @@
       }
     },
     {
-      "build_hash": "aad91aba57cfec22c029fa8b20efd8162ec6e7eafcec2dc513077577652dfabc",
+      "build_hash": "8af5f34855ab6c282547a56b36bcca3d3107a700c2dea5c8d3d27bc2727c2af9",
       "label": "L2, backend digest-not-canonical",
       "start": [
         "tiny-tracker",
@@ -170,7 +171,7 @@
       }
     },
     {
-      "build_hash": "31ea5d3ad43128a20545c9130cb044965a2a787c9233fe7ef792e41c42cfe2be",
+      "build_hash": "0804e8d1a21dbf893767f0c874a72b7507aa6d13b4e5102bc6c84b65ff29010d",
       "label": "L2, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -253,7 +254,7 @@
       }
     },
     {
-      "build_hash": "1df70352f2825c11127aa421705e2eba92ec00db7e82e39c05447285c345586c",
+      "build_hash": "baa001f59cf505df2a0ce6cafe817f2565198fe0cdf633168bd60a9c25374abb",
       "label": "L2, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -336,7 +337,7 @@
       }
     },
     {
-      "build_hash": "0681d7ddc467d314cab7a90e334c283ea65b0dfd6261558c117375be6349b22a",
+      "build_hash": "2f8f213ad385df1f1e0aff99140475f73463a71ad7b4e1ce50819ccdc78d588b",
       "label": "L2, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -419,7 +420,7 @@
       }
     },
     {
-      "build_hash": "e87c852b7693594c11b480a6227bce69839ff8dd8e4eba94e976923041414c7f",
+      "build_hash": "0e65d8e2d86724274c004ef4f85d6b704f0f4bf6e175ebc796557a095bb7457c",
       "label": "L2, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -479,7 +480,7 @@
       }
     },
     {
-      "build_hash": "7827dcf8ed5cc2d4ad58d1137b9e8719eccace2398f68371ef79df3f7183eaba",
+      "build_hash": "0e476f34e9b9e26729c80e3abc3b363a9299d27281a6b095320fc905c85ae6ae",
       "label": "L2, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -562,7 +563,7 @@
       }
     },
     {
-      "build_hash": "e2fd81e4bf0a951e65b2267d5b5fe56712ad584ffd7b7144478beb6cda181d5e",
+      "build_hash": "6ff94f668f8d99c07be26548b0f0e0cde5b2b76cc7884b2f53f5cc28c5d00002",
       "label": "L2, defect add-label-replaces-list",
       "start": [
         "tiny-tracker",
@@ -621,7 +622,7 @@
       }
     },
     {
-      "build_hash": "b04c8164659b65cc9bfcf270b7c77c7fc942982321e5b4aa097aa54aa76cf79d",
+      "build_hash": "456d9999d3fa1e6ac8f317e1ca2c3d5667e2c0741359236532e6acc24fdcb073",
       "label": "L2, defect add-label-replaces-list, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -682,7 +683,7 @@
       }
     },
     {
-      "build_hash": "86aa6b6ea68b8c45e092ec92366bc26ffb8324f4239c4bcb271066ba9ad2e0e7",
+      "build_hash": "6d744f560793ba83241f2b8744efc2b6e9d293f1f94569bd4c1861482bd22ec8",
       "label": "L2, defect add-label-replaces-list, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -743,7 +744,7 @@
       }
     },
     {
-      "build_hash": "8e3038487346cb4e6457fc756f4c8a08be6bc34208c4121ca56202a05478b276",
+      "build_hash": "7049f72a3ab7991b0fcd4f2ff3c555e211ee4498f95193bf3b74b34847e764fb",
       "label": "L2, defect bulk-misreports-partial",
       "start": [
         "tiny-tracker",
@@ -802,7 +803,7 @@
       }
     },
     {
-      "build_hash": "79abe75903b10c018544c3ef62a53ee92f6dbfc26a0df0e2a47d7e0aa192256e",
+      "build_hash": "3c149b93bffe8093b46cd3f17f095b1c0914928bf228a4b04e8ff20c685b9ddf",
       "label": "L2, defect bulk-misreports-partial, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -863,7 +864,7 @@
       }
     },
     {
-      "build_hash": "fbcd179c28cce932ce668f33ae85b4dfdebc0d6dc3d745ed12de9b8c9f85da02",
+      "build_hash": "8f22c97832b70fedaad17e25222fe5a67451390b15cab55dca90b951c10c97a9",
       "label": "L2, defect bulk-misreports-partial, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -924,7 +925,7 @@
       }
     },
     {
-      "build_hash": "d862f30c6a52aefa903b6c54eee21e2dc4e3a7efe311311509205f5c1880dac2",
+      "build_hash": "fe126e557fb834a789ea75066c0b0173dcf8946f81e3295aeafe64962bbb38d8",
       "label": "L2, defect bulk-without-transaction",
       "start": [
         "tiny-tracker",
@@ -983,7 +984,7 @@
       }
     },
     {
-      "build_hash": "2d537029d1d137cc0d9f30ea92f21e9e651682316d99dac71f853c283bb60dfc",
+      "build_hash": "4c56036843c485adcef4f341af9b788cbb8030b0c07df13a75880feec3d51eee",
       "label": "L2, defect bulk-without-transaction, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -1044,7 +1045,7 @@
       }
     },
     {
-      "build_hash": "6475ab2e93a20b00e70b186cd82c0070a2e95363283228112b7e581182053eb2",
+      "build_hash": "c4c9791447ed3045f1bb0a58c4ed575f12499034a6b75a0b9bbef1526622a6bc",
       "label": "L2, defect bulk-without-transaction, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -1105,7 +1106,7 @@
       }
     },
     {
-      "build_hash": "f9d20b0c62e385a7d9c8310a1cd40e0d8ea45589b3ffa1b3d318ea2ec18a0f14",
+      "build_hash": "711040d07b6977bb48e2fbca34c9257a8a903b28ea16510069a7c757cff7323e",
       "label": "L2, defect close-before-confirm",
       "start": [
         "tiny-tracker",
@@ -1164,7 +1165,7 @@
       }
     },
     {
-      "build_hash": "c6753c807d14fd9099b3bc48c7851061196f3b67ec2309f77725d1c051d95514",
+      "build_hash": "e61066cb6694c47d11a40a2e81e0ef26bbe066aaa14c721ca7a7eec561fd92ec",
       "label": "L2, defect close-before-confirm, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -1225,7 +1226,7 @@
       }
     },
     {
-      "build_hash": "608455230fd2bd27e0a6c16e2fe98534b1e26e34d8aa84d8ed19298d82436cd2",
+      "build_hash": "6a3b9706adf520f19eb4447884d5e935803eff7d39b71970404fad0f52bea81c",
       "label": "L2, defect close-before-confirm, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -1286,7 +1287,7 @@
       }
     },
     {
-      "build_hash": "a5b13216838f66f6d672f49767d3bbe965f226a0859e24bf32f3b959168ff8ce",
+      "build_hash": "c0f01f8b4df02efb92ef5169d4b8bfb6ace5dfea9a3325b2846c51f2172c5ece",
       "label": "L2, defect coerce-types",
       "start": [
         "tiny-tracker",
@@ -1345,7 +1346,7 @@
       }
     },
     {
-      "build_hash": "ad79c852cce8a93baf579cc41489cbaa4eaace8d903be51fb33610d1a6f102f4",
+      "build_hash": "7610094739b5674abcd38744a511e2b39389c8c29ccab3ada0c069bc7d3d1711",
       "label": "L2, defect coerce-types, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -1406,7 +1407,7 @@
       }
     },
     {
-      "build_hash": "7c412af6b40ba5921113162d90340f1fa17ef1384c2e04d0c9202894e3514754",
+      "build_hash": "76e7c9706650333dac627d24d2def50952f44531e9ce654cc9829159efafdfbe",
       "label": "L2, defect coerce-types, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -1467,7 +1468,7 @@
       }
     },
     {
-      "build_hash": "447f77c33fcf704ccfe26df745d02cf5074b5fe455ff2afbf451f4d7b9c7d0d8",
+      "build_hash": "d43b9bc2105e158d81e5ec16812546ef9ce12604832bc63a827815a3505e8b23",
       "label": "L2, defect comment-id-dropped",
       "start": [
         "tiny-tracker",
@@ -1526,7 +1527,7 @@
       }
     },
     {
-      "build_hash": "2f31a18b06be88102f80774d3e82b3366c12e12530032496761dfaa4deca0bb8",
+      "build_hash": "dabd79444f2ec01bb1c59303067a1a874d1a4730e48e6d938417045cbf90c6f2",
       "label": "L2, defect comment-id-dropped, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -1587,7 +1588,7 @@
       }
     },
     {
-      "build_hash": "9bec13af7b20210922d506c11e3a67bbbea13c5d9e39b1050bd2d060c32c5f7e",
+      "build_hash": "2a488dbe36319bb481cfd5cd44be856c56d11b1803491dedaa81209c3b5d54e2",
       "label": "L2, defect comment-id-dropped, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -1648,7 +1649,7 @@
       }
     },
     {
-      "build_hash": "ed5f3c15517f944286b4a5caffab290dd2ec54abdad933764ab7ca379f3c43d7",
+      "build_hash": "5f3eec781830bf912e9dabe0321af0aa4f959be0b4349cf9936c272a3125c89d",
       "label": "L2, defect comment-marked-read-only",
       "start": [
         "tiny-tracker",
@@ -1707,7 +1708,7 @@
       }
     },
     {
-      "build_hash": "e84827048897297c0bc72aadf7fc931b30f7982cbccd8dbf9bdb4a2dbe94d3bc",
+      "build_hash": "e246df3d0f8f194d74f5bf921eee524fb539145bb775eaeae5072f3efb67b99c",
       "label": "L2, defect comment-marked-read-only, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -1768,7 +1769,7 @@
       }
     },
     {
-      "build_hash": "2ff85d66d884fd81d6b1e736622d2db0314056ea5151429c793316200b11ef1e",
+      "build_hash": "f88e72a0a8c8dee1af5e022571889b721f02bd4f58baf3e684b6d34fe9eec101",
       "label": "L2, defect comment-marked-read-only, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -1829,7 +1830,7 @@
       }
     },
     {
-      "build_hash": "4419d0dacbcfdcc033af9ba64b42a3d30c1011f072e222aa5189264e2bd2d001",
+      "build_hash": "6d1292e8ced3164a90b80d52ff0a108b9ccccb5bd4ffaf7e66056c8b79ca8b00",
       "label": "L2, defect conflict-as-generic-error",
       "start": [
         "tiny-tracker",
@@ -1888,7 +1889,7 @@
       }
     },
     {
-      "build_hash": "6ba6fd29f9f6aca46d783cc3b7e55a847a3ff5b5461f4b93452a2d85d3840ea0",
+      "build_hash": "6d846db9b3f8507d99189115bf0ceeec4094cc950356d80b3a2c362a3fcd2446",
       "label": "L2, defect conflict-as-generic-error, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -1949,7 +1950,7 @@
       }
     },
     {
-      "build_hash": "67ee0d74c8df8fe3465606d6ba9c208c5aa636fe997ca7a0f71b1396ea60c656",
+      "build_hash": "017c706890af57a451cdcdfdc54caaef490c9abf0646c9e1ed6e39009c916e64",
       "label": "L2, defect conflict-as-generic-error, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2010,7 +2011,7 @@
       }
     },
     {
-      "build_hash": "4ea89ffd1b3faa70a7b247b604b3e987d84d801e4f0a2f44ad178e893f980f93",
+      "build_hash": "d2c8570ccc5ad7cbb9eb05824f126022884503394a228f31260f03bef33b5bcc",
       "label": "L2, defect conflict-without-iserror, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2071,7 +2072,7 @@
       }
     },
     {
-      "build_hash": "796353b4176a8309e5e45d3594e0afc50ceec50938d33db08e8f1e6dce212003",
+      "build_hash": "dae8e71ea7b67f1136774f76e0f727fb959698e6f696f3a09e89d5dbb22db66e",
       "label": "L2, defect conflict-without-iserror, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -2132,7 +2133,7 @@
       }
     },
     {
-      "build_hash": "e76715efeac498d8794d545d9a4875305a1b57b926c1fd09392ceb71adfe51fa",
+      "build_hash": "02d9b193507372cc883d46b4f03ed053446606578f3fc86a158d50065ab2172c",
       "label": "L2, defect convert-numeric-strings",
       "start": [
         "tiny-tracker",
@@ -2191,7 +2192,7 @@
       }
     },
     {
-      "build_hash": "e352590b0205142435066f8329785ba41037c1e89382a98325857ff2700ceb58",
+      "build_hash": "e27750ccbda8f383e842d7376da2d8d16bc4fcb804da41e91e6a91700ccb3fa5",
       "label": "L2, defect convert-numeric-strings, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -2252,7 +2253,7 @@
       }
     },
     {
-      "build_hash": "e62a5e814fa0acfa2264313f2f160f440dcb451ccfbcc6956422a27f0a7021bd",
+      "build_hash": "8d72fe194b95e1065a27aa6bbff07d67a8fca67f9f99c2b61291c3eaecbf8d99",
       "label": "L2, defect convert-numeric-strings, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2313,7 +2314,7 @@
       }
     },
     {
-      "build_hash": "b73473ce9602d70adaebe4b9945556a17597f3a815d9b9d5524195b73f88fe10",
+      "build_hash": "399713f5d6fb8e00482a72089a4d54390a6cade67f7b5fc1e9653da4d34ec65c",
       "label": "L2, defect create-marked-idempotent",
       "start": [
         "tiny-tracker",
@@ -2372,7 +2373,7 @@
       }
     },
     {
-      "build_hash": "5ae79cd1d358b76cbdcf7e05d71128b25246d26cf35d997b087d0a3c22cfe7a6",
+      "build_hash": "c6002f2ad8835ac92c78ac39ea34efdc216127e13bd54c100e19b102c28a89c8",
       "label": "L2, defect create-marked-idempotent, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -2433,7 +2434,7 @@
       }
     },
     {
-      "build_hash": "2afe1b45b691328067ce6c75913fb5ee610937b69894a607280d0d5844ca9080",
+      "build_hash": "6e31e1569d5d550b859c45ad0da94454a973973555a246ba9d7db809d7cf2557",
       "label": "L2, defect create-marked-idempotent, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2494,7 +2495,7 @@
       }
     },
     {
-      "build_hash": "69dcf5eef6fdf1d98436461564fbc286d323129507aa21b73e6d645b50d68c7e",
+      "build_hash": "c37455799dee2cdc3d54da8c00216a9a2b6c1a6fcb74784f161f730a4e204c3a",
       "label": "L2, defect create-overwrites, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2555,7 +2556,7 @@
       }
     },
     {
-      "build_hash": "df498caf23d20beca5a7c1a704808584d2abaab4f5d8da7521892f1e26c8e57b",
+      "build_hash": "a8268db2cc5c69e4e881931af4790b27e5fd0a48a4900da6190a9947f2ce73da",
       "label": "L2, defect create-overwrites, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -2615,7 +2616,7 @@
       }
     },
     {
-      "build_hash": "3dc1b4702b6435fe1eb334a453f9f10041593b15b957657285c19c60d6590638",
+      "build_hash": "f5fa614131ac2ccb017737d77d93df074d53feff14edd35b9cec4530ab6eaf21",
       "label": "L2, defect delete-refetches-version",
       "start": [
         "tiny-tracker",
@@ -2674,7 +2675,7 @@
       }
     },
     {
-      "build_hash": "66c6997b1b5dd6a447097939cee418f90b0ef1bc2f75303bb036549d57b9aa1b",
+      "build_hash": "604f6e1144a980ac0d7c47c7aad0bd5c8edba60c0c8cdd453352ea59b5c11580",
       "label": "L2, defect delete-refetches-version, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -2735,7 +2736,7 @@
       }
     },
     {
-      "build_hash": "e64f0b9c4905db7dabf13872543f308c9fb6c506e2fb6b72e2be9314a2d51b32",
+      "build_hash": "57d4e7b86f73b9c1df1cba2f223aad75f9152a08704ad0cb7f8c5185ea1f0746",
       "label": "L2, defect delete-refetches-version, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2796,7 +2797,7 @@
       }
     },
     {
-      "build_hash": "e0bef682977a399d76b312e2c80feb2bd0bdc6dd2262f5bd4fe652b5ba4f71cc",
+      "build_hash": "2beb884c43f11133ab0643b3f590e9552cab96a59767cb6ed2e189ebc144d96b",
       "label": "L2, defect drop-unknown-args",
       "start": [
         "tiny-tracker",
@@ -2855,7 +2856,7 @@
       }
     },
     {
-      "build_hash": "4fb337c385ad4c3cabc6f593cca287be17e57afc944d21ffd6b5a0a5fbfc1f7e",
+      "build_hash": "52eb5e48cc1ed041db33d8e90f80e1d86f2f800e3a97da8d320e963e0fc08304",
       "label": "L2, defect drop-unknown-args, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -2916,7 +2917,7 @@
       }
     },
     {
-      "build_hash": "077ab4255163a37b1cf63bc407b12b369b64a7f4accc84e004be6fd0a9d4f818",
+      "build_hash": "c05b07c30af6541278678d6e0c51ff47523cc01a7db45aa9f7bda0741b434f88",
       "label": "L2, defect drop-unknown-args, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -2977,7 +2978,7 @@
       }
     },
     {
-      "build_hash": "9ca6fad14e3c2c06e4cd0b5db910028957c9acb7abf691b8d5e6cf128500cf84",
+      "build_hash": "b4b5761e95a5e4e51bcf1ba35622cc44255dcfb9aa52dd0af5f764eaf43cb840",
       "label": "L2, defect empty-filter-deletes-all, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -3038,7 +3039,7 @@
       }
     },
     {
-      "build_hash": "861314b92a19bb85b5e1cf53eb4434533df5764810a1f3d005b96d7f9d91650e",
+      "build_hash": "484d4ddc304873d026a165216b08da5456dbff8db4dcf003edadfa064540541e",
       "label": "L2, defect empty-filter-deletes-all, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -3098,7 +3099,7 @@
       }
     },
     {
-      "build_hash": "2e1b41312dec8cff1a1a062603b8e92f0a2e731db342b0d5584b6c079f596bd0",
+      "build_hash": "ea2068680b87743fa4cc1d55e033be299a895505d3dc0a9bc3129dc983fe3c4f",
       "label": "L2, defect error-as-text, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -3159,7 +3160,7 @@
       }
     },
     {
-      "build_hash": "550efce955947237f10d02568a695969800e61ba775985f30f4edb572c3c60f2",
+      "build_hash": "b78af46da86cda3cca30159779fe35b85fe838ee23bb1ac7453935164fbe4245",
       "label": "L2, defect error-as-text, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -3219,7 +3220,7 @@
       }
     },
     {
-      "build_hash": "71fa870006279fccef7273e047a3e59860da41da282f8b848ca58389c68f6071",
+      "build_hash": "eb235563765b2c239018aea8b9343cbad648ab1ee7fbebf15c32e3c73f220e09",
       "label": "L2, defect force-by-default",
       "start": [
         "tiny-tracker",
@@ -3278,7 +3279,7 @@
       }
     },
     {
-      "build_hash": "7a371575f74973577657424789da15630554f6cb60f4b5ecf21c6bb752201699",
+      "build_hash": "0fbfe9babcec35a31241ac2b47bc8659c9de85eb2df97694113cb3a57658992d",
       "label": "L2, defect force-by-default, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -3339,7 +3340,7 @@
       }
     },
     {
-      "build_hash": "c828382bf7480726fbd11baa2a57e3fe991668caeb6712851292f04c3860a630",
+      "build_hash": "c89a57836240d5b0cb566a5a93c34751759a32ffbe78917693709adcc1217bc1",
       "label": "L2, defect force-by-default, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -3400,7 +3401,7 @@
       }
     },
     {
-      "build_hash": "df7a4d3216a5b703c9777f981379f45531e681271b35bdecef41925a9211b5b7",
+      "build_hash": "0a39e71dfb6dcfacdf1b83d4e14fdb36e0f1fe82b4ad48ab82551974ac483b0e",
       "label": "L2, defect idempotency-key-dropped",
       "start": [
         "tiny-tracker",
@@ -3483,7 +3484,7 @@
       }
     },
     {
-      "build_hash": "f7decaa8b0270c938956818215d64e22647c16e52ede9e20fac3cbd914f91f08",
+      "build_hash": "22e8927bebea7fdb02c10385f868f2789aad2ba7cd5eaa5da6fca76f02eb65e4",
       "label": "L2, defect idempotency-key-dropped, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -3544,7 +3545,7 @@
       }
     },
     {
-      "build_hash": "63a5ff3d68ec739a95cc9b567d4bf2629cccb6d7f77aba4eabd19a804f44f210",
+      "build_hash": "a5901ac7814727458e5ea310a2178ca4d55bb371de97914d8e7ffff042746954",
       "label": "L2, defect idempotency-key-dropped, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -3605,7 +3606,7 @@
       }
     },
     {
-      "build_hash": "50ba6c7175644a453f6fb858b3a08dfdc40773093381a17de0a0ae3b43db3220",
+      "build_hash": "70a621e84543d11df088bd1ee985ff3f9c3e05e03b4d63baf6a6b09d4b37c73a",
       "label": "L2, defect idempotency-key-ignores-args",
       "start": [
         "tiny-tracker",
@@ -3688,7 +3689,7 @@
       }
     },
     {
-      "build_hash": "613acee193de0456f2d5522cdde56a6e872a1076b70a0c5066a9a39472c995a8",
+      "build_hash": "2f49882fccfd89a30784136f5c6fcc0ec96b3a36623090de2123c99cd0eaa96b",
       "label": "L2, defect idempotency-key-ignores-args, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -3749,7 +3750,7 @@
       }
     },
     {
-      "build_hash": "398581bd37524f3dad5aca2a61602c356e790d46d88a6da7b9a19767e0b69fd5",
+      "build_hash": "641144bccf9ae6e22061dd266c2775d18b9f4cc5691f75312d547bd7f99f7356",
       "label": "L2, defect idempotency-key-ignores-args, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -3810,7 +3811,7 @@
       }
     },
     {
-      "build_hash": "2b764d9ce6ce53ff7bfa627d61f6bf369b007b12bdc5db52315f1b893023a0c2",
+      "build_hash": "373ac25e5eec58cbeece202e51e980f4d77fd23fa94cfbc890d67f891e7851e0",
       "label": "L2, defect ignore-project-scope, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -3871,7 +3872,7 @@
       }
     },
     {
-      "build_hash": "f87eeab68b09371132d4753bd3a04030454c16c6f6282bd59c5ba7ce92308db6",
+      "build_hash": "4a66256d6b14106541ec04fd893548e68bfb468ddc0505cb629ba7ba31d81963",
       "label": "L2, defect ignore-project-scope, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -3932,7 +3933,7 @@
       }
     },
     {
-      "build_hash": "a1d97d69a04393f4d6be24523b024424f3b22638f79ceb51657a0ed32b7707f3",
+      "build_hash": "0c3243e1b45921e0f7f78402c79d1d8f02f3be6f1a9e994a82dd80949f52feb5",
       "label": "L2, defect ignore-project-scope, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -3994,7 +3995,7 @@
       }
     },
     {
-      "build_hash": "558b9c5a30bdc781264d1882479004c78036b1feb304752191029142945f209e",
+      "build_hash": "6e3651fa94a58123df31d9e545e56be38a462ad7926557e37a0c7976344b84f3",
       "label": "L2, defect ignore-unknown-args-with-notice",
       "start": [
         "tiny-tracker",
@@ -4053,7 +4054,7 @@
       }
     },
     {
-      "build_hash": "7955f72f4c79eede5bb6fe3c8d64a312f30ba31cf99808aa787704319f4f9c43",
+      "build_hash": "23e08ffbf254d10fad740e508a89414380834f2275e2bf2de696d660bd4bb2f2",
       "label": "L2, defect ignore-unknown-args-with-notice, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -4114,7 +4115,7 @@
       }
     },
     {
-      "build_hash": "aa33c2c2dbafb9201c6f6a0fa9a5574f5ce5a72b3eae6172318b16e1b471d4cc",
+      "build_hash": "9e78793e99bf4b73ba319801ea465bd1c997c6dc8db7245c8ff55c708a58a64f",
       "label": "L2, defect ignore-unknown-args-with-notice, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -4175,7 +4176,7 @@
       }
     },
     {
-      "build_hash": "13877da3e5e6c9fac6aef3b3a49010c977e38cc1805c24181e98d76189f069c5",
+      "build_hash": "78448b25fd8b8dcfa7b7cb56a088fbed0651e958dd4d417f2de621be2d91772d",
       "label": "L2, defect in-progress-reported-not-applied",
       "start": [
         "tiny-tracker",
@@ -4234,7 +4235,7 @@
       }
     },
     {
-      "build_hash": "c9705dcbe743e696cd1c04ca47e5e83deecb251b395510e0870a87fa2493777e",
+      "build_hash": "44cdf58754b8b2a7faf2d45fc8062308a447f46ca5fd1d5c2030acd1e9d48699",
       "label": "L2, defect in-progress-reported-not-applied, backend digest-not-canonical",
       "start": [
         "tiny-tracker",
@@ -4295,7 +4296,7 @@
       }
     },
     {
-      "build_hash": "e712fab9a10384d563d06a4f8e9a35e1f5b0580ecafc9c1de8299dc12e5ebb73",
+      "build_hash": "482bbd9d79881aa9a65b833d06a38cc3f4bad672392122b9cceddbf55e5749e7",
       "label": "L2, defect in-progress-reported-not-applied, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -4356,7 +4357,7 @@
       }
     },
     {
-      "build_hash": "2f4a17690ab5b9306b550b3525c66d7dada439f3daeba79cfb5b4595b415f404",
+      "build_hash": "8054fd04a2ee19b00a80e39a356f3879985d1e9227ace16fed518c6f60344cf6",
       "label": "L2, defect in-progress-reported-not-applied, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -4417,7 +4418,7 @@
       }
     },
     {
-      "build_hash": "d418484c01c385578260ba070a29038097c7e115f654667fc5faf92deed69113",
+      "build_hash": "7839ed79fc1c5aad68a14f0cbade6e1df184a0b6b597ea79db305c659a04b1d9",
       "label": "L2, defect key-store-in-memory",
       "start": [
         "tiny-tracker",
@@ -4476,7 +4477,7 @@
       }
     },
     {
-      "build_hash": "3b4417aff76f77372599836a0c676c70c06d5adbd00b55c3161fd2778f1d87dd",
+      "build_hash": "a13b76aab15cc90f4caa49eecafc9f3d4b37fb01d30263de242ec51474064e0d",
       "label": "L2, defect key-store-in-memory, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -4537,7 +4538,7 @@
       }
     },
     {
-      "build_hash": "f97b36e720d2e8e38c49b7b1eac9a0013d680d05f9d9fc0e9ee3c2c058346c2c",
+      "build_hash": "9d5b84bfea9cbbf5dee4f0744ad734e60e588f2082748616d1a9b1e7470950d3",
       "label": "L2, defect key-store-in-memory, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -4598,7 +4599,7 @@
       }
     },
     {
-      "build_hash": "c1acace3e35e4e69467acefb1d892bdb9880360db0999aa25532a61c5015765b",
+      "build_hash": "603481a5dd5ddade08bcf6b6d317336b4256b8ffe99ebc6dfe27bf749e8cff50",
       "label": "L2, defect label-by-position",
       "start": [
         "tiny-tracker",
@@ -4657,7 +4658,7 @@
       }
     },
     {
-      "build_hash": "2aaffd9eb49437419bbc19ae28a0ab480405349a72a49aec980f2832f7e46c16",
+      "build_hash": "6cdd21d2a4084083cae3e20932d5b311ff5314d5afffc00338ba61f3c734f0f0",
       "label": "L2, defect label-by-position, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -4718,7 +4719,7 @@
       }
     },
     {
-      "build_hash": "fcd721aba92767c0dcd971725de22129fbfab584a334f4fa865805398a1c1558",
+      "build_hash": "8e9bac0a771c8e237dff00e6582529ddf72ea6c37d6622a558463f122d5cb5ad",
       "label": "L2, defect label-by-position, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -4779,7 +4780,7 @@
       }
     },
     {
-      "build_hash": "07c56b83ac030706908f3373a4c64f8132e58fae558149bacc3bb264eaa2ecc6",
+      "build_hash": "1fc6c0de8375f10f7fca85b68f79987c81dd8ee01ab5c30fb11e7a259156891c",
       "label": "L2, defect lookup-reexecutes",
       "start": [
         "tiny-tracker",
@@ -4862,7 +4863,7 @@
       }
     },
     {
-      "build_hash": "c055cc9d8ee5cc68fc018366e916afe56aea4585f8860eb78c21bd114b2e661b",
+      "build_hash": "1c337408b104bdfa6d2dc7388eeefee3d4eb0632e9b3bcb6161a922ed5cd04f1",
       "label": "L2, defect lookup-reexecutes, backend digest-not-canonical",
       "start": [
         "tiny-tracker",
@@ -4923,7 +4924,7 @@
       }
     },
     {
-      "build_hash": "d8133f1eb1f2c68b86b24164a3fb3c328375ea4e3a25e632108eac7d0adad5e6",
+      "build_hash": "0015d31be3ae26bb3bec938c5df29dad24a7777cb6534601611ec565fedc8bf2",
       "label": "L2, defect lookup-reexecutes, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -4984,7 +4985,7 @@
       }
     },
     {
-      "build_hash": "7d8585edcf19731960d9832ecfbfe85ba8a56b7430bb68281f91aa513329ebb4",
+      "build_hash": "c47724710dd33aa627a2b9e310030ceb814fa5c52fc3fcb7d2179b487ab9fa72",
       "label": "L2, defect lookup-reexecutes, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -5045,7 +5046,7 @@
       }
     },
     {
-      "build_hash": "990beedec5d3eb93cb59a4c388de33f4feaf58f8ed5ba2642d046a9fb20af4c4",
+      "build_hash": "99466cda2cda57ff727e4b3b61952a125ba621a7af72ef0d44834f7c558d3eed",
       "label": "L2, defect missing-annotations",
       "start": [
         "tiny-tracker",
@@ -5104,7 +5105,7 @@
       }
     },
     {
-      "build_hash": "1dbb84ad10d026dc3b4c50c856ed31ed3e107ee8b6df875186108a4ad5946770",
+      "build_hash": "aafe4e2ae58ebbcd50989dc3d710291cf98e8cb850d1cb862a7a3383eb884ac1",
       "label": "L2, defect missing-annotations, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -5165,7 +5166,7 @@
       }
     },
     {
-      "build_hash": "c6afca2e8cec779a1c51ab0ee4db6103aadf3b444e1b64fbf543e92ddad1f200",
+      "build_hash": "ab12b5e8f4561023b619518d53c86b62d122f66028a9df67e75a85fee2386b1c",
       "label": "L2, defect missing-annotations, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -5226,7 +5227,7 @@
       }
     },
     {
-      "build_hash": "8b5a849a2587edbdd7dd902ff60b9721f55464ac9a892606d5b1404da584d757",
+      "build_hash": "58a7829909c4a133cf2bcae041feddade497e5c264be7d1c4098cd5342f2cf97",
       "label": "L2, defect no-idempotency-key",
       "start": [
         "tiny-tracker",
@@ -5285,7 +5286,7 @@
       }
     },
     {
-      "build_hash": "3e79085229c177a67516d4d9928dab426ade9400c22e01279903b5428065cd7f",
+      "build_hash": "bc377115e4675b6aa07e71f4544c0e32c3c9ea470c42d3a78dfb2ce686526912",
       "label": "L2, defect no-idempotency-key, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -5346,7 +5347,7 @@
       }
     },
     {
-      "build_hash": "29cca4675f4b9866bbc4d36294198548a40a526e421992b503089609ab1c1331",
+      "build_hash": "3f668f4ae2867b08514e5b72a4707fb34c0cf9197bbda3480550bfc8651f3178",
       "label": "L2, defect no-idempotency-key, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -5407,7 +5408,7 @@
       }
     },
     {
-      "build_hash": "3027851fadf20d26bfc7be6189ad8f0bf6694a14e58b9985be3bfe8dbf6a39ca",
+      "build_hash": "165b506136a9d747ebb7d4ee54da4feffe73185ef9fcba0a7800251591e487e8",
       "label": "L2, defect read-merge-put",
       "start": [
         "tiny-tracker",
@@ -5466,7 +5467,7 @@
       }
     },
     {
-      "build_hash": "fa81b4c8ea6e243db467e9f36faca3efcaac5c0f24cd1ec0358996d806dfcb98",
+      "build_hash": "639c8812c4487cab56c090e8c8fc0ced65e11ab4df069d53b2291d721eefacb1",
       "label": "L2, defect read-merge-put, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -5527,7 +5528,7 @@
       }
     },
     {
-      "build_hash": "ee56228affb2f680ce717f950bd4f28dc55213073afb86b33baa62c66201c99a",
+      "build_hash": "67da1c7e14a405165d4fb20c965484de58a9a74dac4cbbfd8e4f79a9ea338176",
       "label": "L2, defect read-only-by-annotation",
       "start": [
         "tiny-tracker",
@@ -5586,7 +5587,7 @@
       }
     },
     {
-      "build_hash": "b8d93e672f869eb39d543c42c8a3cdb57cc567583b25771323c654b1842a4cbe",
+      "build_hash": "19b7eb007e28af8a8165ed90da29bccdd504a539099c73ef4ca13c330e6e3a36",
       "label": "L2, defect read-only-by-annotation, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -5647,7 +5648,7 @@
       }
     },
     {
-      "build_hash": "6f11fe4512ef039c1d64470bd98ac6bec0a02f1cfc3eb66b00cc8f6d240afa95",
+      "build_hash": "63c84715b2557179cb3449fafb050c4eaf951a5c0b0bb7a2ac371f9cd44de893",
       "label": "L2, defect read-only-by-annotation, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -5708,7 +5709,7 @@
       }
     },
     {
-      "build_hash": "889fc552ad5b3c9ed13339875d3113af89a9c08e6bdb1cd8408bea77343779a6",
+      "build_hash": "d2de0afe59b3f6ce5e837b835de83e3d341965ba681c80b95529036a8621750d",
       "label": "L2, defect read-only-strict-true",
       "start": [
         "tiny-tracker",
@@ -5767,7 +5768,7 @@
       }
     },
     {
-      "build_hash": "643853d99d99deecc00023e2f2f4b562698cfea7a2fe648d44d477482d869d86",
+      "build_hash": "47f98d28e8b0def0d6e5df9efc476bfc5c54494054b843f558f86eafa4cfa089",
       "label": "L2, defect read-only-strict-true, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -5828,7 +5829,7 @@
       }
     },
     {
-      "build_hash": "c0c0853c62c0ff9545715019cda940794abb6895b29e005db5409adf93314699",
+      "build_hash": "6354fc2b810e249d6a16541a93e723de34a772e3ec8bc166bfe36bb0a7f357f5",
       "label": "L2, defect read-only-strict-true, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -5889,7 +5890,7 @@
       }
     },
     {
-      "build_hash": "8ee5e0db7fbd2db20bcaefbbf7b7f2fd4e1b960514ad48d2c972581862ee7c7b",
+      "build_hash": "799f198ce693637b9cc054772f3816e755e368a37cfe50775c0648401fede847",
       "label": "L2, defect receipt-missing-version",
       "start": [
         "tiny-tracker",
@@ -5948,7 +5949,7 @@
       }
     },
     {
-      "build_hash": "84dc7d1622444260bc5a7911b476eb4362245430c6a5fd64fb5e2b5bc0e820fd",
+      "build_hash": "d71a8014eceba3f471bd061f97da425d18d67b674539de7ae7861ed7628f7520",
       "label": "L2, defect receipt-missing-version, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -6009,7 +6010,7 @@
       }
     },
     {
-      "build_hash": "70616c73c2c74142c7f44b038ae6587abd0dbb1858165612bbc1655d83898232",
+      "build_hash": "f894bc6eb34208cd67301d41b663eaa41e76203f7fd4d724f7f821b54e51f372",
       "label": "L2, defect receipt-missing-version, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -6070,7 +6071,7 @@
       }
     },
     {
-      "build_hash": "ab88d7ab76e756975516b540df8b99d3b1c9ee3ee8d7ced0cdec6f4e86378412",
+      "build_hash": "2d03d64d099626a66dd71cccb50cfd34983e983a09e6f1865cd340186958a495",
       "label": "L2, defect retry-without-key",
       "start": [
         "tiny-tracker",
@@ -6129,7 +6130,7 @@
       }
     },
     {
-      "build_hash": "ca62e64bd3844c26e9f5c37c5784fc667c850a56167d996ff99dfac31f9e1ce8",
+      "build_hash": "8d7bc966c64bef0847ff20e5dedf68c6d48a61f32ac86603e5c0c7972ccb8b7a",
       "label": "L2, defect retry-without-key, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -6190,7 +6191,7 @@
       }
     },
     {
-      "build_hash": "e62fa4dd323b0b12d5ebd15ffd5ba969862739de68580ab5b3c8f61c19a5398d",
+      "build_hash": "6dd4cf7ffa29fc2e5754354bb4517da31a35cc0ad5e0754e4e3072e53a27a0a6",
       "label": "L2, defect retry-without-key, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -6251,7 +6252,7 @@
       }
     },
     {
-      "build_hash": "5149667008194024d0971073c76e4f0cc4c902c2dbd295b15cb9a2bbdf17510a",
+      "build_hash": "5b2725492d04325f9390c4c0942974d88019634ecca25e3b6c06a2a1165c0388",
       "label": "L2, defect set-labels-non-destructive",
       "start": [
         "tiny-tracker",
@@ -6310,7 +6311,7 @@
       }
     },
     {
-      "build_hash": "f089387dbaf6a728efc15bf3825f9afcdfe43b20bd7a6480681af515600b1b7e",
+      "build_hash": "96e66e7c6d379183e87a4bc3c96ddfebb72d1988aae9219bb3efc1ada888aa1e",
       "label": "L2, defect set-labels-non-destructive, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -6371,7 +6372,7 @@
       }
     },
     {
-      "build_hash": "a7753d856614380461f7334f4c2f693893ee691ff06ee4d6028249275ed3868f",
+      "build_hash": "51af951944d3b0b49643991291376a06f810527a1468f5ec53f0e2a4bf199e4b",
       "label": "L2, defect set-labels-non-destructive, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -6432,7 +6433,7 @@
       }
     },
     {
-      "build_hash": "b5fdff7c1accb00aae631cd3ed8fa69a7b389b04ded6fcb83a31f0961f4b27c7",
+      "build_hash": "45555345ddc4ddf18c85547431263cafe053325d264de8ac6f92f37680e2d13a",
       "label": "L2, defect settle-miss-reported-not-applied",
       "start": [
         "tiny-tracker",
@@ -6491,7 +6492,7 @@
       }
     },
     {
-      "build_hash": "53177c933ac6bdbd6a6c958c586ac3a9e2a169924667d28ca585cf11be3b497c",
+      "build_hash": "8363bc4ae02bcf4d25b3a5af65128f4e92770464f833e1f2fb3df6f0e7cce34f",
       "label": "L2, defect settle-miss-reported-not-applied, backend digest-not-canonical",
       "start": [
         "tiny-tracker",
@@ -6552,7 +6553,7 @@
       }
     },
     {
-      "build_hash": "f6f28a7426ec761cc879d43eb46994d3a9390553e59e19abec64566b00a09b73",
+      "build_hash": "3d8252c9a9aabc8d268d4c873e0d666005075bf2fd82fb260c4d2779475bc10c",
       "label": "L2, defect settle-miss-reported-not-applied, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -6613,7 +6614,7 @@
       }
     },
     {
-      "build_hash": "ccfee5a6b3cfa04bc372b6199adb891cc15862694caf1ee260563a5552f45166",
+      "build_hash": "54ad1e092fd0743337a8a705771b92313b9d462dc7361e3d7492404516625e4a",
       "label": "L2, defect settle-miss-reported-not-applied, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -6674,7 +6675,7 @@
       }
     },
     {
-      "build_hash": "fca06b6aea3a52053d2586cdfc5c7ec7bf5e7e787de0e3a8888bfa6b00f250bd",
+      "build_hash": "1ef2c9d433c7230b7fe9f9090d6a227f77f0a65d023a35561685f15b5eb32990",
       "label": "L2, defect shape-claims-applied",
       "start": [
         "tiny-tracker",
@@ -6733,7 +6734,7 @@
       }
     },
     {
-      "build_hash": "26079265cbfd48ee8779b87d2bf99a18d4e0153c094d58850924318102f68624",
+      "build_hash": "e151578eb2d781a8970b33eea405ea24d8cf1f33af4d280c34780990cb18d394",
       "label": "L2, defect shape-claims-applied, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -6794,7 +6795,7 @@
       }
     },
     {
-      "build_hash": "55ea98a452f5f4f48d4359633e071feefaff124f128c6b8a887a2c5838f481f7",
+      "build_hash": "b4c430dc65cd8ec5a8699063f6fbe2c8ca6cfc84d2e67a952624aec1466d3398",
       "label": "L2, defect shape-missing-failed",
       "start": [
         "tiny-tracker",
@@ -6853,7 +6854,7 @@
       }
     },
     {
-      "build_hash": "eac63c24ba90dc186b57823c2dd70fae3ac912d35e8ee17d9e9e6830534545c5",
+      "build_hash": "57c3033527a7b0835580bbd877c7d94070f3997c2d84c5bf0178de14d1f23e49",
       "label": "L2, defect shape-missing-failed, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -6914,7 +6915,7 @@
       }
     },
     {
-      "build_hash": "0d4699975b73b815990e20afd32a5962e1fa227c6b33c722b7681921630bd61a",
+      "build_hash": "b6b9cc016b97901d0ae02363baae546bca6caf709dc48b8d04b72b0e0ff7f6dc",
       "label": "L2, defect shape-missing-failed, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -6975,7 +6976,7 @@
       }
     },
     {
-      "build_hash": "54fdb2a9c300a8e1b2f18425ba01ba163a32c64e3491f9666e8df4dcbff2698d",
+      "build_hash": "90c5cd0f5e4816aa808c306b646e1e844f6ec3e975e67abfe98e84baed148c56",
       "label": "L2, defect shape-text-invites-retry, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -7036,7 +7037,7 @@
       }
     },
     {
-      "build_hash": "ecff34e7334efea4e2a2d1baad7ee4a2f378f2f74c6a060255c4a039fa064a12",
+      "build_hash": "862ee2a7029f18bd9ef0f6b27192e550dd7025e21667c403669ae6fabdb4bff4",
       "label": "L2, defect shape-text-invites-retry, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -7097,7 +7098,7 @@
       }
     },
     {
-      "build_hash": "f0799261787b4ca94c6b4b479f1d20349b6551269ef4de3414c02e997921501f",
+      "build_hash": "b68a8db848cf9f8f1921bece26db330fd67163a753a60c689578e66a887f449d",
       "label": "L2, defect shape-text-invites-retry, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -7158,7 +7159,7 @@
       }
     },
     {
-      "build_hash": "9f1edda497d7ff3b7b1bdbb5ba14f3e6533ab0d83f0664bfb2e05e87b061189a",
+      "build_hash": "815aa6ed10f8f064ce1ed14fa30a44b1e16f7182a7162ac3beaf4753b9462e0e",
       "label": "L2, defect shape-text-says-all-saved",
       "start": [
         "tiny-tracker",
@@ -7217,7 +7218,7 @@
       }
     },
     {
-      "build_hash": "1879509bf118dfae54bedcce5a938059103a4d501b54ac34ce212fa4365c2df1",
+      "build_hash": "f55243e740c229738d4ac4a1309f4cc496c6774ac79bf363a80db532d240e645",
       "label": "L2, defect shape-text-says-all-saved, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -7278,7 +7279,7 @@
       }
     },
     {
-      "build_hash": "cf252921156d6c470a854783d18d4e37d02d3fed9c92378bb0315a41472439bc",
+      "build_hash": "4c057ea25e7b26a81cdcbe784be26ea0bb3753e79f18541f16527a96c05b215f",
       "label": "L2, defect shape-text-says-all-saved, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -7339,7 +7340,7 @@
       }
     },
     {
-      "build_hash": "eea2f73cf0bed2a3300c0c06513535e8f147b911b9fcef3df19280c47614adc9",
+      "build_hash": "15211e7d2aadb7a1817b9bf944e03eb37f966ad699b356a6236b26889a4cc943",
       "label": "L2, defect shape-text-says-failed",
       "start": [
         "tiny-tracker",
@@ -7398,7 +7399,7 @@
       }
     },
     {
-      "build_hash": "ff0a9ae9504eb6f66448f715030173c1512b8d33f5e49be04ecb11077fe3068d",
+      "build_hash": "3619d0ded85ff13eea31507baadccaec77cc53e0c12b0cbb56f924414b1342b0",
       "label": "L2, defect shape-text-says-failed, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -7459,7 +7460,7 @@
       }
     },
     {
-      "build_hash": "967e79b995824554191478000ed3a2b9ae4dc97255ff8115b85a415b316dc996",
+      "build_hash": "ed722e236108aec71d840d99fdea712c93f1d261777245de1ff4a6c4d0c30692",
       "label": "L2, defect shape-text-says-failed, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -7520,7 +7521,7 @@
       }
     },
     {
-      "build_hash": "c09ea815b78d7a33cd00db360f229ad3167eaacb0d097abc796c0c234a7116b7",
+      "build_hash": "a53687ef0ea3fb3c2ed2465cf7456d608604b156b5277d67eed0a74200c1a80e",
       "label": "L2, defect shape-unknown-as-failed",
       "start": [
         "tiny-tracker",
@@ -7579,7 +7580,7 @@
       }
     },
     {
-      "build_hash": "81df72b44c8b6fdf05a67b8f3f0df498c4faaed2eb2a7448cb36fc01c044a1bf",
+      "build_hash": "a8eca250f414f780e2bdaa88061cf64f0ac628f4ad50650946061584db132190",
       "label": "L2, defect shape-unknown-as-failed, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -7640,7 +7641,7 @@
       }
     },
     {
-      "build_hash": "b112cc799e97e128e96b3a3550b42182354a52183f801f8c432e35b1db87d39f",
+      "build_hash": "50d46823f83cd4b6c764a766e5d78d8f75c3fa1cc492bc68df3beaa8ab3a10cb",
       "label": "L2, defect shape-unknown-as-failed, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -7701,7 +7702,7 @@
       }
     },
     {
-      "build_hash": "f91d18692308894c7f3654e44e7a6881d06ce894aeda2ca8e19f6bd2d436ecda",
+      "build_hash": "f4619741b536dc09e9224a929705e4c2ec52f9d613784ebf63e30240215d032e",
       "label": "L2, defect shape-wrong-version",
       "start": [
         "tiny-tracker",
@@ -7760,7 +7761,7 @@
       }
     },
     {
-      "build_hash": "008f51a1cb36de4dc00414971901182695cf25e7125bde06aeb28a3b8b6560ff",
+      "build_hash": "dafee4f42145a39707d71883dc434481af7691231532740265785e389d474375",
       "label": "L2, defect shape-wrong-version, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -7821,7 +7822,7 @@
       }
     },
     {
-      "build_hash": "a9d3ea917c367785688d39685bc7f63b3df81ef1018b8fe18128132a4fd17942",
+      "build_hash": "b573719defc328a649fa9278e56aa274b819553d71b7e4087716e723e0afe8be",
       "label": "L2, defect shape-wrong-version, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -7882,7 +7883,7 @@
       }
     },
     {
-      "build_hash": "62dfd1ce20de8c7adb8bf6abe64724fd91500cdf6f7c6e0c0e7d37b5c05f0251",
+      "build_hash": "89a746578bb7f91890c01bd1bcc7f7bd0bc5af4729d7d816e267bb8950e49771",
       "label": "L2, defect skip-limits",
       "start": [
         "tiny-tracker",
@@ -7941,7 +7942,7 @@
       }
     },
     {
-      "build_hash": "c423eb9787396360ecb8cd25a2b53aae080bb05022ad50b7fbabbc1fa77214ad",
+      "build_hash": "b9c1e3cdec2e221a18beab47ba376241a7572117e6a23b23dbd78424b6b61253",
       "label": "L2, defect skip-limits, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -8002,7 +8003,7 @@
       }
     },
     {
-      "build_hash": "d860a218aad988704ed80ba78ec3187d2399287c0fb13912f3cf71b38f58b784",
+      "build_hash": "6d41d30f700a4620a86809182038147b2e9fcdcad040dccdf39d732a741d6ba5",
       "label": "L2, defect skip-limits, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -8063,7 +8064,7 @@
       }
     },
     {
-      "build_hash": "bac8f344e0e566b7c25f456136a7267812a3701f8b81643153635e0cdc6f3a50",
+      "build_hash": "87df248c84546661aae9126f2338fd0e4fe7b1ee3d341325208e5f1afc2868c5",
       "label": "L2, defect skip-null-assignee, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -8124,7 +8125,7 @@
       }
     },
     {
-      "build_hash": "1b191f368ace07c6e8d16d0b7775b17244f5778d8481d436d44f09dba19bcc02",
+      "build_hash": "076da90641b62aa8a08c4f2ad98cd695333500eab899e1f04a8bcd25f8c5e1d3",
       "label": "L2, defect skip-null-assignee, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -8185,7 +8186,7 @@
       }
     },
     {
-      "build_hash": "91209e1e914a648e41721d2b94f5f1ce9722ee1ecbba5a2f3f8c10e87a3e9ff0",
+      "build_hash": "c65dc8579fbbe8d267ec13855bff5388fbab1674a211057db0c596960b9c85e6",
       "label": "L2, defect skip-null-assignee, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -8245,7 +8246,7 @@
       }
     },
     {
-      "build_hash": "051b960ff87129cfc661192bb0ebbefb1475b376bc931269b23c6e32537aeb18",
+      "build_hash": "598af10a3c3b5cc1db40b5446692a4ac7eafc428e55ebeba7d4f1f00a00151a1",
       "label": "L2, defect stale-unannounced, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -8306,7 +8307,7 @@
       }
     },
     {
-      "build_hash": "079eb7db74fe25b760bf60759a4847a4a3997fc6ab8c52be1a1ee990dc7e4b75",
+      "build_hash": "cee4f914e9acb8f21e00521a8d46d25dbae5268bb7ff1b57b714c2789c8ff9e3",
       "label": "L2, defect stale-unannounced, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -8367,7 +8368,7 @@
       }
     },
     {
-      "build_hash": "662fb24b05f33cf911e2d0e70ca3ff81eb9826725ac4ffbbc9e3dc481e054d63",
+      "build_hash": "4f1d793483d478f41b9b7dcdaf7a8db2f1c3111920cc3176aff55657824f71eb",
       "label": "L2, defect stale-unannounced, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -8427,7 +8428,7 @@
       }
     },
     {
-      "build_hash": "dbc4a5672769690ccca502eb895746f9ff949818629290f5d5db04230fe026b0",
+      "build_hash": "e008108308d5027fcb8333069da160ca6f7507c85af6a7944fd03de44752ca64",
       "label": "L2, defect token-in-error",
       "start": [
         "tiny-tracker",
@@ -8486,7 +8487,7 @@
       }
     },
     {
-      "build_hash": "5a085d389b192ad08ccdce6adbcde1185363b288d4542143baf592341299ce2a",
+      "build_hash": "00ffc12d7149730336d4035cd35881d0787bac4fc010df67440002f03a2d9e64",
       "label": "L2, defect token-in-error, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -8547,7 +8548,7 @@
       }
     },
     {
-      "build_hash": "1a1ab930cf4969f1bf14c6f6ba6b3293eba3d8267d5fea674231610d96bf1bca",
+      "build_hash": "4472574f7897cd917fb8145ef3e8b4917ff09f41426c8369858c8b5327d1f56b",
       "label": "L2, defect token-in-error, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -8608,7 +8609,7 @@
       }
     },
     {
-      "build_hash": "6c5e973d4981104490dc2bb24a7bcdddf0331b7746921a45a832d95562ad39b4",
+      "build_hash": "ac9fb17c5ad588c70f5aa6f8c02d11c6b2b9388f4b8848208b53cf55d7f827ee",
       "label": "L2, defect undeclared-title-limit",
       "start": [
         "tiny-tracker",
@@ -8667,7 +8668,7 @@
       }
     },
     {
-      "build_hash": "394f0b6f5b2b83cf6429ea7e92251293495f804a2ee1e1107419d1c5c886b4e5",
+      "build_hash": "c952d42fb38374683adf87fc2efef3ad86ef9e3fbc34fd590ab4b8daa5e2e99b",
       "label": "L2, defect undeclared-title-limit, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -8728,7 +8729,7 @@
       }
     },
     {
-      "build_hash": "8738a3a7e7fe7008aaf93b5e6685d198a7b3562fe72c96f2ee2cbf5682d0487b",
+      "build_hash": "88e8c89e8ee6dceed50c3dced1f69e46da104ca8b52000861b842cf34f518b9f",
       "label": "L2, defect undeclared-title-limit, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -8789,7 +8790,7 @@
       }
     },
     {
-      "build_hash": "65155486057d47ecf11c54f3c70f46ba798402a1c5965e3ebcc35e86b5fa0443",
+      "build_hash": "9d13d38799c48cfa87712873004ba7c90c51080a47389b0209b241f8dd87bc03",
       "label": "L2, defect unknown-denied-tools-ignored",
       "start": [
         "tiny-tracker",
@@ -8848,7 +8849,7 @@
       }
     },
     {
-      "build_hash": "d8c8683fed888e32319bc7b1e2505fdebe430acdeb2ce6a3994194562efecb85",
+      "build_hash": "27622e1b3414e01d78a7e8852f41a6b188a1e5e5eb3c0b460bb5210a69794de7",
       "label": "L2, defect unknown-denied-tools-ignored, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -8909,7 +8910,7 @@
       }
     },
     {
-      "build_hash": "b8dbbb3a453c6bc045b215e67a03983a5ba0d485fc908e179790816ab3e13dc9",
+      "build_hash": "29eff2d93e00e16066f1884a21b2f12b707ff13f719fcfb9b7fbbcaa3ca151ad",
       "label": "L2, defect unknown-denied-tools-ignored, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -8970,7 +8971,7 @@
       }
     },
     {
-      "build_hash": "162a36e1037342f2a67e711a73e8d18b7bd624ebabd950ee286762027550455b",
+      "build_hash": "79a20a2d669f4202a08805d0a0f7272826c335af7f61e1acc2710b0fe73afee7",
       "label": "L2, defect unknown-tools-ignored",
       "start": [
         "tiny-tracker",
@@ -9029,7 +9030,7 @@
       }
     },
     {
-      "build_hash": "e262ae56bd0ee9907583ff934dd05f000737ee65ca3e48ebb2e9af7007533fde",
+      "build_hash": "94ad0bc278f7a237a67cb84445b1365ec6472ebe570c95cf4b223d12fc5d8531",
       "label": "L2, defect unknown-tools-ignored, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -9090,7 +9091,7 @@
       }
     },
     {
-      "build_hash": "66e3cb715dde289a42d466d21ac1fe3609282259ee5a1331c2dfab9be34a793a",
+      "build_hash": "8ff65498cfae12ff8c7fb24c02a9e7b7ea6f94868fe29338c118e93850774301",
       "label": "L2, defect unknown-tools-ignored, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -9151,7 +9152,7 @@
       }
     },
     {
-      "build_hash": "1a856fb81484d323097d174accb5576f1c84f88cd9ff74cc990a4bf74ca14b08",
+      "build_hash": "b1452cd3c4136329d90c6e93afdb49a00ec91a272fef2ad9be3e3cb37f169498",
       "label": "L2, defect update-adds-defaults, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -9212,7 +9213,7 @@
       }
     },
     {
-      "build_hash": "2c3c3d2b55c98d420fc20b76136d4e238892e42596ad58f36af98bfe1ec3fd65",
+      "build_hash": "59aed5e6120826a7fb2d3cd4949792fdd565dc4f4be0294604b5a5eeb26b33e2",
       "label": "L2, defect update-adds-defaults, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -9273,7 +9274,7 @@
       }
     },
     {
-      "build_hash": "72d5a0868c5b1e1611a098d309296409f5efbae4c35d6857d889e4b34e13fd42",
+      "build_hash": "7641bfeb6ea4cba59049eb70b7dc309a69c83f720f853fa8c8657ea54dd5e862",
       "label": "L2, defect update-adds-defaults, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9335,7 +9336,7 @@
       }
     },
     {
-      "build_hash": "4c91f782bfb78ff631c9ac9c32893d5e174902ff084503109a06741e73ceb594",
+      "build_hash": "afd40ab228e20a5195a551ef0891c38bcfaf1067411fe4d1460570d816491d45",
       "label": "L2, defect vague-validation-error",
       "start": [
         "tiny-tracker",
@@ -9394,7 +9395,7 @@
       }
     },
     {
-      "build_hash": "54ae9233ffc20dacfc46392749372567f971cbf0d17008770409d978e1c71e63",
+      "build_hash": "f2fc93617e61d1f2121a3f124755f821728b1c73db1f69f2362511ad93deb463",
       "label": "L2, defect vague-validation-error, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -9455,7 +9456,7 @@
       }
     },
     {
-      "build_hash": "368f3af767b65fbb86e8de881bde4fdf12faa3b3387e6125a636bfd864224a5a",
+      "build_hash": "254fa6bd6475190e7fb56406442050c56523b6e66507ad759e6dd8ee1382c8be",
       "label": "L2, defect vague-validation-error, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -9516,7 +9517,7 @@
       }
     },
     {
-      "build_hash": "3441053b95525487ed9d6b52817c19d78dbf14ca1df660e8ad72500eb7d81f15",
+      "build_hash": "6f69a43001bb061a6e31f75b2e30bb0165fd27583ed59ccbecc3f094678e9975",
       "label": "L3 correct build",
       "start": [
         "tiny-tracker",
@@ -9573,7 +9574,7 @@
       }
     },
     {
-      "build_hash": "004715a2f55da48ea95adb358056d88a191199db1685d43b99e451b586ad13fd",
+      "build_hash": "a12e10531dbd5ea6e427601c3175301cb0b86d6d3df9c3feee8136a661c8e94d",
       "label": "L3, defect add-label-replaces-list, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9635,7 +9636,7 @@
       }
     },
     {
-      "build_hash": "3558c3feba7d111d183ed17da40dc16fae6f4add7033dbebe93547ce15524118",
+      "build_hash": "6c4883eb44a3cdb8abf88ff6008ccc23b3ff85a4247d6ae056a55b184693d9d6",
       "label": "L3, defect bulk-misreports-partial, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9697,7 +9698,7 @@
       }
     },
     {
-      "build_hash": "2940f9416e670e202a7b3c3dfaafff6ba08f8a24358fd9192c5aaa963abcbbdb",
+      "build_hash": "f7953da0bf15aa78ed3ec0b542f6cac802da464fe799115e82472a9a7f0a1d99",
       "label": "L3, defect bulk-without-transaction, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9759,7 +9760,7 @@
       }
     },
     {
-      "build_hash": "b7e5e9d6e73c8b8b249065b3f91e3b8bc0f5dbd0d71a7587b3245a8028ab9598",
+      "build_hash": "b379cae56b749318137d531d1f1e6f1617f1e21f8dd17a3728326748deac53d9",
       "label": "L3, defect close-before-confirm, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9821,7 +9822,7 @@
       }
     },
     {
-      "build_hash": "a3316397a69902508e368e87e1c080b9574622c14271acf6101e8d73113fef8f",
+      "build_hash": "d7459a00596a53b8897cb02077d1072396c675ae0fff1b807833c4f7f2db8691",
       "label": "L3, defect coerce-types, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9883,7 +9884,7 @@
       }
     },
     {
-      "build_hash": "2adbe227111000059092ee15c1df0cc58305adf7a2a4e7e9333e34260d6988bd",
+      "build_hash": "cbd816a22d28531c5c73698a3086725fe452b8cdcba069dd7c48675d62f59ada",
       "label": "L3, defect comment-id-dropped, backend digest-of-current-state, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -9945,7 +9946,7 @@
       }
     },
     {
-      "build_hash": "7d1904a2f19770d24d4a5a80363140028f66360b2eaff6e2f793a3d293cc6a32",
+      "build_hash": "49efca5bced6736333701c53f46fb2a11a29fbe0b5e2c5c8669f1784960b2859",
       "label": "L3, defect comment-marked-read-only, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10007,7 +10008,7 @@
       }
     },
     {
-      "build_hash": "82e77abfe0aee2fd9e8d9915336815b3971816ad4bbe7eeaeddb32efe1033d4a",
+      "build_hash": "55fbde8cbf37b4c20cfd33e494274848fbb72e4b077bf3d3936e3736d6aebe38",
       "label": "L3, defect conflict-as-generic-error, backend digest-not-canonical",
       "start": [
         "tiny-tracker",
@@ -10068,7 +10069,7 @@
       }
     },
     {
-      "build_hash": "eb0909c6b632e22cc493b69f1e7d81a9fcc33edf62d113e93917efeb77c0910f",
+      "build_hash": "b8a6f3b3744425cba4d032916a87bc8b22d0f69a57372b31ea3a1e8610babe07",
       "label": "L3, defect conflict-as-generic-error, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -10129,7 +10130,7 @@
       }
     },
     {
-      "build_hash": "df18bf8c3c798b2d18c7bdb455ff186d5185695186f66f5040d0a6ffdfc7ddbc",
+      "build_hash": "00cb2a2611865f8af018eb346121aa988427bdd0f159ec5476dc1cd2a31363fd",
       "label": "L3, defect conflict-without-iserror, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -10190,7 +10191,7 @@
       }
     },
     {
-      "build_hash": "be8422ba76d84ab721db46fa123edc5ea09bfd1c69ce31f904d7d1e66a985c88",
+      "build_hash": "7b3beb69f95efc575a10f9a663a232220f2a4acf64ad35a0cbff27efed68ec70",
       "label": "L3, defect conflict-without-iserror, backend lookup-unscoped, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10252,7 +10253,7 @@
       }
     },
     {
-      "build_hash": "b4c389d850fe735acb70f4453cf2d08c8d482456fe46aa3ce3b8bdaee880784f",
+      "build_hash": "fdbacedc282ef55dcf4022d890f4944790b4014aedd5222c362af4d72afeca26",
       "label": "L3, defect convert-numeric-strings, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10314,7 +10315,7 @@
       }
     },
     {
-      "build_hash": "b32a9e1ea46387743d765bb9224b6976230e9d74a266d6ce6c8bcc62d6f2e5b9",
+      "build_hash": "a6e40c869f92e0a27c5374348560ad30615916642a8ce45a7f8319cc0998e001",
       "label": "L3, defect create-marked-idempotent, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10376,7 +10377,7 @@
       }
     },
     {
-      "build_hash": "5d8bade88a826cd77f8d68bcd4d3482a7f00ac1a6ac30ccea8cbbe5c7bcf36da",
+      "build_hash": "1ee55ef7cdf0a54ba4bc763e624c19ab6c58cd52dbfe11ec4282c61a26947345",
       "label": "L3, defect create-overwrites, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -10437,7 +10438,7 @@
       }
     },
     {
-      "build_hash": "5dcfba01cfd3b09ca7d51fcc6ed292eebc74f81b7876ce6ccfd5d65817277822",
+      "build_hash": "37fc197547da541b3054ade30c4ac9c597d1671b4f6341b5097200c0c990552a",
       "label": "L3, defect create-overwrites, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -10498,7 +10499,7 @@
       }
     },
     {
-      "build_hash": "9abd73953044769315c04ea60a82ad8711a5213687ec19b2107a31ba61036e2b",
+      "build_hash": "056974f393fb66db188ab2d9c8a6c43a854550a20e307743c76acc8ec2b0bc75",
       "label": "L3, defect delete-refetches-version, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -10559,7 +10560,7 @@
       }
     },
     {
-      "build_hash": "cb82667c574044b814d45498f5e24308ced98f24da245dee9bbb05f9c673b1b7",
+      "build_hash": "8e0f4cd421a9f7b294ca2d11c0f08569792849dd0e51220aa1005aafee398cb1",
       "label": "L3, defect drop-unknown-args, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10621,7 +10622,7 @@
       }
     },
     {
-      "build_hash": "a571503e6f180bd8e0feece00bc4f1562034c11431cf905faefc2b689c8ca2c3",
+      "build_hash": "06c8f4a27e2b7139f7aa90da3e2b760d8e6e63ed56127608b03edc8b0023da4e",
       "label": "L3, defect empty-filter-deletes-all, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -10682,7 +10683,7 @@
       }
     },
     {
-      "build_hash": "6fecd9b4dd7cbc4465b2815da9e0f33d55633b3872a6d23a3fda8c8d99ece5e5",
+      "build_hash": "c68f2504aabc7dbfa1d272a158f1472d8510dbafa7de082172fa93d2db1c9b89",
       "label": "L3, defect empty-filter-deletes-all, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -10743,7 +10744,7 @@
       }
     },
     {
-      "build_hash": "a07956b041b439c9536457005349ad3baab4b7491c488e5763a3e2d978823828",
+      "build_hash": "8733b2654a80e460eaeb8484a63fe8e644167f00bcbf0cdc44666a13e9bb9563",
       "label": "L3, defect error-as-text, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -10804,7 +10805,7 @@
       }
     },
     {
-      "build_hash": "6b5bb9137b4b3cca8995077f130c442d6373ead084fa18680574185de47ecdc4",
+      "build_hash": "79c843b1051eddbe12b50fcc619bd2e6a9e9fb026b59b121b328bc4b2133d16a",
       "label": "L3, defect force-by-default, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -10865,7 +10866,7 @@
       }
     },
     {
-      "build_hash": "c5e8e7faad0f6380dd4976e8b08a9c866725e9e6b3478aec75046fbe9d990ffb",
+      "build_hash": "a940a18250dd5582187dd65eab573d9ade3c78d64c9948a65aa84f4cfccc44b6",
       "label": "L3, defect idempotency-key-dropped, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10927,7 +10928,7 @@
       }
     },
     {
-      "build_hash": "16605f32ec70931472593edcd0d9b9065c36ef31aacedfeea9b35c39b3737ee9",
+      "build_hash": "08815e1a0d2e804836fced516298761840ad40d996a298324d3ccbbf5426eae2",
       "label": "L3, defect idempotency-key-ignores-args, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -10989,7 +10990,7 @@
       }
     },
     {
-      "build_hash": "3ca67bb9b297186463a0f508b7ed45d46d96bd170dcfc449c446a4f6974e9ce7",
+      "build_hash": "df4c59a498fcd1259c169fd26bab9b5132729907523069dbc20bc18930e96d50",
       "label": "L3, defect ignore-project-scope, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -11050,7 +11051,7 @@
       }
     },
     {
-      "build_hash": "77296973bba9dfd7986f17bf6adbf0f0f141ea18afccdc9b664145c61970ffef",
+      "build_hash": "6170fc5ac9116549af81d716af8f4e89f507d7a22b4a0f2e41211e54948d8278",
       "label": "L3, defect ignore-unknown-args-with-notice, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11112,7 +11113,7 @@
       }
     },
     {
-      "build_hash": "0f81f2904fb0c3a1c81619929a08334b397d561545ecc6b3afd7780e7ce94dd7",
+      "build_hash": "450806bd7a1ffef3aa7273543aee8b9c7fe0bd7c90c829fa278fe55fe20b374d",
       "label": "L3, defect in-progress-reported-not-applied, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -11173,7 +11174,7 @@
       }
     },
     {
-      "build_hash": "b0121e89f0eb9225bbc3b0bfdb9b861f5e3175a4e354f70a7eb006783f5eb55f",
+      "build_hash": "04eb839911d87b478001061f38bf6a22f71750fb3289d4e6a0e9d17d16164200",
       "label": "L3, defect in-progress-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11235,7 +11236,7 @@
       }
     },
     {
-      "build_hash": "a2848ffad4382a852176fb5c18d0b193e530b3d9e5b7882266082715cdcd7d4a",
+      "build_hash": "886d6d388ec850520edd0e836224ee87f6e9f0fa52b4d1aa17e253291af1d23f",
       "label": "L3, defect key-store-in-memory, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11297,7 +11298,7 @@
       }
     },
     {
-      "build_hash": "d83de6583877a56554438fe7c77f9a81a8d35512c37540ca634621c73bf3be4d",
+      "build_hash": "1e0f22b3dd9be1660fbd33d187e84f27e642fe7013892f31ee11093daf91a313",
       "label": "L3, defect label-by-position, backend digest-of-current-state, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11359,7 +11360,7 @@
       }
     },
     {
-      "build_hash": "1db4607fb30eb4f2a64489842df4c7d43a79fc3dd39af8a68d04dab4ba868cb8",
+      "build_hash": "4bf422815021041dd2a5fbf1b92a0f22b692eca5c1ffa118c09b32982c9e3649",
       "label": "L3, defect label-by-position, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -11420,7 +11421,7 @@
       }
     },
     {
-      "build_hash": "6ae60d7c7e833383020c1e7ee252a4e98a354140a111fc083699e23aa476b70b",
+      "build_hash": "afb5b0acedfebbb78728e15b720e81e307013b393bfe0ea7479ab2fd57047e34",
       "label": "L3, defect lookup-reexecutes, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -11481,7 +11482,7 @@
       }
     },
     {
-      "build_hash": "67958a399045552c733457a8b719a6ba8bbcdb72341ae48bef94e1e06e0466b6",
+      "build_hash": "81f40fe133c041695e87089c7662ffc46ab46e78128b2137baa9cca8ffda2356",
       "label": "L3, defect lookup-reexecutes, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11543,7 +11544,7 @@
       }
     },
     {
-      "build_hash": "d58049bb011bfc88af13b9ea22f87134e42773882e4abf793910a0cff4816276",
+      "build_hash": "454d27ab76591fedc463a241fcb2c3db30582fa6540f15f3359a22072fc69a27",
       "label": "L3, defect missing-annotations, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11605,7 +11606,7 @@
       }
     },
     {
-      "build_hash": "f5ed7698292b8e4ea71513eb0da816771ea8b3090cfec94c655f0dcfc0b56478",
+      "build_hash": "6a97b619c0dee91b93815d8666d1a81a7441826452292eede677231334e400c3",
       "label": "L3, defect no-idempotency-key, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11667,7 +11668,7 @@
       }
     },
     {
-      "build_hash": "a528c88c0d40df9ddf0e4eab7d1a0f73287e1987a7b6ea5290a56dc4434ec2f4",
+      "build_hash": "90959fac147144c40ecf45a5afba3e381c9ae525ba2ae84a9ce83900db244dd8",
       "label": "L3, defect read-merge-put, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -11728,7 +11729,7 @@
       }
     },
     {
-      "build_hash": "0dfa1e16b45a1228a4a92a4172ac1a482bacff8a619c383f502b3ebd925ace67",
+      "build_hash": "8b9220fede1992f82071bb68ddfba5eca011d72dd425fafc2b646e2a8ad567ab",
       "label": "L3, defect read-merge-put, backend lookup-wrong-record, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11790,7 +11791,7 @@
       }
     },
     {
-      "build_hash": "b1c2952a8e1efbbf710372807fcf51dae6e0ddb4d06194a4d4692fa70f9bfe60",
+      "build_hash": "36b08b71e8c55d98a32c5963bd0ec22e3291d2d7db7e1c107984bf9b977020b4",
       "label": "L3, defect read-only-by-annotation, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11852,7 +11853,7 @@
       }
     },
     {
-      "build_hash": "bcf2f4e6454d6da6d6f87bedb2de7e72dc8007bb458c035d19ce37d76ea5f9a7",
+      "build_hash": "e824bf3de83d7af2a7fae5ea1b0b27288485b67330c981c5957956b812a04e7d",
       "label": "L3, defect read-only-strict-true, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11914,7 +11915,7 @@
       }
     },
     {
-      "build_hash": "ec205c351fff841c4cc7c83dad9c5b149d35042e8e61613ba6aedaa8c8b5c27a",
+      "build_hash": "9c31723ab5eaf8cd67f50e3d1c61c40b89d9e400539ef2bc174705dbf20d68c2",
       "label": "L3, defect receipt-missing-version, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -11976,7 +11977,7 @@
       }
     },
     {
-      "build_hash": "f1a53b9b1da416fa2a39bc9893d5b0f219992a1a287a930b8c2d53e6f16c86f3",
+      "build_hash": "b53094803fa52d27cf04a633cf9c23448834e16160c7a24d74c65889d6811712",
       "label": "L3, defect retry-without-key, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12038,7 +12039,7 @@
       }
     },
     {
-      "build_hash": "fe8eba148f6dc08e21f1185d4159cb2bb06fb738b98b8a80b7ced2ea57321b9c",
+      "build_hash": "11e37d0fb861acd909249bb46fee81ebe7203fb0e4b17b28e3206dd3d0c70194",
       "label": "L3, defect set-labels-non-destructive, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12100,7 +12101,7 @@
       }
     },
     {
-      "build_hash": "bc33909871a0014791e87150f5d0a1f44fb2dd0002d3513cd1b1a4b2c2ecda7a",
+      "build_hash": "7bb16f2317f5e11d06b5c832ea702fe77ab940f468637935ca6b3bfe41276773",
       "label": "L3, defect settle-miss-reported-not-applied, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -12161,7 +12162,7 @@
       }
     },
     {
-      "build_hash": "66f8b14031e711c74d124efb1b1f990cce100cbd7b43dbf2d43dee2e181b9b3c",
+      "build_hash": "3c213ae8b999d2272661881c8f560b6ad11c8456bc4c9e30f8128b07402efcb8",
       "label": "L3, defect settle-miss-reported-not-applied, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12223,7 +12224,7 @@
       }
     },
     {
-      "build_hash": "5f3815913287372ac73dc9c7da8880ccca0952e8a19b265eff5f66f1012ebbfd",
+      "build_hash": "bfc640c52ec6b39cff71e6c5bfbb23a2c3ded200062ca49f81b29d25847ff839",
       "label": "L3, defect shape-claims-applied, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -12284,7 +12285,7 @@
       }
     },
     {
-      "build_hash": "a28908cf0c0009c1e0b4ed79a89f2530e7aac438ea3c4b9d9ba2e27b31cd44df",
+      "build_hash": "8c2f6ba36626d01032dca6c7daf5bd57eeb3a317a08b0492c118c8fd4f84c1c0",
       "label": "L3, defect shape-claims-applied, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -12345,7 +12346,7 @@
       }
     },
     {
-      "build_hash": "a37c70faab5c2388932b4f76bdaf67cd8efc943bd27d27ec76065e1ba2ebaa45",
+      "build_hash": "0d82124e4251e4a8aea247ca4b7ac703a77dd290feb7d1acecac98788fddf230",
       "label": "L3, defect shape-missing-failed, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12407,7 +12408,7 @@
       }
     },
     {
-      "build_hash": "50b4657b67751d5fa8a82fd9bde97fdd48b77c92830645657b2c797c3b4e8bed",
+      "build_hash": "d91cafc611160ed4d4940ca84879432f63067e56c94a2463607b6bd1089b9a31",
       "label": "L3, defect shape-text-invites-retry, backend digest-of-current-state, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12469,7 +12470,7 @@
       }
     },
     {
-      "build_hash": "fb73537b6663ce7a7812d03a368b18b85a04b75bf97de90edcf9a1a73142877a",
+      "build_hash": "2bb268b02764fd51c0c7056cffd6c5a0ed9561d29c6a0e18edd8fed6745a132d",
       "label": "L3, defect shape-text-says-all-saved, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12531,7 +12532,7 @@
       }
     },
     {
-      "build_hash": "4319fd7646cb71e82dbeffc2dc4b197317d24085176ac478edaf20bea758606f",
+      "build_hash": "75711c93bd05d55c7551362c2d29d11aba65ac74b4905dcb27799c85fe0a501a",
       "label": "L3, defect shape-text-says-failed, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12593,7 +12594,7 @@
       }
     },
     {
-      "build_hash": "85866cfb420e04c912708620ccd6ebdd582d087edf3712fc4b2363117534b9f8",
+      "build_hash": "5a5dc991a5ca0d5f1fa9b2d59cb7d2f558b9d29805cf7402f4bc6218ad5d80c2",
       "label": "L3, defect shape-unknown-as-failed, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12655,7 +12656,7 @@
       }
     },
     {
-      "build_hash": "9073f5c66a980d78f91b23bb97b217b4f9c01d72b95bc51a0cf65a0473ba21cd",
+      "build_hash": "40e18d198f89f3b4fe44f1040e1851b1aef7d3df804d59a033060f8518f5221f",
       "label": "L3, defect shape-wrong-version, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12717,7 +12718,7 @@
       }
     },
     {
-      "build_hash": "86214080a097ca0d5b3b9cd26fc035d7ae6191fd5708c4d428affaae1c9991f4",
+      "build_hash": "87511cbbcc03c6f40a4eccdc7784911fae228ec6713009813feb6297d357d092",
       "label": "L3, defect skip-limits, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12779,7 +12780,7 @@
       }
     },
     {
-      "build_hash": "911841cc55718a70941d28d7fc3cc0c98a8971451a4beaa525f821545ce3979d",
+      "build_hash": "9f382f9cdf53f9dc838f423f39c682bbd043356dddb726a9edd9c0557118d148",
       "label": "L3, defect skip-null-assignee, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -12840,7 +12841,7 @@
       }
     },
     {
-      "build_hash": "15d66e6fdfc4d7a2483cbcde1ca625997d19c3695d0f2e46b964178b17024a3f",
+      "build_hash": "f6b7cc2f3fb683b103943966c6164c9e28df43031344c477670f0153c0e184c9",
       "label": "L3, defect stale-unannounced, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -12901,7 +12902,7 @@
       }
     },
     {
-      "build_hash": "a0eebc1902b067e4529ae3f77e2ccd26fd3e3bfafe3c6f2a55e48391d5e57ba0",
+      "build_hash": "a74e1da820725a8f4e3a98ca71de7bb80d5cfaffe2ca7e29b204d55b4d8d2c2c",
       "label": "L3, defect token-in-error, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -12963,7 +12964,7 @@
       }
     },
     {
-      "build_hash": "08aa4cf009d998b965be9bae06b579897a09bb4c21b885b9e245d35e3d5f25ac",
+      "build_hash": "40cd22bf243ef73a62bcf29b66d73b0afca0e27adbd33ae6bac48a6bc855d1e8",
       "label": "L3, defect undeclared-title-limit, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -13025,7 +13026,7 @@
       }
     },
     {
-      "build_hash": "127509024b4bfb0efb6e48872a301a94313be97488c250a0b6d6c6bb47a177b9",
+      "build_hash": "91aa1825840a3af7bdea77b80d5d83d1ec8c6a8d417b5b38c90c6f65de56939f",
       "label": "L3, defect unknown-denied-tools-ignored, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -13087,7 +13088,7 @@
       }
     },
     {
-      "build_hash": "e59c28ce99042f9714e50280eb77ef617863c39d49fd7aaeea54e4b7a540bc8c",
+      "build_hash": "f4b561228a2698b27ff9329ad39d3f4741e923476ba6e131c88742f9f2794300",
       "label": "L3, defect unknown-tools-ignored, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -13149,7 +13150,7 @@
       }
     },
     {
-      "build_hash": "d4eda0065cc5d9607e4b13766adeb2d7aa5c6866d8108c3ccd5083a61c1166f9",
+      "build_hash": "aa676806e30049e58226a83d647b566748fff1781dc3093cfc3814fc647011fa",
       "label": "L3, defect update-adds-defaults, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -13210,7 +13211,7 @@
       }
     },
     {
-      "build_hash": "70cc317986fb7f2787491591c318360662f4b47d8dac22007c633f6550752896",
+      "build_hash": "4505a7db59d7a6d95c5af581e1bd214557e402b6ef60e0ddc3d20ae0d59374e1",
       "label": "L3, defect vague-validation-error, backend lost-update, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -13272,7 +13273,7 @@
       }
     },
     {
-      "build_hash": "db1b09dff1d95670d741ac61c1246d2630821eb0d8af596dd6ceb16ae808a850",
+      "build_hash": "ba9af084e3e2de28747ca579f7b55aa89db2cca7fa49c635b4bccb27734c5c05",
       "label": "L3d correct build",
       "start": [
         "tiny-tracker",
@@ -13331,7 +13332,7 @@
       }
     },
     {
-      "build_hash": "8645ed5a8dac5cb277a443f0e85d4198d2d25f4b4435cf3f6448083c994a19f3",
+      "build_hash": "c5eb763b931647c804bc0bb68d57cc6d8b22475fc7d8d07c4fcbd1be9373d083",
       "label": "L3d, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -13392,7 +13393,7 @@
       }
     },
     {
-      "build_hash": "4bd4e73c37bde12e4afaedd1f49c652039c5cbad472b73520c7e25ceb37b0a70",
+      "build_hash": "2d7139820104a7d4cefa197cd7e57e5fec71ca687ffda889882952795c948542",
       "label": "L3d, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -13453,7 +13454,7 @@
       }
     },
     {
-      "build_hash": "3361c6f646fbd4593b852462cae4a9edbc1d3c134e29e7cb64ba1701ecd7d7f3",
+      "build_hash": "b50bd138709695b2aa1322251ce816f8a89b0c0687e388023922e78fca282942",
       "label": "L3d, defect add-label-replaces-list, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -13516,7 +13517,7 @@
       }
     },
     {
-      "build_hash": "c92d74431b606dbf8f91b0135b05682683dc866f2213ce27a8d86eba5620855f",
+      "build_hash": "97cbe6de6330d755851cf18640d8b591e2c88b479db18d78ab6ebfc5103582c1",
       "label": "L3d, defect add-label-replaces-list, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -13579,7 +13580,7 @@
       }
     },
     {
-      "build_hash": "b6ffd4e26db2c757dc14e5c0a1061bf32c075dac7b74c8e6bb18f46125b36f9b",
+      "build_hash": "b2a6be8c936380cba96b6dcaa4723ef8852553b10e387149ca53d1b99108f19f",
       "label": "L3d, defect add-label-replaces-list, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -13642,7 +13643,7 @@
       }
     },
     {
-      "build_hash": "b18d505d0387d3d3b7c7b8d4bb5edf45e819e414d0d7db12f75d45597cf69d5f",
+      "build_hash": "f2088f6c336e7ce2aca264c1d9273ecd3651378a6ff3ab484d6a28aca4dd68b9",
       "label": "L3d, defect bulk-misreports-partial, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -13705,7 +13706,7 @@
       }
     },
     {
-      "build_hash": "07757b8111a42914770e5ccd02d0af385444b5416396fc054e0bebd96bffc614",
+      "build_hash": "8d327f4e1991c18b5191451d53c2de36261e21e579e0cc821e34b25cea51a1cb",
       "label": "L3d, defect bulk-misreports-partial, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -13768,7 +13769,7 @@
       }
     },
     {
-      "build_hash": "1b722faf35099ff073a215fd7bc934b7f511cb55c2575dcffe67c5840f8676ca",
+      "build_hash": "0e1b30201a2c83830a9b3adc531417089d7a670fc7c4a61f15a3e320b76928e8",
       "label": "L3d, defect bulk-misreports-partial, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -13831,7 +13832,7 @@
       }
     },
     {
-      "build_hash": "593b5fd6807175282cdf3aad40ff9515b2a1fa14cf92004a5dbe70bd13e69260",
+      "build_hash": "d033350e6b157b5659349a96ff9a352cca36ddb6a8e9be31c0d493c46184d6ad",
       "label": "L3d, defect bulk-without-transaction, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -13894,7 +13895,7 @@
       }
     },
     {
-      "build_hash": "a34b534e5210b1a1fd36b4b7faf1f9d14ea4fc0487da3f5e2680f417cf923682",
+      "build_hash": "c128073f982c29590f1421ca4b37a05d94bc5b96f93eb1b07b2f76a7b9a0d20f",
       "label": "L3d, defect bulk-without-transaction, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -13957,7 +13958,7 @@
       }
     },
     {
-      "build_hash": "983671bcd11a831dce84ed0cbcfda6ca8e3fa58a53244c2444feca08cebd93c1",
+      "build_hash": "1e006f72659126c4c82af2d513e724fdb3476cb067daaed41932920284d87a2a",
       "label": "L3d, defect bulk-without-transaction, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -14020,7 +14021,7 @@
       }
     },
     {
-      "build_hash": "6250e6209220584a8b6962da54d8611142fa700f6040dfec8d70103582136975",
+      "build_hash": "08797ed1e41914ca9f6efe46de5f778f970080e48e6c88e918bf122196c83a18",
       "label": "L3d, defect close-before-confirm, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -14083,7 +14084,7 @@
       }
     },
     {
-      "build_hash": "24740d03d135eb317722539d49c3738694e4367727075cfcf5282afbbc62ce4c",
+      "build_hash": "6e9bfb7fb921ee3d5954fcfd9d5f00fe6d8790e78abb476358be2d0aa2760494",
       "label": "L3d, defect close-before-confirm, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -14146,7 +14147,7 @@
       }
     },
     {
-      "build_hash": "df8b36276d16e3bfbb07086906d2bc01cdf07dd41e6475e6c7da07867667ffb7",
+      "build_hash": "c8cd69c30042911a246da7506bbf40876fa675b174646a8947b6aadc205ecec9",
       "label": "L3d, defect close-before-confirm, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -14209,7 +14210,7 @@
       }
     },
     {
-      "build_hash": "645d262883c961758fb0d2206832186f94954a472972846b2149d481e62e917e",
+      "build_hash": "5ed7979b8eb10a7d0219ebbb7eb7f0b89e114898534e5ed90abcfefa0e280ed0",
       "label": "L3d, defect coerce-types, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -14272,7 +14273,7 @@
       }
     },
     {
-      "build_hash": "e574902134a2fd1b68a0c2dc63f113f4002cb8467c78c00538e6594a78d9afad",
+      "build_hash": "b61a0fe8a307c8fc2f0e2d8ae30d84224363fb83fd8a2f87882aaae9f9091799",
       "label": "L3d, defect coerce-types, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -14335,7 +14336,7 @@
       }
     },
     {
-      "build_hash": "07a4e9f45dc93fe9b428015a99039fc55654cf18d810558b9b7d9a1f6b116599",
+      "build_hash": "b6febbcee0441c2ebf46b83e63d6557d5bbc851e1e9044f13fb0cb0748e0c463",
       "label": "L3d, defect coerce-types, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -14398,7 +14399,7 @@
       }
     },
     {
-      "build_hash": "2390b55373f9f94dcd90011c815b9d0fd606caeecc21ebc6df61778084234201",
+      "build_hash": "68cc9af72d39c0626641fda5bea80158d79e6680f137228b5ee25a20a2143a6a",
       "label": "L3d, defect comment-id-dropped, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -14461,7 +14462,7 @@
       }
     },
     {
-      "build_hash": "8d512428196faf88570ae4b4395712411b91e41340c921a84d53d772ab47bbae",
+      "build_hash": "82ea10c905aaa1887e5fb52525ebf74f3e26053b67043154b1f81350defe8c0e",
       "label": "L3d, defect comment-id-dropped, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -14524,7 +14525,7 @@
       }
     },
     {
-      "build_hash": "293d132300720749e67b3881d581280e00ddee144aa09b7a9ba117d6027f8311",
+      "build_hash": "decdf121c5def72c33e7f1fac9b8ed665bf596d5c7f6335225c746ad04dcce50",
       "label": "L3d, defect comment-id-dropped, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -14587,7 +14588,7 @@
       }
     },
     {
-      "build_hash": "dbc20eabab3707172333740b2465b06123bf6038ab7319219f1f5784367cf71d",
+      "build_hash": "1ca8a8fbf701953eb688eb47fe1055b0b72551c80e6ef03a87839aef138c353b",
       "label": "L3d, defect comment-marked-read-only, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -14650,7 +14651,7 @@
       }
     },
     {
-      "build_hash": "4b955c73295fa91c3434ecea4eb3e2c2f51de7d1054082a1e6493b5a0c75f89b",
+      "build_hash": "9e870cad83f815629b36622bf101b66114b6bcaecdefd09508cc40b68389afcf",
       "label": "L3d, defect comment-marked-read-only, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -14713,7 +14714,7 @@
       }
     },
     {
-      "build_hash": "a537dcda8f8f20ef97b5f7fca8a194a2b1bfa0240c800eae9e656f572d05eceb",
+      "build_hash": "d5405628258bdc3fb78e2788d3fd382813aa5948c13267790299c9da3deb5477",
       "label": "L3d, defect comment-marked-read-only, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -14776,7 +14777,7 @@
       }
     },
     {
-      "build_hash": "33a01346e2ea7b72ed31112fc1be3ca33ac9f472397649e23116d43c415618f3",
+      "build_hash": "03693136752e21471c3d4e4f462dce59913491c99bc9a12ca82fe83aecadbb74",
       "label": "L3d, defect conflict-as-generic-error, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -14839,7 +14840,7 @@
       }
     },
     {
-      "build_hash": "236eea4b328745e97768f65da6f127be67da0a9587ede4cab7119b574b3044e2",
+      "build_hash": "0833c0c96c8345b6cc248406ccbec582e3355ad45bf8b491259aa449b95d6521",
       "label": "L3d, defect conflict-as-generic-error, backend key-record-not-durable, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -14903,7 +14904,7 @@
       }
     },
     {
-      "build_hash": "e0cebf8a58a853b44ba47b25f333a63adcaa62eb883082242591cade2295f582",
+      "build_hash": "c0ced1a3c4456dad7c8c3b913ff38b679f7e5554f6d4256fe6d512e1d77e0f84",
       "label": "L3d, defect conflict-without-iserror, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -14966,7 +14967,7 @@
       }
     },
     {
-      "build_hash": "e4d0a6e8cad890d9b7643d5a64f48624686ac65290e05c49870177b5c93346d6",
+      "build_hash": "5d6ee8f86d53bfce7f071b2f48febad01e404d2916202c65123ec49d1934a5d1",
       "label": "L3d, defect conflict-without-iserror, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -15029,7 +15030,7 @@
       }
     },
     {
-      "build_hash": "369a05cf37c805f12ab1f1283796d3d1665efbe3792bb11d7856cc97ea2bad25",
+      "build_hash": "158728c22c5a1ff562773247d4cfeaa547e8428e4d78dda525bbb5042535e8fc",
       "label": "L3d, defect conflict-without-iserror, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -15092,7 +15093,7 @@
       }
     },
     {
-      "build_hash": "88f62c53dabd7429a02d48e96af541e429b274e9772cddf9718913ec6a3e5921",
+      "build_hash": "f3c0f0547e30d7f98954c4bfe7d02870f87cda32dbbc3b871176c48bc51409a1",
       "label": "L3d, defect convert-numeric-strings, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -15155,7 +15156,7 @@
       }
     },
     {
-      "build_hash": "fbfe7aed57bb5432dca4475ce5d317c7cfdf4701abeb8e6b03ccf800bf3983ce",
+      "build_hash": "8988c285cd8b04715122f3b3e29985fdab602290b80bdc79e28c7a50267a4abc",
       "label": "L3d, defect convert-numeric-strings, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -15218,7 +15219,7 @@
       }
     },
     {
-      "build_hash": "9ea70376719b2c702a178b4348b22bd7f0b6cb0bc56ef0b2b2e813ebe0f4b3d7",
+      "build_hash": "780477e00a4639053af2ca57395f9492c270efc4f0332b86c35249e2491d1b81",
       "label": "L3d, defect convert-numeric-strings, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -15281,7 +15282,7 @@
       }
     },
     {
-      "build_hash": "cbd8ab95ac9141b972cd03d266a558c0ef0d2213838d59fa0062c9a0c553dcbf",
+      "build_hash": "e4a8b60a0703a0a9b7074467266c700244bda09764edce2812cbe3f13560af62",
       "label": "L3d, defect create-marked-idempotent, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -15344,7 +15345,7 @@
       }
     },
     {
-      "build_hash": "e6e1b3f9c3d1b146ff6c87ab163a114675f54574cfa4c5002745cacce036c52b",
+      "build_hash": "033fa8cefc19062ddd139a031aeb343e6ecd50b801872b1070c55fc0bfa96b4c",
       "label": "L3d, defect create-marked-idempotent, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -15407,7 +15408,7 @@
       }
     },
     {
-      "build_hash": "87ec8022b6a63a9e0dd87ea0235c81edd7872048e6fdcc170b28ca8a4177fafb",
+      "build_hash": "2b055665fc4e8baa3e015a0c20a1e0e9a497de34e99aedaf145350fbb1e02e4e",
       "label": "L3d, defect create-marked-idempotent, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -15470,7 +15471,7 @@
       }
     },
     {
-      "build_hash": "66f7068ae887899926335592f354140176c9ad41e1c58dbbb6a7933c652ed068",
+      "build_hash": "343817fff5e06ae4c6129cffa236ffa7a5be9e8d68f86651a6c38fff76a703f6",
       "label": "L3d, defect create-overwrites, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -15533,7 +15534,7 @@
       }
     },
     {
-      "build_hash": "ff6d2887f4c8b7410bf432c8593ba8cdf9e8c85b602e56892336c9f0a7135531",
+      "build_hash": "2f3a24fac40cbb65b0d2eb8e3123ad4298e5f3bf0d27697c523e9edef3932cb4",
       "label": "L3d, defect create-overwrites, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -15596,7 +15597,7 @@
       }
     },
     {
-      "build_hash": "e3814f889236a1b017d12ff3c21e2600cf9b4d924b30b965d10affd8264d0d45",
+      "build_hash": "9290f30ca92694b27086964d370fa39b8aa91bfeb67b2f23aac326264b464e14",
       "label": "L3d, defect create-overwrites, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -15659,7 +15660,7 @@
       }
     },
     {
-      "build_hash": "8446cb67439663dd864b6a8955c5606fa9c61b233e7ca1a10cd65cb3d077cc9d",
+      "build_hash": "619f6bbde30f97c575e637c7f4387df78eb75f900235c135ba847996f15508db",
       "label": "L3d, defect delete-refetches-version, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -15722,7 +15723,7 @@
       }
     },
     {
-      "build_hash": "cd2e115409977abdfedf2454d2d6b1d46161f8922999af824057bef8f7b36a40",
+      "build_hash": "38c1c20e4855b000f7c3683481c4ff1e1a02aac3eff25b7e2a5068b76d8654bd",
       "label": "L3d, defect delete-refetches-version, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -15785,7 +15786,7 @@
       }
     },
     {
-      "build_hash": "1c869e3667474145abc449263fc2cfe9126a3333f2c0b64a9aacc65527c532cb",
+      "build_hash": "e2fe1ac156c9d230b5c76a227cdae077dbaa91ee7fe5244250c3fb4da5657c0d",
       "label": "L3d, defect drop-unknown-args, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -15848,7 +15849,7 @@
       }
     },
     {
-      "build_hash": "50ff7946391239940ab8304c643434a8f66afadfa1e6913db38a897fbc0510ae",
+      "build_hash": "9f0160d0e15683fd8164bbe4d1738c4a4e7a8344e129706807bcc06bb2fcc170",
       "label": "L3d, defect drop-unknown-args, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -15911,7 +15912,7 @@
       }
     },
     {
-      "build_hash": "5e45ce38c8dffc8271a76696fcd44dc28a130ecd4404a2941efd6b27205bc33e",
+      "build_hash": "70489f3739ddc20108c90e4829ce63735964b825f9b7ebfac58a3f3c7b8f6459",
       "label": "L3d, defect drop-unknown-args, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -15974,7 +15975,7 @@
       }
     },
     {
-      "build_hash": "f6a8a7cdb5afa53faf948e55231f049ff28ba2429ee3bc4da657daf063599e7c",
+      "build_hash": "080e0db8503a547265e93fb7dc786a9dee1072f12b579f86618cbfc9d1eae3f1",
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -16037,7 +16038,7 @@
       }
     },
     {
-      "build_hash": "503c054d5d24b564bf6857ff77c1f8f14d696b4a82b55e6958b2138265bff9ff",
+      "build_hash": "a11b98fb76525070511563fc4d5413524dc4dc2614cf918060bfae238aba7022",
       "label": "L3d, defect empty-filter-deletes-all, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -16100,7 +16101,7 @@
       }
     },
     {
-      "build_hash": "fb30f80ead44d7744f5cd3594781c341ff17c8698e341fd223713e38d682182b",
+      "build_hash": "4a3df1a65c5528cc7638ad6938ee9a4cbe886e966687495cfc584e0c94135d58",
       "label": "L3d, defect empty-filter-deletes-all, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -16163,7 +16164,7 @@
       }
     },
     {
-      "build_hash": "aecab572d298228f6099f6ebddce1e8659e327d1bcbe40ad64ef30f5f4a545aa",
+      "build_hash": "9942e8d7019456f9f4b19dfb48e4e4fa8572230b7c4ee2829dc52dd32f17a3ab",
       "label": "L3d, defect error-as-text, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -16226,7 +16227,7 @@
       }
     },
     {
-      "build_hash": "b638d41900dd09a53b35228edb2a74552c7df4931a5ff50e2c73f301390dc7aa",
+      "build_hash": "abc32d9956615d2380879615ac94693289675569df644ba7bbcdee4affdec017",
       "label": "L3d, defect error-as-text, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -16289,7 +16290,7 @@
       }
     },
     {
-      "build_hash": "b4662c6dc25cd522e41a7cfb685249ec9e69437729b287cd6ddb50b797313eae",
+      "build_hash": "c4fda4b5e1ed9e256b59e53f2400006c009d0e3039bf243057b6ad14204bf447",
       "label": "L3d, defect error-as-text, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -16352,7 +16353,7 @@
       }
     },
     {
-      "build_hash": "92d03dde3c742924eca52c839e373322c5d68d070cfc98fedc5850fd2df11823",
+      "build_hash": "b18a1621c908165b739e424981afcd0f56128072daa950d5fe36b92f7b79995e",
       "label": "L3d, defect force-by-default, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -16415,7 +16416,7 @@
       }
     },
     {
-      "build_hash": "93dd7c9e96f8183dab7116aa4f32b5e7762d7569a96f79ea35991fd2615c2bc5",
+      "build_hash": "253e68025e75e77324d137eb276e80de28284c32fcac2a8ae8aa9b39b1fd24e9",
       "label": "L3d, defect force-by-default, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -16478,7 +16479,7 @@
       }
     },
     {
-      "build_hash": "4b0c45174d587d97fa7c419196057b5bb89b60726edb865e913a94d4cbb98ab2",
+      "build_hash": "d940791288926100ffeac7f4d663fa0ce8b3370459460ae6b4227146b9fb836f",
       "label": "L3d, defect force-by-default, backend replay-digest-mismatch, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -16542,7 +16543,7 @@
       }
     },
     {
-      "build_hash": "1f5b6207b78d1ea578c65ac9837d16c087f0bf19c1a6eb37f0d09baff04ecffb",
+      "build_hash": "e9543356b7dec93ca9d5a4b77481509edd6f4bf49f836a744e04bd2ef9cc3c14",
       "label": "L3d, defect idempotency-key-dropped, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -16605,7 +16606,7 @@
       }
     },
     {
-      "build_hash": "98833dab829eec360b59198dfa9d02e30e085e7fd3e28ba29afac270d55c67aa",
+      "build_hash": "df0b10e594bfbcace2254c3222c6e898434146b42b20dd77f406b48881d13338",
       "label": "L3d, defect idempotency-key-dropped, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -16668,7 +16669,7 @@
       }
     },
     {
-      "build_hash": "ca3b68405d6eabf68ba060ca99a7f15a5e02c5522d0deb62751e0952b32bfebb",
+      "build_hash": "08bb445ee06f8f14939abf32dfd0300b475ed38a94a788061a44ac01dea142f4",
       "label": "L3d, defect idempotency-key-dropped, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -16731,7 +16732,7 @@
       }
     },
     {
-      "build_hash": "9043813a5bb4d0a996a55ee6fdca580a07964c421923bb0e34a3d250026a204a",
+      "build_hash": "97d644bb29c309235a8c4a2f7d53480302fbe7e75d335ed21ce003227ce786e9",
       "label": "L3d, defect idempotency-key-ignores-args, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -16794,7 +16795,7 @@
       }
     },
     {
-      "build_hash": "309253de6427d46e8650dad545fe0db14171ce1aadd797ae143779a3b993be96",
+      "build_hash": "8472d211e78d17c5639c418e4b850339595d0d474b0ffaed207731b9a042a07f",
       "label": "L3d, defect idempotency-key-ignores-args, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -16857,7 +16858,7 @@
       }
     },
     {
-      "build_hash": "a5e6e8142a862fa50652b51876df60cd9071551962f6a1d280bb396fc3f5c410",
+      "build_hash": "d57d4f2fb19fc196edfe16168f17c1d23db9b7a2d62530db3e3f7ee7980c1a04",
       "label": "L3d, defect idempotency-key-ignores-args, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -16920,7 +16921,7 @@
       }
     },
     {
-      "build_hash": "a656c2513d5948ec2ec6e28e1aa8b699fd7f42b46d738aa7f30edb4b362b188a",
+      "build_hash": "2bf35f7ff75473c538874b499ad00e74abe95f94b2639f3ca4cfb6aa9c312eaf",
       "label": "L3d, defect ignore-project-scope, backend digest-not-canonical",
       "start": [
         "tiny-tracker",
@@ -16983,7 +16984,7 @@
       }
     },
     {
-      "build_hash": "c20cf46795a97541b2e8331c10ff34db26ddb21cc02b14b026b54b32c1253b48",
+      "build_hash": "aa3f96e0b90fd3b51209208582444f1ea358c9b04ddc15454f0169befe888ba6",
       "label": "L3d, defect ignore-project-scope, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -17046,7 +17047,7 @@
       }
     },
     {
-      "build_hash": "06a4578da86c28fbf29314d4504ba01ecc310fd0b3f7a5457f31801324209419",
+      "build_hash": "2f80e3878ccd4f060949e1fdbf7f7e1087cf85256cd7d80d3fa543ec06fddbe5",
       "label": "L3d, defect ignore-project-scope, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -17109,7 +17110,7 @@
       }
     },
     {
-      "build_hash": "8d147a4b58c91ddf929e05e15420c6078c4c76360d59978ccbe04a3176f8df94",
+      "build_hash": "554acb28d4f12d864af139e4fc0769ef3d625e1c5bb08ea4ab0db57fe2aadd51",
       "label": "L3d, defect ignore-unknown-args-with-notice, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -17172,7 +17173,7 @@
       }
     },
     {
-      "build_hash": "8e6466341d4f79db55df1c1e5cc9d65968e398268b43ff286d7530f89c421680",
+      "build_hash": "d4e1f2c2c7d2c092d2bbde562c1814e19860d2f1979eb6c7f69a708cc6617d84",
       "label": "L3d, defect ignore-unknown-args-with-notice, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -17235,7 +17236,7 @@
       }
     },
     {
-      "build_hash": "e6361febff829b72e7c76ea7fc9e2ee1c8b9514f9412c6340d717ba9ca9edfd2",
+      "build_hash": "9afd730e3c661d296cd272a69de37f05e4cb77d8994984dae8770202abe1cbbe",
       "label": "L3d, defect ignore-unknown-args-with-notice, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -17298,7 +17299,7 @@
       }
     },
     {
-      "build_hash": "bc24bbbf958d7c3b0d2dd4347359fd173df29d717550f8906394b52e6aa574aa",
+      "build_hash": "635a36093acd8f4643c4739d2ff63970ad05d9cd873a6debee5f7d8a5cc03944",
       "label": "L3d, defect in-progress-reported-not-applied, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -17361,7 +17362,7 @@
       }
     },
     {
-      "build_hash": "8a93fca73397770ca97118b3cb31f65423654d1c9f8d19eae3b241018f6de6d7",
+      "build_hash": "97be2934ff535234350020a3fc0bebba7bfe9fe7bb6ce92e6c1b2a3eb51c9c39",
       "label": "L3d, defect in-progress-reported-not-applied, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -17424,7 +17425,7 @@
       }
     },
     {
-      "build_hash": "47688fcd05b33615eff676705e757c41ff763eed02a939d92dfdaab4490d7c37",
+      "build_hash": "bf3f10e5da3ef3a8deea8a16f6f72d4448fdde8122b2a89eda10874d113d66a8",
       "label": "L3d, defect in-progress-reported-not-applied, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -17487,7 +17488,7 @@
       }
     },
     {
-      "build_hash": "ba100b5eb97c1708ef36faca7990fc19ef267ede62ada68c8ff538b992c8932f",
+      "build_hash": "332190fd4909900270178f022d8b712b09340420fbc9d5c93117408a58392157",
       "label": "L3d, defect key-store-in-memory, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -17550,7 +17551,7 @@
       }
     },
     {
-      "build_hash": "632ad26c13522d1bbc1d24f0f5ce4fd2b03f7d3983c5b70f7a9b1e5039ae5ed5",
+      "build_hash": "30ae2211a20135b2d1c75060e0628dcaa29e74fffb5fe8ac856ddf2cf2686104",
       "label": "L3d, defect key-store-in-memory, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -17613,7 +17614,7 @@
       }
     },
     {
-      "build_hash": "a1c0cd18d1248edd0bc96be4d377dfe145378add976a537600b76a556433ccb9",
+      "build_hash": "059c398cc4c75f11cf68e26ca71f02296f9b541fae1355787c5f8b0c72a45d39",
       "label": "L3d, defect key-store-in-memory, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -17676,7 +17677,7 @@
       }
     },
     {
-      "build_hash": "78c5a85b3aa1e6d9a32e1e9dcf0ea2994f097c340bce3cd5d9c7e8c5389d5570",
+      "build_hash": "e1137da7dc8eb30f97a755b5afd9037e11d50b9c1f0749b87496d904e1046b76",
       "label": "L3d, defect label-by-position, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -17739,7 +17740,7 @@
       }
     },
     {
-      "build_hash": "476e973604357feff3dbf9bc154f981209bab24edd85ae4291de2e0d35d108be",
+      "build_hash": "fd904b4df37e59a5dff2a493438264f58caa160b656bd42d704d5fdf29247ba2",
       "label": "L3d, defect label-by-position, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -17802,7 +17803,7 @@
       }
     },
     {
-      "build_hash": "db1d9ec4cc85f32d16a7f0de8cf8a4054addb7dfe76372f33ba3ad36ce6b03b7",
+      "build_hash": "39406d9f9816d7dc4173efbbbda17f2e4b4adbf84f4b1d673aa844304cf9caa5",
       "label": "L3d, defect lookup-reexecutes, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -17865,7 +17866,7 @@
       }
     },
     {
-      "build_hash": "532d9488f77b32cbbac1133360dcfb08304a75882a7a4c1dd0cf2d166ce0afc4",
+      "build_hash": "daa63151e776dcf7a852e1333b2795cff603fb99df5c1dac02717151cd91fa35",
       "label": "L3d, defect lookup-reexecutes, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -17928,7 +17929,7 @@
       }
     },
     {
-      "build_hash": "1eb8f08e4eb5baeec3995f6d1ff05dfed112cc0f882f71c4e66c99873b7a6ee9",
+      "build_hash": "7824d61b67ddfdb67d2bf2793befd73462e564f9bd06169c2614ec4a489c885f",
       "label": "L3d, defect lookup-reexecutes, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -17991,7 +17992,7 @@
       }
     },
     {
-      "build_hash": "5a1e52c8532aecb018cf820d2c88a9abbc9297054ae4484bd98d4d4b28d8da80",
+      "build_hash": "08849e4b1a0f554d464f1c603639fbb7fe42dd06e4bdcc4b109a5144182558a7",
       "label": "L3d, defect missing-annotations, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -18054,7 +18055,7 @@
       }
     },
     {
-      "build_hash": "0996b51f630223bd734af7d9549534b213b8cf3f7c817b695c59bfa5ec69038c",
+      "build_hash": "e374cca57af4c7f71fd856c08ec324257e160502bcdb4415435c7ea446e1b057",
       "label": "L3d, defect missing-annotations, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -18117,7 +18118,7 @@
       }
     },
     {
-      "build_hash": "1c3804f326577edf5adc121191ed5f16430da4ba0e269ec8d0c644e4ef9dab5c",
+      "build_hash": "ba7f00b6abbe1c12675491f14937bf9f6ccccdcdfb2c0ad4b8a632de74c3e43a",
       "label": "L3d, defect missing-annotations, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -18180,7 +18181,7 @@
       }
     },
     {
-      "build_hash": "58b8565a5e6a52e5fa9abab2a3a76c2f022d2fecab1f582db1a406fe4193dc87",
+      "build_hash": "0823b4880cc588bbaf9075e2372160df75f63e54dd9c98640528c4b9538f8ae3",
       "label": "L3d, defect no-idempotency-key, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -18243,7 +18244,7 @@
       }
     },
     {
-      "build_hash": "f21e5060225048fcbb40ba2cc83886bd9a6177e58ecc82b155c3a5fd59846699",
+      "build_hash": "7c67ca72ca57b4594ac874f31a848289c1b0d22a76fa5c816029b10d3b8934e8",
       "label": "L3d, defect no-idempotency-key, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -18306,7 +18307,7 @@
       }
     },
     {
-      "build_hash": "87d3f25e0d0c63a5708f35d92b18d0963d1509b792ac89cf03f6be638f774d02",
+      "build_hash": "a19713217a9d4685ace50f2a6d10d95f20071717c29abed30a2685559ccf79fb",
       "label": "L3d, defect no-idempotency-key, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -18369,7 +18370,7 @@
       }
     },
     {
-      "build_hash": "253eb539a8e3d3cbbfdf7f2c6c37cfa5cba2a284277819778a5caddf55d67d4f",
+      "build_hash": "0331bc14aac9f2a5cd7c5bb30ed7e35192f6a5f3db680b1b1a7beb2d4026d245",
       "label": "L3d, defect read-merge-put, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -18432,7 +18433,7 @@
       }
     },
     {
-      "build_hash": "f76cce1d28ad772ebfa2251bde6cb31d50a8639d0ca5b2bf3c5e752c2a003619",
+      "build_hash": "3d5703eb9384708c068bae1f8b2adf4f00d0aa3c1d4fe0f6e741c0b0fd155cef",
       "label": "L3d, defect read-merge-put, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -18495,7 +18496,7 @@
       }
     },
     {
-      "build_hash": "e3a93b79b70fa350179fd856b0558bec74bef999f1463cf9e7a1623720a95de3",
+      "build_hash": "d5e16042382639cec454dc33fe8acec2c664afeae7f1df940e646bca0bf6ada0",
       "label": "L3d, defect read-merge-put, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -18558,7 +18559,7 @@
       }
     },
     {
-      "build_hash": "38d181b88cdd1c689c9e140233e3be31f2b70500830dd4c85129e9c5ea83d9af",
+      "build_hash": "cc80891d352b03ab14d8b77e05d0dbf0436b41ba37bdc86cc5523d7b123d1a82",
       "label": "L3d, defect read-only-by-annotation, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -18621,7 +18622,7 @@
       }
     },
     {
-      "build_hash": "c932ecc2bdeeaf81ea15e40d95204ad60a1829b4144022ba772859ce986a0fbd",
+      "build_hash": "cbca8425fc87036e82fe04e225381a3fb4c65ec0754b99755e691ed3aaacda14",
       "label": "L3d, defect read-only-by-annotation, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -18684,7 +18685,7 @@
       }
     },
     {
-      "build_hash": "8994f4a33960766340a9c4017aab27fe68fc5639850ab16aa772473c62e220b2",
+      "build_hash": "9c8bd37fe3485eb3c8eccbf4535caea6e9c15628e3d2ff19d2aa1956c7a0a78e",
       "label": "L3d, defect read-only-by-annotation, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -18747,7 +18748,7 @@
       }
     },
     {
-      "build_hash": "82c5c8d66cbf89b210bdabd7a1bc4190f6c2fa82f8c279d74f205c26b2774396",
+      "build_hash": "cb2a572e872d7d653cad11f46d2fd86537ba168eb5364cbd4cf7b0ff4b6ff6fe",
       "label": "L3d, defect read-only-strict-true, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -18810,7 +18811,7 @@
       }
     },
     {
-      "build_hash": "3f644f3545bf58db7ed9f76ebb2ee2185a6da2c454f35a8bab80ee6e06c9aa36",
+      "build_hash": "0af5cd2eda962b68207079fe695335b04f5817d608bbfea068f70217b583ea92",
       "label": "L3d, defect read-only-strict-true, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -18873,7 +18874,7 @@
       }
     },
     {
-      "build_hash": "9a7f1572e0ebae4fb9de25caf6c7ffee5e38cdd6ae97140492b3fb6ad4e3deaa",
+      "build_hash": "39dfbb0579cc4f5adf9631ce414886f98b0a51dd24d5847d4cf2900a19561b2a",
       "label": "L3d, defect read-only-strict-true, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -18936,7 +18937,7 @@
       }
     },
     {
-      "build_hash": "3cff3914a6076c0617dc783e8fc26f41d4562cefb00517ae61ff01cc7cd46a25",
+      "build_hash": "eb19e8c4ea8df444fbb8bb4f6e523241065a20ca0385d2324869c87d04d1a1e9",
       "label": "L3d, defect receipt-missing-version, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -18999,7 +19000,7 @@
       }
     },
     {
-      "build_hash": "b856c9096fb910716677af186f1f7920b84b18f59fd6975950f18747697a89bf",
+      "build_hash": "3d6c7c279c21cd682305ef7c3941a857dcbfc6c7ab307f1f623d7c444d6da338",
       "label": "L3d, defect receipt-missing-version, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -19062,7 +19063,7 @@
       }
     },
     {
-      "build_hash": "1e7ececedbe0e81cac4ad81e02490c1e3c49330973ecf163a09265aa9314b152",
+      "build_hash": "617eeb59d72a34ce851c3f09bf1e6cb69ea76a64e43c59656b9cb26b63914c3b",
       "label": "L3d, defect receipt-missing-version, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -19125,7 +19126,7 @@
       }
     },
     {
-      "build_hash": "8b3ddb5a9763c1640c1746612598f36c95139cd7c18971102d57a025968f4037",
+      "build_hash": "24d16682acaa6bb39f4cdd6d560c67e6ac48fdbfdd1a225bb4e722a062679ed8",
       "label": "L3d, defect retry-without-key, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -19188,7 +19189,7 @@
       }
     },
     {
-      "build_hash": "11f709965666c63f9833393dba7dd0b678444075302d04f36bddd0b7c9c3f21d",
+      "build_hash": "08d285902463d95d814074f2975f877ea379529a6bf89fdaf550514a5f7453f7",
       "label": "L3d, defect retry-without-key, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -19251,7 +19252,7 @@
       }
     },
     {
-      "build_hash": "0966d90325f06a2497fe719cde42594fbe5cbdb8e7b75ca6307657d3c3ad7933",
+      "build_hash": "a045cee0060fe88d2f5b72cb75a5df087146e8d38b82a8a58a712ba4aa808fa6",
       "label": "L3d, defect retry-without-key, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -19314,7 +19315,7 @@
       }
     },
     {
-      "build_hash": "ba02273bf2c220a1c6ba7044ffae27fa7603026fad08c3958102e5abdcbf64ea",
+      "build_hash": "c00f6b2e4cbbc731db73030b51429f2efc5ec453cd77290fd278d4e75fe77e38",
       "label": "L3d, defect set-labels-non-destructive, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -19377,7 +19378,7 @@
       }
     },
     {
-      "build_hash": "35411c2be0396a2c208f7bc39a0246c3fb6f6b9951c3a2010fa40415e1239690",
+      "build_hash": "01423500bf3e063d40b81d0ff5a04cad564702c468e012ff89b9b38a29feb1a5",
       "label": "L3d, defect set-labels-non-destructive, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -19440,7 +19441,7 @@
       }
     },
     {
-      "build_hash": "d0b698674277fcffab225ae5ec541c9ffaac97463124b9a43d7267a018ffe3b8",
+      "build_hash": "4cd7d40560bb3aada26d6834bc6e1ca875882515276f73f7726cbfd17e96b34d",
       "label": "L3d, defect set-labels-non-destructive, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -19503,7 +19504,7 @@
       }
     },
     {
-      "build_hash": "16180ab2035a3d77d32a998681fcbfca10d7f61f90387a116818261fabad8ffe",
+      "build_hash": "bf3e6dc909d650141af1dd54a66249e67ce612ddca215b3a954a8b2e9f366885",
       "label": "L3d, defect settle-miss-reported-not-applied, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -19566,7 +19567,7 @@
       }
     },
     {
-      "build_hash": "6c0a208c35f5efcbc196917f7eea246bc995dafb84d50f646c476e4f3a4dea8f",
+      "build_hash": "8301952b2e3d10f54c8333b4ad3e5525f88c7b4cd3c3f3d5657a9162377252c9",
       "label": "L3d, defect settle-miss-reported-not-applied, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -19629,7 +19630,7 @@
       }
     },
     {
-      "build_hash": "aded628217dce918166634c5d5029cbc90f1bf0ebf872f883adab3d44dac4214",
+      "build_hash": "6f53483572ee700e426e3a6412d81bf8d5e73b86e27015d1616a1af037ae1507",
       "label": "L3d, defect settle-miss-reported-not-applied, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -19692,7 +19693,7 @@
       }
     },
     {
-      "build_hash": "aefeffc3bfa66a7e691b5a6b949c67ec8453451efa8ffe7333ae7a2610a34b9a",
+      "build_hash": "d276bad6859b0839abaefd70a47893fd56c55202b86221aa5a4ab8141ef6c5ec",
       "label": "L3d, defect shape-claims-applied, backend key-record-after-effect, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -19756,7 +19757,7 @@
       }
     },
     {
-      "build_hash": "ab510fa440d95005ce7774440afc051d85685cfebe00a2a0bc7833313a4ffbca",
+      "build_hash": "cd4bae50df597b888eb08d1315a1fd9fe61f3c441dc0f7021630ffc673dd8a85",
       "label": "L3d, defect shape-claims-applied, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -19819,7 +19820,7 @@
       }
     },
     {
-      "build_hash": "88261a423083b56455102972aecb635fc07ff79a28fb71ccb0d5110443784fad",
+      "build_hash": "697ae2cfbd47ffe3c1fbc1e4b5b303e12c0401778f9872d7c6328f03fc0f63ea",
       "label": "L3d, defect shape-missing-failed, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -19882,7 +19883,7 @@
       }
     },
     {
-      "build_hash": "176f47cb8db88768ecb91f2ffa46859baf67b79c143dbd8589248197aabd40bf",
+      "build_hash": "ddf87ead76af0fa8c988bdf7d9f4a4dfcea7ab934989ee7012178e438512be39",
       "label": "L3d, defect shape-missing-failed, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -19945,7 +19946,7 @@
       }
     },
     {
-      "build_hash": "80d502bcc4fc3e78e2329ea9c41ae380e38b3e2c4affe3fa032b800e613280bd",
+      "build_hash": "bebf952c9eac55dc13c8d7102cd9a0f7f744b5b868a5ecca36ed365d253e386a",
       "label": "L3d, defect shape-missing-failed, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -20008,7 +20009,7 @@
       }
     },
     {
-      "build_hash": "72ce1d7d9e2945b52690b298db2bb9c1600af4cbe3acad20adc86be6b2639184",
+      "build_hash": "fe52667408db5fcef69bfbc04f2051d4f626ae99e57e89a2e3ffc00b5378e895",
       "label": "L3d, defect shape-text-invites-retry, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -20071,7 +20072,7 @@
       }
     },
     {
-      "build_hash": "e2faab88bba1ef7512f96352c255a9dc2f92117caafb22b9048356359357ea70",
+      "build_hash": "3d812fa9e4b6ee1302b633fd7dfc0f433ff13b818231ccd7cf82ee582f4cd9d8",
       "label": "L3d, defect shape-text-invites-retry, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -20134,7 +20135,7 @@
       }
     },
     {
-      "build_hash": "47dfef13972b848d2dd236e7f1309c9629101d44b1cdce74dab3101da82de1de",
+      "build_hash": "66dd9204a908e588904ab586a7c4379c5869a7efd8a9e13350c14cd1232bfa72",
       "label": "L3d, defect shape-text-invites-retry, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -20197,7 +20198,7 @@
       }
     },
     {
-      "build_hash": "5b940b9a7e8a192979f4b4b7232fef1cc743525f0fa3129dac885b513d91052f",
+      "build_hash": "b433673e29b155a7b7d110749383260b9b7c7fcb3f16b25320eb6840ad69bfe8",
       "label": "L3d, defect shape-text-says-all-saved, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -20260,7 +20261,7 @@
       }
     },
     {
-      "build_hash": "ad2493f0c36269143e9081455e2d897c8d39fa53ad88b6d29c5c27f94adde51f",
+      "build_hash": "62cc5130d9a9a426ee57f068ab309dde80dff071f7c845e503a3ede4cbc0de80",
       "label": "L3d, defect shape-text-says-all-saved, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -20323,7 +20324,7 @@
       }
     },
     {
-      "build_hash": "bb9085ed3ac27b3b8746d0e63194d146d32387c85727344b98f983fa90054f86",
+      "build_hash": "d4ef745acce9dd74c94ea52f8122c96a14b6607c52ed80c0679870c8c4182a66",
       "label": "L3d, defect shape-text-says-all-saved, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -20386,7 +20387,7 @@
       }
     },
     {
-      "build_hash": "53bb001f34652291d9279bf1c82469053bc13086f2f7b703155b1478f525f5eb",
+      "build_hash": "4e185de66f329e27d90030eab4580ec3fe40ca3b25e2791cd5efc09cccff6e43",
       "label": "L3d, defect shape-text-says-failed, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -20449,7 +20450,7 @@
       }
     },
     {
-      "build_hash": "2b13b641493274ea53f9365d9337dcec987c97333db48576992d23dd9b9f650b",
+      "build_hash": "d5e361128d43d8402ac17d22ff927621c523317f91cf727865ddbda52c0d666f",
       "label": "L3d, defect shape-text-says-failed, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -20512,7 +20513,7 @@
       }
     },
     {
-      "build_hash": "c650bfb62188e2f14625d88c98bfd16223b057dc08dc739795e1bc9e6b645f2f",
+      "build_hash": "a1213c716ef766b0939375d4df01c29093cc1b202b381d2e20d9f0e0b59e42a3",
       "label": "L3d, defect shape-text-says-failed, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -20575,7 +20576,7 @@
       }
     },
     {
-      "build_hash": "f9c3e972aaa762a45b86432203ab8d4dcb5fa183fa2028393eb5caaa68b84c6a",
+      "build_hash": "c404542cfd1ad3bdde9151a365a2e052e6849d213d1d8a0ab9c1986d629793e0",
       "label": "L3d, defect shape-unknown-as-failed, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -20638,7 +20639,7 @@
       }
     },
     {
-      "build_hash": "7aca18f3bdf7961f826a7e1e789bb41ce47cfb23be1f30e0297eea28751d04ba",
+      "build_hash": "ce6a3ffc6645ecfe3019930e6f290401db34b1f0101b21d4981cc1cfa09c3919",
       "label": "L3d, defect shape-unknown-as-failed, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -20701,7 +20702,7 @@
       }
     },
     {
-      "build_hash": "4565da884679435c3788249fac20f356e289ad4912785c344a3dfc6643a46461",
+      "build_hash": "ad0c6a75c1876002fbc8df60a8813d6704a57eb3c27f1f080a97b5dd91b6e218",
       "label": "L3d, defect shape-unknown-as-failed, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -20764,7 +20765,7 @@
       }
     },
     {
-      "build_hash": "8069628ec18fae2b876ec502ad5b76510bf600079268ec4785fb5651335e42f0",
+      "build_hash": "54e71513b5b41064c375dfd7ceb6cc7044fad80ecedad1f3812d80d504eff886",
       "label": "L3d, defect shape-wrong-version, backend digest-of-current-state",
       "start": [
         "tiny-tracker",
@@ -20827,7 +20828,7 @@
       }
     },
     {
-      "build_hash": "511347f52c19d1e9515e4b6a1f01586a27321bf64eada71b4bcb508e5ceb2bfc",
+      "build_hash": "af586948e40b61dbefbf7010b9e1c3c2a2d6ff091b204bb5d5a5359db218d559",
       "label": "L3d, defect shape-wrong-version, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -20890,7 +20891,7 @@
       }
     },
     {
-      "build_hash": "fedda46d4fd89d7ace5c78c1c9c765d72548b51920c61f73c2bf55b121c58f6d",
+      "build_hash": "76518cff2ae4665da76ffdee66823ed46aab82c9c5c1541a528edb48d488104f",
       "label": "L3d, defect shape-wrong-version, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -20953,7 +20954,7 @@
       }
     },
     {
-      "build_hash": "168de961cf346ebfdacf8c94433fe46e801cbed57b8d572254bacf1875684386",
+      "build_hash": "60d956e0b90a64752db178e11deaea0af9d409c462ec066df1779b73f4b8b111",
       "label": "L3d, defect skip-limits, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -21016,7 +21017,7 @@
       }
     },
     {
-      "build_hash": "692f11cdac87b2e6b09a1c9424b89f101b48775052774432082b8c2be92b4403",
+      "build_hash": "7e8fedc4f74794da26f1b1d809e5eec39d433547c22e3d9e1b51d868029cf8a4",
       "label": "L3d, defect skip-limits, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -21079,7 +21080,7 @@
       }
     },
     {
-      "build_hash": "86a3cc85cac6c92e3dd0ebac8929345ae2ae0892e4c8fa34b431403e022b0bb6",
+      "build_hash": "8a89ec950ce15d570a3d8e59aa49f2ca31028ba5ff2e6e559ae5f5ede59c54f3",
       "label": "L3d, defect skip-limits, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -21142,7 +21143,7 @@
       }
     },
     {
-      "build_hash": "777f909b68e86906ff6aa0d4b1c9f31ab82656f228b8689fbd398cf12eb1cd5c",
+      "build_hash": "f4ad6f39c50be5c781b172f9b9c9c2d6f61df0edbf69749853d41cf8d5551e73",
       "label": "L3d, defect skip-null-assignee, backend key-expires-early",
       "start": [
         "tiny-tracker",
@@ -21205,7 +21206,7 @@
       }
     },
     {
-      "build_hash": "5bf4266b5a4fbe431663c970c4c92aee738d848a6df2ce0511bdf8c5acb54a49",
+      "build_hash": "7c1efaeaf7fe7b6edefa7b048e5ebc5ad4d8abddaff3ddde47270ab2be1c0ee1",
       "label": "L3d, defect skip-null-assignee, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -21268,7 +21269,7 @@
       }
     },
     {
-      "build_hash": "b64569025b302f6d149ae3dca47e93207f0c1b271db67c0a7617d4555859fce1",
+      "build_hash": "cc08c93fbbf60d3a303fcf196d11108fe2228ffa06b908b15e6b6401aeaf7f34",
       "label": "L3d, defect skip-null-assignee, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -21331,7 +21332,7 @@
       }
     },
     {
-      "build_hash": "3af09a1c061d8aba31ebeda9a7259bf5f4caae8871e1d4f1c81791894de635bd",
+      "build_hash": "dda98f67f76ba2ff36322a655a5a70027db55a2c40f2cabdf29bf282cee0ed6e",
       "label": "L3d, defect stale-unannounced, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -21394,7 +21395,7 @@
       }
     },
     {
-      "build_hash": "cd4c3a521df719e4a2935fc9d1f81a303d4acf0cc86786c5f1a86365c47d3a68",
+      "build_hash": "2ce67404a7172da1c2d7cd2780d4f243ab9b35efb72512fc6b0f0e58bbc58864",
       "label": "L3d, defect stale-unannounced, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -21457,7 +21458,7 @@
       }
     },
     {
-      "build_hash": "ded4e309ce128066460aaeebf82a98cb7c192a8afb4e0840d836d2d3e0a45a00",
+      "build_hash": "0766f7e2225fac657bc7f002726d1ce43eaf6a2b19ef7c41eda19d8742ea409a",
       "label": "L3d, defect stale-unannounced, backend lost-update",
       "start": [
         "tiny-tracker",
@@ -21520,7 +21521,7 @@
       }
     },
     {
-      "build_hash": "f455ed6576b58afac2479b6eec4cfd61bfca747ecc45fbd07742a244e7ee085a",
+      "build_hash": "b8fd47cf7ee2b3e3bb1358b1e54dbcec41ca704509ccdd0f5f04fd5d9bcd27be",
       "label": "L3d, defect token-in-error, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -21583,7 +21584,7 @@
       }
     },
     {
-      "build_hash": "9088401a3819e9e7bd197f5c8e673d8f76f2ffadf9a665eb847a6fe282a4fe43",
+      "build_hash": "74c43a712115244c8c1e77698b77059569bccbc84ed7001e20d8cf48d58ec85a",
       "label": "L3d, defect token-in-error, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -21646,7 +21647,7 @@
       }
     },
     {
-      "build_hash": "204a1b0c66afa75af04759e500ac08faedcd13ea332f51eb7c23a9aae64ca0db",
+      "build_hash": "98e9b587ff1b7a747344e9a5e41e101c3de7b1873af37ec72e691bdae664e5fd",
       "label": "L3d, defect token-in-error, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -21709,7 +21710,7 @@
       }
     },
     {
-      "build_hash": "eb543ee575a816a82ca41346a6f862f940f8599993f15fccf4a486f7542f5fea",
+      "build_hash": "4e2dd88da599b0cbf0e24994cb8dae5044e89794ab3f3fe2dad71f628092fcf1",
       "label": "L3d, defect undeclared-title-limit, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -21772,7 +21773,7 @@
       }
     },
     {
-      "build_hash": "d5ae8df28f37ee2bfc10f8d63c41b29b242cde1e4e8fbc157b3bde19437e884c",
+      "build_hash": "3c8a52dee905f6bfb110d2ffa51b47f4d43ae17905978eb756d5142e32edcad8",
       "label": "L3d, defect undeclared-title-limit, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -21835,7 +21836,7 @@
       }
     },
     {
-      "build_hash": "6429674dfdcae2cf30d9d36b8f64299cb6fb4734485ea638d36b08d51a821c49",
+      "build_hash": "3976d0949103eefd067ee8e04344912f686f2c9a2c081410620d9897bd04caba",
       "label": "L3d, defect undeclared-title-limit, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -21898,7 +21899,7 @@
       }
     },
     {
-      "build_hash": "4488026b4b6b4cd8a3ebec83cdd3621051cd65db2dc893d45affab88fa87f586",
+      "build_hash": "dc7c0d6c2d2a8f145c3a960e569b780743fe2762a45450be71a70e1e1bd658ed",
       "label": "L3d, defect unknown-denied-tools-ignored, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -21961,7 +21962,7 @@
       }
     },
     {
-      "build_hash": "3207fb5c2c6d4f6d47fcc7207db3b6862d8f4886cbd62062d513c1330d5aecc5",
+      "build_hash": "cda4fccb912e82a4ce948581e67b9dbb5237ae3822305fc18f754d037f29652b",
       "label": "L3d, defect unknown-denied-tools-ignored, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -22024,7 +22025,7 @@
       }
     },
     {
-      "build_hash": "e246afe51f1f568521b88fc4fae9a8b2f93c96e272bee25a5eddf2eccc35e7ea",
+      "build_hash": "7dd78cb6068d85b596842cf6ef70a2f940f7c699b25d0c89c719d6f927bf8fd6",
       "label": "L3d, defect unknown-denied-tools-ignored, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -22087,7 +22088,7 @@
       }
     },
     {
-      "build_hash": "d9ec6eb219eb08be0fef8e5e1bf7e6620164115bff3241cceafdd4386c7cd7fc",
+      "build_hash": "b1493d169ffc9131e5bd858fa63942d896c36c87731e1fe01aac6be88daa1f73",
       "label": "L3d, defect unknown-tools-ignored, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -22150,7 +22151,7 @@
       }
     },
     {
-      "build_hash": "77aea102e66c31e1797431fe202e15ccdad801b0ed825823cf5682eb112409cc",
+      "build_hash": "61b8e3d2028e43baf4d57ef62d4d0c3f883010caecf79724382e1ac097f14c63",
       "label": "L3d, defect unknown-tools-ignored, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -22213,7 +22214,7 @@
       }
     },
     {
-      "build_hash": "d2d93b747e3123b2a032f1d907d458c584a1f3b03e23c5f4c24ebab65e36b1ef",
+      "build_hash": "f95f14b6384d52986e9f8d099e791aee5525f6eb0348f7b53f4dd0f992f5f686",
       "label": "L3d, defect unknown-tools-ignored, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -22276,7 +22277,7 @@
       }
     },
     {
-      "build_hash": "e920bf5860ab7a9073c3ffc40f36d57f8cd5fc76d8c8eb868f72ec55d091cbd5",
+      "build_hash": "786ec72954e94072113c4efbb4f86e7e4d9c1cb3f24a3e7b29e043383a7e47ea",
       "label": "L3d, defect update-adds-defaults",
       "start": [
         "tiny-tracker",
@@ -22337,7 +22338,7 @@
       }
     },
     {
-      "build_hash": "da7deef161e630b0840d27eac0a0410a3726ef7edb86adf562e38024f98b8538",
+      "build_hash": "23617833efa0c621582027a1276f0441ac4fdfa545fcd3796851f0d33fccbc56",
       "label": "L3d, defect update-adds-defaults, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -22400,7 +22401,7 @@
       }
     },
     {
-      "build_hash": "997b388ad55ff469756f9e65687e91400948aca8c1569db9bd9ad5396e29b541",
+      "build_hash": "d317a58e02fa3d43fe6bbb2213a42ee75068ea6db1aaa9d2a8d92d6e5532b54a",
       "label": "L3d, defect update-adds-defaults, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -22463,7 +22464,7 @@
       }
     },
     {
-      "build_hash": "973f9f9af3de784be42298ca98e98114ddf739f6a19fc4fb32e41e38ca814d30",
+      "build_hash": "eff668f667c4be064b0c647a4086ac68a0ad2598d6031edd8059d82a6525215b",
       "label": "L3d, defect vague-validation-error, backend key-record-after-effect",
       "start": [
         "tiny-tracker",
@@ -22526,7 +22527,7 @@
       }
     },
     {
-      "build_hash": "11b83134f615a20c65ab1182b362a6c32c125fd577f42331c4fce409aef50ad9",
+      "build_hash": "da40246e206f4653abfc0605ccdec41674fe7d03e9f3c6dea87c85dc28ea386c",
       "label": "L3d, defect vague-validation-error, backend key-record-not-durable",
       "start": [
         "tiny-tracker",
@@ -22589,7 +22590,7 @@
       }
     },
     {
-      "build_hash": "e3e588deefaeb326aa56566be7911af8f5d3998a1aff040e24b0ca1e8c91f054",
+      "build_hash": "e3eb0c75385b4efd86f68f776e8633d041f33f51749614678017cc08a522f246",
       "label": "L3d, defect vague-validation-error, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -22652,7 +22653,7 @@
       }
     },
     {
-      "build_hash": "3441053b95525487ed9d6b52817c19d78dbf14ca1df660e8ad72500eb7d81f15",
+      "build_hash": "6f69a43001bb061a6e31f75b2e30bb0165fd27583ed59ccbecc3f094678e9975",
       "label": "Lv correct build",
       "start": [
         "tiny-tracker",
@@ -22709,7 +22710,7 @@
       }
     },
     {
-      "build_hash": "8a042f2c7d604203ab3b041abaa6d31e086a8ea81a252cd86f075fa634e840db",
+      "build_hash": "1e84c74082231b5c1e35d52f96a07e805b893175d2c2e87172369736772bcda9",
       "label": "Lv, backend key-expires-early, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -22770,7 +22771,7 @@
       }
     },
     {
-      "build_hash": "90366c367453470fc56179f5b3c8c83bb0095624a2ea1d903ec4f5599c3ec922",
+      "build_hash": "8c4e2b5b0d8f16f3c04ed143b943a01905aa8f06178c9f2735ced936e00c21d5",
       "label": "Lv, defect add-label-replaces-list, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -22833,7 +22834,7 @@
       }
     },
     {
-      "build_hash": "f0f8490b4f808a3ac4239d4191034fb5ff2509076a2f8374f0cf7798196f90f3",
+      "build_hash": "be3b1f2c00cc7b371934d432cd6f1ffb22184fe3556626a8f2c5710da8a9e57c",
       "label": "Lv, defect add-label-replaces-list, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -22896,7 +22897,7 @@
       }
     },
     {
-      "build_hash": "7cabcd17051cf3af303a2e8538dceadc255501aa88526eb70a1c239e4bcd62ab",
+      "build_hash": "5fe6decd7092a0db282c548ee717b40ee92dbcf2ff47a05aa192b3ec1a6f87c1",
       "label": "Lv, defect add-label-replaces-list, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -22958,7 +22959,7 @@
       }
     },
     {
-      "build_hash": "126118db26b2541d6456636ebcb8e623d554ffad9156fb1bcfd9fcd1d7d2faad",
+      "build_hash": "867554efa09fadaac63d155179a8b9485311e0f5c79d93ecc79db6d443f49634",
       "label": "Lv, defect bulk-misreports-partial, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23021,7 +23022,7 @@
       }
     },
     {
-      "build_hash": "f8937e9fcd0da584acd20e273bed4bb514e4ac8dc7878bb5f9c7f82c29418776",
+      "build_hash": "40bab5cedabef7c69dacd424dddfe45b012fbc16d56d776f2b175c772a328ac3",
       "label": "Lv, defect bulk-misreports-partial, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23084,7 +23085,7 @@
       }
     },
     {
-      "build_hash": "6f093c1a1dc3f5c6e6e4915772939016d871862ebad38dbc9c00db7eb857cd4f",
+      "build_hash": "c80f04c01147d9109b9af34ef97803089c64acdb2887416114490b751174b0ee",
       "label": "Lv, defect bulk-misreports-partial, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -23146,7 +23147,7 @@
       }
     },
     {
-      "build_hash": "45c5555efdf3d0ef6666dd175941e35bb56808d1a99437e0382d8a7a569e3140",
+      "build_hash": "397ad014b8adf1d0619d4dda558ff635909451e29c76cdb6e4da384aede84044",
       "label": "Lv, defect bulk-without-transaction, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23209,7 +23210,7 @@
       }
     },
     {
-      "build_hash": "08dee085851d93c34c227d6f983e59b323719da0021775b0e59a9fddfc241afb",
+      "build_hash": "3073d8d6c5a810f8df6781d2b349d9db89dfd9fa8f3644397db22812a23ecf83",
       "label": "Lv, defect bulk-without-transaction, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23272,7 +23273,7 @@
       }
     },
     {
-      "build_hash": "5b27ed9fcb70b8ae53ed31588eac22361a4b3c8457f39416bfadd29e12f8347e",
+      "build_hash": "ddf4e1ca88b13e4fb442b8abbffedba6ffba19bd2eb523e9c16c6cc8d79fff16",
       "label": "Lv, defect bulk-without-transaction, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -23334,7 +23335,7 @@
       }
     },
     {
-      "build_hash": "d87aa1ac81201a476d6eec5dab881d07db47583e377b8de5c03111937ab81607",
+      "build_hash": "f5380ab06491e326f211ff5aa19fc40f558aa5bdc0c0d8b458db044c4ad511db",
       "label": "Lv, defect close-before-confirm, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23397,7 +23398,7 @@
       }
     },
     {
-      "build_hash": "936375a4a333dd36d3b8092a391b5182006131dd38ecf027fe72afaa443ecfbf",
+      "build_hash": "812a6a39546c9a37d0e3b8d90d54f0966b092f52336521ed0d916a522f1704a4",
       "label": "Lv, defect close-before-confirm, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23460,7 +23461,7 @@
       }
     },
     {
-      "build_hash": "2b5b9b2bf6f5b419d3894c0467971bf955037eecf8672981276f9e65b9cb5b5b",
+      "build_hash": "e6fba1b848bb286406347fae83f9a084cab1bfbc193be643a0ec9d4fdc0fd3f7",
       "label": "Lv, defect close-before-confirm, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -23522,7 +23523,7 @@
       }
     },
     {
-      "build_hash": "785f1a68867ea5c5604a2f57a2dd4f29455377bb4492fb42bed85360ce4f6e38",
+      "build_hash": "d07aa0418ee106fc9339b916183b432fef472bbfb2f53ad84129e8a5954f789e",
       "label": "Lv, defect coerce-types, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23585,7 +23586,7 @@
       }
     },
     {
-      "build_hash": "7df04e15e1dc4967e51ccfd8e9c03650c5871164278038daf019c099f351c3a8",
+      "build_hash": "3b1f2b13fe5162c9ff29eaa3d570b69d70611b57be713096112a59ac1079d59f",
       "label": "Lv, defect coerce-types, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23648,7 +23649,7 @@
       }
     },
     {
-      "build_hash": "29c3d6fcab0619b1176747978dceb2a6accfbd3832726f274582f81b278cb873",
+      "build_hash": "abfc7b72924653636ddca6be1a8ffca3e29d0a6671177d0bc4cbfe6de54ad00c",
       "label": "Lv, defect coerce-types, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -23710,7 +23711,7 @@
       }
     },
     {
-      "build_hash": "d89267426f0851678618f37021a48a3f41eb076d57bf1d774151a8ca5061309d",
+      "build_hash": "afe1b5549a7b135113c29d3e2023eff3e03e7fcd2677e75e62f7b5e92fbeca94",
       "label": "Lv, defect comment-id-dropped, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -23773,7 +23774,7 @@
       }
     },
     {
-      "build_hash": "4301f1fb8a38fe3d72235cea30971cc60a48cce3d8a990deb75db59f58bae940",
+      "build_hash": "209bd128239ed3b3af2094ae7afa5358a7221f2d433e9fb0a4db966579264fde",
       "label": "Lv, defect comment-id-dropped, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23836,7 +23837,7 @@
       }
     },
     {
-      "build_hash": "a243902e89e4bf03542b67cd8f366b8e8307e5202cda6681e8da489a670f8420",
+      "build_hash": "c56ae3b5fbfc0b159c0c3c28965600dfecb1faef3bd8aaad84db0e476f849ae7",
       "label": "Lv, defect comment-id-dropped, backend lost-update, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -23898,7 +23899,7 @@
       }
     },
     {
-      "build_hash": "e90c7a9f895d234b90500937fcf6f92fac53816fd584b93b3c054a850a612700",
+      "build_hash": "179b90259f29a8c4e48937e749a3c457d47641ce4cc6f1103bbd894000145b6a",
       "label": "Lv, defect comment-marked-read-only, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -23961,7 +23962,7 @@
       }
     },
     {
-      "build_hash": "0d6822d13e600029778378cc511492cecccf691afe780d85395bdb37fb7b9292",
+      "build_hash": "fb98eb32e74247e0aca994dbf5d3228849e5b966216af321ba7df857652bc57b",
       "label": "Lv, defect comment-marked-read-only, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24024,7 +24025,7 @@
       }
     },
     {
-      "build_hash": "d6a06c01a1c73a2c053e255f44952e114c48ace78679a0d2dba2602134f39294",
+      "build_hash": "a9347ba229c8e828905046f97e381b880dc02d1ed55d8b6b797e8c699a2a5a29",
       "label": "Lv, defect comment-marked-read-only, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -24086,7 +24087,7 @@
       }
     },
     {
-      "build_hash": "644f402500ad807810492ef508d619eb9fdff7e6888c022cd11ac79732bddcff",
+      "build_hash": "43bbd2224895654ccf841887e4ce30a3d7e9a98622e7de5c7f73f35f3726a58f",
       "label": "Lv, defect conflict-as-generic-error, backend digest-of-current-state, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -24148,7 +24149,7 @@
       }
     },
     {
-      "build_hash": "2149805a2542b0ac6be0cd653cfdf70fd7001c1c21d5e5aeb600ebed8fdfd2df",
+      "build_hash": "d891d6cd7ec835d0b9ed2d63c1db418789236b673d752006013c3fd19e6f0c2e",
       "label": "Lv, defect conflict-as-generic-error, backend lost-update, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24211,7 +24212,7 @@
       }
     },
     {
-      "build_hash": "500c26dd86ccc4e89276b6df3003310133f2e5b4812b59ad3e5a04b4033b1f88",
+      "build_hash": "aac0dab9debf1d11e608549d52cc645fa162550c62905cab2094dcd589c9713f",
       "label": "Lv, defect conflict-as-generic-error, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24274,7 +24275,7 @@
       }
     },
     {
-      "build_hash": "70b86ee2346ce6d06f8425a6c2c900380863255b99f909cca2bb6f0a109aecad",
+      "build_hash": "f05b6ac0e37f2c0af9e143087ce6f42f3c10bca939232ca304080822d5e1aeb0",
       "label": "Lv, defect conflict-without-iserror, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -24336,7 +24337,7 @@
       }
     },
     {
-      "build_hash": "da720af248d17d9b8a5baa299511678ae7581cfc1ec255931365fc0c75c6268c",
+      "build_hash": "628e3f8abe4413cc1f9dfb49c5d061221717d6c1393ff27e5050c19afa6ec807",
       "label": "Lv, defect conflict-without-iserror, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24399,7 +24400,7 @@
       }
     },
     {
-      "build_hash": "8c75a8b300ad665442dd0f5253bfe0e25b32bc533156d7d407f2ac2a0e1ba714",
+      "build_hash": "b096d847c7ea3ab1a62f9a8e66aa058a4d063655ed9006d923d903ccbb084789",
       "label": "Lv, defect conflict-without-iserror, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24460,7 +24461,7 @@
       }
     },
     {
-      "build_hash": "9a3869b467a192f00aa63a14313ab0e45b8f919876212ca5036a11fc684182c4",
+      "build_hash": "3d1aa5c5c3efe5e55787c546c28f2002e5825d78a26740d9a5239d8bcac382cd",
       "label": "Lv, defect convert-numeric-strings, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24523,7 +24524,7 @@
       }
     },
     {
-      "build_hash": "93f68841ce15c1583b8191230165c2e4e556f19e53d9d2d155fa67d94f2a24f7",
+      "build_hash": "48d0cac87565dee416475040f1dbead366f614ae7aa0e99c27086c0104f3c4e4",
       "label": "Lv, defect convert-numeric-strings, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24586,7 +24587,7 @@
       }
     },
     {
-      "build_hash": "9eb708834cd1462f33261ea3ecb80405ffea4fa6b56bbf2d81f95a1fed45ff6e",
+      "build_hash": "73943378783cac7e21827248c9f384408e1053d2051b30475c9a87cb0dba775a",
       "label": "Lv, defect convert-numeric-strings, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -24648,7 +24649,7 @@
       }
     },
     {
-      "build_hash": "a40c239d63d2eb44c56095eebcb990b14e987618dca9923627fd0251972d0a0c",
+      "build_hash": "3cd5915bfd4db08e7cae9446b5dbeb341571ff05b08cff05f216a95b8d2cb702",
       "label": "Lv, defect create-marked-idempotent, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24711,7 +24712,7 @@
       }
     },
     {
-      "build_hash": "f12b7d700c01507923c0723d8bc0dfa872e098bc497732d80025c394748dc412",
+      "build_hash": "dc18ec005af34ec112c193b8152581124130f2d7f95abd6a8de7519850d954df",
       "label": "Lv, defect create-marked-idempotent, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -24774,7 +24775,7 @@
       }
     },
     {
-      "build_hash": "3aca5c44d593e1f87066312cf70829fc20e7902fd146942b0c2528c541dfb0dc",
+      "build_hash": "43b4322e00563764a7920b99b691f4f57520c3a987243dd57b4a2520b6adb075",
       "label": "Lv, defect create-marked-idempotent, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -24836,7 +24837,7 @@
       }
     },
     {
-      "build_hash": "74bdc9084370a90394248b71d98106a176d2a6b30c51db9d05141d7321c0a209",
+      "build_hash": "785e0c459cda1dba947c84acce534101a6e67c0fdc80f2d63d44f05c1801504b",
       "label": "Lv, defect create-overwrites, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -24898,7 +24899,7 @@
       }
     },
     {
-      "build_hash": "f02fecfe8d69122a135123db0f23979b4a10433ad489306a97d9e92d43fa9151",
+      "build_hash": "ebbe8fdbc6dc7160a6b8da00026004bc384c0c38433fb9a3af4a5305d81e44ff",
       "label": "Lv, defect create-overwrites, backend lost-update, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -24961,7 +24962,7 @@
       }
     },
     {
-      "build_hash": "e9c85b363ad96d802a6405c21f31c5f68a31a5d631b72f7a3ae28000496e3a32",
+      "build_hash": "938663a8be92d3460141d9b115cd8b93248b795865bb1092e450e515fbef8369",
       "label": "Lv, defect create-overwrites, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25024,7 +25025,7 @@
       }
     },
     {
-      "build_hash": "c02ac8f72d49a2ad7b175a2dc174ec55032bdbb41dede6439373fb4cdd446ab0",
+      "build_hash": "e478052fe3863d33cb54df4235749e6fa1951ce52d7a76465dc46a39798b7053",
       "label": "Lv, defect delete-refetches-version, backend digest-not-canonical, variant settle-by-lookup",
       "start": [
         "TRACKER_VARIANTS=settle-by-lookup",
@@ -25086,7 +25087,7 @@
       }
     },
     {
-      "build_hash": "6e11c8d32974d880c220d9c8fc406848eb17f82035e49943693aba98a42f437a",
+      "build_hash": "9f411039a452924f10115b3566358f1e5f7a9e25b2d9b44b436769be00c7fd21",
       "label": "Lv, defect delete-refetches-version, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25149,7 +25150,7 @@
       }
     },
     {
-      "build_hash": "3f4e29e97f698f1868721cebdb1d2023b0f51cb1db605711560da77edd5a7232",
+      "build_hash": "83ff12eac97c31b59010a8ac68e64d49e26800e95780bc468e5ea517bbc03afb",
       "label": "Lv, defect delete-refetches-version, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -25211,7 +25212,7 @@
       }
     },
     {
-      "build_hash": "6e4a68dd9204c4f368facb35e343e92f6d3b1a6d98c4f9854198b2e8bbe612d2",
+      "build_hash": "cdbcf7a293c4e59f15c7aaa493b56e01f6710231e383cd3c2bbac53daf333046",
       "label": "Lv, defect delete-refetches-version, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25274,7 +25275,7 @@
       }
     },
     {
-      "build_hash": "2dd74533c1c7be9877bcc5eccc4e5af6429e99642cb7c30081792bd7d353d70a",
+      "build_hash": "6cca2bfc2e26d193192b261f255e6682d5d4a844eaa7c40807a40a7b11afed40",
       "label": "Lv, defect drop-unknown-args, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25337,7 +25338,7 @@
       }
     },
     {
-      "build_hash": "2e0632bb9027e6aea7f441d3214e2e2b4445d1b0c506db4c3871bd9f98ca341f",
+      "build_hash": "3fbcd6f8371d1be7c6f7d84f07d6c9ced4973cc434c4ea6b6843d474314b46de",
       "label": "Lv, defect drop-unknown-args, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25400,7 +25401,7 @@
       }
     },
     {
-      "build_hash": "fbdbfff4695619c8954ea3a837ed4d6654d60562397040584f2fd2a1180628f5",
+      "build_hash": "439cc36e4db2008f5daf80ff8e4451c9d8b2d830517e8c12552e1605bc4ae66f",
       "label": "Lv, defect drop-unknown-args, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -25462,7 +25463,7 @@
       }
     },
     {
-      "build_hash": "7925e18194abc77bbb9e46d359837a26a3c5a369a712e8dea389f8c69a2a7c35",
+      "build_hash": "bbc864a62ac302cbde09de8ff7ee307cd547be41bf8a6ae991847db568db7bb6",
       "label": "Lv, defect empty-filter-deletes-all, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25525,7 +25526,7 @@
       }
     },
     {
-      "build_hash": "101792f9dfe8b2c62f91651ada88075ac016b723f9f9084680a133bf064b3ad7",
+      "build_hash": "7333964e12287b34965511abe579940b094f8cf666679610460bebd4ad0e1233",
       "label": "Lv, defect empty-filter-deletes-all, backend digest-of-current-state, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25588,7 +25589,7 @@
       }
     },
     {
-      "build_hash": "46540bb113c3249ec5f3d796e03450e81a9fdd7818ff399d4f205146996976ff",
+      "build_hash": "15a448afc9febe7c6ff27df4a0857a6efeb24edf704902af06ed8a1c07522a15",
       "label": "Lv, defect empty-filter-deletes-all, backend replay-digest-mismatch, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -25650,7 +25651,7 @@
       }
     },
     {
-      "build_hash": "44ba874f4e986813251168db9db7e2cb7f0c5eb90b3809db5fc487efbe942014",
+      "build_hash": "940bbfd14b46e4ddf991abb99f51be901b2eb28014a55e7b0009aa585cc51608",
       "label": "Lv, defect error-as-text, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -25713,7 +25714,7 @@
       }
     },
     {
-      "build_hash": "826a047daaa94c3380aafc8a65691029abaa04f2107221e597173c9434b0dc1b",
+      "build_hash": "6fd06c3bc665c97e36519cefa3caaf7225a91e06e89c748a6d82fae73c608fdc",
       "label": "Lv, defect error-as-text, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -25775,7 +25776,7 @@
       }
     },
     {
-      "build_hash": "c80ec6651469b61cad7bcb67cf9316b48fa83283b5fdf850df7652bbaa6064fb",
+      "build_hash": "4757cbb4e269cfe88791e640258ead1e2202f236a2e89a280ec7a3f91b431038",
       "label": "Lv, defect error-as-text, backend lookup-unscoped",
       "start": [
         "tiny-tracker",
@@ -25836,7 +25837,7 @@
       }
     },
     {
-      "build_hash": "73ee6e26322e85d1cc2fb7a151534244136fee275a184714a82f0ffe78289e0d",
+      "build_hash": "8bba1afe9fab16555e2285640ef66653d2e68a772648c991080c1c8868dfae7c",
       "label": "Lv, defect error-as-text, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -25899,7 +25900,7 @@
       }
     },
     {
-      "build_hash": "c464bb6f2118bd85f7c2b4f408bb1c9a9aa80c35ad3bdfd6f10be82ef1313920",
+      "build_hash": "39fe96e6e61d3ad9254c8f59d553b1d1059721ed7bd6a594c497a1351d4b9d89",
       "label": "Lv, defect force-by-default, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -25961,7 +25962,7 @@
       }
     },
     {
-      "build_hash": "5745d92127fb000ef34db7446e486e41c263aa2aa30a29cf54ad117afe11068c",
+      "build_hash": "36eb3dd50f6b2b101e6c9d08b3e79670774a8b34c58886f24c9300300454dfc8",
       "label": "Lv, defect force-by-default, backend digest-of-current-state, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26024,7 +26025,7 @@
       }
     },
     {
-      "build_hash": "605797bdac90f497f6801685f161843c47e95f2f9c52eb6a3850321546181945",
+      "build_hash": "e5d0c0181d47feb84096aa7ffd378696a4408c88933c079ed4d620b514a870d2",
       "label": "Lv, defect force-by-default, backend key-expires-early, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26087,7 +26088,7 @@
       }
     },
     {
-      "build_hash": "4fbc156a149268167cb9830ebab1653150faf8132b9fcd049f3020b5bc64bd7d",
+      "build_hash": "094c9db2d271cbdb6cdc9d2250beabc018abc122ff44fd7195c209bbd367abc3",
       "label": "Lv, defect idempotency-key-dropped, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26150,7 +26151,7 @@
       }
     },
     {
-      "build_hash": "1c63c1adbfeae871a53cf0f5e53f38c64b92f6fb7c042d36edb35119106b8d0e",
+      "build_hash": "34be48fefe0022222cf1c257a6ad6461ff010d3824fd23d6f9f4aa1247da89ba",
       "label": "Lv, defect idempotency-key-dropped, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26213,7 +26214,7 @@
       }
     },
     {
-      "build_hash": "26a05b900f1493cb2b8021e683e51e2e44b1475e63dd71d1ecc9aefa6505262b",
+      "build_hash": "b048e39724cd2af2c14ae001665b8190f71c8551f4f6e80771c83088507106b3",
       "label": "Lv, defect idempotency-key-dropped, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -26275,7 +26276,7 @@
       }
     },
     {
-      "build_hash": "68c85d8487af8796a95028bac339d3b8e2f24d062e33fd6984efa809081df760",
+      "build_hash": "8952b0672b4136428ab8105acde9762b4072698e37d28845de294b1aad3fa891",
       "label": "Lv, defect idempotency-key-ignores-args, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26338,7 +26339,7 @@
       }
     },
     {
-      "build_hash": "fe38eee7a26af7bed153b5e6fbd27ea4eff0d325d38d653bf01ae2646da4058c",
+      "build_hash": "b556e07b83fc9fa8261373da55ff15b28e36fdb5a7846712a807f4cf5b502d01",
       "label": "Lv, defect idempotency-key-ignores-args, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26401,7 +26402,7 @@
       }
     },
     {
-      "build_hash": "20fec1a6b6e3486390ca722c6f22f094df4fb4ee99f206464c63ad3592bc3641",
+      "build_hash": "add635323ae5c59efd9904aa00e42dbaacbebf6b0129acc68174bff07adadcb8",
       "label": "Lv, defect idempotency-key-ignores-args, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -26463,7 +26464,7 @@
       }
     },
     {
-      "build_hash": "8692643692beb67931a2b528a244457036c21a9e4907266f353d773f852573fe",
+      "build_hash": "3722363bc8b9557ccd9b4419d518c5302ac0346f0866fcb503d070e6503290bb",
       "label": "Lv, defect ignore-project-scope, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -26525,7 +26526,7 @@
       }
     },
     {
-      "build_hash": "ad4a03d69088f3de7e31948eeaafe9d566b5884c01809ebd7002e283a95e00e0",
+      "build_hash": "4bcb264bae98086c8496bd3eb5a466e45d79dd8770fdaae6c3ab1de8d66d9262",
       "label": "Lv, defect ignore-project-scope, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26588,7 +26589,7 @@
       }
     },
     {
-      "build_hash": "0d777cdc0287ba377380cbfb8579fe6057760b7edacc6c89dad69f5a392c3a00",
+      "build_hash": "64b56fdc53910ce296bd5f1b333d91772c2598b87d994e850e727477f829d12f",
       "label": "Lv, defect ignore-project-scope, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26649,7 +26650,7 @@
       }
     },
     {
-      "build_hash": "825998bc466677b7df99d5de663d9ee3e51c8e414ec5addcd8299d7cc48e8c38",
+      "build_hash": "73a1e92cda12cf376f624e06a7701619377540264f7dbc7e131cb3dcbba8a616",
       "label": "Lv, defect ignore-unknown-args-with-notice, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26712,7 +26713,7 @@
       }
     },
     {
-      "build_hash": "27e21b21d139ec5b941694359ed556b9f9d780180e9eced220f8623f2f6b3366",
+      "build_hash": "95a05146daba8b2b97a1ead77c17ae6a2337a10eddb862a8bd65e1905524f892",
       "label": "Lv, defect ignore-unknown-args-with-notice, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26775,7 +26776,7 @@
       }
     },
     {
-      "build_hash": "021177ef2fc647af79345756b91f2dbb54b92f1e162c15e8f4b61442e3ab44a3",
+      "build_hash": "60897dc2aa9367ee37e2eea0565fb9dc22e200020d8f20a879770954fd4d369e",
       "label": "Lv, defect ignore-unknown-args-with-notice, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -26837,7 +26838,7 @@
       }
     },
     {
-      "build_hash": "77fd08202099f267ace6dec6817ff51646621ae8ecb5816db71669ea3623b82b",
+      "build_hash": "8eab4035a2e8165f8d6463bb1fa273c5f82fd6eaaec839c239e76d7e2ebc0c85",
       "label": "Lv, defect in-progress-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -26900,7 +26901,7 @@
       }
     },
     {
-      "build_hash": "4c80214d897781dd5f2edbd75550b124264f2042fd69044e13f69fbd076b1875",
+      "build_hash": "56c0e7e89e8d6f65bcc02cc39247b30ed9d3cdc9ad601d418dc602ff8aa46ff0",
       "label": "Lv, defect key-store-in-memory, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -26963,7 +26964,7 @@
       }
     },
     {
-      "build_hash": "79f41734421696bfa9014c7d8489eeb6790676b001ca4280236cacefa4e668cc",
+      "build_hash": "04bd32c0e8925f630f812f6efe50dd63577d3dc957f711a7e7804b1520db0236",
       "label": "Lv, defect key-store-in-memory, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27026,7 +27027,7 @@
       }
     },
     {
-      "build_hash": "42be3595739f0c4161dbadacdcb31ac339ae900da8328d1d4df30b13f573df75",
+      "build_hash": "1eb44da41e4f2a01033ee81dddfcf61a4be27953de92e1908875e872c5bb4e3a",
       "label": "Lv, defect key-store-in-memory, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -27088,7 +27089,7 @@
       }
     },
     {
-      "build_hash": "d4646420429d34dbf0081a37ebbff33201c078bd4e89c86aa89d2e4a62094db8",
+      "build_hash": "d46ee798e3a9153f59f77ebb55a7249da5cb722059f55dc71a5ea0d1e22e1680",
       "label": "Lv, defect label-by-position, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -27150,7 +27151,7 @@
       }
     },
     {
-      "build_hash": "43e4ba85631968cd52599f502175bee7935b2d5cfc4321660c8bf8cab165750b",
+      "build_hash": "3f907faa767440cbd4d6f9079a111bccdde058ca5dcec68f257b1e5f3102e29d",
       "label": "Lv, defect label-by-position, backend lost-update, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27213,7 +27214,7 @@
       }
     },
     {
-      "build_hash": "303316ca5211bdd5c3c407501a63eb2bc3f5d275398a128a170ce8aa07da88cc",
+      "build_hash": "af9465237aa380f67cf99bf14ece03c98945e18a1fa83575f56b4dfa391227d9",
       "label": "Lv, defect label-by-position, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27276,7 +27277,7 @@
       }
     },
     {
-      "build_hash": "4649320005af5ec2d2637e8251824d2e5074224eb9307bb8f4ffa85a5f12bcdf",
+      "build_hash": "89f12182338839b971cda581a0535ae4642e5920a274fa4523376da9dfe04534",
       "label": "Lv, defect lookup-reexecutes, backend replay-digest-mismatch",
       "start": [
         "tiny-tracker",
@@ -27337,7 +27338,7 @@
       }
     },
     {
-      "build_hash": "3e9f887e03ff7b92c1f090588e4b053df9de8fa4b0bb3ed316de9ebb84097440",
+      "build_hash": "caf1587963b8a438f698a8ae08b2107eb817915c04cc27f81a062908d3c1a64e",
       "label": "Lv, defect missing-annotations, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27400,7 +27401,7 @@
       }
     },
     {
-      "build_hash": "4b84b26fb77fa0b1d382fd9ef0c7556412488ff5bea304d52606ad576142a6e1",
+      "build_hash": "19767b0134d0a951f4bfd3d7672f97333ae97e9416ccc93bbab5f253fdb316d1",
       "label": "Lv, defect missing-annotations, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27463,7 +27464,7 @@
       }
     },
     {
-      "build_hash": "124244ee7da987bf80fb3cd7c64d51160984f6572d3a102b84d3f40e92b51aab",
+      "build_hash": "950c238036e7b333d3a622cde3de241483ecb9b9b382f9e18386122188cc7cae",
       "label": "Lv, defect missing-annotations, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -27525,7 +27526,7 @@
       }
     },
     {
-      "build_hash": "27d1ac8d8d10f69ccc620ce29d99dd861fad379851599b038ff3f3e98e6f758a",
+      "build_hash": "ef7b219465888531634121366dce999b8b662f91e92097cd8d8465b4a8c1b4bb",
       "label": "Lv, defect no-idempotency-key, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27588,7 +27589,7 @@
       }
     },
     {
-      "build_hash": "acf1a146796038f06fec315df65cbad8d55ac0baf5a6b5bdb63904c631efd6eb",
+      "build_hash": "95011abf03ccc13e461c973de96fdfccafc0e332498ea84f49ac5dae4c9ce80b",
       "label": "Lv, defect no-idempotency-key, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27651,7 +27652,7 @@
       }
     },
     {
-      "build_hash": "829f6f6ca1d88e7e3ab76ae32d5481f5c6e4c5a9bab3df92a5cef881ad0ec9ce",
+      "build_hash": "00dac0e941c6919f011c951ce2f4061836822eadbf40fac976e3c09d3972f238",
       "label": "Lv, defect no-idempotency-key, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -27713,7 +27714,7 @@
       }
     },
     {
-      "build_hash": "35bbe01d751d2fe2588d39d919a95c56ab897521d8f8494d8a1f5997b7225832",
+      "build_hash": "0e6d8e7b60d5c891578c992f393aabfb0f588c30de4177b6ac1dfa71224e655c",
       "label": "Lv, defect read-merge-put, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27776,7 +27777,7 @@
       }
     },
     {
-      "build_hash": "fae00387a02e832b9e74126dcc6364fa4ff425c403d307198f3bc1c8d3c615f1",
+      "build_hash": "ed4c0dfe9226cbfce95d8a7c0114e743b7ffe7bc0a4d399e69e884987d5615d5",
       "label": "Lv, defect read-merge-put, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -27839,7 +27840,7 @@
       }
     },
     {
-      "build_hash": "d470ab15c53fc27ff42b185f5242fe8f2ecd7b12822c7b01df2563f636890077",
+      "build_hash": "32f70420232c7fef2aa92d04917de429ae00ab6e365b0377a55ae381d2218a10",
       "label": "Lv, defect read-merge-put, backend replay-digest-mismatch, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -27901,7 +27902,7 @@
       }
     },
     {
-      "build_hash": "72a0bbd1f23fddb908a8a0d79909d36074008d3adeb0dd7e269285660967dc76",
+      "build_hash": "d9c7f0d3271e040ac6b41d9525f048dbc462809fe190527109e497c2c637b0b2",
       "label": "Lv, defect read-only-by-annotation, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -27964,7 +27965,7 @@
       }
     },
     {
-      "build_hash": "5c568b2b6aaa1907d7b6f6409359d6b6313c26e7a1bdbedab0d53125819da8ea",
+      "build_hash": "bcfb11e3d5e0b38e36e556d9e3e2391ef369ddb59cd4a685520e4541240fb7ba",
       "label": "Lv, defect read-only-by-annotation, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28027,7 +28028,7 @@
       }
     },
     {
-      "build_hash": "a1aff590ba22a460d8bc37ccaf4917d1a78ac01799e1460a9a60c94cd53d7812",
+      "build_hash": "801fd46f1e99035d790f0de90528d2e7419cd4767a0fcfe1c0fb30e64a267d4a",
       "label": "Lv, defect read-only-by-annotation, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -28089,7 +28090,7 @@
       }
     },
     {
-      "build_hash": "dad7b3ce8481fe5378cf664d5978f935413938b0065384caa56a7ad9cfd38e98",
+      "build_hash": "ad6656802ebac9a62eda49aef64eab677bd929fca069edf684ad019ded0e11b3",
       "label": "Lv, defect read-only-strict-true, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28152,7 +28153,7 @@
       }
     },
     {
-      "build_hash": "738c29e76327ac9f12dec37e548e963f97dcdb2d876c4a585e16a8c9851023a4",
+      "build_hash": "9469b7e77729a8b7d4051dfc4d17ebe56ec42f1e310a54862c4e3d78a9c84e99",
       "label": "Lv, defect read-only-strict-true, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28215,7 +28216,7 @@
       }
     },
     {
-      "build_hash": "02ce462389c44530c1b6506ecea3205de3c2b273655c789b01bbf539cbcf0511",
+      "build_hash": "c861a30cfe9fa3989aa34961a9e9a40bc65a95252a8923105e9ba7a9d27ab429",
       "label": "Lv, defect read-only-strict-true, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -28277,7 +28278,7 @@
       }
     },
     {
-      "build_hash": "019cd91f9b1bd0694f17ff5997372bbf6d223e4db782d8b6b6dd454815dbff4c",
+      "build_hash": "cf66f385c084fa14a632823147e7b001cc252b7a61358628abe7a5f5422bc2c0",
       "label": "Lv, defect receipt-missing-version, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28340,7 +28341,7 @@
       }
     },
     {
-      "build_hash": "d538994ee13e34abc9f237698df616baac6a97ff91ab82545bb3f33872ad1314",
+      "build_hash": "88be92a0f7649da557be145c3f30eaf83fed87a27a3be37fa9a890dc105a8a96",
       "label": "Lv, defect receipt-missing-version, backend digest-of-current-state, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -28402,7 +28403,7 @@
       }
     },
     {
-      "build_hash": "50a8e04d8be0768d56c4d745a2b95a4106f8af11e1bcf5925b05fb8a92247e03",
+      "build_hash": "cb91b451534ca08dd628300b25a4518405602d6a76bd4eff96eb1037f50d6383",
       "label": "Lv, defect receipt-missing-version, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28465,7 +28466,7 @@
       }
     },
     {
-      "build_hash": "df858127823a97ed0b24bd3ed3668d88b430caa9149ded9ee30800f1a988a7cf",
+      "build_hash": "eadcb9ef22a3835a4bdd3fc6509a1d2f10a1e69317587a85e4156d4923e2709e",
       "label": "Lv, defect retry-without-key, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28528,7 +28529,7 @@
       }
     },
     {
-      "build_hash": "bd7409422ac6736824341cbddf6e0244853e7abfc11b5b13fc16066ead04b3c7",
+      "build_hash": "70ae860c34f4b4c10288416ced58621b166d890bcbfadc71d6935ec7b261d7df",
       "label": "Lv, defect retry-without-key, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28591,7 +28592,7 @@
       }
     },
     {
-      "build_hash": "e8d5c67b1ffdad843385441ff0556e2bcf9eabd4db9fea8c7c8dceeb4f520857",
+      "build_hash": "00077fbd1bfa098a9ad4a91f781f666578e8c6532f820c426a6fcde916a4c91d",
       "label": "Lv, defect retry-without-key, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -28653,7 +28654,7 @@
       }
     },
     {
-      "build_hash": "60a794549f04335cb016c1fd7a093c0421d8583f55550265ad1fbce678817162",
+      "build_hash": "48ea52620fefa52075aa6204b4833038a679796035bdc81be6a8e6c66dad62f3",
       "label": "Lv, defect set-labels-non-destructive, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -28716,7 +28717,7 @@
       }
     },
     {
-      "build_hash": "772ae26280169cd898be6044b329faa33de68ea5a57c80503a6f65ec0be9772e",
+      "build_hash": "314cc9a3ba30ddefd2dae7b67e3bc90f0be2658a0dfe6e708a1c339c6264d733",
       "label": "Lv, defect set-labels-non-destructive, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28779,7 +28780,7 @@
       }
     },
     {
-      "build_hash": "c21bddd5d20888c31fb7cdf1989ea383b134880d6a142c603c893b322718bfc0",
+      "build_hash": "55c5fe60f0ef35e30ef43b179d3a7c87b5b487c9d5dfc8d022eb593a2fcf0cc6",
       "label": "Lv, defect set-labels-non-destructive, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -28841,7 +28842,7 @@
       }
     },
     {
-      "build_hash": "9e4e0015cc2a9b1edcabf815371cb8403fbdf6f8e565028667d710c41651d736",
+      "build_hash": "696cad47da348113c4c2cbdaa4bb5263e05ae7f894194eeacd39bc59f5e4ff25",
       "label": "Lv, defect settle-miss-reported-not-applied, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -28904,7 +28905,7 @@
       }
     },
     {
-      "build_hash": "cc68766028fa95665fa2a9cfcb719229d6d3b18288a6bb92a9c1bc1aa60889b8",
+      "build_hash": "c0a930db04e86d6dd6372232ac5e457267cab69808f6ab27a53bd63bab1cd921",
       "label": "Lv, defect shape-claims-applied, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -28966,7 +28967,7 @@
       }
     },
     {
-      "build_hash": "1f8b668776a6df1b379992618441b3b46b2e6d5820d5f9b867462b8db0537e3d",
+      "build_hash": "90376b7f40dfc182ce54fb9aab36b6a65d71ec7d60dbeab5c18d4a17dcb13618",
       "label": "Lv, defect shape-claims-applied, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29029,7 +29030,7 @@
       }
     },
     {
-      "build_hash": "17a9c7bd5eb8e4bdb125294f6a071bc5c56228342918ff52e16e809d77fdec79",
+      "build_hash": "6e0ab5fc06baa5c71bacebd5e53a460d1d48d55fa6b11904b98e61e537ad2b92",
       "label": "Lv, defect shape-claims-applied, backend lookup-wrong-record",
       "start": [
         "tiny-tracker",
@@ -29090,7 +29091,7 @@
       }
     },
     {
-      "build_hash": "88b266236dbb5d661e231594b16616f3087509acbe330119d2ffa67d4cabdf28",
+      "build_hash": "1b2d7edfe061781d6c88efa9fe64228e60b8696b7c902e7bb381b85173d8c20a",
       "label": "Lv, defect shape-claims-applied, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29153,7 +29154,7 @@
       }
     },
     {
-      "build_hash": "d373ec3c9afe2e0713a9e6170cf733db09d72442482150b9d451f54849a2e3a4",
+      "build_hash": "bef70c109819626c5b78eb0db34141646facd4a13cdfde628ba038f4d25055bb",
       "label": "Lv, defect shape-missing-failed, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29216,7 +29217,7 @@
       }
     },
     {
-      "build_hash": "a0d7432b245efe6b18df4c69a8572b237eca4fcbfc133eb6bd08826141cd9b8e",
+      "build_hash": "816d8fccc81ac19d02c566ba23a27772a97d193ace1af861eb43e3f8c381a739",
       "label": "Lv, defect shape-missing-failed, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -29278,7 +29279,7 @@
       }
     },
     {
-      "build_hash": "6bf01291e563f459045a1ff0fadb193ff0ac5f935ec04148e4685ea85e62365e",
+      "build_hash": "2d9c69fda283e7103de7d8e17e6577fc0fa9ce12e201e1371504f4bc17c0a9a5",
       "label": "Lv, defect shape-missing-failed, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29341,7 +29342,7 @@
       }
     },
     {
-      "build_hash": "083350a672099d008466870d13f859e252510cda1143541d8d7855d24178ff57",
+      "build_hash": "d1df6eecc196bef5ee372472ed6a4e81de68f7f1fda83682008072f75fb015e5",
       "label": "Lv, defect shape-text-invites-retry, backend digest-not-canonical, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29404,7 +29405,7 @@
       }
     },
     {
-      "build_hash": "48591974061a910ca47a51dba266e266ee28f8daba18412fc8e040f1c43c34f0",
+      "build_hash": "7a5523c8f6936ad89ff42a990a5471595eecbc0756c21fe56ce3b0eaf65659d6",
       "label": "Lv, defect shape-text-invites-retry, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29467,7 +29468,7 @@
       }
     },
     {
-      "build_hash": "2101da64e09308b68da8d83142a4eff96826c4aec54b17bb259b3737ef8dfd06",
+      "build_hash": "209f49452cd581a6765128908b817f4ac959befc4d214e747f02c3c757087d2f",
       "label": "Lv, defect shape-text-invites-retry, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -29527,7 +29528,7 @@
       }
     },
     {
-      "build_hash": "d6c449420a91d4d6616b9e782f80259478ee7a3ca69221b6f53384f642d383b5",
+      "build_hash": "8a808ff8061fb071bfe596ab7f6bc0e366ec4e6a518b9d15d36c6545166ca3b1",
       "label": "Lv, defect shape-text-says-all-saved, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29590,7 +29591,7 @@
       }
     },
     {
-      "build_hash": "bb351ae1bae425a4d3e7d14f7d8d5279ebd93863833c3c6fcd3fccb91c0c5f32",
+      "build_hash": "f8632fd1a238ee543aa22502bf2e7d933806564474f6299998b93d2772f80895",
       "label": "Lv, defect shape-text-says-all-saved, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29653,7 +29654,7 @@
       }
     },
     {
-      "build_hash": "4bac18362c0fd40916a7ef1eb0a2a7dcb93258a85363b6e2225da4a6d47715d6",
+      "build_hash": "a61ba962ff31b80e4fd8ff2c19358f9543e23f049e1e71fc269f681c5a1861d6",
       "label": "Lv, defect shape-text-says-all-saved, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -29715,7 +29716,7 @@
       }
     },
     {
-      "build_hash": "7c46e0babfc7287e843cada577a18e4218fdd0f9b5cfe32fc7913f9f3cfee3e2",
+      "build_hash": "83ab0f166981a905783b65c595538439d444d2d6e279e48a8eb76204cf9d1e9d",
       "label": "Lv, defect shape-text-says-failed, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -29777,7 +29778,7 @@
       }
     },
     {
-      "build_hash": "aee5da9899bae3de7af25e7f528d6705fbb151d013a5bb369bf6c4571340e0bb",
+      "build_hash": "ddc447f2f61dfdd2b830f9455e07968e1992039801fcb1f9fe242cddf459d098",
       "label": "Lv, defect shape-text-says-failed, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29840,7 +29841,7 @@
       }
     },
     {
-      "build_hash": "9072800ab886979d21bf4977f725e941af654feb4894ff05794806c0e4c3d72b",
+      "build_hash": "4545447255de66501d3a475a2a76cfe39782f8c41d9364c0e32bfb24a994c56b",
       "label": "Lv, defect shape-text-says-failed, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -29903,7 +29904,7 @@
       }
     },
     {
-      "build_hash": "6e6104797f41b6adc3cef3ba5ec800e07abfc1b6a9e6bd089ce78a61628833ea",
+      "build_hash": "5ac2fcb8e91eb050f215b1f61aa50b158d38780daca1c4442d949a7e260d4f46",
       "label": "Lv, defect shape-unknown-as-failed, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -29966,7 +29967,7 @@
       }
     },
     {
-      "build_hash": "bccb246d7bf2debc8ff6a21fab636ca631407eb64a57bc0a74e91f9d7f4d4098",
+      "build_hash": "0241ab37009497314c2bd83c6ae7d2b81323d2db6fb14d055d9742cf0794bbd2",
       "label": "Lv, defect shape-unknown-as-failed, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -30028,7 +30029,7 @@
       }
     },
     {
-      "build_hash": "84f2b6a9c01f6e4fca97a30b2759524edc357dbbc0a4ba6a90947c685bdd0e2d",
+      "build_hash": "f6990e28f261b3ccc0eac5a2c6f0ab9dcdfb3c24e36385d51d0c2d7b27de93b2",
       "label": "Lv, defect shape-unknown-as-failed, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30091,7 +30092,7 @@
       }
     },
     {
-      "build_hash": "e4d58bec0ca07f7cf27aae300138a7baac243ab38c6169d1f84fba5e9acf9999",
+      "build_hash": "76eb45d6e173ee12da7ff98a65f1d6a3f45774df4cc9d6229373237cbf2f38e5",
       "label": "Lv, defect shape-wrong-version, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -30153,7 +30154,7 @@
       }
     },
     {
-      "build_hash": "4291d8997194c0a9fe29e2f4567754c9508b1babb59eae4cb3b29af779030394",
+      "build_hash": "298fa5d8b89b4709762ddf286bce619a5edace1f64be17139e3dd676614faf29",
       "label": "Lv, defect shape-wrong-version, backend key-expires-early, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30216,7 +30217,7 @@
       }
     },
     {
-      "build_hash": "cd6ab6ab82849c7c44bdba93957d76835bccabfbe091d09f4bfbb0dea1c5716f",
+      "build_hash": "605c38ce8478224221dd20da8c495a4d2ee6e673f3abfb51ce612a6647ed2fdf",
       "label": "Lv, defect shape-wrong-version, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30279,7 +30280,7 @@
       }
     },
     {
-      "build_hash": "164d1f146e7e610bc0aecdea12a61bf5dd535e22c9551c44205056085bc2d457",
+      "build_hash": "2526e600653aad6117e46eb319f9c6f7a89e24d5084817a330efc1211bac484a",
       "label": "Lv, defect skip-limits, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30342,7 +30343,7 @@
       }
     },
     {
-      "build_hash": "626cdf2bf3dbd86cf9c09341772bd63d2eb0fae666b1c6ed5c878f9de81cf2ae",
+      "build_hash": "3cb4bd861df248317d8a1f27bcc323a4d7083f72d4056d0af17438d83b9a81fe",
       "label": "Lv, defect skip-limits, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30405,7 +30406,7 @@
       }
     },
     {
-      "build_hash": "f81da8964b5ac3957070babdff4abc359dfccd989e90266fbf5396a1d98934a9",
+      "build_hash": "c86e599c995c93d8e05b2c6fc92923a589e0ca4e632a0a716b60fe80d540a1d5",
       "label": "Lv, defect skip-limits, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -30467,7 +30468,7 @@
       }
     },
     {
-      "build_hash": "6543772f36dc3353e8dbfe7174fd4097b4ef6247d2e41995ea2a3cd846b13db5",
+      "build_hash": "72503747db51d71fa178c5effcac722e55b30ad8ca7ceb295bff088531446e41",
       "label": "Lv, defect skip-null-assignee, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -30529,7 +30530,7 @@
       }
     },
     {
-      "build_hash": "4af0a5d8ba55f3c805a2af4999e4ba7428de038bd6bd96770137d561fa0d2e65",
+      "build_hash": "1de89ab5a2cd7d411c35b110e187d0b01f4503b8551943e2f3ebf1944806438f",
       "label": "Lv, defect skip-null-assignee, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30592,7 +30593,7 @@
       }
     },
     {
-      "build_hash": "0d80707d5ba4f21963a993d528c5008b860dd51960d9ebdcaa4e7ed4d62ec1ca",
+      "build_hash": "e7fdd66cb71197e61e45a9b8b4a79fa30c1d65de9f1eb40d71a408fdcdc01244",
       "label": "Lv, defect skip-null-assignee, backend replay-digest-mismatch, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30655,7 +30656,7 @@
       }
     },
     {
-      "build_hash": "affbdd1eaa71fc38f2825844c303955f71be3b5cbfa5178ac0eb7d21b430feff",
+      "build_hash": "9d9786e6f3bbd2cabd935460da37f528f707b23b06aa6fa3e2e1a719d774657e",
       "label": "Lv, defect stale-unannounced, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30718,7 +30719,7 @@
       }
     },
     {
-      "build_hash": "b5bd3fd5edad200ad7056e1a7090d0d0d50bb4791860f571e2a9501829392a4b",
+      "build_hash": "15c58595fc8240a0c8bb1919050d4f9027575d5e60bfb87cd3bc7cb464b8757d",
       "label": "Lv, defect stale-unannounced, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30781,7 +30782,7 @@
       }
     },
     {
-      "build_hash": "52d29166a9616b7b583f86d060935b4abdad7f382208274ed7767b646ff1ba8c",
+      "build_hash": "0913aaa36612cf8c9619ff743d41cda040764c74d0051ac4175883051af6ea10",
       "label": "Lv, defect stale-unannounced, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -30843,7 +30844,7 @@
       }
     },
     {
-      "build_hash": "7074c28ba4975b9f1b0a61a512ab55697b7a723e2dfa0712858cba134b9da8b3",
+      "build_hash": "bba5eb99fa21052156ca3d64142973c1e64009d2536f860fa9c3125f3ca9d162",
       "label": "Lv, defect token-in-error, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -30906,7 +30907,7 @@
       }
     },
     {
-      "build_hash": "33e7fa58fd596890dc97f4c03051e4ad74feaa4fd1ecabd58e75f63612dac3fe",
+      "build_hash": "24d8e8c0473e2f32c68a953dac92ec42cb46ae2b7a7b1aed2de18b429f0343c5",
       "label": "Lv, defect token-in-error, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -30969,7 +30970,7 @@
       }
     },
     {
-      "build_hash": "82d14c6f8387bb8acdb36e2a5335fdc4aa5b8d9995878354df4fba47ba418f98",
+      "build_hash": "2bff64dfa62bfc153b58f3a6a769956dd5c0cbaaab17b6fa46337bc699de351d",
       "label": "Lv, defect token-in-error, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -31031,7 +31032,7 @@
       }
     },
     {
-      "build_hash": "e7cb311ea2975df9d2bbf3b5115aef2421486a41d0d26b0af8133e67b1815c55",
+      "build_hash": "88622ed4ac051d26df9dbe8b06d2e2b085aa42928ee59098bc3c529cc9903d95",
       "label": "Lv, defect undeclared-title-limit, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31094,7 +31095,7 @@
       }
     },
     {
-      "build_hash": "030281004bc93bc3943f78d4b56659888c07bbd9d918a96e0282d26a12839587",
+      "build_hash": "f635970ce5f9ea4149ab075581efe733aec7b3a6741d0d35481d865775b5bec6",
       "label": "Lv, defect undeclared-title-limit, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31157,7 +31158,7 @@
       }
     },
     {
-      "build_hash": "97a28ade31ab6482d6452c3a6b21f7c17ca8a012ecc07e26b04d647eb74d7e3c",
+      "build_hash": "090b77565585c2acf15d0e6416482bc297afc3a30be89ad352eadacbefaf6fbf",
       "label": "Lv, defect undeclared-title-limit, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -31219,7 +31220,7 @@
       }
     },
     {
-      "build_hash": "206e8cb339ef812ea8116a6386e086de494cbb595921fdddfa5890094a1fa3c2",
+      "build_hash": "074afcfbfe255c186fc0799e3515134da114c6af0e4d7db300c7fb5a939d509a",
       "label": "Lv, defect unknown-denied-tools-ignored, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31282,7 +31283,7 @@
       }
     },
     {
-      "build_hash": "d5e5161eba32b80a3f49935f186c18032ec5dd04309dd6a9ed01f91119919dbb",
+      "build_hash": "025343d366a6fc271da752118ca7ff4c8bc3d32e4d91255fb53414e325bf97e9",
       "label": "Lv, defect unknown-denied-tools-ignored, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31345,7 +31346,7 @@
       }
     },
     {
-      "build_hash": "7d2b38eef1492446caa1bdcabd361b187ffc7701f7247b8b8337179b9485074d",
+      "build_hash": "57c7b54d4a1be103703dc46759927aefbea166db59f428c504e65680ae4e363a",
       "label": "Lv, defect unknown-denied-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -31407,7 +31408,7 @@
       }
     },
     {
-      "build_hash": "3e690a8037410eb8567cf800b2ce9ff2416f8c6b07be05c0bb03896adfc7fe3d",
+      "build_hash": "9d56b0b5c892cb101e167495ac0b8baa71ee42948abf0146b0af60bee04d5164",
       "label": "Lv, defect unknown-tools-ignored, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31470,7 +31471,7 @@
       }
     },
     {
-      "build_hash": "266db802cc0eb30de45fe0b15c477e9a931878354388f8fbbc37162e8feb9f4d",
+      "build_hash": "b7a946024cad968f0020e30701758ab468ee206af0eb2cc16ed95b8fd552a94e",
       "label": "Lv, defect unknown-tools-ignored, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31533,7 +31534,7 @@
       }
     },
     {
-      "build_hash": "4d155e7fbe2bbf6c2ac7e5ad7755068ed90282592a538007d8202221a06a56d2",
+      "build_hash": "0fa9bafc57227ad4330681df6d2eb9ab5f8e94dc7d4f4ab4c9c43b893b5095f9",
       "label": "Lv, defect unknown-tools-ignored, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -31595,7 +31596,7 @@
       }
     },
     {
-      "build_hash": "079781528b88888629f371dd5de4d91f9f764af53e9b8957a5bd3f6f907b46e9",
+      "build_hash": "0ea869968aceda01a3cbec239f97abea58011f56e367bafe435808b37988a95d",
       "label": "Lv, defect update-adds-defaults, backend digest-not-canonical, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -31657,7 +31658,7 @@
       }
     },
     {
-      "build_hash": "e2eab575b4b49d2b3e895e0acc33ccbaf01cf973f7640776618a128f627e918a",
+      "build_hash": "10ff0a14c11bec79fe38ded841de0cbb3967b5bd4aeb7fb45bc370803a787a4d",
       "label": "Lv, defect update-adds-defaults, backend digest-of-current-state, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31720,7 +31721,7 @@
       }
     },
     {
-      "build_hash": "5336780aab37f598417a57488e5b5d9eda537b18e75869cff438a49e1e0c01e6",
+      "build_hash": "51ed58c06a3a2e7fcb35089eeadef9353185dc3b651b804a74a91fe1aa2746f8",
       "label": "Lv, defect update-adds-defaults, backend replay-digest-mismatch, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31783,7 +31784,7 @@
       }
     },
     {
-      "build_hash": "bdd4c73374e8faf5cc4430ae2db7983af79de49c90b6f2fc1ae3ba5ca477ec66",
+      "build_hash": "af30482cb118af988d43a61b54e47437d1fd32c477b004e99d0e4c106d77d1a0",
       "label": "Lv, defect vague-validation-error, backend digest-not-canonical, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -31846,7 +31847,7 @@
       }
     },
     {
-      "build_hash": "bbc0597f195a58dc4c613eff012e601e05322da42bf02fccd56c5ebf9af8b21f",
+      "build_hash": "7b5d99d251d787bc189b5f0dac8b4b56d96f994248d5e5825e885134838e2ff3",
       "label": "Lv, defect vague-validation-error, backend digest-of-current-state, variant key-store-honest",
       "start": [
         "TRACKER_VARIANTS=key-store-honest",
@@ -31909,7 +31910,7 @@
       }
     },
     {
-      "build_hash": "3de6bc72550de4f97f37f0ce7a7424cc8f8ba729586561050aeee1aef240519c",
+      "build_hash": "07322892b15dd7cb730be0178e067e3a75cb7d8555ad2cd6079ee1f6782843f8",
       "label": "Lv, defect vague-validation-error, backend key-expires-early, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",
@@ -31971,7 +31972,7 @@
       }
     },
     {
-      "build_hash": "4e53274b75a24a5894d7bc01220f786c6a813a64731ce6c976a35cfc7bf3b809",
+      "build_hash": "7bcc467955ad8fc6dafa7a3411148ecf5b6014b510ea918806ea29d07f5531e0",
       "label": "Lv, variant key-store-durable",
       "start": [
         "TRACKER_VARIANTS=key-store-durable",
@@ -32030,7 +32031,7 @@
       }
     },
     {
-      "build_hash": "c0c4d679e9a7a1704418aab2fd45158cc9a9bf7947cb4f223955170942e33b80",
+      "build_hash": "0b24251dfc5b29112b05e3d4c92919d80aac8e0d1285395721bb0eceb6ad2341",
       "label": "Lv, variant settle-by-client-reference",
       "start": [
         "TRACKER_VARIANTS=settle-by-client-reference",

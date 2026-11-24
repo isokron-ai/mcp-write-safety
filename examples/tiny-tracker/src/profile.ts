@@ -14,7 +14,7 @@
 // An unknown name, or a name for a feature this version does not build yet,
 // stops the process with exit 2, like every other setting.
 
-export const PACKAGE_VERSION = "0.3.0";
+export const PACKAGE_VERSION = "0.4.0";
 
 export const PROFILES = ["0.1", "default"] as const;
 export type ProfileName = (typeof PROFILES)[number];

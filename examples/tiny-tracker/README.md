@@ -7,7 +7,7 @@
 If you want a starting point for your own server, read the correct handlers in `src/mcp/tools/` and ignore `src/defects/`.
 
 - Node 22 or later, TypeScript, the official MCP TypeScript SDK (`@modelcontextprotocol/server` 2.4.0).
-- Streamable HTTP. Protocol revision 2026-07-28, with the SDK's stateless fallback for 2025-11-25 clients.
+- Streamable HTTP, or stdio (`tiny-tracker stdio`, 0.4.0). Protocol revision 2026-07-28, with the SDK's stateless fallback for 2025-11-25 clients.
 - One direct runtime dependency (the SDK, which brings `zod` with it). No network access beyond 127.0.0.1, except in container mode, where `/mcp` and a defect build's evidence routes listen on every interface behind their tokens.
 - npm package `@mcp-write-safety/tiny-tracker` (command `tiny-tracker`): `npx -y @mcp-write-safety/tiny-tracker all`, or build it from this folder (below). Its `writecheck.yaml` is the `mcp-writecheck` manifest for it.
 - The requirements: [MCP Write-Safety Requirements 0.9](https://isokron.ai/mws?utm_source=tiny-tracker-readme&utm_medium=readme). Source: [isokron-ai/mcp-write-safety](https://github.com/isokron-ai/mcp-write-safety/tree/main/examples/tiny-tracker).
