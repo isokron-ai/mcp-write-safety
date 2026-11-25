@@ -532,22 +532,30 @@ describe("availability (G3 note 26 item 5)", () => {
     }
   });
 
-  it("R-TT-07: on Windows a new lease's ENOTEMPTY with no lease there is a clear refusal, not a silent retry", () => {
-    const t = tempDir("ep-enotempty-win");
-    const saved = { ...leaseFs };
-    try {
-      mkdirSync(t.dataDir, { recursive: true, mode: 0o700 });
-      leaseFs.platform = "win32";
-      leaseFs.renameSync = ((from: string, to: string) => {
-        if (String(from).includes(".new-")) throw Object.assign(new Error("ENOTEMPTY: directory not empty, rename"), { code: "ENOTEMPTY" });
-        return saved.renameSync(from, to);
-      }) as typeof leaseFs.renameSync;
-      assert.throws(() => acquireLease(t.dataDir, () => {}), (e) => e instanceof DataDirError && /\(ENOTEMPTY; on Windows/.test(e.message));
-    } finally {
-      Object.assign(leaseFs, saved);
-      t.cleanup();
-    }
-  });
+  for (const code of ["ENOTEMPTY", "EPERM"]) {
+    it(`R-TT-07: on Windows a new lease's ${code} that lasts, with no lease there, is retried as a lost race (R-TT-09) and then a clear refusal`, () => {
+      const t = tempDir(`ep-${code.toLowerCase()}-win`);
+      const saved = { ...leaseFs };
+      try {
+        mkdirSync(t.dataDir, { recursive: true, mode: 0o700 });
+        leaseFs.platform = "win32";
+        let tries = 0;
+        leaseFs.renameSync = ((from: string, to: string) => {
+          if (String(from).includes(".new-")) {
+            tries++;
+            throw Object.assign(new Error(`${code}: operation refused, rename`), { code });
+          }
+          return saved.renameSync(from, to);
+        }) as typeof leaseFs.renameSync;
+        assert.throws(() => acquireLease(t.dataDir, () => {}), (e) => e instanceof DataDirError && new RegExp(`\\(${code}; on Windows`).test(e.message));
+        // Every try was made (the last one passes lastTry, so only it reports): a lost race is retried, a lasting refusal is said.
+        assert.equal(tries, 5);
+      } finally {
+        Object.assign(leaseFs, saved);
+        t.cleanup();
+      }
+    });
+  }
 
   it("R-TT-08: a lease whose owner file cannot be read at the first look is read again before the start is judged (Windows: racing starts over a killed holder's lease all refused)", () => {
     const t = tempDir("ep-unreadable");
