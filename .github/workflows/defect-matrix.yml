@@ -10,6 +10,15 @@
 #   defects a,b     those defects (names as in the labels of expected/builds-0.3.0.json, for example
 #                   digest-of-current-state); each must match its committed row.
 #
+#   defects all     the control set plus every build in expected/builds-0.3.0.json: the correct builds must match
+#                   their rows and every defect build must match its row (so its fixture answers still tell it
+#                   from the correct build). This is what the tool-qa pump dispatches (t0-defects lane).
+#
+# Result: the last job builds a tool-qa result bundle (worker-kit), sealed to tool-qa's ingest key, with
+# one control `known_good` (every correct build matched) and one `known_bad` (every defect build was caught).
+# A control that did not hold is rejected by ingest as control_failed: a lead against OUR tool, never a
+# subject fault. scripts/ci/t0-bundle.mjs builds it.
+#
 # Only the fixture answers are compared here. The contract-driver and mcp-writecheck rows need a checkout of
 # those tools and are not part of this check; ci.yml and the generator's own `--check` cover the full files.
 #
@@ -39,7 +48,7 @@ on:
         required: true
         type: string
       defects:
-        description: Comma-separated defect names (lowercase letters, digits, hyphen; at most 20). Empty runs the control set only.
+        description: Comma-separated defect names (lowercase letters, digits, hyphen; at most 20), or the word all. Empty runs the control set only.
         required: false
         default: ''
         type: string
@@ -54,7 +63,8 @@ jobs:
   t0-start:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       go: ${{ steps.guard.outputs.go }}
       attempt_id: ${{ steps.guard.outputs.attempt_id }}
@@ -62,6 +72,9 @@ jobs:
       run_key: ${{ steps.guard.outputs.run_key }}
       cells: ${{ steps.guard.outputs.cells }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: guard
         name: Kill switch, then validate the inputs
         env:
@@ -86,15 +99,25 @@ jobs:
           check attempt_id "$IN_ATTEMPT_ID" '^[A-Za-z0-9._-]{1,64}$'
           check fence "$IN_FENCE" '^[A-Za-z0-9._:-]{1,64}$'
           check run_key "$IN_RUN_KEY" '^[A-Za-z0-9._:-]{1,64}$'
-          if [ -n "$IN_DEFECTS" ]; then
+          if [ -n "$IN_DEFECTS" ] && [ "$IN_DEFECTS" != "all" ]; then
             check defects "$IN_DEFECTS" '^[a-z0-9-]+(,[a-z0-9-]+){0,19}$'
           fi
           [ "$bad" -eq 0 ] || exit 1
           cells="$(node -e '
             const raw = process.env.IN_DEFECTS;
-            const cells = raw === ""
-              ? [{ kind: "known-good", label: "correct build" }, { kind: "known-bad", label: "backend defect digest-of-current-state" }]
-              : [...new Set(raw.split(","))].map((d) => ({ kind: "defect", defect: d }));
+            const control = [{ kind: "known-good", label: "correct build" }, { kind: "known-bad", label: "backend defect digest-of-current-state" }];
+            let cells;
+            if (raw === "") cells = control;
+            else if (raw === "all") {
+              // Every build of the committed list: a build labelled "defect NAME" or "backend defect NAME" is a defect
+              // cell; any other (the correct builds) must match its own row.
+              const labels = JSON.parse(require("fs").readFileSync("examples/tiny-tracker/expected/builds-0.3.0.json", "utf8")).builds.map((b) => b.label);
+              cells = [control[1]];
+              for (const l of labels) {
+                const m = /(?:^|\s)defect ([a-z0-9-]+)$/.exec(l);
+                cells.push(m ? { kind: "defect", defect: m[1] } : { kind: "known-good", label: l });
+              }
+            } else cells = [...new Set(raw.split(","))].map((d) => ({ kind: "defect", defect: d }));
             process.stdout.write(JSON.stringify(cells));
           ')"
           {
@@ -131,6 +154,7 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - name: Known-answer check
+        id: check
         env:
           KIND: ${{ matrix.kind }}
           LABEL: ${{ matrix.label }}
@@ -165,30 +189,50 @@ jobs:
             if (failures.length) { for (const f of failures) console.error(`${label}: ${f}`); process.exit(1); }
             console.log(`${label}: matches expected/0.3.0.json`);
           '
+      - name: Write this cell's result
+        if: always()
+        working-directory: .
+        env:
+          KIND: ${{ matrix.kind }}
+          LABEL: ${{ matrix.label }}
+          DEFECT: ${{ matrix.defect }}
+          OUTCOME: ${{ steps.check.outcome }}
+        run: node scripts/ci/t0-cell.mjs "$RUNNER_TEMP/cell"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: t0cell-${{ needs.t0-start.outputs.attempt_id }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/cell/cell.json
+          if-no-files-found: ignore
+          retention-days: 3
 
   t0-manifest:
     needs: [t0-start, build]
     if: ${{ always() && needs.t0-start.outputs.go == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
+    timeout-minutes: 10
+    # Runs none of the cells' code: it only reads their result files and builds the sealed bundle.
+    permissions:
+      contents: read
     steps:
-      - name: Write the manifest stub
-        env:
-          ATTEMPT_ID: ${{ needs.t0-start.outputs.attempt_id }}
-          FENCE: ${{ needs.t0-start.outputs.fence }}
-          RUN_KEY: ${{ needs.t0-start.outputs.run_key }}
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          conclusion=success
-          for r in $RESULTS; do
-            case "$r" in failure) conclusion=failure ;; cancelled) [ "$conclusion" = failure ] || conclusion=cancelled ;; esac
-          done
-          CONCLUSION="$conclusion" node -e 'require("fs").writeFileSync("t0-manifest.json", JSON.stringify({ attempt_id: process.env.ATTEMPT_ID, fence: process.env.FENCE, run_key: process.env.RUN_KEY, conclusion: process.env.CONCLUSION }, null, 2) + "\n")'
-          cat t0-manifest.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: t0-${{ needs.t0-start.outputs.attempt_id }}
-          path: t0-manifest.json
-          if-no-files-found: error
-          retention-days: 3
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: t0cell-${{ needs.t0-start.outputs.attempt_id }}-*
+          path: ${{ runner.temp }}/cells
+      - name: Build the result bundle
+        env:
+          CELLS: ${{ needs.t0-start.outputs.cells }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cells" "$RUNNER_TEMP/out"
+          node scripts/ci/t0-bundle.mjs --cells "$RUNNER_TEMP/cells" --out "$RUNNER_TEMP/out"
+      - uses: isokron-ai/tool-qa/worker-kit@b04b7c65c244de48c32f93c7ea9b9ac933ca1efe # tool-qa main, 27 Nov 2026
+        with:
+          bundle-dir: ${{ runner.temp }}/out/bundle
+          meta-file: ${{ runner.temp }}/out/meta.json
+          attempt-id: ${{ needs.t0-start.outputs.attempt_id }}
+          item-index: 0
+          fence: ${{ needs.t0-start.outputs.fence }}
+          run-key: ${{ needs.t0-start.outputs.run_key }}
