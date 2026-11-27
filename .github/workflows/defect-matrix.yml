@@ -1,17 +1,30 @@
 # T0 worker: the tiny-tracker defect matrix. Dispatch only; there is no schedule, push or pull_request trigger.
 #
-# Builds examples/tiny-tracker and, for each build in the matrix, starts it, collects the fixture answers
-# with expected/generate.mjs (the generator the known-answer files come from) and compares them with the
-# committed row of expected/0.3.0.json: same build_hash, same FX- answers.
+# Builds examples/tiny-tracker and, for each cell, starts the builds, collects the fixture answers with
+# expected/generate.mjs (the generator the known-answer files come from) and compares them with the committed rows of
+# expected/0.4.0.json (builds listed in expected/builds-0.4.0.json): same build_hash, same FX- answers. scripts/ci/matrix-plan.mjs
+# says which cells there are and how a defect cell is judged.
 #
-#   defects empty   the control set: "correct build" (known good: must match its row) and
-#                   "backend defect digest-of-current-state" (known bad, FX-DIG-1 differs: must match its own row, and that row must
-#                   differ from the correct build's). It shows the matrix itself works.
-#   defects a,b     those defects (names as in the labels of expected/builds-0.3.0.json, for example
-#                   digest-of-current-state); each must match its committed row.
+#   known-good cell  a correct build (one per level): must reproduce its committed row.
+#   defect cell      the defect's single-defect builds (or, for a defect that has none, every build that holds it): each must
+#                    reproduce its row, AND the defect must be detected: its fixture answers (run now) differ from the
+#                    correct build's at the same level, or its committed contract answers do. A defect that is neither
+#                    detected nor listed in the known-answer file's not_detected note is NEUTERED: the cell fails. A defect
+#                    with no single-defect build is only checked for reproducing and reported as combo_only.
 #
-# Only the fixture answers are compared here. The contract-driver and mcp-writecheck rows need a checkout of
-# those tools and are not part of this check; ci.yml and the generator's own `--check` cover the full files.
+#   defects empty   the control set: "L2 correct build" and defect digest-of-current-state.
+#   defects a,b     those defects; each judged as above.
+#   defects all     every correct build and every distinct defect of the list. This is what the tool-qa pump dispatches
+#                   (t0-defects lane).
+#
+# Result: the last job builds a tool-qa result bundle (worker-kit), sealed to tool-qa's ingest key, with
+# one control `known_good` (every correct build reproduced its row) and one `known_bad` (every defect reproduced its rows and is
+# detected or documented). A control that did not hold is rejected by ingest as control_failed: a lead against OUR tool,
+# never a subject fault. scripts/ci/t0-bundle.mjs builds it.
+#
+# The fixture answers are run here; the contract answers are the committed ones (the contract driver is not checked out
+# here). Whether mcp-writecheck itself flags each defect build is what the dogfood-tiny-tracker worker of
+# mcp-writecheck-action runs.
 #
 # No secrets. The first job does nothing unless the repository variable LOOP_ENABLED is exactly "true".
 
@@ -27,7 +40,7 @@ on:
         required: true
         type: string
       attempt_id:
-        description: Attempt id (same character set). Names the manifest artifact t0-<attempt_id>.
+        description: Attempt id (same character set). Names the result artifact result-<attempt_id>-0.tar.age.
         required: true
         type: string
       fence:
@@ -39,7 +52,7 @@ on:
         required: true
         type: string
       defects:
-        description: Comma-separated defect names (lowercase letters, digits, hyphen; at most 20). Empty runs the control set only.
+        description: Comma-separated defect names (lowercase letters, digits, hyphen; at most 20), or the word all. Empty runs the control set only.
         required: false
         default: ''
         type: string
@@ -54,7 +67,8 @@ jobs:
   t0-start:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       go: ${{ steps.guard.outputs.go }}
       attempt_id: ${{ steps.guard.outputs.attempt_id }}
@@ -62,6 +76,9 @@ jobs:
       run_key: ${{ steps.guard.outputs.run_key }}
       cells: ${{ steps.guard.outputs.cells }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: guard
         name: Kill switch, then validate the inputs
         env:
@@ -86,17 +103,11 @@ jobs:
           check attempt_id "$IN_ATTEMPT_ID" '^[A-Za-z0-9._-]{1,64}$'
           check fence "$IN_FENCE" '^[A-Za-z0-9._:-]{1,64}$'
           check run_key "$IN_RUN_KEY" '^[A-Za-z0-9._:-]{1,64}$'
-          if [ -n "$IN_DEFECTS" ]; then
+          if [ -n "$IN_DEFECTS" ] && [ "$IN_DEFECTS" != "all" ]; then
             check defects "$IN_DEFECTS" '^[a-z0-9-]+(,[a-z0-9-]+){0,19}$'
           fi
           [ "$bad" -eq 0 ] || exit 1
-          cells="$(node -e '
-            const raw = process.env.IN_DEFECTS;
-            const cells = raw === ""
-              ? [{ kind: "known-good", label: "correct build" }, { kind: "known-bad", label: "backend defect digest-of-current-state" }]
-              : [...new Set(raw.split(","))].map((d) => ({ kind: "defect", defect: d }));
-            process.stdout.write(JSON.stringify(cells));
-          ')"
+          cells="$(node scripts/ci/matrix-plan.mjs cells "$IN_DEFECTS")"
           {
             echo "go=true"
             echo "attempt_id=$IN_ATTEMPT_ID"
@@ -110,7 +121,7 @@ jobs:
     if: needs.t0-start.outputs.go == 'true'
     name: build ${{ matrix.kind }} ${{ matrix.defect || matrix.label }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
@@ -130,65 +141,48 @@ jobs:
           node-version: "22"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
-      - name: Known-answer check
+      - name: Run the cell
+        working-directory: .
         env:
           KIND: ${{ matrix.kind }}
           LABEL: ${{ matrix.label }}
           DEFECT: ${{ matrix.defect }}
-        run: |
-          # shellcheck disable=SC2016  # the JavaScript is single-quoted on purpose
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { isDeepStrictEqual } from "node:util";
-            import { generate } from "./expected/generate.mjs";
-            const builds = "expected/builds-0.3.0.json";
-            const committed = JSON.parse(readFileSync("expected/0.3.0.json", "utf8")).builds;
-            const labels = JSON.parse(readFileSync(builds, "utf8")).builds.map((b) => b.label);
-            const { KIND, DEFECT } = process.env;
-            let label = process.env.LABEL;
-            if (KIND === "defect") {
-              const hits = labels.filter((l) => l.endsWith(` defect ${DEFECT}`) || l === `defect ${DEFECT}`);
-              if (hits.length !== 1) { console.error(`${DEFECT}: ${hits.length} builds in ${builds} carry that defect, expected 1`); process.exit(1); }
-              label = hits[0];
-            }
-            const want = committed.find((b) => b.label === label);
-            if (!want) { console.error(`no committed row for "${label}"`); process.exit(1); }
-            const doc = await generate({ builds, only: [label], repeat: 3 });
-            const got = doc.builds[0];
-            const failures = [];
-            if (got.build_hash !== want.build_hash) failures.push("build_hash differs from the committed row");
-            if (!isDeepStrictEqual(got.fixture, want.fixture)) failures.push("fixture answers differ from the committed row");
-            if (KIND === "known-bad") {
-              const good = committed.find((b) => b.label === "correct build");
-              if (isDeepStrictEqual(got.fixture, good.fixture)) failures.push("the known-bad build answers like the correct build");
-            }
-            if (failures.length) { for (const f of failures) console.error(`${label}: ${f}`); process.exit(1); }
-            console.log(`${label}: matches expected/0.3.0.json`);
-          '
+        run: node scripts/ci/matrix-cell.mjs "$RUNNER_TEMP/cell"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: t0cell-${{ needs.t0-start.outputs.attempt_id }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/cell/cell.json
+          if-no-files-found: ignore
+          retention-days: 3
 
   t0-manifest:
     needs: [t0-start, build]
     if: ${{ always() && needs.t0-start.outputs.go == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
+    timeout-minutes: 10
+    # Runs none of the cells' code: it only reads their result files and builds the sealed bundle.
+    permissions:
+      contents: read
     steps:
-      - name: Write the manifest stub
-        env:
-          ATTEMPT_ID: ${{ needs.t0-start.outputs.attempt_id }}
-          FENCE: ${{ needs.t0-start.outputs.fence }}
-          RUN_KEY: ${{ needs.t0-start.outputs.run_key }}
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          conclusion=success
-          for r in $RESULTS; do
-            case "$r" in failure) conclusion=failure ;; cancelled) [ "$conclusion" = failure ] || conclusion=cancelled ;; esac
-          done
-          CONCLUSION="$conclusion" node -e 'require("fs").writeFileSync("t0-manifest.json", JSON.stringify({ attempt_id: process.env.ATTEMPT_ID, fence: process.env.FENCE, run_key: process.env.RUN_KEY, conclusion: process.env.CONCLUSION }, null, 2) + "\n")'
-          cat t0-manifest.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: t0-${{ needs.t0-start.outputs.attempt_id }}
-          path: t0-manifest.json
-          if-no-files-found: error
-          retention-days: 3
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: t0cell-${{ needs.t0-start.outputs.attempt_id }}-*
+          path: ${{ runner.temp }}/cells
+      - name: Build the result bundle
+        env:
+          CELLS: ${{ needs.t0-start.outputs.cells }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/cells" "$RUNNER_TEMP/out"
+          node scripts/ci/t0-bundle.mjs --cells "$RUNNER_TEMP/cells" --out "$RUNNER_TEMP/out"
+      - uses: isokron-ai/tool-qa/worker-kit@b04b7c65c244de48c32f93c7ea9b9ac933ca1efe # tool-qa main, 27 Nov 2026
+        with:
+          bundle-dir: ${{ runner.temp }}/out/bundle
+          meta-file: ${{ runner.temp }}/out/meta.json
+          attempt-id: ${{ needs.t0-start.outputs.attempt_id }}
+          item-index: 0
+          fence: ${{ needs.t0-start.outputs.fence }}
+          run-key: ${{ needs.t0-start.outputs.run_key }}
