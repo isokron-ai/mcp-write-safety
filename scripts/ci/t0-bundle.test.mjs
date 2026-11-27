@@ -131,6 +131,7 @@ test('R-DM-10: a defect whose answers equal the correct build\'s is NEUTERED and
   const gaps = [...documentedGaps(COMMITTED)];
   assert.ok(gaps.length >= 30, `${gaps.length} documented gaps`);
   assert.ok(gaps.includes('update-adds-defaults'));
+  assert.ok(gaps.includes('vague-validation-error'), 'the last name of the note, before its verb, is read');
 });
 
 test('R-DM-11: a defect build that no longer reproduces its committed row, or did not run, fails its cell', () => {
