@@ -179,3 +179,20 @@ test('R-DM-12: the guard step gives defects=all the 0.4.0 cells; "all" is an exa
   assert.doesNotMatch(yaml, /builds-0\.3\.0|0\.3\.0\.json/, 'the workflow no longer reads the 0.3.0 files');
   assert.doesNotMatch(yaml, /t0-<attempt_id>/, 'no stale wording about the old manifest stub');
 });
+
+test('R-DM-13: a defect whose fixture answers equal the correct build\'s is still detected when its committed contract answers differ', () => {
+  const { defects, correct } = plan(COMMITTED_BUILDS_FOR_13());
+  const goodOf = (b) => rows[correct.find((x) => x.factors.level === b.factors.level).label];
+  const [d, o] = [...defects].find(([n, x]) => x.single.length && !documentedGaps(COMMITTED).has(n));
+  const saved = o.single.map((b) => [b.label, rows[b.label].fixture, rows[b.label].contract]);
+  try {
+    const got = {};
+    for (const b of o.single) { rows[b.label].fixture = goodOf(b).fixture; rows[b.label].contract = { answers: { 'LRT-A1': ['fail'] } }; got[b.label] = { build_hash: rows[b.label].build_hash, fixture: goodOf(b).fixture }; }
+    const r = judgeCell({ cell: { kind: 'defect', defect: d }, buildsDoc: BUILDS, expectedDoc: COMMITTED, got });
+    assert.equal(r.ok, true);
+    assert.equal(r.detected, true);
+  } finally {
+    for (const [l, f, c] of saved) { rows[l].fixture = f; rows[l].contract = c; }
+  }
+});
+function COMMITTED_BUILDS_FOR_13() { return BUILDS; }
