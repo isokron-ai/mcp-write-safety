@@ -11,7 +11,7 @@ export function cellRecord(env, verdict) {
   if (!['known-good', 'defect'].includes(kind)) throw new Error(`cell kind ${JSON.stringify(kind)} is not known-good or defect`);
   const rec = { kind, outcome: verdict.ok ? 'success' : 'failure' };
   if (kind === 'defect') rec.defect = String(env.DEFECT ?? ''); else rec.label = String(env.LABEL ?? '');
-  for (const k of ['reason', 'mode', 'detected', 'documented']) if (verdict[k] !== undefined) rec[k] = verdict[k];
+  for (const k of ['reason', 'status', 'mode', 'detected', 'documented']) if (verdict[k] !== undefined) rec[k] = verdict[k];
   return rec;
 }
 

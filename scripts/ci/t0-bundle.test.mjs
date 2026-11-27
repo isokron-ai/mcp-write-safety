@@ -180,19 +180,61 @@ test('R-DM-12: the guard step gives defects=all the 0.4.0 cells; "all" is an exa
   assert.doesNotMatch(yaml, /t0-<attempt_id>/, 'no stale wording about the old manifest stub');
 });
 
-test('R-DM-13: a defect whose fixture answers equal the correct build\'s is still detected when its committed contract answers differ', () => {
-  const { defects, correct } = plan(COMMITTED_BUILDS_FOR_13());
+test('R-DM-13: a difference only in the committed contract rows is reported as committed_contract, not as detected, and only when BOTH rows have a contract (a row with none is never "detected by absence")', () => {
+  const { defects, correct } = plan(BUILDS);
   const goodOf = (b) => rows[correct.find((x) => x.factors.level === b.factors.level).label];
   const [d, o] = [...defects].find(([n, x]) => x.single.length && !documentedGaps(COMMITTED).has(n));
-  const saved = o.single.map((b) => [b.label, rows[b.label].fixture, rows[b.label].contract]);
-  try {
+  const saved = o.single.map((b) => [b.label, rows[b.label].fixture, rows[b.label].contract, goodOf(b).contract]);
+  const run = (contractOf) => {
     const got = {};
-    for (const b of o.single) { rows[b.label].fixture = goodOf(b).fixture; rows[b.label].contract = { answers: { 'LRT-A1': ['fail'] } }; got[b.label] = { build_hash: rows[b.label].build_hash, fixture: goodOf(b).fixture }; }
-    const r = judgeCell({ cell: { kind: 'defect', defect: d }, buildsDoc: BUILDS, expectedDoc: COMMITTED, got });
-    assert.equal(r.ok, true);
-    assert.equal(r.detected, true);
+    for (const b of o.single) { rows[b.label].fixture = goodOf(b).fixture; rows[b.label].contract = contractOf(b); got[b.label] = { build_hash: rows[b.label].build_hash, fixture: goodOf(b).fixture }; }
+    return judgeCell({ cell: { kind: 'defect', defect: d }, buildsDoc: BUILDS, expectedDoc: COMMITTED, got });
+  };
+  try {
+    for (const b of o.single) goodOf(b).contract = { answers: { 'LRT-A1': ['pass'] } };
+    const both = run(() => ({ answers: { 'LRT-A1': ['fail'] } }));
+    assert.equal(both.ok, true);
+    assert.equal(both.status, 'committed_contract');
+    assert.equal(both.detected, false, 'not run here, so not detected');
+    const none = run(() => undefined);
+    assert.equal(none.ok, false, 'a row with no contract differs from the correct build only by absence: not detection');
+    assert.equal(none.reason, 'neutered');
   } finally {
-    for (const [l, f, c] of saved) { rows[l].fixture = f; rows[l].contract = c; }
+    for (const [l, f, c, gc] of saved) { rows[l].fixture = f; rows[l].contract = c; }
+    for (const b of o.single) goodOf(b).contract = saved[0][3];
   }
 });
-function COMMITTED_BUILDS_FOR_13() { return BUILDS; }
+
+test('R-DM-14: variants are correct alternatives, not defects: no cell is made for a variant, a build with a variant is not a single-defect build, and the correct builds are the plain ones', () => {
+  const { defects, correct } = plan(BUILDS);
+  const variants = new Set(BUILDS.builds.map((b) => b.factors.variant).filter((v) => v !== '-'));
+  assert.ok(variants.size >= 1, 'the list has variants');
+  for (const v of variants) assert.equal(defects.has(v), false, `${v} is a variant, not a defect`);
+  for (const [, o] of defects) for (const b of o.single) assert.equal(b.factors.variant, '-');
+  for (const b of correct) assert.deepEqual([b.factors.mcp, b.factors.backend, b.factors.variant], ['-', '-', '-']);
+  assert.equal(correct.length, 4);
+  assert.ok(!allCells(BUILDS).some((c) => variants.has(c.defect)));
+});
+
+test('R-DM-15: combo_only and committed_contract defects never satisfy known_bad: they are listed in the report on their own, and known_bad is judged on the defects that were detected or documented', () => {
+  const cells = [
+    { kind: 'known-good', label: 'L2 correct build', outcome: 'success' },
+    { kind: 'defect', defect: 'a', outcome: 'success', status: 'detected' },
+    { kind: 'defect', defect: 'b', outcome: 'success', status: 'documented' },
+    { kind: 'defect', defect: 'c', outcome: 'success', status: 'combo_only' },
+    { kind: 'defect', defect: 'd', outcome: 'success', status: 'committed_contract' },
+  ];
+  const b = build({ expected: cells.map(({ outcome, status, ...c }) => c), found: cells });
+  assert.deepEqual(b.matrix.combo_only, ['c']);
+  assert.deepEqual(b.matrix.committed_contract, ['d']);
+  assert.deepEqual(b.matrix.detected, ['a']);
+  assert.deepEqual(b.matrix.documented_gaps, ['b']);
+  assert.equal(control(b, 'known_bad').observed, 'detected_or_documented');
+  // the judged ones decide: a neutered one is a miss even beside an unjudged one
+  const bad = cells.map((c) => (c.defect === 'a' ? { ...c, outcome: 'failure', status: 'neutered' } : c));
+  assert.equal(control(build({ expected: cells.map(({ outcome, status, ...c }) => c), found: bad }), 'known_bad').observed, 'missed');
+  // nothing judged at all: the control is not satisfied by the unjudged ones
+  const only = cells.filter((c) => c.status === 'combo_only' || c.status === 'committed_contract');
+  const none = build({ expected: only.map(({ outcome, status, ...c }) => c), found: only });
+  assert.equal(control(none, 'known_bad').observed, 'none_judged');
+});
