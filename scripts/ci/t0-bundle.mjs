@@ -6,7 +6,7 @@
 //
 // Writes <out>/bundle/results/matrix.json (every cell and its outcome) and <out>/meta.json (worker-kit meta file).
 // Controls: known_good (every correct build matched its committed row) and known_bad (every defect build
-// matched its row, so its answers still tell it from the correct build). A control that did not hold is
+// reproduced its rows and is detected, or documented as not detected). A control that did not hold is
 // rejected by tool-qa's ingest as control_failed, which is a lead against OUR tool, never a subject fault.
 // A cell that left no result counts as `incomplete`, never as caught.
 import { createHash } from 'node:crypto';
@@ -34,7 +34,7 @@ export function judge(expected, found) {
   return expected.map((c) => {
     const f = byKey.get(keyOf(c));
     const outcome = f?.outcome === 'success' || f?.outcome === 'failure' ? f.outcome : 'incomplete';
-    return { ...c, outcome };
+    return { ...c, ...(f ? { reason: f.reason, mode: f.mode, detected: f.detected, documented: f.documented } : {}), outcome };
   });
 }
 
@@ -49,13 +49,13 @@ export function build({ expected, found, env = process.env, now = new Date() }) 
   const cells = judge(expected, found);
   const controls = [
     controlOf(cells, (c) => c.kind === 'known-good', 'match', 'known_good', 'differs'),
-    controlOf(cells, (c) => c.kind === 'defect' || c.kind === 'known-bad', 'all_caught', 'known_bad', 'missed'),
+    controlOf(cells, (c) => c.kind === 'defect' || c.kind === 'known-bad', 'detected_or_documented', 'known_bad', 'missed'),
   ].filter(Boolean);
   const sha = /^[0-9a-f]{40}$/.test(env.GITHUB_SHA ?? '') ? env.GITHUB_SHA : null;
   const repo = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY ?? '') ? env.GITHUB_REPOSITORY : 'isokron-ai/mcp-write-safety';
   const at = now.toISOString().replace(/\.\d+Z$/, 'Z');
   return {
-    matrix: { lane: 't0-defects', cells, missed: cells.filter((c) => c.kind !== 'known-good' && c.outcome !== 'success').map((c) => c.defect ?? c.label) },
+    matrix: { lane: 't0-defects', cells, missed: cells.filter((c) => c.kind !== 'known-good' && c.outcome !== 'success').map((c) => c.defect ?? c.label), combo_only: cells.filter((c) => c.mode === 'combo_only').map((c) => c.defect), documented_gaps: cells.filter((c) => c.documented && c.detected === false).map((c) => c.defect) },
     meta: {
       subject: { id: SUBJECT_ID, repo, sha },
       tools: [{ name: repo.split('/')[1], version: sha ?? 'unknown' }],

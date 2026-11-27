@@ -44,7 +44,7 @@ function run(script, env) {
   try {
     const out = join(tmp, 'out');
     writeFileSync(out, '');
-    const r = spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, LOOP_ENABLED: 'true', ...GOOD, ...env } });
+    const r = spawnSync('bash', ['-e', '-c', script], { cwd: root, encoding: 'utf8', env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, LOOP_ENABLED: 'true', ...GOOD, ...env } });
     return { status: r.status, text: `${r.stdout}${r.stderr}`, out: readFileSync(out, 'utf8') };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
