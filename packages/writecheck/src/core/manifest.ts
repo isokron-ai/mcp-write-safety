@@ -494,6 +494,21 @@ export interface CreateSpec extends ToolTemplate {
 }
 
 /**
+ * backend.inflight_hold: how the tester asks the target to hold a write inside its backend, after the backend has taken the
+ * write's idempotency key and before it commits (the in-flight window of src/checks/inflight.ts, MWS-RES-2). The loopback gate
+ * cannot open that window: it holds a request before the backend sees it. Only the fixture interface fixture-api/1 is built:
+ * POST {control}/_fixture/faults arming backend/before-commit/delay once, for hold_ms, behind the bearer token in token_env.
+ */
+export interface InflightHold {
+  fixture: 'fixture-api/1';
+  /** The tester's variable holding the control listener's base URL (loopback). */
+  control_env: string;
+  /** The tester's variable holding the control token (a secret: redacted, never passed to the server by this block). */
+  token_env: string;
+  hold_ms: number;
+}
+
+/**
  * A write tool that accepts an idempotency key (MWS-RETRY-2). The optional fields are the declaration's statements of
  * Annex E: what the backend and the tool do with keys, which the tester cannot see from outside.
  */
@@ -683,7 +698,7 @@ export interface Manifest {
     in5_creates?: number;
   };
   /** backend.gate: exactly one route (rewrite_env: base-URL rewrite; node_import: the in-process hook). */
-  backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null } | null;
+  backend: { gate: { rewrite_env: string | null; node_import: boolean; hold_timeout_ms: number } | null; inflight_hold?: InflightHold | null } | null;
   /** Arguments for other tools (annotation effects), bound to a resource whose scratch object `{{id}}` names. */
   calls: Record<string, { args: unknown; resource: string | null }>;
   /**
@@ -1571,7 +1586,14 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
   let backend: Manifest['backend'] = null;
   if (o['backend'] !== undefined) {
     const b = obj(o['backend'], 'backend');
-    keys(b, ['gate'], 'backend');
+    keys(b, ['gate', 'inflight_hold'], 'backend');
+    let inflight: InflightHold | null = null;
+    if (b['inflight_hold'] !== undefined) {
+      const h = obj(b['inflight_hold'], 'backend.inflight_hold');
+      keys(h, ['fixture', 'control_env', 'token_env', 'hold_ms'], 'backend.inflight_hold');
+      if (h['fixture'] !== 'fixture-api/1') throw fail('backend.inflight_hold.fixture', 'the fixture interface that offers the hold: "fixture-api/1" (tiny-tracker FIXTURE.md: backend/before-commit/delay, armed on the control listener) is the only one built');
+      inflight = { fixture: 'fixture-api/1', control_env: str(h['control_env'], 'backend.inflight_hold.control_env', ENV), token_env: str(h['token_env'], 'backend.inflight_hold.token_env', ENV), hold_ms: num(h['hold_ms'], 3_000, 200, 60_000, 'backend.inflight_hold.hold_ms') };
+    }
     if (b['gate'] !== undefined) {
       const g = obj(b['gate'], 'backend.gate');
       keys(g, ['rewrite_env', 'node_import', 'hold_timeout_ms'], 'backend.gate');
@@ -1581,6 +1603,7 @@ export function validateManifest(raw: unknown, source: { path: string; sha256: s
       if ((rewrite !== null) === nodeImport) throw fail('backend.gate', 'give exactly one route: rewrite_env (the variable that holds the backend URL; the tester points it at a loopback gate) or node_import: true (a Node server loads the in-process hook)');
       backend = { gate: { rewrite_env: rewrite, node_import: nodeImport, hold_timeout_ms: num(g['hold_timeout_ms'], 5_000, 100, 120_000, 'backend.gate.hold_timeout_ms') } };
     } else backend = { gate: null };
+    if (inflight) backend.inflight_hold = inflight;
   }
   const calls: Manifest['calls'] = {};
   if (o['calls'] !== undefined) {

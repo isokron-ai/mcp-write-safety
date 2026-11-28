@@ -99,6 +99,7 @@ export interface RunOutcome {
 export function secretsOf(m: Manifest, env: NodeJS.ProcessEnv): string[] {
   const names = new Set<string>([...m.server.env_passthrough, ...Object.values(m.server.headers_env).map((h) => h.env)]);
   for (const r of m.resources) if (r.control?.auth) names.add(r.control.auth.env);
+  if (m.backend?.inflight_hold) names.add(m.backend.inflight_hold.token_env);
   return [...names].map((n) => env[n]).filter((v): v is string => typeof v === 'string' && v.length >= 6);
 }
 
@@ -120,7 +121,7 @@ export function redactorFor(m: Manifest, env: NodeJS.ProcessEnv): Redactor {
 }
 
 export function egressOf(m: Manifest, env: NodeJS.ProcessEnv) {
-  return egressFor([m.server.url, ...m.resources.map((r) => (r.control ? (r.control.base ?? env[r.control.base_env!]) : null))]);
+  return egressFor([m.server.url, ...m.resources.map((r) => (r.control ? (r.control.base ?? env[r.control.base_env!]) : null)), m.backend?.inflight_hold ? env[m.backend.inflight_hold.control_env] : null]);
 }
 
 // why: review S6: the server command goes into results.json and the scope sentence; credentials in it are left out.

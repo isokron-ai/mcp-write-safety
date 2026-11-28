@@ -12,7 +12,7 @@ import { cellRecord } from './matrix-cell.mjs';
 import { allCells, documentedGaps, judgeCell, judgeWritecheck, plan } from './matrix-plan.mjs';
 import { build } from './t0-bundle.mjs';
 import { buildMap, MAP_FILE, mcpDefects } from './writecheck-expected.mjs';
-import { observedOf, runWritecheck } from './writecheck-run.mjs';
+import { CONTROL_LAYOUT_DEFECTS, controlManifest, layoutFor, observedOf, runWritecheck } from './writecheck-run.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (f) => JSON.parse(readFileSync(join(root, f), 'utf8'));
@@ -243,4 +243,77 @@ test('R-DM-25: mutation checks: dropping an expected answer, or a writecheck tha
   assert.match(yaml, /working-directory: packages\/writecheck[\s\S]{0,200}npm run build/);
   assert.match(yaml, /WRITECHECK_CLI: \$\{\{ github\.workspace \}\}\/packages\/writecheck\/dist\/src\/cli\/main\.js/);
   assert.equal(JSON.parse(readFileSync(join(root, 'packages/writecheck/package.json'), 'utf8')).bin['mcp-writecheck'], 'dist/src/cli/main.js');
+});
+
+// ---- the control layout (R-DM-26..28): the cells whose defect needs a write held inside the backend ----
+
+const SHIPPED = readFileSync(join(root, 'examples', 'tiny-tracker', 'writecheck.yaml'), 'utf8');
+
+test('R-DM-26: only in-progress-reported-not-applied runs in the control layout; every other cell, correct builds included, is unchanged (separate)', () => {
+  assert.deepEqual([...CONTROL_LAYOUT_DEFECTS], ['in-progress-reported-not-applied']);
+  const cells = allCells(BUILDS);
+  const control = cells.filter((c) => layoutFor(c) === 'control').map((c) => c.defect);
+  assert.deepEqual(control, ['in-progress-reported-not-applied']);
+  assert.ok(cells.filter((c) => c.kind === 'known-good').every((c) => layoutFor(c) === 'separate'), 'L2, L3, L3d and Lv stay separate');
+  assert.equal(layoutFor({ kind: 'defect', defect: 'settle-miss-reported-not-applied' }), 'separate', 'settle-miss needs the gate, which only the separate layout has');
+  assert.deepEqual(MAP.defects['in-progress-reported-not-applied'].expected, ['MWS-RES-2:violated'], 'what the control layout must show');
+});
+
+test('R-DM-27: the control manifest is one all --fixture-control process with faults on loopback ports, the control and evidence tokens passed through, no gate, restart or launch settings; a drifted manifest is refused', () => {
+  const m = controlManifest(SHIPPED, { cwd: '/tt', backendPort: 41001, controlPort: 41002 });
+  assert.match(m, /command: \[node, dist\/src\/cli\.js, all, --port, "0", --backend-port, "41001", --fixture-control, --control-port, "41002", --features, "evidence,strict-input,ledger,faults"\]/);
+  assert.match(m, /env_passthrough: \[TRACKER_BACKEND_TOKEN, TRACKER_CONTROL_TOKEN, TRACKER_EVIDENCE_TOKEN\]/);
+  assert.match(m, /env_public: \[TRACKER_DEFECTS\]/, 'the server is not given TRACKER_BACKEND_URL (in all it runs its own backend)');
+  assert.doesNotMatch(m, /rewrite_env|^ {2}restart:|^settings:/m);
+  assert.match(m, /^ {2}cwd: "\/tt"$/m);
+  assert.match(m, /inflight_hold: \{ fixture: fixture-api\/1, control_env: TRACKER_CONTROL_URL, token_env: TRACKER_CONTROL_TOKEN/);
+  // mutation: a shipped manifest whose server line changed is refused, not run in a half-edited layout
+  assert.throws(() => controlManifest(SHIPPED.replace('server, --port, "0"', 'server, --port, "4100"'), { cwd: '/tt', backendPort: 1, controlPort: 2 }), /cannot edit the shipped manifest/);
+  assert.throws(() => controlManifest(SHIPPED.replace(/^ {2}inflight_hold: .*$/m, ''), { cwd: '/tt', backendPort: 1, controlPort: 2 }), /no backend\.inflight_hold/);
+});
+
+test('R-DM-28: the control layout starts no separate backend, gives the tester loopback backend and control URLs and fresh tokens, and masks every token in the Actions log (stub CLI)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dm-wc-ctl-'));
+  const printed = [];
+  const write = process.stdout.write.bind(process.stdout);
+  const was = process.env.GITHUB_ACTIONS;
+  try {
+    const tt = join(dir, 'tt');
+    mkdirSync(join(tt, 'dist', 'src'), { recursive: true });
+    writeFileSync(join(tt, 'writecheck.yaml'), SHIPPED);
+    writeFileSync(join(tt, 'dist', 'src', 'cli.js'), `require('node:fs').writeFileSync(${JSON.stringify(join(dir, 'backend-started'))}, 'yes');\n`);
+    const cli = join(dir, 'main.mjs');
+    writeFileSync(cli, `import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+const a = process.argv.slice(2);
+const at = (f) => a[a.indexOf(f) + 1];
+if (a[0] === 'plan') { console.log('plan hash: h1'); process.exit(0); }
+const e = process.env;
+writeFileSync(${JSON.stringify(join(dir, 'seen.json'))}, JSON.stringify({ manifest: readFileSync(at('-m'), 'utf8'), backend: e.TRACKER_BACKEND_URL, control: e.TRACKER_CONTROL_URL, tokens: [e.TRACKER_BACKEND_TOKEN, e.TRACKER_CONTROL_TOKEN, e.TRACKER_EVIDENCE_TOKEN], defects: e.TRACKER_DEFECTS }));
+const out = at('--out') + '/run-1'; mkdirSync(out, { recursive: true });
+writeFileSync(out + '/results.json', JSON.stringify({ suite: { version: 'stub' }, results: [{ requirement: 'MWS-RES-2', verdict: 'violated' }] }));
+process.exit(1);
+`);
+    process.env.GITHUB_ACTIONS = 'true';
+    process.stdout.write = (c, ...r) => { printed.push(String(c)); return true; };
+    let got;
+    try {
+      got = await runWritecheck({ cli, tinyTracker: tt, defects: ['in-progress-reported-not-applied'], layout: 'control', timeoutMs: 20000 });
+    } finally {
+      process.stdout.write = write;
+    }
+    assert.deepEqual(got, { ok: true, observed: ['MWS-RES-2:violated'], version: 'stub', records: 1 });
+    const seen = JSON.parse(readFileSync(join(dir, 'seen.json'), 'utf8'));
+    assert.match(seen.backend, /^http:\/\/127\.0\.0\.1:\d+$/);
+    assert.match(seen.control, /^http:\/\/127\.0\.0\.1:\d+$/);
+    assert.notEqual(seen.backend, seen.control);
+    assert.equal(new Set(seen.tokens).size, 3, 'three distinct tokens');
+    for (const t of seen.tokens) assert.ok(printed.includes(`::add-mask::${t}\n`), 'each token is masked');
+    assert.ok(!printed.some((l) => !l.startsWith('::add-mask::') && seen.tokens.some((t) => l.includes(t))), 'no token printed otherwise');
+    assert.match(seen.manifest, /--fixture-control/);
+    assert.equal(seen.defects, 'in-progress-reported-not-applied');
+    assert.throws(() => readFileSync(join(dir, 'backend-started')), 'no separate backend was started');
+  } finally {
+    if (was === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = was;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
