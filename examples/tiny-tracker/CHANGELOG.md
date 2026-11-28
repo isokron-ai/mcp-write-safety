@@ -2,6 +2,11 @@
 
 All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for the MCP Write-Safety Requirements. The format follows Keep a Changelog; versions follow Semantic Versioning once published.
 
+## Unreleased
+
+### Fixed
+- `backend/before-commit/delay` is built (R-TT-10). The fault table listed it from 0.3.0 ("opens the in-flight window"), but it had no action and was not in `BUILT_FAULT_POINTS`, so arming it on the control listener answered 501 `not_built` and no harness outside this repository's tests could hold a write after its pending key record. Armed (`{"once": true, "hold_ms": N}`), the next write waits `hold_ms` after the pending record and before the commit section, then commits as it would have; a same-key call meanwhile answers 409 `in_progress`. The hold counts against the cap of 16 held answers. Build descriptors and known answers are unchanged (the built list is not part of them).
+
 ## 0.4.0 (24 Nov 2026) for MWS 0.9
 
 ### Stream F (0.4.0 contract kit)

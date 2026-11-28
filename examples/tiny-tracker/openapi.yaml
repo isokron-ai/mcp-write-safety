@@ -665,7 +665,9 @@ paths:
         Arms a fault point (feature `faults`), `process/position/action`. Built: `mcp/after-backend-reply/drop` (the
         MCP answer is held after the backend committed: the lost response, server-side) and the crash points
         `backend/before-commit/crash`, `backend/after-commit/crash`, `mcp/after-backend-reply/crash` and
-        `backend/after-effect-before-key/crash` (keyed writes; without `durable`, 400 `needs_feature`). A crash point
+        `backend/after-effect-before-key/crash` (keyed writes; without `durable`, 400 `needs_feature`), and
+        `backend/before-commit/delay` (a write waits `hold_ms` after its pending key record, before it commits: the
+        in-flight window, where a same-key call answers 409 `in_progress`). A crash point
         takes no selector but `{"once": true}` and needs `--supervise` (409 `needs_supervise` in one process). Every
         arming and firing is a ledger entry. At most 32 armed faults.
       security: [{ controlToken: [] }]
