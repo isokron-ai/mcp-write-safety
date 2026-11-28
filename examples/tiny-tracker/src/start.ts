@@ -6,6 +6,7 @@ import { ListenError, startMcpServer, type McpListenOptions, type RunningMcpServ
 import { resolveTransport, TransportError } from "./transport.js";
 import type { Build } from "./mcp/types.js";
 import { applyVariants } from "./variants/index.js";
+import { applySameKeyAnswer, parseSameKeyAnswer, SAME_KEY_ANSWER_ENV } from "./mcp/same-key-answer.js";
 
 export { startBackend, type RunningBackend } from "./backend/http.js";
 export { ConfigError } from "./mcp/config.js";
@@ -65,6 +66,12 @@ export async function startServer(options: StartServerOptions): Promise<StartedS
     throw new ConfigError((e as Error).message);
   }
   const variants = applyVariants(build, options.env);
+  // Research modes only (scripts/sim/same-key-inflight); the CLI takes the setting only with --fixture-control and inflight.
+  try {
+    applySameKeyAnswer(build, parseSameKeyAnswer(options.env[SAME_KEY_ANSWER_ENV]));
+  } catch (e) {
+    throw new ConfigError(`${(e as Error).message}. Not starting.`);
+  }
   const config = loadConfig(options.env, build.configRules, [...build.tools.keys()]);
   if (build.defects.length > 0 && !isLoopbackUrl(config.backendUrl)) {
     throw new ConfigError("A build with defects only talks to a backend on 127.0.0.1 or localhost. Not starting.");

@@ -1,0 +1,188 @@
+# Same key while the first write is in flight: evidence for how mcp-writecheck should judge the case. Nothing here
+# changes a judge; it measures what each server answer leads reasonable clients to do.
+#
+#   sim         the deterministic simulator (scripts/sim/same-key-inflight/model.mjs): its own tests, then every grid cell
+#               (answer variants A-E x client policies P1-P5 x the first write landing or failing x the hold time d) and a
+#               seeded population.
+#   live        tiny-tracker `all --fixture-control` with the faults feature, create_ticket answering the same-key retry as
+#               one variant (TRACKER_SAME_KEY_ANSWER); the policies as scripted MCP clients through the real MCP layer, the
+#               first write held by backend/before-commit/delay (#45). Each live cell is compared with its simulated cell.
+#   writecheck  mcp-writecheck, built from this commit, against each variant in the matrix runner's control layout:
+#               inflight.same-key (MWS-RES-2) as judged today (strict B-9), beside the lenient reading's verdict.
+#   report      the job summary tables and one JSON artifact (same-key-sim). Fails when a live cell was not valid or
+#               disagrees with the simulator, or a writecheck run failed (after writing both).
+#
+# No secrets; the tokens are made by the scripts and masked. Read-only token; actions pinned by SHA; inputs reach the
+# scripts through env only and are checked first.
+
+name: same-key-sim
+
+on:
+  workflow_dispatch:
+    inputs:
+      population_runs:
+        description: Simulated runs per variant and policy (100 to 100000).
+        required: false
+        default: '5000'
+        type: string
+      live_repeats:
+        description: Live repetitions of every grid cell (1 to 5).
+        required: false
+        default: '2'
+        type: string
+  pull_request:
+    paths:
+      - 'scripts/sim/same-key-inflight/**'
+      - '.github/workflows/same-key-sim.yml'
+      - 'examples/tiny-tracker/src/mcp/same-key-answer.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: same-key-sim-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.check.outputs.runs }}
+      repeats: ${{ steps.check.outputs.repeats }}
+    steps:
+      - id: check
+        name: Check the inputs
+        env:
+          IN_RUNS: ${{ inputs.population_runs }}
+          IN_REPEATS: ${{ inputs.live_repeats }}
+        run: |
+          runs="${IN_RUNS:-5000}"
+          repeats="${IN_REPEATS:-2}"
+          if ! [[ "$runs" =~ ^[0-9]{3,6}$ ]] || (( runs < 100 || runs > 100000 )); then echo "::error::population_runs must be an integer from 100 to 100000"; exit 1; fi
+          if ! [[ "$repeats" =~ ^[1-5]$ ]]; then echo "::error::live_repeats must be an integer from 1 to 5"; exit 1; fi
+          { echo "runs=$runs"; echo "repeats=$repeats"; } >> "$GITHUB_OUTPUT"
+
+  sim:
+    needs: inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: The simulator's tests
+        run: node --test scripts/sim/same-key-inflight/*.test.mjs
+      - name: Run the simulator
+        env:
+          POPULATION_RUNS: ${{ needs.inputs.outputs.runs }}
+        run: node scripts/sim/same-key-inflight/sim.mjs "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sk-sim
+          path: ${{ runner.temp }}/out/sim.json
+          if-no-files-found: error
+          retention-days: 14
+
+  live:
+    needs: inputs
+    name: live ${{ matrix.variant }} ${{ matrix.outcome }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B, C, D, E]
+        outcome: [lands, fails]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build tiny-tracker
+        working-directory: examples/tiny-tracker
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Run the live harness
+        env:
+          VARIANT: ${{ matrix.variant }}
+          OUTCOME: ${{ matrix.outcome }}
+          REPEATS: ${{ needs.inputs.outputs.repeats }}
+        run: node scripts/sim/same-key-inflight/live.mjs examples/tiny-tracker "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sk-live-${{ matrix.variant }}-${{ matrix.outcome }}
+          path: ${{ runner.temp }}/out/live-*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  writecheck:
+    name: writecheck ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [A, B, C, D, E]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build tiny-tracker
+        working-directory: examples/tiny-tracker
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Build mcp-writecheck (the CLI under test, from this commit)
+        working-directory: packages/writecheck
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      - name: Run writecheck against the variant
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: node scripts/sim/same-key-inflight/writecheck.mjs packages/writecheck/dist/src/cli/main.js examples/tiny-tracker "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sk-wc-${{ matrix.variant }}
+          path: ${{ runner.temp }}/out/wc-*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  report:
+    needs: [sim, live, writecheck]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Runs no harness code: it reads the result files and writes the summary.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: sk-*
+          path: ${{ runner.temp }}/in
+          merge-multiple: true
+      - name: Build the report
+        run: |
+          mkdir -p "$RUNNER_TEMP/in" "$RUNNER_TEMP/report"
+          node scripts/sim/same-key-inflight/report.mjs "$RUNNER_TEMP/in" "$RUNNER_TEMP/report/same-key-sim.json" "$RUNNER_TEMP/report/summary.md"
+      - name: Job summary
+        if: always()
+        run: if [ -f "$RUNNER_TEMP/report/summary.md" ]; then cat "$RUNNER_TEMP/report/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: same-key-sim
+          path: ${{ runner.temp }}/report/
+          if-no-files-found: warn
+          retention-days: 30

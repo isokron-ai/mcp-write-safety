@@ -4,6 +4,9 @@ All notable changes to `@mcp-write-safety/tiny-tracker`, the sample server for t
 
 ## Unreleased
 
+### Added
+- `TRACKER_SAME_KEY_ANSWER` (research only, `src/mcp/same-key-answer.ts`): `A` to `E` picks how `create_ticket` answers a same-key call while the first is still being applied: `A` "conflict, nothing was written by this call" (`not_applied`, `conflict`), `B` the correct build (`unknown`, `in_progress`, `same_key`), `C` a plain 409 with no outcome, `D` wait for the first call and answer after it, `E` "Failed" (`not_applied`). Taken only with `--fixture-control` and the `inflight` feature over HTTP; the state line names it. It feeds the same-key simulator and live harness (`scripts/sim/same-key-inflight`, workflow `same-key-sim.yml`); build descriptors and known answers are unchanged.
+
 ### Fixed
 - `backend/before-commit/delay` is built (R-TT-10). The fault table listed it from 0.3.0 ("opens the in-flight window"), but it had no action and was not in `BUILT_FAULT_POINTS`, so arming it on the control listener answered 501 `not_built` and no harness outside this repository's tests could hold a write after its pending key record. Armed (`{"once": true, "hold_ms": N}`), the next write waits `hold_ms` after the pending record and before the commit section, then commits as it would have; a same-key call meanwhile answers 409 `in_progress`. The hold counts against the cap of 16 held answers. Build descriptors and known answers are unchanged (the built list is not part of them).
 

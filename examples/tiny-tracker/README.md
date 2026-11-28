@@ -88,6 +88,7 @@ TRACKER_BACKEND_URL=http://127.0.0.1:4200 node dist/src/cli.js server --port 430
 | `TRACKER_DEFECTS` | `--defect`, `--defects` | Defects to switch on. An unknown name stops the server (exit 2). |
 | `TRACKER_VARIANTS` | | Correct variants to switch on (see [Variants](#variants)). An unknown name stops the server (exit 2). |
 | `TRACKER_KEY_JOURNAL` | | The journal file of the `key-store-honest` variant (required with it). |
+| `TRACKER_SAME_KEY_ANSWER` | | Research only (`scripts/sim/same-key-inflight` in the repository): `A` to `E` picks how `create_ticket` answers a call whose idempotency key is still being applied (`B` is the correct build). Needs `--fixture-control` and the `inflight` feature; any other value stops the server (exit 2). |
 | | `--backend-defect` | `lost-update`. |
 | `TRACKER_MCP_TOKEN` / `TRACKER_MCP_TOKEN_FILE` | | Bearer token for `/mcp`. Required in container mode; optional otherwise. Refused with `stdio`. |
 | `TRACKER_CONTAINER` | | `1` in the image: listen on every interface, and refuse to start without an MCP token. Only `1` or `0`. Refuses `tiny-tracker backend`. |

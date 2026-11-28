@@ -183,6 +183,12 @@ async function main(): Promise<void> {
     transport: stdio ? "stdio" : "http",
   });
   for (const [name, why] of Object.entries(RETIRED_ENV)) if (env[name] !== undefined) refusals.push(`${name} ${why}`);
+  // Research modes for the same-key-in-flight answer (src/mcp/same-key-answer.ts): a fixture setting, never a release one.
+  const sameKeyAnswer = env.TRACKER_SAME_KEY_ANSWER;
+  if (sameKeyAnswer !== undefined && sameKeyAnswer !== "") {
+    if (!["A", "B", "C", "D", "E"].includes(sameKeyAnswer)) refusals.push("TRACKER_SAME_KEY_ANSWER must be one of A, B, C, D, E");
+    else if (!fixtureControl || !features.includes("inflight") || layout === "backend" || stdio) refusals.push("TRACKER_SAME_KEY_ANSWER needs --fixture-control, the inflight feature and `tiny-tracker all` or `server` over HTTP");
+  }
   if (values["data-dir"] !== undefined && !features.includes("durable")) refusals.push("--data-dir has no effect without the durable feature");
   const tokenDir = values["token-dir"] ?? env.TRACKER_TOKEN_DIR;
   if (tokenDir !== undefined && !needsFixtureLayer(features, fixtureControl)) refusals.push("--token-dir has no effect without a fixture feature or --fixture-control");
@@ -485,6 +491,7 @@ async function main(): Promise<void> {
       out.defects = server.build.defects;
       out.read_only = server.config.readOnly;
       if (server.variants.length) out.variants = server.variants;
+      if (sameKeyAnswer !== undefined && sameKeyAnswer !== "") out.same_key_answer = sameKeyAnswer;
     } catch (e) {
       for (const close of closers) await close();
       if (e instanceof ConfigError) fail(e.message);
