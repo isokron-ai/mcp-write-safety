@@ -8,10 +8,9 @@
  * The judge and the gate's cut-and-hold are tested on their own; the rest runs against tiny-tracker when it is built
  * (examples/tiny-tracker/dist, or TINY_TRACKER_DIR), and is skipped otherwise, with the reason.
  *
- * tiny-tracker 0.4.0 offers no hold of a write inside its backend: FIXTURE.md lists backend/before-commit/delay, and the control
- * listener answers its arming 501 not_built. The same-key detection is shown against `tiny-tracker all --fixture-control` with
- * that point made armable inside the test process, exactly as tiny-tracker's own test/ledger.test.ts does; the shipped build is
- * shown to give `not tested` with the target's own answer.
+ * The same-key scenario needs the first write held inside the backend: tiny-tracker's backend/before-commit/delay (armable since
+ * R-TT-10), on the control listener of `tiny-tracker all --fixture-control`. Without the faults feature the listener answers the
+ * arming 501 not_enabled, which is shown to give `not tested` with the target's own answer.
  */
 
 import assert from 'node:assert/strict';
@@ -303,31 +302,17 @@ async function freePort(): Promise<number> {
 }
 
 /**
- * `tiny-tracker all --fixture-control` with the faults feature, its backend and control listener on fixed loopback ports the
- * tester knows (no gate: the hold is the target's own). `armable`: backend/before-commit/delay is made armable in the server
- * process first, as tiny-tracker's own ledger test does (0.4.0 lists the point but does not build it). The manifest keeps one
- * server process: no restart step and no launch settings, whose second process would want the same ports.
+ * `tiny-tracker all --fixture-control`, its backend and control listener on fixed loopback ports the tester knows (no gate: the
+ * hold is the target's own). `faults`: whether the faults feature is on (without it the control listener refuses the arming).
+ * The manifest keeps one server process: no restart step and no launch settings, whose second process would want the same ports.
  */
-async function startAll(o: { defects?: string[]; armable: boolean }): Promise<TT> {
+async function startAll(o: { defects?: string[]; faults: boolean }): Promise<TT> {
   const [bport, cport] = [await freePort(), await freePort()];
   const work = mkdtempSync(join(tmpdir(), 'mwsc-ttall-'));
-  const cli = join(dir!, 'dist', 'src', 'cli.js');
-  let entry = cli;
-  if (o.armable) {
-    entry = join(work, 'armable-delay.mjs');
-    const u = (p: string) => JSON.stringify(new URL(`file://${join(dir!, 'dist', 'src', p)}`).href);
-    writeFileSync(entry, [
-      `const fp = await import(${u('fault-points.js')});`,
-      `const f = await import(${u('fixture/faults.js')});`,
-      `fp.BUILT_FAULT_POINTS.push('backend/before-commit/delay');`,
-      `f.FAULT_ACTIONS['backend/before-commit/delay'] = { position: 'before-commit', fire: async (_c, _a, kit) => { await kit.hold(undefined); } };`,
-      `await import(${u('cli.js')});`,
-      '',
-    ].join('\n'));
-  }
+  const features = o.faults ? 'evidence,strict-input,ledger,faults' : 'evidence,strict-input,ledger';
   const edit = (text: string) => {
     const x = text
-      .replace(/command: \[node, dist\/src\/cli\.js, server, --port, "0"\]/, `command: [node, ${JSON.stringify(entry)}, all, --port, "0", --backend-port, "${bport}", --fixture-control, --control-port, "${cport}", --features, "evidence,strict-input,ledger,faults"]`)
+      .replace(/command: \[node, dist\/src\/cli\.js, server, --port, "0"\]/, `command: [node, dist/src/cli.js, all, --port, "0", --backend-port, "${bport}", --fixture-control, --control-port, "${cport}", --features, "${features}"]`)
       .replace('env_passthrough: [TRACKER_BACKEND_TOKEN]', 'env_passthrough: [TRACKER_BACKEND_TOKEN, TRACKER_CONTROL_TOKEN, TRACKER_EVIDENCE_TOKEN]')
       .replace('env_public: [TRACKER_BACKEND_URL, TRACKER_DEFECTS, TRACKER_VARIANTS, TRACKER_KEY_JOURNAL]', 'env_public: [TRACKER_DEFECTS]')
       .replace(/^  restart: .*$/m, '')
@@ -351,7 +336,7 @@ async function startAll(o: { defects?: string[]; armable: boolean }): Promise<TT
   };
 }
 
-async function runAll(o: { defects?: string[]; armable: boolean }): Promise<Result[]> {
+async function runAll(o: { defects?: string[]; faults: boolean }): Promise<Result[]> {
   const t = await startAll(o);
   try {
     const r = await runTT(t);
@@ -362,8 +347,8 @@ async function runAll(o: { defects?: string[]; armable: boolean }): Promise<Resu
   }
 }
 
-test('R-WC-02: with an armable in-flight hold, --defect in-progress-reported-not-applied: the same-key call is MWS-RES-2 violated', { skip }, async () => {
-  const rs = await runAll({ defects: ['in-progress-reported-not-applied'], armable: true });
+test('R-WC-02: with the in-flight hold (all --fixture-control, faults), --defect in-progress-reported-not-applied: the same-key call is MWS-RES-2 violated', { skip }, async () => {
+  const rs = await runAll({ defects: ['in-progress-reported-not-applied'], faults: true });
   const s = rec(rs, INFLIGHT_SCENARIOS.sameKey)!;
   assert.equal(s.verdict, 'violated', s.reason);
   assert.match(s.reason, /nothing was written/);
@@ -374,13 +359,13 @@ test('R-WC-02: with an armable in-flight hold, --defect in-progress-reported-not
 
 test('R-WC-02: mutation: the same build with the second call sent after the first has answered reads held (the overlap is what finds it)', { skip }, async () => {
   INFLIGHT_SCHEDULE.mutation = 'second-after-first';
-  const rs = await runAll({ defects: ['in-progress-reported-not-applied'], armable: true });
+  const rs = await runAll({ defects: ['in-progress-reported-not-applied'], faults: true });
   const s = rec(rs, INFLIGHT_SCENARIOS.sameKey)!;
   assert.equal(s.verdict, 'held', s.reason);
 });
 
-test('R-WC-03: with an armable in-flight hold, the correct build: the same-key call answers in progress, held; no in-flight record violated', { skip }, async () => {
-  const rs = await runAll({ armable: true });
+test('R-WC-03: with the in-flight hold (all --fixture-control, faults), the correct build: the same-key call answers in progress, held; no in-flight record violated', { skip }, async () => {
+  const rs = await runAll({ faults: true });
   for (const tool of ['create_ticket', 'create_project']) {
     const s = rec(rs, INFLIGHT_SCENARIOS.sameKey, tool)!;
     assert.equal(s.verdict, 'held', `${tool}: ${s.reason}`);
@@ -389,9 +374,9 @@ test('R-WC-03: with an armable in-flight hold, the correct build: the same-key c
   assert.ok(!rs.some((x) => x.scenario.id.startsWith('inflight.') && x.verdict === 'violated'));
 });
 
-test('R-WC-04: tiny-tracker 0.4.0 as shipped answers the arming 501 not_built: same-key is not tested, quoting the target, never violated', { skip }, async () => {
-  const rs = await runAll({ defects: ['in-progress-reported-not-applied'], armable: false });
+test('R-WC-04: a control listener without the faults feature answers the arming 501 not_enabled: same-key is not tested, quoting the target, never violated', { skip }, async () => {
+  const rs = await runAll({ defects: ['in-progress-reported-not-applied'], faults: false });
   const s = rec(rs, INFLIGHT_SCENARIOS.sameKey)!;
   assert.equal(s.verdict, 'not tested');
-  assert.match(s.reason, /501 .*not_built/);
+  assert.match(s.reason, /501 .*not_enabled/);
 });

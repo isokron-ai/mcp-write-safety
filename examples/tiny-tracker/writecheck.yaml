@@ -36,9 +36,9 @@ backend:
   gate: { rewrite_env: TRACKER_BACKEND_URL }
   # The in-flight scenarios (MWS-RES-2, a same-key call while the first is still being applied): the first keyed create is held
   # inside the backend after it has taken the key, by the fixture's fault point backend/before-commit/delay (FIXTURE.md,
-  # fixture-api/1), armed on the control listener. Only `tiny-tracker all --fixture-control` serves that listener, and 0.4.0
-  # answers the arming 501 not_built, so with this build the scenario is not tested and says why; a backend started on its
-  # own (`backend`, as above) offers no control listener at all (TRACKER_CONTROL_URL unset).
+  # fixture-api/1; it needs the faults feature), armed on the control listener. Only `tiny-tracker all --fixture-control`
+  # serves that listener: set TRACKER_CONTROL_URL and TRACKER_CONTROL_TOKEN to it. A backend started on its own (`backend`, as
+  # above) offers none, so there the scenario is not tested and says why (TRACKER_CONTROL_URL unset).
   inflight_hold: { fixture: fixture-api/1, control_env: TRACKER_CONTROL_URL, token_env: TRACKER_CONTROL_TOKEN, hold_ms: 3000 }
 
 limits: { write_budget: 20000, writes_per_second: 1000, pairs: 40, stale_reps: 3, gate_reps: 2, timeout_ms: 15000, max_fuzz_cases: 200 }

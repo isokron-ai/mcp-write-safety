@@ -82,6 +82,9 @@ export const BUILT_FAULT_POINTS: readonly string[] = [
   "backend/before-commit/crash", "backend/after-commit/crash", "mcp/after-backend-reply/crash",
   // ---- G2 fold-in 11: the point between the effect and the key record, so key-record-after-effect shows from outside ----
   "backend/after-effect-before-key/crash",
+  // ---- the in-flight window (R-TT-10): a capped hold after the pending key record, before the commit section, so a harness
+  // outside this process can send a same-key call while the first is still being applied ----
+  "backend/before-commit/delay",
 ];
 // ---- end stream B ----
 

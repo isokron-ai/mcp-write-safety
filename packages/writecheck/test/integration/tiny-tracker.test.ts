@@ -136,9 +136,9 @@ const EXPECT: Record<string, string[]> = {
   //                                     fence and reports not applied, and the held request then creates the ticket (MWS-RES-1)
   //   in-progress-reported-not-applied  needs the first keyed create held inside the backend after it took the key. The gate
   //                                     holds a request before the backend sees it, and a backend started on its own offers no
-  //                                     control listener (FIXTURE.md: 0.4.0 does not build backend/before-commit/delay either),
-  //                                     so here the same-key scenario is `not tested`, with the reason, and nothing is
-  //                                     violated. With the hold made armable, inflight.test.ts shows MWS-RES-2 violated.
+  //                                     control listener, so here the same-key scenario is `not tested`, with the reason, and
+  //                                     nothing is violated. With the control listener (backend/before-commit/delay, R-TT-10),
+  //                                     inflight.test.ts shows MWS-RES-2 violated.
   'settle-miss-reported-not-applied': ['MWS-RES-1'],
   'in-progress-reported-not-applied': [],
 };
