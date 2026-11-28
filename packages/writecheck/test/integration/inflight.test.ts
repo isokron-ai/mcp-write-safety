@@ -110,6 +110,25 @@ test('R-WC-03: the same-key judge: "still in progress, repeat with the same key"
   assert.equal(r.verdict, 'held', r.reason);
 });
 
+/**
+ * The B-9 reading on a concrete example, for the owner to check the rule against. A server whose intent is right (the second
+ * call itself wrote nothing) answers the same-key call while the first is in flight with "conflict, nothing written" and
+ * `outcome: "not_applied"`, `code: "conflict"`; the first write lands afterwards. Annex B-9 ("A repeat with a key"): on a call that
+ * carried an idempotency key, `outcome` and `code` are statements about the write the key identifies, not about this call. That
+ * write is in effect afterwards, so `not_applied` misstates it: MWS-RES-2 `violated` (second clause), although the server's own
+ * meaning was true of the second call. The form B-9 gives for this case is `outcome: "unknown"`, `code: "in_progress"`,
+ * `repeat: "same_key"` (held, the test above). Where the first write never lands, nothing contradicts the answer: not tested.
+ */
+test('R-WC-03: B-9 reading, a concrete example: "conflict, nothing written" (not_applied) for a same-key call while the first is in flight is violated once the first lands, not tested if it never does', () => {
+  useTT();
+  const conflict = { ...call({ step: 'c2', text: 'Conflict: another request with this idempotency_key is being processed. Nothing was written by this call.', shape: S({ outcome: 'not_applied', repeat: 'no', code: 'conflict' }) }), t_end_ms: 1 };
+  const landed = sameKeyVerdict(same({ second: conflict, after: trace(['T-7']) }), W);
+  assert.equal(landed.verdict, 'violated', landed.reason);
+  assert.match(landed.reason, /not_applied/);
+  const never = sameKeyVerdict(same({ second: conflict, first: { ...call({ step: 'c0' }), t_end_ms: 2 }, after: trace([]) }), W);
+  assert.equal(never.verdict, 'not tested', never.reason);
+});
+
 test('R-WC-04: the same-key judge: no hold, a refused or unfired hold, or no keyed write is not tested, never a verdict', () => {
   useTT();
   const said = { ...call({ step: 'c2', text: 'nothing was written', shape: NOT_APPLIED }), t_end_ms: 1 };
@@ -245,7 +264,8 @@ test('R-WC-01: mutation: the same build with the held request released before th
   INFLIGHT_SCHEDULE.mutation = 'release-before-answer';
   const rs = await run({ defects: ['settle-miss-reported-not-applied'] });
   const r = rec(rs, INFLIGHT_SCENARIOS.lostHeld)!;
-  assert.notEqual(r.verdict, 'violated', r.reason);
+  // why: released first, the request lands before the server's lookup, which then finds the write: a success, in effect.
+  assert.equal(r.verdict, 'held', r.reason);
   assert.ok(!rs.some((x) => x.scenario.id.startsWith('inflight.') && x.verdict === 'violated'));
 });
 
@@ -270,7 +290,11 @@ test('R-WC-03: correct variant settle-by-lookup (a lookup behind a fence): the h
 });
 
 test('R-WC-03: correct variant key-store-honest (keys kept by the server, no backend key): lost-held held, nothing violated', { skip }, async () => {
-  const noBackendKey = (text: string) => text.replace(/(title: "\{\{marker\}\}" \}, key: \{ arg: idempotency_key \}, replay_marker: replayed), backend_key: true/, '$1');
+  const noBackendKey = (text: string) => {
+    const out = text.replace(/(title: "\{\{marker\}\}" \}, key: \{ arg: idempotency_key \}, replay_marker: replayed), backend_key: true/, '$1');
+    assert.notEqual(out, text, 'the edit removed backend_key: true from the ticket idempotency block (the shipped manifest did not drift)');
+    return out;
+  };
   const rs = await run({ variants: ['key-store-honest'], edit: noBackendKey });
   assert.deepEqual(violatedIds(rs), []);
   assert.equal(rec(rs, INFLIGHT_SCENARIOS.lostHeld)!.verdict, 'held', rec(rs, INFLIGHT_SCENARIOS.lostHeld)!.reason);
