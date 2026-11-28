@@ -16,6 +16,10 @@
  *   (same-key)        After the first has finished, the tester reads back by the marker. Under B-9 a keyed call's outcome and
  *                     code describe the write the key identifies, so a second answer that says "not applied" while that write
  *                     is in effect afterwards is `violated` (second clause); "in progress", "not known" or a replay hold.
+ *                     Owner decision, 28 Nov 2026 (spec DECISIONS R16-4): an error that makes no claim about the keyed write's
+ *                     outcome is never `violated` here until MWS 1.0. Words that a declared patterns.in_progress reads (the key
+ *                     is in progress, in use or outstanding) hold, with an observation recommending the B-9 form; a bare "409
+ *                     Conflict" is `not tested` with that observation.
  *
  * Where the tester cannot bring a condition about, the record is `not tested` with the reason, never a verdict on the target:
  * no gate, a gate route that cannot cut and hold (the in-process hook and the wire gate), no declared in-flight hold, a hold the
@@ -31,6 +35,7 @@ import { render } from '../core/template.js';
 import { getPath, isObj, nowMs, short, sleep, type Obj } from '../core/util.js';
 import { lastMutating, nthOf, type GateRequest } from '../gate/gate.js';
 import { result, type Result } from '../report/verdicts.js';
+import { fromDeclaration, outcomeByField, saidBy, says } from './says.js';
 import { shapeOf } from './shape.js';
 import { brief, readSecondClause, res2Judge, toolByName, wp, type CallBrief, type CheckModule, type Observation, type PlanContext, type PlannedCheck, type RunContext } from './types.js';
 
@@ -327,6 +332,22 @@ async function runSameKey(ctx: RunContext, res: ResourceSpec, hold: InflightHold
 
 // ---------------------------------------------------------------- verdicts
 
+/** The B-9 form a same-key answer while the first call is in flight is recommended to take (spec MWS-RES-2, the same-key trial). */
+const B9_FORM = '`outcome: "unknown"`, `code: "in_progress"`, `repeat: "same_key"` (with `replayed: true`, and text that says this call wrote nothing, if wanted)';
+const recommendB9 = (what: string): string => `Observation: ${what}; the form Annex B, B-9 gives for this answer is recommended: ${B9_FORM}.`;
+const textOf = (b: CallBrief): string => `${b.text ?? ''} ${b.rpc_error?.message ?? ''}`.trim();
+
+/**
+ * Whether an error states nothing about the outcome of the write its key identifies: no adopted shape's outcome, no declared
+ * outcome field, and a second clause that no declared pattern read (unread, and not held back for a repeat the shape may invite).
+ */
+function makesNoOutcomeClaim(b: CallBrief, changed: string[], values: Record<string, unknown>): boolean {
+  if (b.ok || b.indeterminate || (b.result_type && b.result_type !== 'complete')) return false;
+  if (shapeOf(b)?.outcome || outcomeByField(b)) return false;
+  const sec = readSecondClause(b, changed, values);
+  return sec.v === 'unread' && !sec.blocksHeld;
+}
+
 const quoteCall = (b: CallBrief): string => JSON.stringify(short(b.text ?? b.rpc_error?.message ?? '', 200));
 
 /** MWS-RES-1 from the lost answer with the request held on its way. */
@@ -388,6 +409,21 @@ export function sameKeyVerdict(o: SameKeyObs, w: ReturnType<typeof wp>): Result 
   const what = `Same key while the first is in flight: the same call with the same key ${o.key} was sent while the first was held inside the backend; after both answered, ${n} object(s) carry the call's marker (${o.after.ids.map((x) => JSON.stringify(x)).join(', ')})`;
   if (b.ok) return result('MWS-RES-2', w, sc, 'held', `${what}; the second call answered as a success (${quoteCall(b)}), not as a failure.`, { notes });
   // why: B-9 "A repeat with a key": the second answer's outcome describes the write the key identifies; that write is in effect.
-  const j = res2Judge(b, o.after.ids.map((id) => String(id)), 'backend', `${what}; the second call answered with an error (${quoteCall(b)})`, Object.fromEntries(o.after.ids.map((id) => [String(id), id])));
+  const changed = o.after.ids.map((id) => String(id));
+  const values = Object.fromEntries(o.after.ids.map((id) => [String(id), id]));
+  const j = res2Judge(b, changed, 'backend', `${what}; the second call answered with an error (${quoteCall(b)})`, values);
+  // why: owner decision, 28 Nov 2026 (spec MWS-RES-2, the same-key trial; DECISIONS R16-4): an error that makes no claim about
+  // the keyed write's outcome is not a violation in this trial until MWS 1.0. Only an answer whose second clause went unread
+  // comes here: a stated failure (an adopted not_applied, a declared pattern that reads "failed") keeps its violated, a held
+  // stays held, and an answer the tester could not judge for another reason (a lost call, a task) keeps its reason.
+  if (j.verdict === 'not tested' && makesNoOutcomeClaim(b, changed, values)) {
+    const text = textOf(b);
+    // why: rule 11: whether the words say the key is in progress is decided by a declared pattern; the default one adds a note only.
+    if (fromDeclaration('in_progress') && says('in_progress', text)) {
+      return result('MWS-RES-2', w, sc, 'held', `${what}; the second call answered with an error (${quoteCall(b)}) that says a call with this key is still in progress, which leaves the outcome of the keyed write open, and makes no statement that the write failed or was not applied (spec MWS-RES-2, the same-key trial).`, { notes: [...notes, saidBy('in_progress', text), recommendB9('the answer says the key is in progress but states no outcome')] });
+    }
+    const dflt = !fromDeclaration('in_progress') && says('in_progress', text);
+    return result('MWS-RES-2', w, sc, 'not tested', `${what}; the second call answered with an error (${quoteCall(b)}) that makes no claim about the keyed write's outcome${dflt ? '; only the tester\'s default pattern reads in-progress wording in it, which alone decides nothing (spec 7.3, rule 11): declare patterns.in_progress, or read it' : ''}. Until MWS 1.0 such an answer is an observation in this trial, not a violation (spec MWS-RES-2, the same-key trial).`, { notes: [...notes, ...j.notes, ...(dflt ? [saidBy('in_progress', text)] : []), recommendB9(dflt ? 'the answer may say the key is in progress, but states no outcome' : 'the answer says nothing about the write or the key (a bare conflict or transport error)')] });
+  }
   return result('MWS-RES-2', w, sc, j.verdict, j.reason, { notes: [...notes, ...j.notes], steps: j.verdict === 'violated' ? [o.first.step, b.step, o.after.step] : [] });
 }

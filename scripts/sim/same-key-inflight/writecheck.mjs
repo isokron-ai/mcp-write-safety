@@ -15,6 +15,10 @@
 // The lenient verdict is computed here from writecheck's own record (its verdict and the object count its reason states);
 // no judge code is changed.
 //
+// The run declares patterns.in_progress for the server's wording that a call with the key is in progress (IN_PROGRESS below):
+// under spec 7.3, rule 11 only a declared pattern decides what a text says, so variant C's bare in-progress 409 is judged by
+// it, as the owner's decision of 28 Nov 2026 (spec DECISIONS R16-4) reads that answer: held, with an observation.
+//
 // Usage: node scripts/sim/same-key-inflight/writecheck.mjs <writecheck-cli> <tiny-tracker-dir> <out-dir>   (VARIANT in env)
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -25,6 +29,7 @@ import { controlManifest, freePorts, observedOf } from '../../ci/writecheck-run.
 import { VARIANTS } from './model.mjs';
 
 const SCENARIO = 'inflight.same-key';
+export const IN_PROGRESS = String.raw`\b(in progress|in use|outstanding|being processed)\b`;
 const mask = (v) => { if (process.env.GITHUB_ACTIONS === 'true') process.stdout.write(`::add-mask::${v}\n`); };
 
 function findResults(dir) {
@@ -62,8 +67,10 @@ try {
   const base = controlManifest(readFileSync(join(tt, 'writecheck.yaml'), 'utf8'), { cwd: tt, backendPort, controlPort });
   const text = base.replace('env_public: [TRACKER_DEFECTS]', 'env_public: [TRACKER_DEFECTS, TRACKER_SAME_KEY_ANSWER]');
   if (text === base) throw new Error('the control manifest has no env_public line to add TRACKER_SAME_KEY_ANSWER to');
+  const declared = text.replace(/^patterns:\n/m, `patterns:\n  in_progress: '${IN_PROGRESS}'\n`);
+  if (declared === text) throw new Error('the control manifest has no patterns block to add in_progress to');
   const manifest = join(work, 'writecheck.yaml');
-  writeFileSync(manifest, text);
+  writeFileSync(manifest, declared);
   const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...tokens, TRACKER_BACKEND_URL: `http://127.0.0.1:${backendPort}`, TRACKER_CONTROL_URL: `http://127.0.0.1:${controlPort}`, TRACKER_SAME_KEY_ANSWER: variant };
   const run = (args) => spawnSync(process.execPath, [cli, ...args], { env, encoding: 'utf8', timeout: 1_500_000, maxBuffer: 64 * 1024 * 1024 });
   const plan = run(['plan', '-m', manifest]);

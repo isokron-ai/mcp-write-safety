@@ -31,7 +31,8 @@ export const DEFAULT_PATTERNS: Record<SaysKind, string> = {
   not_used: String.raw`\b(not used|unused|ignored|had no effect|(was|were) not applied|dropped|not recogni[sz]ed and (was |were )?(ignored|not used))\b`,
   // The outcome is said to be unknown (MWS-RES-2, MWS-RETRY-2): about whether the write was applied, not any check that could not be made.
   outcome_unknown: String.raw`\b(not known whether|unknown whether|not sure whether|uncertain whether|(outcome|result|state|status of the (write|change|update)) (is|was|remains) (unknown|not known|uncertain)|may (or may not )?have (been (applied|written|saved|made)|succeeded|gone through)|might have (been (applied|written)|succeeded)|((could|can) ?not|couldn't|can't|unable to) (confirm|determine|tell|verify|know)( \S+){0,4}? (whether|if|that)|((could|can) ?not|couldn't|can't|unable to) (confirm|determine|tell|verify)( (the|this|that|your|its))? (write|update|change|request|operation|call|save|deletion|creation|it)(?=\s*([.;,:!)]|$)| (was|were|had|has|have|went|took|succeeded|completed|applied|is|got)\b))\b`,
-  in_progress: String.raw`\b(still in progress|already in progress|in flight|being processed)\b`,
+  // A call with the same key said to be still in progress, in use or outstanding (MWS-RETRY-2; MWS-RES-2, the same-key trial).
+  in_progress: String.raw`\b(still in progress|already in progress|(is|are) (currently )?in progress|in flight|being processed|(is|are) (currently |already )?(in use|being used)|outstanding)\b`,
   // why: a negated form ("not a replay", "replayed: false") says the opposite (review of note 8, 9).
   replay: String.raw`(?<!(\bnot|\bnever|\bno|n't)\s+((a|an|been|being)\s+)?)\b(replay(ed)?|already (applied|processed|done)|duplicate request|same (request|key) as before)\b(?!["']?\s*[:=]\s*["']?(false|no|0)\b)`,
   // An operation said to be accepted or pending (NF-19).
