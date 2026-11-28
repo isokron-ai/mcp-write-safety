@@ -11,7 +11,7 @@ import { MAP_FILE } from './writecheck-expected.mjs';
 const map = JSON.parse(readFileSync(MAP_FILE, 'utf8')).defects;
 const NINE = ['MWS-UPD-1', 'MWS-UPD-2', 'MWS-CONC-1', 'MWS-CONC-2', 'MWS-CONC-3', 'MWS-TGT-1', 'MWS-TGT-3', 'MWS-RES-1', 'MWS-ATOM-2'];
 
-test('R-DM-26: min mode expects violated for a defect it judges, not_testable_mock for a backend-semantic one (and the in-flight forms), nothing for a fixture defect', () => {
+test('R-DM-29: min mode expects violated for a defect it judges, not_testable_mock for a backend-semantic one (and the in-flight forms), nothing for a fixture defect', () => {
   const st = minStatuses();
   assert.deepEqual(NINE.filter((r) => st[r] !== 'not_testable_mock'), []);
   assert.deepEqual(minExpected('error-as-text', map['error-as-text']), ['MWS-RES-2:violated']);
@@ -26,7 +26,7 @@ test('R-DM-26: min mode expects violated for a defect it judges, not_testable_mo
 const doc = (results) => ({ format: 'mws-min-results/1', mode: 'min', results });
 const capped = NINE.map((r) => ({ requirement: r, verdict: 'not tested', status: 'not_testable_mock' }));
 
-test('R-DM-27: a min run is detected only where min mode said what it may; a backend-semantic defect reported held is missed, never detected', () => {
+test('R-DM-30: a min run is detected only where min mode said what it may; a backend-semantic defect reported held is missed, never detected', () => {
   const run = (results) => ({ ok: true, ...readMin(doc(results)) });
   assert.equal(judgeMin({ run: run([...capped, { requirement: 'MWS-RES-2', verdict: 'violated' }]), expected: map['error-as-text'], defect: 'error-as-text' }).state, 'detected');
   assert.equal(judgeMin({ run: run(capped), expected: map['read-merge-put'], defect: 'read-merge-put' }).state, 'detected');
@@ -41,7 +41,7 @@ test('R-DM-27: a min run is detected only where min mode said what it may; a bac
   assert.throws(() => readMin({ format: 'mws-results/1', results: [] }), /not a min-mode/);
 });
 
-test('R-DM-28: a min cell is judged by min mode\'s rules and its record says writecheck_mode min, with not_testable_mock answers kept', () => {
+test('R-DM-31: a min cell is judged by min mode\'s rules and its record says writecheck_mode min, with not_testable_mock answers kept', () => {
   const got = {};
   const cell = { kind: 'defect', defect: 'read-merge-put' };
   const run = { ok: true, ...readMin(doc(capped)) };

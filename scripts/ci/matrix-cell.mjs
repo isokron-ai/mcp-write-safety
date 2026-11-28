@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BUILDS, EXPECTED, judgeCell, labelsFor } from './matrix-plan.mjs';
 import { MAP_FILE } from './writecheck-expected.mjs';
-import { runWritecheck } from './writecheck-run.mjs';
+import { layoutFor, runWritecheck } from './writecheck-run.mjs';
 import { judgeMin, runMinCell } from './writecheck-min.mjs';
 
 const WC_ITEM = /^MWS-[A-Z0-9]+-[0-9]+:(violated|self-attested-no|platform|not_testable_mock)$/;
@@ -57,9 +57,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         : await runWritecheck({
           cli: process.env.WRITECHECK_CLI, tinyTracker: 'examples/tiny-tracker',
           defects: entry?.layer === 'mcp' ? [cell.defect] : [], backendDefects: entry?.layer === 'backend' ? [cell.defect] : [],
+          layout: layoutFor(cell),
         });
       writecheck = min ? { run, expected: entry, judge: judgeMin, mode: 'min' } : { run, expected: entry };
-      process.stdout.write(`writecheck ${JSON.stringify(run)}\n`);
+      process.stdout.write(`writecheck ${JSON.stringify(min ? run : { layout: layoutFor(cell), ...run })}\n`);
     }
     verdict = judgeCell({ cell, buildsDoc, expectedDoc, got, writecheck });
   } catch (err) {

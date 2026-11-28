@@ -133,6 +133,9 @@ export const FAULT_ACTIONS: Record<string, FaultAction> = {
   "mcp/after-backend-reply/crash": { position: "after-backend-reply", fire: async (result) => result, ...CRASH_ACTION },
   // G2 fold-in 11: fires inside the commit section (DurabilityOptions.afterEffect), never through the controller's hooks.
   "backend/after-effect-before-key/crash": { position: "after-commit", fire: async () => undefined, ...CRASH_ACTION },
+  // R-TT-10: the in-flight window. Fires after the pending key record and before the commit section; the write waits for
+  // hold_ms (capped like every hold), then goes on as it would have. Nothing is altered: the commit is the true one, late.
+  "backend/before-commit/delay": { position: "before-commit", fire: async (_ctx, _arm, kit) => { await kit.hold(undefined); } },
 };
 
 /** Validates an arming request. Unknown members are refused, never ignored. */
@@ -309,7 +312,8 @@ export class FaultController {
   readonly backendHooks: Required<BackendFaultHooks> = {
     beforeCommit: async (ctx) => {
       const call = { run: ctx.meta.attribution.run, operation: ctx.meta.attribution.operation };
-      const arm = this.pick("backend", "before-commit", call, () => undefined, false);
+      // why: a before-commit action that holds (the delay) counts against the cap of held answers, as an mcp hold does.
+      const arm = this.pick("backend", "before-commit", call, () => undefined, true);
       const action = arm && this.actions[arm.point];
       if (action && action.position === "before-commit") await action.fire(ctx, arm!, this.kit(arm!));
     },

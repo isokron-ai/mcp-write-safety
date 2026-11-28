@@ -642,8 +642,6 @@ describe("backend fault hooks (BackendOptions.faults): the controller fires back
 
   it("a before-commit action runs before anything is written; its firing names no entry", async () => {
     const point = "backend/before-commit/delay";
-    (BUILT_FAULT_POINTS as string[]).push(point);
-    FAULT_ACTIONS[point] = { position: "before-commit", fire: async (_ctx, _arm, kit) => { await kit.hold(undefined); } };
     const s = await stack();
     try {
       assert.equal((await s.arm(point, { hold_ms: 150 })).status, 201);
@@ -657,8 +655,45 @@ describe("backend fault hooks (BackendOptions.faults): the controller fires back
       assert.equal(entries[fired].fault!.fired_on_seq, null);
     } finally {
       await s.close();
-      (BUILT_FAULT_POINTS as string[]).pop();
-      delete FAULT_ACTIONS[point];
+    }
+  });
+
+  it("R-TT-10: backend/before-commit/delay is built and armable: a keyed create waits after its pending record, a same-key call meanwhile answers 409 in_progress, and the first then commits once", async () => {
+    assert.ok(BUILT_FAULT_POINTS.includes("backend/before-commit/delay"));
+    const s = await stack({ features: [...ALL, "inflight"] });
+    try {
+      const armed = await s.arm("backend/before-commit/delay", { once: true, hold_ms: 400 });
+      assert.equal(armed.status, 201, armed.text);
+      const id = armed.body.fault.id as string;
+      const key = { "idempotency-key": "r-tt-10-key-0001" };
+      const first = s.api.send("POST", "/tickets", { project: "inbox", title: "held" }, key);
+      let fired = false;
+      for (let i = 0; i < 40 && !fired; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+        const g = await call("GET", `${s.control}/_fixture/faults`, CONTROL);
+        fired = [...g.body.armed, ...g.body.spent].some((a: { id: string; fired: number }) => a.id === id && a.fired >= 1);
+      }
+      assert.ok(fired, "the arming reports its firing while the write is held");
+      const second = await s.api.send("POST", "/tickets", { project: "inbox", title: "held" }, key);
+      assert.deepEqual([second.status, second.body.error], [409, "in_progress"], "the second meets the pending key");
+      assert.equal((await first).status, 201);
+      assert.equal((await s.api.export()).tickets.length, 1, "applied once");
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("R-TT-10: mutation: with nothing armed the same two keyed calls never overlap: the second replays the first (the delay is what opens the window)", async () => {
+    const s = await stack({ features: [...ALL, "inflight"] });
+    try {
+      const key = { "idempotency-key": "r-tt-10-key-0002" };
+      const first = s.api.send("POST", "/tickets", { project: "inbox", title: "plain" }, key);
+      const second = await s.api.send("POST", "/tickets", { project: "inbox", title: "plain" }, key);
+      assert.equal((await first).status, 201);
+      assert.equal(second.status, 201, "a replay, not in_progress");
+      assert.equal((await s.api.export()).tickets.length, 1);
+    } finally {
+      await s.close();
     }
   });
 
