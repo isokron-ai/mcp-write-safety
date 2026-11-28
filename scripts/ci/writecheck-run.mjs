@@ -13,7 +13,7 @@
 // Actions log, and live for the run.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -116,7 +116,8 @@ function runOn(o, cli, work, manifest, env) {
   if (!hash) return { ok: false, error: `plan gave no plan hash (exit ${plan.status}): ${String(plan.stderr).slice(-300)}`, stderr: String(plan.stderr ?? '') };
   const out = join(work, 'out');
   const r = run(['run', '-m', manifest, '--confirm-target', 'tiny-tracker', '--plan-hash', hash, '--out', out, '--state', join(work, 'state')]);
-  const file = findResults(out.replace(/\/$/, '')) ?? null;
+  // why: a run that stopped before writing anything leaves no out folder; that is "no results.json", not a crash of the runner.
+  const file = existsSync(out) ? (findResults(out.replace(/\/$/, '')) ?? null) : null;
   if (!file) return { ok: false, error: `run wrote no results.json (exit ${r.status}): ${String(r.stderr).slice(-300)}`, stderr: String(r.stderr ?? '') };
   const doc = JSON.parse(readFileSync(file, 'utf8'));
   return { ok: true, observed: observedOf(doc), version: doc.suite?.version ?? 'unknown', records: (doc.results ?? []).length };
