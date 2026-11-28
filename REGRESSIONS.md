@@ -7,6 +7,7 @@ isokron-ai/tool-qa) reads this table, so keep its four columns.
 - `R-INP-*`: the dispatch inputs of the T0 worker workflows (`defect-matrix.yml`).
 - `R-DM-*`: the result bundle of the defect-matrix T0 worker (`scripts/ci/t0-bundle.mjs`).
 - `R-TT-*`: tiny-tracker's command line and server.
+- `R-PROBE-*`: the mutation-probe workflow (`mutation-probe.yml`).
 
 | ID | What it was | Pinned by | Fix |
 |---|---|---|---|
@@ -45,3 +46,4 @@ isokron-ai/tool-qa) reads this table, so keep its four columns.
 | R-DM-23 | LOW. Found by: design. What counts as reported: `violated`, `platform` and a review-only clause answered no, read from results.json; nothing else. | `scripts/ci/writecheck-matrix.test.mjs` › `R-DM-23: observedOf reads violated, platform and review answers "no" from a results.json, and nothing else` | 87790e9 |
 | R-DM-24 | MEDIUM. Found by: design. The driver gives the backend defect to the backend and the defect to the server, confirms the plan hash and target, and treats a CLI that cannot run as an error (stub CLI test). | `scripts/ci/writecheck-matrix.test.mjs` › `R-DM-24: the driver starts the backend with the backend defect, gives the server the defect, confirms the plan hash and reads results.json (stub CLI)` | 87790e9 |
 | R-DM-25 | HIGH. Found by: design (mutation checks). Dropping an expected answer, or a mcp-writecheck that stops reporting any one of the defects it is expected to catch, or a correct build with one injected violation at any level, must fail; the workflow must build the CLI it runs. | `scripts/ci/writecheck-matrix.test.mjs` › `R-DM-25: mutation checks: dropping an expected answer, or a writecheck that stops reporting a defect, is caught by these tests' own checks` | 87790e9 |
+| R-PROBE-01 | LOW. Found by: moving the reviewers' mutation checks from a local clone to Actions. The `mutation-probe` workflow of this repository is only a caller of tool-qa's reusable one; pinned to a branch or a tag, or given a pull-request trigger, secrets or write access, it would run tool-qa code that moved under it, on input from a fork. The test holds it to one full commit (the same one as `probe-ref`), `workflow_dispatch` only, `contents: read`, no secrets and no shell of its own. | `scripts/ci/mutation-probe-caller.test.mjs` › `R-PROBE-01: mutation-probe.yml calls the reusable workflow at one full commit and passes the same commit as probe-ref; dispatch only, read-only, no secrets` | 4b074fb |
