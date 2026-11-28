@@ -171,7 +171,17 @@ export async function conc46(c: Ctx): Promise<void> {
       T(c, { ...base, requirement: 'MWS-CONC-4', case: 'conflict', verdict: 'not tested', reason: why ?? 'the conflict was not delivered', reason_code: 'indeterminate' });
       continue;
     }
-    const applied = mutating2xx(s.recs);
+    // Only the refused write is judged here (spec MWS-CONC-4): a later request of the same call that changed the same object
+    // applied it after all; other items of a composite call are judged by MWS-ATOM-1, and a conflict that hit a request
+    // before an input_required answer is judged by MWS-RETRY-3 on that answer, not on the caller's retry.
+    const refused = s.recs.find((r) => r.fault)!;
+    if (s.first.inputRequired && s.firstRecs.includes(refused)) {
+      T(c, { ...base, requirement: 'MWS-CONC-4', case: 'conflict', verdict: 'not tested', reason: 'the conflict hit a request sent before the input_required answer; that write is judged by MWS-RETRY-3', reason_code: 'condition_not_forced' });
+      continue;
+    }
+    const refusedOn = new Set(c.targets(refused));
+    const after = s.recs.slice(s.recs.indexOf(refused) + 1);
+    const applied = mutating2xx(after).filter((r) => c.targets(r).some((t) => refusedOn.has(t)));
     const sh = c.shape(s.final);
     if (!s.final.isError || applied.length) {
       T(c, { ...base, requirement: 'MWS-CONC-4', case: 'conflict', verdict: 'violated', reason: !s.final.isError ? `the mock refused the write with a conflict; the result has no isError: true${s.final.rpcError ? ` (a JSON-RPC error ${s.final.rpcError.code})` : ''}` : `after the conflict the call applied ${applied.map((r) => `${r.method} ${r.path}`).join(', ')}` });

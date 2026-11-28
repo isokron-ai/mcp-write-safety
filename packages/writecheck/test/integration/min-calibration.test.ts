@@ -91,6 +91,15 @@ if (want('read-merge-put')) {
   });
 }
 
+if (want('shape-missing-failed') || want('close-before-confirm')) {
+  test('R-MIN-14: a conflict on one item of a composite call is not a CONC-4 violation when only other items were applied, nor one that hit a write before input_required', { skip, timeout: 600_000 }, async () => {
+    for (const d of ['shape-missing-failed', 'close-before-confirm']) {
+      const doc = await runBuild([d]);
+      assert.deepEqual(doc.results.filter((r) => r.requirement === 'MWS-CONC-4' && r.verdict === 'violated').map((r) => `${d} ${r.tool}: ${r.reason}`), []);
+    }
+  });
+}
+
 for (const [defect, e] of Object.entries(expected.defects)) {
   if (e.layer !== 'mcp' || !want(defect)) continue;
   const x = minExpectation(defect);
