@@ -278,6 +278,22 @@ Without a block, the requirements it unlocks are `not tested` (or `not applicabl
 
 Update modes: `field_patch`, `full_replace`, `command`, `composite` (several backend writes in one call; with the gate, its second and its last writes are failed for MWS-ATOM-1 and ATOM-2). The mode decides which requirements apply; it never excuses a lost update.
 
+## Min mode: a mock of the backend from its OpenAPI description
+
+Where the backend is somebody's hosted service, `mcp-writecheck min` runs the requirements that test the server's own layer against a mock of that backend made from its OpenAPI 3.x description, inside your sandbox:
+
+```sh
+mcp-writecheck min --spec openapi.yaml --spec-url https://example.com/openapi.yaml \
+  --base-url-env API_BASE_URL --env API_TOKEN --declaration writecheck.yaml --out min-results -- node dist/server.js
+```
+
+- The mock is built in (no third-party mock server to fetch or pin). It keeps the objects a create made so they can be read back, honours a declared `Idempotency-Key` header, records every request the server sends, and fails a named request (the second mutating one, the batch naming its second item, a lost answer after the write was applied, a conflict) when a check asks for it. Every fault is listed in `results.json` (`faults_injected`).
+- The server's base-URL variables (`--base-url-env`, and any `--env` name ending in `_URL`, `_HOST`, `_ENDPOINT` and the like) point at the mock; every other variable gets a dummy, a secret-like one a canary made for the run (MWS-SEC-1 looks for it in every result). Never give it a real credential. The plan is accepted without a person only when every target is the mock; any other URL refuses the run (`target_not_standin`).
+- What runs, and why, is one data file: `src/min/requirements-min.json`. The nine requirements that need real backend semantics (MWS-UPD-1/2, MWS-CONC-1/2/3, MWS-TGT-1/3, MWS-RES-1, MWS-ATOM-2) are always `not tested`, status `not_testable_mock`, reason code `backend_semantics_not_exercised`: never held, never violated. MWS-RES-2, MWS-RETRY-2, MWS-ANN-2/3/5 and MWS-TGT-2 are judged on the half a mock can show and are never held. Every record says `basis: stateful-mock`.
+- `--declaration` reads only the patterns, review answers, adopted result shape, settings, selector, `multi` reports, `fixed_constraints`, `try_values` and `no_version_check` of a manifest; a member marked `# guessed` is ignored, and a requirement that needs a member that is absent is `not tested` (`declaration_missing`).
+- A server that will not start against the mock, crashes on its reply, or asks for an endpoint the description lacks is `not tested`: the mock's limit, never the server's violation.
+- `results.json` is `mws-min-results/1`: `mode: "min"`, the spec's URL and sha256, the requirements that ran, and the records. Count it apart from a full run. Exit 0 complete, 1 a violated record, 3 refused or the server did not start against the mock.
+
 ## The backend gate
 
 The gate interposes on the hop between your server and its backend, so that a concurrency or failure case is forced by holding or failing one named request, never by timing. Two routes:

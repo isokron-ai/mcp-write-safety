@@ -37,7 +37,7 @@ function guardScript(yaml) {
 }
 
 const workflows = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f) && readFileSync(join(dir, f), 'utf8').includes(STEP)).sort();
-const GOOD = { IN_SHARD_ID: 's-1', IN_ATTEMPT_ID: 'a.2_x', IN_FENCE: 'f:3', IN_RUN_KEY: 'k:4', IN_DEFECTS: 'digest-of-current-state,lookup-reexecutes' };
+const GOOD = { IN_SHARD_ID: 's-1', IN_ATTEMPT_ID: 'a.2_x', IN_FENCE: 'f:3', IN_RUN_KEY: 'k:4', IN_DEFECTS: 'digest-of-current-state,lookup-reexecutes', IN_MODE: 'min' };
 
 function run(script, env) {
   const tmp = mkdtempSync(join(tmpdir(), 'wf-inputs-'));
@@ -59,7 +59,9 @@ test('R-INP-01: every T0 worker refuses a dispatch input with a newline in it', 
 
     const ok = run(script, {});
     assert.equal(ok.status, 0, `${wf}: good inputs pass\n${ok.text}`);
-    assert.match(ok.out, /^go=true\nattempt_id=a\.2_x\nfence=f:3\nrun_key=k:4\ncells=\[.*"digest-of-current-state".*\]\n$/, wf);
+    assert.match(ok.out, /^go=true\nattempt_id=a\.2_x\nfence=f:3\nrun_key=k:4\ncells=\[.*"digest-of-current-state".*\]\nmode=min\n$/, wf);
+    assert.match(run(script, { IN_MODE: '' }).out, /\nmode=full\n$/, `${wf}: no mode is full mode`);
+    assert.equal(run(script, { IN_MODE: 'max' }).status, 1, `${wf}: a mode other than full or min is refused`);
     assert.equal(run(script, { IN_DEFECTS: '' }).status, 0, `${wf}: no defects runs the control set`);
 
     for (const [name, good] of Object.entries(GOOD)) {

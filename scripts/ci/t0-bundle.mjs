@@ -34,7 +34,7 @@ export function judge(expected, found) {
   return expected.map((c) => {
     const f = byKey.get(keyOf(c));
     const outcome = f?.outcome === 'success' || f?.outcome === 'failure' ? f.outcome : 'incomplete';
-    return { ...c, ...(f ? { reason: f.reason, status: f.status, mode: f.mode, detected: f.detected, documented: f.documented, writecheck_detected: f.writecheck_detected, writecheck_clean: f.writecheck_clean, writecheck: f.writecheck } : {}), outcome };
+    return { ...c, ...(f ? { reason: f.reason, status: f.status, mode: f.mode, detected: f.detected, documented: f.documented, writecheck_detected: f.writecheck_detected, writecheck_clean: f.writecheck_clean, writecheck: f.writecheck, ...(f.writecheck_mode ? { writecheck_mode: f.writecheck_mode } : {}) } : {}), outcome };
   });
 }
 

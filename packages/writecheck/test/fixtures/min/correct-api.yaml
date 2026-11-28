@@ -1,0 +1,106 @@
+# The backend of the correct-server fixture (correct-server.mjs): an API whose shapes a mock made from this description cannot
+# model fully. Every server that uses it the way correct-server.mjs does is correct; min mode must give it no violated record.
+openapi: 3.1.0
+info: { title: min-mode mock-limit fixture, version: "1" }
+paths:
+  /items:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 50 }
+                idempotency_key: { type: string, description: "The same key with another request is refused (422 `key_reused`)." }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { type: object, properties: { item: { $ref: "#/components/schemas/Item" } } } } } }
+        "422": { description: invalid or a reused key, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /items/search:
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, properties: { q: { type: string } } } } } }
+      responses:
+        "200": { description: matches, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/Item" } } } } } } }
+  /items/{item_number}:
+    parameters: [{ name: item_number, in: path, required: true, schema: { type: integer } }]
+    get:
+      responses:
+        "200": { description: the item, content: { application/json: { schema: { type: object, properties: { item: { $ref: "#/components/schemas/Item" } } } } } }
+        "404": { description: not found, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    patch:
+      parameters: [{ name: If-Match, in: header, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 50 }
+                tags: { type: array, items: { $ref: "#/components/schemas/Tag" } }
+      responses:
+        "200": { description: written, content: { application/json: { schema: { type: object, properties: { item: { $ref: "#/components/schemas/Item" } } } } } }
+        "412": { description: changed since, content: { application/json: { schema: { type: object, properties: { error: { type: string }, message: { type: string }, current: { $ref: "#/components/schemas/Item" } } } } } }
+        default: { description: error, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /notes:
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string } } } } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { type: object, properties: { note: { $ref: "#/components/schemas/Note" } } } } } }
+  /notes/{noteIdOrKey}:
+    parameters: [{ name: noteIdOrKey, in: path, required: true, schema: { type: string } }]
+    get:
+      responses:
+        "200": { description: the note, content: { application/json: { schema: { type: object, properties: { note: { $ref: "#/components/schemas/Note" } } } } } }
+  /labels:
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { type: object, properties: { label: { $ref: "#/components/schemas/Label" } } } } } }
+        "409": { description: a label with this name already exists, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /labels/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      responses:
+        "200": { description: one, content: { application/json: { schema: { type: object, properties: { label: { $ref: "#/components/schemas/Label" } } } } } }
+  /heartbeats:
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, properties: { at: { type: string } } } } } }
+      responses:
+        "201": { description: recorded, content: { application/json: { schema: { type: object, properties: { heartbeat: { $ref: "#/components/schemas/Heartbeat" } } } } } }
+  /heartbeats/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      responses:
+        "200": { description: one, content: { application/json: { schema: { type: object, properties: { heartbeat: { $ref: "#/components/schemas/Heartbeat" } } } } } }
+components:
+  schemas:
+    Tag:
+      type: object
+      required: [name, color]
+      properties: { name: { type: string }, color: { type: string } }
+    Item:
+      type: object
+      required: [id, number, title, tags, version]
+      properties:
+        id: { type: integer }
+        number: { type: integer }
+        title: { type: string }
+        tags: { type: array, items: { $ref: "#/components/schemas/Tag" } }
+        version: { type: integer, minimum: 1 }
+    Note:
+      type: object
+      required: [id, key, text]
+      properties: { id: { type: string }, key: { type: string }, text: { type: string } }
+    Label:
+      type: object
+      required: [id, name]
+      properties: { id: { type: string }, name: { type: string } }
+    Heartbeat:
+      type: object
+      required: [id, at]
+      properties: { id: { type: string }, at: { type: string } }
+    Error:
+      type: object
+      required: [error, message]
+      properties: { error: { type: string }, message: { type: string } }

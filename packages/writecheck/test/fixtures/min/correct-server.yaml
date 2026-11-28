@@ -1,0 +1,13 @@
+# The declaration of the correct-server fixture, as min mode reads it (patterns, review answers, the read-only setting).
+mws: "0.9"
+patterns:
+  outcome_unknown: 'not known whether'
+  write_failed: '\bnothing was (created|changed|written)\b'
+  retry_invited: '\b(please retry|try again)\b'
+  not_used: '\bnot used\b'
+review:
+  conflict_says_not_applied: 'nothing was changed'
+  conflict_says_reread: 'read it with get_item'
+  rejection_gives_reason: 'must|expected'
+settings:
+  read_only: { env: FIX_READ_ONLY, on: "true", valid: { "true": restrict, "false": permit, "enabled": permit } }

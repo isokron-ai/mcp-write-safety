@@ -124,6 +124,8 @@ jobs:
           node ../../scripts/ci/test-shard.mjs run --shard ${{ matrix.shard }}/6
           --dir dist/test --exclude dist/test/unit
           --split dist/test/integration/tiny-tracker.test.js
+          --split dist/test/integration/min-calibration.test.js
+          --split dist/test/integration/min-mock-limits.test.js
           --manifest "$RUNNER_TEMP/cli-${{ matrix.shard }}.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
