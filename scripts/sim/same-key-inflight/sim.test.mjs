@@ -31,11 +31,12 @@ test('hand-worked cells', async () => {
   for (const [args, want] of cases) assert.deepEqual(pick(await simulateCell(...args)), want, args.join(' '));
 });
 
-test('B (strict B-9) gives no duplicate and no lost write to P1 to P4 on the grid', async () => {
-  for (const m of (await grid()).filter((x) => x.variant === 'B' && x.policy !== 'P5')) {
-    assert.equal(m.duplicate, false, `${m.policy} ${m.outcome} ${m.d}`);
-    assert.equal(m.lost, false, `${m.policy} ${m.outcome} ${m.d}`);
-  }
+test('B (strict B-9): no duplicate for P1 to P4; a lost write only where the client gives up without reading the outcome', async () => {
+  const g = (await grid()).filter((x) => x.variant === 'B' && x.policy !== 'P5');
+  for (const m of g) assert.equal(m.duplicate, false, `${m.policy} ${m.outcome} ${m.d}`);
+  const lost = g.filter((m) => m.lost).map((m) => `${m.policy} ${m.outcome} ${m.d}`);
+  // P2 says "not saved" once its retries run out with the first write still in flight; P3 says it on any non-success.
+  assert.deepEqual(lost, ['P2 lands 8000', 'P3 lands 800', 'P3 lands 1800', 'P3 lands 3000', 'P3 lands 8000']);
 });
 
 test('the grid covers every cell once, and the population is reproduced from its seed', async () => {
