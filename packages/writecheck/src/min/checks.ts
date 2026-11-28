@@ -6,9 +6,9 @@
  */
 
 import { nonAdditive } from '../checks/types.js';
-import { getPath, isObj, type Obj } from '../core/util.js';
+import { canonical, deepEqual, getPath, isObj, type Obj } from '../core/util.js';
 import { KEY_ARG, VERSION_ARG, mutating2xx, prose, said, type Base, type Ctx, type Step, type Trial } from './context.js';
-import type { MockRecord } from './mock.js';
+import { batchOps as batchOpsOf, type MockRecord } from './mock.js';
 import { succeeded, type ToolResult } from './mcp.js';
 import { matchOperation } from './openapi.js';
 import { mainType, matches, stringFor } from './values.js';
@@ -17,7 +17,18 @@ const MANAGED = /(^|\.)(version|updated_at|updatedAt|created_at|createdAt|etag)$
 let faultN = 0;
 const fid = (what: string) => `F${++faultN}-${what}`;
 
-const unusable = (s: Step): string | null => (s.crashed ? 'the server exited during the call (a reply of the mock it could not handle is our limit, not a finding)' : s.final.timedOut ? 'the call timed out (indeterminate, spec 7.3 rule 5)' : s.final.transportError ? `no answer: ${s.final.transportError}` : s.recs.some((r) => r.kind === 'unmatched') ? 'the server sent a request the description does not have (mock_incomplete)' : null);
+/**
+ * Why a call cannot be judged, or null. Every one of these is our limit, never the server's: the server exited on a reply of the
+ * mock, the call timed out, the server sent a request the description does not have, or one the mock answered without modelling
+ * its effect (an action endpoint such as POST /search: whether it wrote is not known).
+ */
+export const unusable = (s: Step): string | null =>
+  s.crashed ? 'the server exited during the call (a reply of the mock it could not handle is our limit, not a finding)'
+  : s.final.timedOut ? 'the call timed out (indeterminate, spec 7.3 rule 5)'
+  : s.final.transportError ? `no answer: ${s.final.transportError}`
+  : s.recs.some((r) => r.kind === 'unmatched') ? 'the server sent a request the description does not have (mock_incomplete)'
+  : s.recs.some((r) => r.unmodelled) ? `the server sent ${s.recs.filter((r) => r.unmodelled).map((r) => `${r.method} ${r.template}`).join(', ')}, which the mock answers without modelling its effect, so whether the call wrote is not known (unmodelled_request)`
+  : null;
 
 const T = (c: Ctx, t: Omit<Trial, 'method'> & { method?: Trial['method'] }): void => c.add({ method: 'black-box', ...t });
 
@@ -56,9 +67,11 @@ export function ann4(c: Ctx): void {
 /** A readOnlyHint tool that sent a mutating request the mock applied. Every call of the run counts (a search). */
 export function ann1(c: Ctx): void {
   for (const t of c.tools.filter((x) => c.ann(x.name)['readOnlyHint'] === true)) {
-    const steps = c.steps.filter((s) => s.tool === t.name && !s.crashed);
+    const called = c.steps.filter((s) => s.tool === t.name);
+    const steps = called.filter((s) => !unusable(s));
     if (!steps.length) {
-      T(c, { requirement: 'MWS-ANN-1', tool: t.name, case: 'calls', verdict: 'not tested', reason: c.noBase.get(t.name) ?? 'not called', reason_code: 'no_successful_call', steps: [] });
+      const why = called.map(unusable).find((x) => x) ?? c.noBase.get(t.name) ?? 'not called';
+      T(c, { requirement: 'MWS-ANN-1', tool: t.name, case: 'calls', verdict: 'not tested', reason: why, reason_code: /unmodelled_request/.test(why) ? 'unmodelled_request' : 'no_successful_call', steps: called.map((s) => s.id) });
       continue;
     }
     const bad = steps.filter((s) => mutating2xx(s.recs).length);
@@ -82,7 +95,9 @@ export async function sec1Provoke(c: Ctx): Promise<void> {
 
 export function sec1(c: Ctx): void {
   const leaks = c.steps.filter((s) => c.canaries.some((k) => JSON.stringify([s.first.raw, s.final.raw, s.final.rpcError]).includes(k)));
-  for (const s of leaks) T(c, { requirement: 'MWS-SEC-1', tool: s.tool, case: 'results', verdict: 'violated', reason: 'a credential canary the server was given for its backend is in a tool result', steps: [s.id] });
+  // A canary the mock itself answered with (it stored what the server sent) is not the server's leak: not tested.
+  const echoed = c.mock.records.some((r) => r.echoed_canary);
+  for (const s of leaks) T(c, echoed ? { requirement: 'MWS-SEC-1', tool: s.tool, case: 'results', verdict: 'not tested', reason: 'a canary is in a result, but the mock had answered with it (it kept what the server sent), so the leak may be the mock\'s', reason_code: 'mock_echoed_credential', steps: [s.id] } : { requirement: 'MWS-SEC-1', tool: s.tool, case: 'results', verdict: 'violated', reason: 'a credential canary the server was given for its backend is in a tool result', steps: [s.id] });
   if (!leaks.length) T(c, { requirement: 'MWS-SEC-1', tool: '(server)', case: 'results', verdict: 'not observed', reason: `no canary in ${c.steps.length} result(s), ${c.steps.filter((s) => s.final.isError).length} of them errors (a search: spec 8.2 rule 8)`, steps: [] });
 }
 
@@ -158,7 +173,9 @@ export async function res2(c: Ctx): Promise<void> {
 export async function conc46(c: Ctx): Promise<void> {
   for (const b of c.writeTools()) {
     const muts = b.step.recs.filter((r) => r.mutating);
-    const idx = muts.findIndex((r) => r.headers['if-match'] !== undefined || conflictDeclared(c, r));
+    // A conflict is injected only on a write that carried a precondition (If-Match, If-Unmodified-Since, or a version member of
+    // a batch operation): a backend never refuses an unconditional write as stale, so a 412 there would test nothing real.
+    const idx = muts.findIndex((r) => carriesPrecondition(r));
     if (idx < 0) continue;
     const args = c.again(b.tool);
     if (!args) continue;
@@ -205,10 +222,8 @@ export async function conc46(c: Ctx): Promise<void> {
   }
 }
 
-const conflictDeclared = (c: Ctx, r: MockRecord): boolean => {
-  const m = matchOperation(c.mock.model, r.method, r.path);
-  return !!m && m.op.responses.some((x) => x.status === '412');
-};
+export const carriesPrecondition = (r: MockRecord): boolean =>
+  r.headers['if-match'] !== undefined || r.header_values['if-unmodified-since'] !== undefined || (Array.isArray(batchOpsOf(r.body)) && batchOpsOf(r.body)!.some((o) => ['if_match', 'expected_version', 'version'].some((k) => o[k] !== undefined)));
 
 function findObject(c: Ctx, id: string): Obj | undefined {
   for (const col of c.mock.model.collections.filter((x) => !x.parent)) {
@@ -251,7 +266,12 @@ export async function res34(c: Ctx): Promise<void> {
     const created = applied.flatMap((r) => r.effect.created);
     const changed = applied.flatMap((r) => r.effect.changed);
     const deleted = applied.flatMap((r) => r.effect.deleted);
+    const certain = (ref: { collection: string }) => c.mock.model.collections.find((x) => x.path === ref.collection)?.idCertain !== false;
     for (const ref of created) {
+      if (!certain(ref)) {
+        T(c, { requirement: 'MWS-RES-3', tool: b.tool, case: 'create', steps: [s.id], verdict: 'not tested', reason: `the description does not say for certain which member of ${ref.collection} is the identifier its path uses, so which value the result must carry is not known`, reason_code: 'identifier_uncertain' });
+        continue;
+      }
       const ok = mentions(s.final, ref.id);
       T(c, { requirement: 'MWS-RES-3', tool: b.tool, case: 'create', steps: [s.id], verdict: ok ? 'held' : 'violated', reason: ok ? `the result carries the identifier the mock assigned (${ref.id})` : `the mock created ${ref.id}; the result does not carry it` });
     }
@@ -263,6 +283,7 @@ export async function res34(c: Ctx): Promise<void> {
     if (!created.length && topObjs.length !== 1) continue;
     const o = findObject(c, top.id) ?? (created[0] && changed[0] ? findObject(c, changed[0].id) : undefined);
     const missing: string[] = [];
+    if ([...created, ...changed].some((r) => !certain(r))) continue; // which value identifies the object is not known for certain
     const idShown = created.length ? created.every((r) => mentions(s.final, r.id)) : mentions(s.final, top.id);
     if (!idShown) missing.push('the identifier');
     const versionedObj = created.length && changed.length ? findObject(c, changed[0]!.id) : o;
@@ -329,14 +350,25 @@ export async function atom1(c: Ctx): Promise<void> {
 
 // ---------------------------------------------------------------------------------------------------------------- RETRY-1, RETRY-2, ANN-3
 
-/** A create whose identifier the mock assigned, on an operation that declares 201 and no 200 (the backend does not dedupe). */
-function plainCreate(c: Ctx, s: Step): boolean {
+/** Body members that commonly carry a value the backend keeps unique (a duplicate is refused or answered with the existing object). */
+const NATURAL_KEY = /^(key|slug|name|email|username|login|handle|external_?id|code|path|title_key)$/i;
+const DUPLICATE_WORDS = /\b(duplicate|already exists?|exists|conflict(s|ing)? with an existing|not unique|unique)\b/i;
+
+/**
+ * A create whose second identical call makes a second object by the backend's own contract: the mock assigned the identifier,
+ * the operation declares 201 and no 200, and the backend cannot be deduplicating it: no 409 or 422 that the description words as a
+ * duplicate, or, where one is declared, the request carries no member that could be the unique value (key, name, slug, email ...).
+ */
+export function plainCreate(c: Ctx, s: Step): boolean {
   return mutating2xx(s.recs).some((r) => {
     if (r.kind !== 'create' || !r.effect.created.length) return false;
     const col = c.mock.model.collections.find((x) => x.path === r.effect.created[0]!.collection);
     if (col && isObj(r.body) && r.body[col.idField] !== undefined) return false;
     const m = matchOperation(c.mock.model, r.method, r.path);
-    return !!m && m.op.responses.some((x) => x.status === '201') && !m.op.responses.some((x) => x.status === '200');
+    if (!m || !m.op.responses.some((x) => x.status === '201') || m.op.responses.some((x) => x.status === '200')) return false;
+    const dupDeclared = m.op.responses.some((x) => (x.status === '409' || x.status === '422') && DUPLICATE_WORDS.test(`${x.description} ${JSON.stringify(x.schema ?? '')}`));
+    const naturalKey = isObj(r.body) && Object.keys(r.body).some((k) => NATURAL_KEY.test(k));
+    return !(dupDeclared && naturalKey) || !!c.mutate['assumeNoDedupe'];
   });
 }
 
@@ -367,7 +399,15 @@ export async function retry2(c: Ctx): Promise<void> {
     const ks = props[keyArg] ?? {};
     const key = (n: string) => stringFor(ks, `mwsminkey${n}${Date.now().toString(36)}`, n.length) ?? `mwsminkey${n}`;
     const plain = plainCreate(c, b.step);
-    const R = (cs: string, steps: Step[], verdict: Trial['verdict'], reason: string, method: Trial['method'] = 'black-box') => T(c, { requirement: 'MWS-RETRY-2', tool: b.tool, case: cs, steps: steps.map((s) => s.id), verdict, reason, method });
+    // A key the server forwarded by a carrier the mock does not honour (a header or body member the description does not declare)
+    // leaves the backend's handling of it unknown: the step is not tested, whatever the mock did with the repeat.
+    const R = (cs: string, steps: Step[], verdict: Trial['verdict'], reason: string, method: Trial['method'] = 'black-box', key?: string) => {
+      const how = key !== undefined ? keyCarried(steps, key) : 'honoured';
+      if (how === 'unmodelled' && !c.mutate['judgeUnmodelledCarrier']) return T(c, { requirement: 'MWS-RETRY-2', tool: b.tool, case: cs, steps: steps.map((s) => s.id), verdict: 'not tested', reason: 'the server forwarded the key by a carrier the description does not declare (an undeclared header or body member), so what the backend does with a repeat is not known', reason_code: 'key_carrier_unmodelled', method });
+      const bad = steps.map(unusable).find((x) => x);
+      if (bad) return T(c, { requirement: 'MWS-RETRY-2', tool: b.tool, case: cs, steps: steps.map((s) => s.id), verdict: 'not tested', reason: bad, reason_code: 'indeterminate', method });
+      return T(c, { requirement: 'MWS-RETRY-2', tool: b.tool, case: cs, steps: steps.map((s) => s.id), verdict, reason, method });
+    };
     // (a) the same key and arguments twice.
     let args = c.again(b.tool);
     if (!args) continue;
@@ -375,16 +415,18 @@ export async function retry2(c: Ctx): Promise<void> {
     const a1 = await c.call(b.tool, { ...args, [keyArg]: ka }, `retry2-a1-${b.tool}`);
     const a2 = await c.call(b.tool, { ...args, [keyArg]: ka }, `retry2-a2-${b.tool}`);
     const na = createdIn([a1, a2]);
-    if (unusable(a1) || unusable(a2)) R('same-key', [a1, a2], 'not tested', unusable(a1) ?? unusable(a2)!);
-    else if (na.length > 1) R('same-key', [a1, a2], 'violated', `one key, the same arguments, two objects at the mock (${na.join(', ')})${a1.recs.some((r) => r.headers['idempotency-key'] === ka) ? '' : '; the key was not forwarded to the backend'}`);
-    else R('same-key', [a1, a2], 'held', 'applied once');
+    if (na.length > 1) R('same-key', [a1, a2], 'violated', `one key, the same arguments, two objects at the mock (${na.join(', ')})${keyCarried([a1], ka) === 'not_sent' ? '; the key was not forwarded to the backend' : ''}`, 'black-box', ka);
+    else R('same-key', [a1, a2], 'held', 'applied once', 'black-box', ka);
     // (b) a new key is a new write (only where the backend does not dedupe on its own).
     if (plain) {
       args = c.again(b.tool) ?? args;
-      const b1 = await c.call(b.tool, { ...args, [keyArg]: key('b1') }, `retry2-b1-${b.tool}`);
-      const b2 = await c.call(b.tool, { ...args, [keyArg]: key('b2') }, `retry2-b2-${b.tool}`);
+      const kb1 = key('b1');
+      const kb2 = key('b2');
+      const b1 = await c.call(b.tool, { ...args, [keyArg]: kb1 }, `retry2-b1-${b.tool}`);
+      const b2 = await c.call(b.tool, { ...args, [keyArg]: kb2 }, `retry2-b2-${b.tool}`);
       const nb = createdIn([b1, b2]).length;
-      if (!unusable(b1) && !unusable(b2)) R('new-key', [b1, b2], nb === 2 ? 'held' : succeeded(b2.final) ? 'violated' : 'not tested', nb === 2 ? 'a new key made a new object' : 'a new key with the same arguments was not treated as a new write');
+      if (keyCarried([b2], kb2) !== 'unmodelled') R('new-key', [b1, b2], nb === 2 ? 'held' : succeeded(b2.final) ? 'violated' : 'not tested', nb === 2 ? 'a new key made a new object' : 'a new key with the same arguments was not treated as a new write', 'black-box', kb1);
+      else R('new-key', [b1, b2], 'not tested', '', 'black-box', kb2);
     }
     // (c) the same key with different arguments must be refused.
     args = c.again(b.tool) ?? args;
@@ -394,7 +436,7 @@ export async function retry2(c: Ctx): Promise<void> {
       const c1 = await c.call(b.tool, { ...args, [keyArg]: kc }, `retry2-c1-${b.tool}`);
       const changed = stringFor(props[strArg] ?? {}, `${String(args[strArg]).slice(0, 40)}x`, 3) ?? `${String(args[strArg])}x`;
       const c2 = await c.call(b.tool, { ...args, [strArg]: changed, [keyArg]: kc }, `retry2-c2-${b.tool}`);
-      if (!unusable(c1) && !unusable(c2) && succeeded(c1.final)) R('changed-arguments', [c1, c2], succeeded(c2.final) ? 'violated' : 'held', succeeded(c2.final) ? `the key was reused with ${strArg} changed and the call was answered as a success${c2.recs.length ? '' : ' without any request to the backend'}` : 'the reused key with changed arguments was refused');
+      if (succeeded(c1.final)) R('changed-arguments', [c1, c2], succeeded(c2.final) ? 'violated' : 'held', succeeded(c2.final) ? `the key was reused with ${strArg} changed and the call was answered as a success${c2.recs.length ? '' : ' without any request to the backend'}` : 'the reused key with changed arguments was refused', 'black-box', kc);
     }
     // (d) a lost answer, then the caller's repeat with the same key.
     args = c.again(b.tool) ?? args;
@@ -406,8 +448,7 @@ export async function retry2(c: Ctx): Promise<void> {
     c.mock.disarm();
     const d2 = await c.call(b.tool, { ...args, [keyArg]: kd }, `retry2-d2-${b.tool}`);
     const nd = createdIn([d1, d2]);
-    if (d1.crashed || d2.crashed) R('lost-answer', [d1, d2], 'not tested', 'the server exited', 'proxy-assisted');
-    else R('lost-answer', [d1, d2], nd.length > 1 ? 'violated' : 'held', nd.length > 1 ? `after a lost answer one key made ${nd.length} objects (${nd.join(', ')})` : 'after a lost answer and a repeat with the key, the write was applied once', 'proxy-assisted');
+    R('lost-answer', [d1, d2], nd.length > 1 ? 'violated' : 'held', nd.length > 1 ? `after a lost answer one key made ${nd.length} objects (${nd.join(', ')})` : 'after a lost answer and a repeat with the key, the write was applied once', 'proxy-assisted', kd);
     // (e) a restart of the server between the two calls.
     args = c.again(b.tool) ?? args;
     const ke = key('e');
@@ -419,7 +460,7 @@ export async function retry2(c: Ctx): Promise<void> {
     }
     const e2 = await c.call(b.tool, { ...args, [keyArg]: ke }, `retry2-e2-${b.tool}`);
     const ne = createdIn([e1, e2]);
-    if (!unusable(e1) && !unusable(e2)) R('restart', [e1, e2], ne.length > 1 ? 'violated' : 'held', ne.length > 1 ? `after a restart of the server one key made two objects (${ne.join(', ')})` : 'after a restart the repeat applied nothing new', 'launch');
+    R('restart', [e1, e2], ne.length > 1 ? 'violated' : 'held', ne.length > 1 ? `after a restart of the server one key made two objects (${ne.join(', ')})` : 'after a restart the repeat applied nothing new', 'launch', ke);
   }
 }
 
@@ -445,16 +486,16 @@ export async function ann25(c: Ctx): Promise<void> {
     const s = await c.call(b.tool, args, `ann25-${b.tool}`);
     const after = c.mock.snapshot();
     if (unusable(s)) continue;
-    const lost: string[] = [];
+    const lostAt: { at: string; field: string | null }[] = [];
     for (const [col, objs] of Object.entries(before)) {
       for (const [id, o] of Object.entries(objs)) {
         const a = after[col]?.[id];
-        if (!a) lost.push(`${col}/${id}`);
-        else for (const p of nonAdditive(o, a)) if (!MANAGED.test(p)) lost.push(`${col}/${id}.${p}`);
+        if (!a) lostAt.push({ at: `${col}/${id}`, field: null });
+        else for (const p of c.mutate['positionalCompare'] ? nonAdditive(o, a) : lostData(o, a)) if (!MANAGED.test(p)) lostAt.push({ at: `${col}/${id}.${p}`, field: p.split(/[.[]/)[0] ?? p });
       }
     }
-    const field = (p: string) => p.split('.')[1]?.split('[')[0] ?? '';
-    const unnamed = lost.filter((p) => !p.includes('.') || !(field(p) in args));
+    const lost = lostAt.map((x) => x.at);
+    const unnamed = lostAt.filter((x) => x.field === null || !(x.field in args)).map((x) => x.at);
     T(c, { requirement: 'MWS-ANN-5', tool: b.tool, case: 'call', steps: [s.id], verdict: lost.length ? 'violated' : 'not tested', reason: lost.length ? `declared destructiveHint: false, and the call removed or replaced ${lost.slice(0, 5).join(', ')} at the mock` : 'nothing was removed or replaced at the mock; additivity against the real backend needs its state', ...(lost.length ? {} : { reason_code: 'backend_state_needed' }) });
     T(c, { requirement: 'MWS-ANN-2', tool: b.tool, case: 'call', steps: [s.id], verdict: unnamed.length ? 'violated' : 'not tested', reason: unnamed.length ? `declared destructiveHint: false, and the call removed or changed data it did not name: ${unnamed.slice(0, 5).join(', ')}` : 'no data the call did not name was removed at the mock; the real backend\'s state is needed for more', ...(unnamed.length ? {} : { reason_code: 'backend_state_needed' }) });
   }
@@ -473,7 +514,7 @@ export function retry3(c: Ctx): void {
 // ---------------------------------------------------------------------------------------------------------------- IN-1 .. IN-7
 
 /** The value the server forwarded for an argument: the member of that name in a mutating request's body or query. */
-function forwarded(recs: MockRecord[], arg: string): { found: boolean; value: unknown } {
+function forwarded(recs: MockRecord[], arg: string, reads = false): { found: boolean; value: unknown } {
   const walk = (x: unknown, depth = 0): { found: boolean; value: unknown } => {
     if (depth > 6) return { found: false, value: undefined };
     if (Array.isArray(x)) {
@@ -490,7 +531,7 @@ function forwarded(recs: MockRecord[], arg: string): { found: boolean; value: un
     }
     return { found: false, value: undefined };
   };
-  for (const r of recs.filter((x) => x.mutating)) {
+  for (const r of recs.filter((x) => x.mutating || reads)) {
     const w = walk(r.body);
     if (w.found) return w;
     if (Object.hasOwn(r.query, arg)) return { found: true, value: r.query[arg] };
@@ -604,11 +645,16 @@ export async function inputs(c: Ctx): Promise<void> {
         continue;
       }
       if (p.kind === 'constraint') {
-        if (!fw.found) T(c, { ...base, requirement: 'MWS-IN-3', verdict: 'violated', reason: `${p.what} for ${p.arg} was accepted (the call succeeded) and not passed on` });
-        else {
-          const valid = c.mock.requestValid(sent.find((r) => forwarded([r], p.arg).found)!);
-          T(c, valid === true ? { ...base, requirement: 'MWS-IN-3', verdict: 'violated', reason: `${p.what} for ${p.arg} was not refused: it reached the mock, and the backend's own description accepts it` } : { ...base, requirement: 'MWS-IN-3', verdict: 'not tested', reason: `the value reached the mock; the backend's description ${valid === false ? 'refuses' : 'cannot say whether it accepts'} it, so the real backend might refuse it`, reason_code: 'backend_semantics_not_exercised' });
-        }
+        // Where the value went: any request of the call (a read's query too) that carries it, by the argument's name or by the
+        // value itself (a server may send it under another name). Accepted with no request at all is the server's own acceptance;
+        // a value that reached the mock is judged only where the backend's own description accepts it there (else the real backend
+        // may refuse it, and the call with it); a value that cannot be traced is not judged.
+        const traced = s.recs.filter((r) => !r.unmodelled && (forwarded([r], p.arg, true).found || carriesValue(r, p.value)));
+        const verdicts = traced.map((r) => c.mock.carriedValid(r, p.arg, p.value));
+        if (!s.recs.length) T(c, { ...base, requirement: 'MWS-IN-3', verdict: 'violated', reason: `${p.what} for ${p.arg} was accepted (the call succeeded) without any request to the backend` });
+        else if (!traced.length) T(c, { ...base, requirement: 'MWS-IN-3', verdict: 'not tested', reason: `the call succeeded, but the value cannot be found in what the server sent the mock, so whether the backend would refuse it is not known`, reason_code: 'value_not_traced' });
+        else if (verdicts.every((v) => v === true) || c.mutate['ignoreBackendSchema']) T(c, { ...base, requirement: 'MWS-IN-3', verdict: 'violated', reason: `${p.what} for ${p.arg} was not refused: it reached the mock, and the backend's own description accepts it there` });
+        else T(c, { ...base, requirement: 'MWS-IN-3', verdict: 'not tested', reason: `the value reached the mock; the backend's description ${verdicts.includes(false) ? 'refuses' : 'cannot say whether it accepts'} it, so the real backend might refuse it`, reason_code: 'backend_semantics_not_exercised' });
         continue;
       }
       // Accepted with a wrong type: IN-6 (not rejected) and IN-1 (did the conversion keep the meaning?).
@@ -688,19 +734,30 @@ export async function cfg(c: Ctx): Promise<void> {
     // CFG-3: read-only mode on; every write tool must refuse.
     if (await started({ [ro.env]: ro.on })) {
       for (const s of await tryWrites('cfg3')) {
+        if (unusable(s)) {
+          T(c, { requirement: 'MWS-CFG-3', tool: s.tool, case: `${ro.env}=${ro.on}`, method: 'launch', steps: [s.id], verdict: 'not tested', reason: unusable(s)!, reason_code: 'indeterminate' });
+          continue;
+        }
         const w = mutating2xx(s.recs);
         T(c, { requirement: 'MWS-CFG-3', tool: s.tool, case: `${ro.env}=${ro.on}`, method: 'launch', steps: [s.id], verdict: w.length ? 'violated' : 'held', reason: w.length ? `in read-only mode ${w.map((r) => `${r.method} ${r.path}`).join(', ')} reached the mock and was applied` : 'refused in read-only mode; no write reached the mock' });
       }
     } else T(c, { requirement: 'MWS-CFG-3', tool: '(server)', case: `${ro.env}=${ro.on}`, method: 'launch', steps: [], verdict: 'not tested', reason: 'the server did not start in read-only mode', reason_code: 'start_failed' });
     // CFG-1: every restricting value, and one the server cannot recognize.
-    const values = [...Object.entries(ro.valid).filter(([v, k]) => k === 'restrict' && v !== ro.on).map(([v]) => v), 'enabled'];
+    // An unrecognized value: one the declaration does not list (a declared value, such as enabled: permit, is not unrecognized).
+    const unrecognized = ['enabled', 'mwsmin-unrecognized'].find((v) => !(v in ro.valid) || !!c.mutate['probeDeclaredValues']) ?? 'mwsmin-unrecognized';
+    const values = [...Object.entries(ro.valid).filter(([v, k]) => k === 'restrict' && v !== ro.on).map(([v]) => v), unrecognized];
     for (const v of values) {
       if (!(await started({ [ro.env]: v }))) {
         T(c, { requirement: 'MWS-CFG-1', tool: '(server)', case: `${ro.env}=${v}`, method: 'launch', steps: [], verdict: 'held', reason: `the server did not start with ${ro.env}=${v}` });
         continue;
       }
-      const steps = await tryWrites(`cfg1-${v}`);
+      const all = await tryWrites(`cfg1-${v}`);
+      const steps = all.filter((s) => !unusable(s));
       const w = steps.filter((s) => mutating2xx(s.recs).length);
+      if (!w.length && !steps.length) {
+        T(c, { requirement: 'MWS-CFG-1', tool: '(server)', case: `${ro.env}=${v}`, method: 'launch', steps: all.map((s) => s.id), verdict: 'not tested', reason: all.map(unusable).find((x) => x) ?? 'no write tool could be called', reason_code: 'indeterminate' });
+        continue;
+      }
       T(c, { requirement: 'MWS-CFG-1', tool: '(server)', case: `${ro.env}=${v}`, method: 'launch', steps: steps.map((s) => s.id), verdict: w.length ? 'violated' : 'held', reason: w.length ? `with ${ro.env}=${v} the server started with writes on: ${w.map((s) => s.tool).join(', ')} wrote to the mock` : `with ${ro.env}=${v} no write reached the mock` });
     }
   }
@@ -711,9 +768,11 @@ export async function cfg(c: Ctx): Promise<void> {
     const value = `${writes[0]!.tool},mwsmin_no_such_tool`;
     if (!(await started({ [deny.env]: value }))) T(c, { requirement: 'MWS-CFG-2', tool: '(server)', case: `${deny.env}=${value}`, method: 'launch', steps: [], verdict: 'held', reason: 'the server did not start with an unknown name in the deny-list' });
     else {
-      const steps = await tryWrites('cfg2');
+      const all = await tryWrites('cfg2');
+      const steps = all.filter((s) => !unusable(s));
       const w = steps.filter((s) => mutating2xx(s.recs).length);
-      T(c, { requirement: 'MWS-CFG-2', tool: '(server)', case: `${deny.env}=${value}`, method: 'launch', steps: steps.map((s) => s.id), verdict: w.length ? 'violated' : 'held', reason: w.length ? `with an unknown name in the deny-list the server started and ${w.map((s) => s.tool).join(', ')} wrote to the mock` : 'with an unknown name in the deny-list the server started with writes disabled' });
+      if (!w.length && !steps.length) T(c, { requirement: 'MWS-CFG-2', tool: '(server)', case: `${deny.env}=${value}`, method: 'launch', steps: all.map((s) => s.id), verdict: 'not tested', reason: all.map(unusable).find((x) => x) ?? 'no write tool could be called', reason_code: 'indeterminate' });
+      else T(c, { requirement: 'MWS-CFG-2', tool: '(server)', case: `${deny.env}=${value}`, method: 'launch', steps: steps.map((s) => s.id), verdict: w.length ? 'violated' : 'held', reason: w.length ? `with an unknown name in the deny-list the server started and ${w.map((s) => s.tool).join(', ')} wrote to the mock` : 'with an unknown name in the deny-list the server started with writes disabled' });
     }
   }
   if (!allow) T(c, { requirement: 'MWS-CFG-4', tool: '(server)', case: 'setting', method: 'launch', steps: [], verdict: 'not tested', reason: 'the declaration names no allow-list setting', reason_code: 'declaration_missing' });
@@ -727,3 +786,58 @@ export async function cfg(c: Ctx): Promise<void> {
 }
 
 export type { Base };
+
+/** Members that identify an element of a list: its own id, else a natural key. */
+const IDENTITY_KEYS = ['id', 'uuid', 'key', 'name', 'slug'];
+const identityOf = (e: unknown): string => {
+  if (isObj(e)) for (const k of IDENTITY_KEYS) if (e[k] !== undefined && e[k] !== null && typeof e[k] !== 'object') return `${k}=${String(e[k])}`;
+  return canonical(e);
+};
+
+/**
+ * What a write removed or replaced, for MWS-ANN-2 and MWS-ANN-5: a member that is gone, a scalar whose value changed, or a list
+ * element that is no longer in the list, an element known by its identity (its id, else a natural key such as its name), not by
+ * its position or its serialization. Key order, values written back unchanged and a read-modify-write that keeps every element
+ * (a superset) are additive. A member that was empty (null or absent) and now holds a value gained data.
+ */
+export function lostData(before: unknown, after: unknown, path = ''): string[] {
+  if (before === null || before === undefined || deepEqual(before, after)) return [];
+  const at = (k: string | number) => (typeof k === 'number' ? `${path}[${k}]` : path ? `${path}.${k}` : k);
+  if (Array.isArray(before)) {
+    if (!Array.isArray(after)) return [path || '(root)'];
+    const left = after.map((x) => ({ x, id: identityOf(x), used: false }));
+    const out: string[] = [];
+    before.forEach((e, i) => {
+      const id = identityOf(e);
+      const hit = left.find((l) => !l.used && l.id === id);
+      if (!hit) {
+        out.push(at(i));
+        return;
+      }
+      hit.used = true;
+      if (isObj(e) && isObj(hit.x)) out.push(...lostData(e, hit.x, at(i)));
+    });
+    return out;
+  }
+  if (isObj(before)) {
+    if (!isObj(after)) return [path || '(root)'];
+    return Object.keys(before).flatMap((k) => (Object.hasOwn(after, k) ? lostData(before[k], after[k], at(k)) : before[k] === null || before[k] === undefined ? [] : [at(k)]));
+  }
+  return [path || '(root)'];
+}
+
+/** How a key reached the mock in these calls: by a carrier it honours, by one it does not model, or not at all (kept by the server). */
+export function keyCarried(steps: Step[], key: string): 'honoured' | 'unmodelled' | 'not_sent' {
+  const recs = steps.flatMap((s) => s.recs).filter((r) => r.mutating);
+  const seen = recs.filter((r) => JSON.stringify([r.header_values, r.body, r.query]).includes(key));
+  if (!seen.length) return 'not_sent';
+  return seen.every((r) => r.idempotency_key === key) ? 'honoured' : 'unmodelled';
+}
+
+/** Does a request carry a value (in its body or its query), whatever the member's name? */
+export function carriesValue(r: MockRecord, v: unknown): boolean {
+  if (v === null || v === undefined) return false;
+  if (Object.values(r.query).some((q) => q === String(v))) return true;
+  const walk = (x: unknown, depth = 0): boolean => (depth > 8 ? false : Array.isArray(x) ? x.some((y) => walk(y, depth + 1)) : isObj(x) ? Object.values(x).some((y) => walk(y, depth + 1)) : deepEqual(x, v));
+  return walk(r.body);
+}

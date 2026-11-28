@@ -235,3 +235,132 @@ test('R-MIN-13: identifiers are made from the description\'s pattern (T-1234 for
   assert.match(fromPattern('^[a-z0-9][a-z0-9-]{0,62}$', 3)!, /^[a-z0-9][a-z0-9-]{0,62}$/);
   assert.equal(fromPattern('^(a|b)$', 1), null, 'an alternation is not guessed at');
 });
+
+// ---- review fixes (28 Nov): what the mock cannot model is not tested, never violated ----
+
+import { existsSync, readdirSync } from 'node:fs';
+import { carriesPrecondition, keyCarried, lostData, plainCreate as _plainCreate } from '../../src/min/checks.js';
+import { nonAdditive } from '../../src/checks/types.js';
+import { sanitizePatterns, loadDescription } from '../../src/min/openapi.js';
+import { safeTest } from '../../src/min/values.js';
+import { sameOrigin } from '../../src/min/run.js';
+void _plainCreate;
+
+test('R-MIN-18: a target is the mock only by a parsed origin compare (a look-alike host, another port or a user part is refused)', () => {
+  const m = 'http://127.0.0.1:5000';
+  assert.equal(sameOrigin('http://127.0.0.1:5000/v1', m), true);
+  for (const bad of ['http://127.0.0.1:5000.evil.example/', 'http://127.0.0.1:50001', 'https://127.0.0.1:5000', 'http://user@127.0.0.1:5000', 'not a url']) assert.equal(sameOrigin(bad, m), false, bad);
+  // Mutation: the old startsWith compare let the look-alike through.
+  assert.equal('http://127.0.0.1:5000.evil.example/'.startsWith(m), true);
+});
+
+test('R-MIN-19: patterns from a server or a description are bounded in length and time; a risky or invalid one is dropped and listed', () => {
+  assert.equal(safeTest('^a+$', 'aaa'), true);
+  assert.equal(safeTest('x'.repeat(300), 'x'), null, 'over the length bound');
+  const t0 = Date.now();
+  assert.equal(safeTest('^(a|a)*$', `${'a'.repeat(40)}!`), null, 'over the time limit');
+  assert.ok(Date.now() - t0 < 2000);
+  const doc = { components: { schemas: { A: { type: 'string', pattern: '^(a+)+$' }, B: { type: 'string', pattern: '[' }, C: { type: 'string', pattern: '^ok$' } } } };
+  const notes: string[] = [];
+  sanitizePatterns(doc, notes);
+  assert.equal((doc.components.schemas.A as { pattern?: string }).pattern, undefined);
+  assert.equal((doc.components.schemas.B as { pattern?: string }).pattern, undefined);
+  assert.equal(doc.components.schemas.C.pattern, '^ok$');
+  assert.equal(notes.length, 2);
+});
+
+test('R-MIN-20: a malformed $ref and an oversized description are refused without a crash', () => {
+  const m = buildModel({ openapi: '3.1.0', info: {}, paths: { '/a/{id}': { get: { responses: { '200': { description: 'x', content: { 'application/json': { schema: { $ref: '#/components/%E0%A4%A' } } } } } } }, '/b': { get: { responses: { '200': { description: 'x', content: { 'application/json': { schema: { $ref: 42 } } } } } } } } }, 'x');
+  assert.ok(m.unexpressed.some((u) => /\$ref/.test(u)));
+  const dir = mkdtempSync(join(tmpdir(), 'min-big-'));
+  const f = join(dir, 'big.json');
+  writeFileSync(f, `{"openapi":"3.1.0","x":"${'y'.repeat(17 * 1024 * 1024)}"}`);
+  assert.throws(() => loadDescription(f), /larger than/);
+});
+
+test('R-MIN-21: the bodies of injected faults are neutral (they do not say a mock or an injection made them)', async () => {
+  const m = new Mock(buildModel(SPEC, JSON.stringify(SPEC)));
+  const url = await m.listen();
+  try {
+    const bodies: string[] = [];
+    for (const fault of [{ kind: 'status', status: 422, code: 'validation' }, { kind: 'status', status: 503, code: 'unavailable' }] as const) {
+      m.arm({ id: 'F', mutating: true, nth: 1, fault });
+      bodies.push(JSON.stringify((await http(`${url}/things`, 'POST', { name: 'n' })).body));
+    }
+    await http(`${url}/things`, 'POST', { name: 'z' });
+    const id = String(m.objects('/things')[0]!['id']);
+    m.arm({ id: 'C', mutating: true, nth: 1, fault: { kind: 'conflict' } });
+    bodies.push(JSON.stringify((await http(`${url}/things/${id}`, 'PATCH', { name: 'q' }, { 'if-match': '"1"' })).body));
+    for (const b of bodies) assert.doesNotMatch(b, /mock|inject|min-mode|writecheck/i, b);
+  } finally {
+    await m.close();
+  }
+});
+
+test('R-MIN-22: a document that breaks a cap is never written as results.json; cap-violations.json says why', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'min-cap-'));
+  const spec = join(dir, 'spec.json');
+  writeFileSync(spec, JSON.stringify(SPEC));
+  const out = join(dir, 'out');
+  const doc = await runMin({ spec, server: { command: process.execPath, args: ['-e', 'process.exit(9)'], env: {} }, baseUrlEnv: [], out, mutate: { cap: false } });
+  assert.ok((doc.cap_violations ?? []).length > 0);
+  assert.equal(existsSync(join(out, 'results.json')), false);
+  assert.ok(readdirSync(out).includes('cap-violations.json'));
+  // And with the cap on, the same run writes results.json.
+  const out2 = join(dir, 'out2');
+  await runMin({ spec, server: { command: process.execPath, args: ['-e', 'process.exit(9)'], env: {} }, baseUrlEnv: [], out: out2 });
+  assert.equal(existsSync(join(out2, 'results.json')), true);
+});
+
+const recOf = (o: Partial<import('../../src/min/mock.js').MockRecord>): import('../../src/min/mock.js').MockRecord => ({ seq: 1, step: 's', method: 'PATCH', path: '/x/1', query: {}, template: '/x/{id}', kind: 'update', mutating: true, headers: { authorization_present: false }, body: {}, status: 200, fault: null, replayed: false, effect: { created: [], changed: [], deleted: [] }, unmodelled: false, unknown_members: [], applied: true, changed_fields: [], header_values: {}, key_carrier: null, idempotency_key: null, echoed_canary: false, ...o });
+
+test('R-MIN-23: a conflict is injected only on a write that carried a precondition (If-Match, If-Unmodified-Since, a batch version)', () => {
+  assert.equal(carriesPrecondition(recOf({ headers: { 'if-match': '"3"', authorization_present: false } })), true);
+  assert.equal(carriesPrecondition(recOf({ header_values: { 'if-unmodified-since': 'x' } })), true);
+  assert.equal(carriesPrecondition(recOf({ body: { ops: [{ op: 'patch', id: 'a', if_match: 2 }] } })), true);
+  assert.equal(carriesPrecondition(recOf({})), false, 'an unconditional write, whatever the description declares');
+});
+
+test('R-MIN-24: a list write is additive when every element is still there by its identity, whatever the order of keys or elements', () => {
+  const before = { tags: [{ name: 'a', color: 'red' }, { name: 'b', color: 'blue' }], title: 't' };
+  const after = { tags: [{ color: 'blue', name: 'b' }, { color: 'red', name: 'a' }, { color: 'green', name: 'c' }], title: 't' };
+  assert.deepEqual(lostData(before, after), []);
+  assert.deepEqual(lostData(before, { tags: [{ name: 'c', color: 'g' }], title: 't' }), ['tags[0]', 'tags[1]']);
+  assert.deepEqual(lostData({ labels: [{ id: 'L-1', name: 'a' }] }, { labels: [{ id: 'L-2', name: 'a' }] }), ['labels[0]'], 'identity by id first');
+  assert.deepEqual(lostData(before, { ...before, title: 'u' }), ['title']);
+  // Mutation: the old serialization compare reads the re-ordered superset as a loss.
+  assert.ok(nonAdditive(before, after).length > 0);
+});
+
+test('R-MIN-25: the identifier member is certain only where the path names it (issue_number -> number; issueIdOrKey is not)', () => {
+  const doc = (param: string, props: Record<string, unknown>) => ({ openapi: '3.1.0', info: {}, paths: { [`/issues/{${param}}`]: { get: { responses: { '200': { description: 'x', content: { 'application/json': { schema: { type: 'object', properties: { issue: { type: 'object', properties: props } } } } } } } } } } });
+  const col = (param: string, props: Record<string, unknown>) => buildModel(doc(param, props), 'x').collections.find((c) => c.path === '/issues')!;
+  const P = { id: { type: 'integer' }, number: { type: 'integer' }, key: { type: 'string' }, title: { type: 'string' } };
+  assert.deepEqual([col('issue_number', P).idField, col('issue_number', P).idCertain], ['number', true]);
+  assert.deepEqual([col('issue_id', P).idField, col('issue_id', P).idCertain], ['id', true]);
+  assert.deepEqual([col('issueKey', P).idField, col('issueKey', P).idCertain], ['key', true]);
+  assert.equal(col('issueIdOrKey', P).idCertain, false);
+});
+
+test('R-MIN-26: the mock does not keep a member the resource lacks, keeps a credential member as a placeholder, and marks a canary it echoed', async () => {
+  const S2 = JSON.parse(JSON.stringify(SPEC));
+  S2.components.schemas.Thing.properties.api_token = { type: 'string' };
+  const m = new Mock(buildModel(S2, JSON.stringify(S2)));
+  m.canaries = ['mwsmin-canary-abc'];
+  const url = await m.listen();
+  try {
+    const c = await http(`${url}/things`, 'POST', { name: 'a', extra: 'x', api_token: 'mwsmin-canary-abc' });
+    const thing = (c.body as { thing: Record<string, unknown> }).thing;
+    assert.equal(thing['extra'], undefined);
+    assert.equal(thing['api_token'], '<stored>');
+    assert.deepEqual(m.records[0]!.unknown_members, ['extra']);
+    assert.equal(m.records[0]!.echoed_canary, false);
+  } finally {
+    await m.close();
+  }
+  // A key the description declares is honoured; one in an undeclared header is not (keyCarried: unmodelled).
+  const step = (recs: import('../../src/min/mock.js').MockRecord[]) => ({ id: 's', tool: 't', args: {}, first: {} as never, final: {} as never, recs, firstRecs: [], crashed: false });
+  assert.equal(keyCarried([step([recOf({ method: 'POST', header_values: { 'x-request-id': 'k12345678' } })])], 'k12345678'), 'unmodelled');
+  assert.equal(keyCarried([step([recOf({ method: 'POST', idempotency_key: 'k12345678', header_values: { 'idempotency-key': 'k12345678' } })])], 'k12345678'), 'honoured');
+  assert.equal(keyCarried([step([recOf({ method: 'POST' })])], 'k12345678'), 'not_sent');
+});

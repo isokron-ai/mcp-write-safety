@@ -72,7 +72,21 @@ export const prose = (r: ToolResult): string =>
     .filter((l) => !/^\s*[{[]/.test(l))
     .join('\n');
 
+/** How long after each call the tester waits, with no step open, so that a request the server sends after answering is seen as its own. */
+export const QUIET_MS = 150;
+
 export class Ctx {
+  /** Test only: turn a protection off, so that a mutation check can show the test that pins it goes red. */
+  mutate: Record<string, boolean> = {};
+
+  /**
+   * Mutating requests the server sent while no call was open (a background writer, or a write it did not wait for). Where there is
+   * one, no write can be tied to a call for certain, and every check that rests on which call wrote is not tested.
+   */
+  backgroundWrites(): MockRecord[] {
+    return this.mock.records.filter((r) => r.step === null && r.mutating && r.kind !== 'unmatched');
+  }
+
   readonly trials: Trial[] = [];
   readonly steps: Step[] = [];
   readonly notes: string[] = [];
@@ -148,13 +162,17 @@ export class Ctx {
     const id = `s${++this.n}-${label}`;
     this.mock.step = id;
     const first = await this.server.call(tool, args);
+    // A request is the call's only while the call is open: from the request to its answer. One that arrives after the answer is
+    // the server's own (background, or a write it did not wait for) and is attributed to no step (see backgroundWrites).
+    this.mock.step = this.mutate['attributeLateRequests'] ? id : null;
     const firstRecs = this.mock.recordsOf(id);
     let final = first;
     if (first.inputRequired && o.accept !== false) {
       this.mock.step = `${id}/retry`;
       final = (await this.retry(tool, args, first)).final;
+      this.mock.step = this.mutate['attributeLateRequests'] ? id : null;
     }
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, QUIET_MS));
     this.mock.step = null;
     const recs = this.mock.records.filter((r) => r.step === id || r.step === `${id}/retry`);
     const crashed = this.server.hasExited;
@@ -188,7 +206,8 @@ export class Ctx {
   collectionFor(tool: string, arg: string, s: Obj): Collection | null {
     const pattern = typeof s['pattern'] === 'string' ? s['pattern'] : isObj(s['items']) && typeof (s['items'] as Obj)['pattern'] === 'string' ? ((s['items'] as Obj)['pattern'] as string) : null;
     const tops = this.mock.model.collections.filter((c) => !c.parent && c.schema);
-    const base = arg.replace(/_?(ids?|keys?)$/i, '').toLowerCase();
+    // The handle an argument names: ticket, ticket_id, ticketId, issue_number, issueIdOrKey, project_key, merge_request_iid.
+    const base = arg.replace(/(_?(ids?|keys?|numbers?|iids?|no)|IdOrKey|OrKey)$/i, '').replace(/[_-]$/, '').toLowerCase();
     const noun = split(tool)?.noun ?? '';
     const byName = tops.find((c) => base && (c.singular.toLowerCase() === base || c.segment.toLowerCase() === base)) ?? (/^(id|key|ids|keys)$/i.test(arg) ? tops.find((c) => c.singular.toLowerCase() === noun) : undefined);
     if (pattern) {

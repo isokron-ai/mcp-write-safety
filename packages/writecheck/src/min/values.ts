@@ -4,6 +4,8 @@
  * can be, so that the value can be found again in the request the server sends to the mock).
  */
 
+import { createContext, runInContext } from 'node:vm';
+
 import { isObj, type Obj } from '../core/util.js';
 
 export const typesOf = (s: unknown): string[] => (isObj(s) ? (Array.isArray(s['type']) ? (s['type'] as unknown[]).map(String) : typeof s['type'] === 'string' ? [s['type']] : []) : []);
@@ -19,14 +21,36 @@ export const mainType = (s: unknown): string | null => {
 };
 export const nullable = (s: unknown): boolean => typesOf(s).includes('null') || (isObj(s) && Array.isArray(s['enum']) && (s['enum'] as unknown[]).includes(null));
 
-/** Matches a string against a schema pattern; a pattern JavaScript cannot compile matches nothing. */
+/** The longest pattern (from a tool's input schema or a description) min mode compiles, and how long one test may run. */
+export const MAX_PATTERN_LENGTH = 256;
+export const PATTERN_TIMEOUT_MS = 50;
+const vmContext = createContext({ re: null as RegExp | null, s: '' });
+
+/**
+ * Tests a string against a pattern a server or a description gave: bounded in length, and run with a time limit, so that a
+ * pattern that backtracks without end cannot stall the run. Over the bound, uncompilable or over time: null (not decided).
+ */
+export function safeTest(pattern: string, v: string): boolean | null {
+  if (pattern.length > MAX_PATTERN_LENGTH || v.length > 100_000) return null;
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern, 'u');
+  } catch {
+    return null;
+  }
+  vmContext['re'] = re;
+  vmContext['s'] = v;
+  try {
+    return runInContext('re.test(s)', vmContext, { timeout: PATTERN_TIMEOUT_MS }) === true;
+  } catch {
+    return null;
+  }
+}
+
+/** Matches a string against a schema pattern; a pattern that cannot be decided (too long, invalid, over time) matches nothing. */
 export function matches(pattern: unknown, v: string): boolean {
   if (typeof pattern !== 'string') return true;
-  try {
-    return new RegExp(pattern, 'u').test(v);
-  } catch {
-    return false;
-  }
+  return safeTest(pattern, v) === true;
 }
 
 /**
@@ -34,6 +58,7 @@ export function matches(pattern: unknown, v: string): boolean {
  * and the quantifiers ? * + {m} {m,n}. `seed` varies the characters chosen. Returns null for anything else.
  */
 export function fromPattern(pattern: string, seed: number, maxLen = 64): string | null {
+  if (pattern.length > MAX_PATTERN_LENGTH) return null;
   let i = 0;
   const p = pattern;
   const digits = String(1000 + (seed % 9000));
@@ -158,11 +183,7 @@ export function fromPattern(pattern: string, seed: number, maxLen = 64): string 
     for (let k = 0; k < n; k++) out += a.gen();
     if (out.length > maxLen) return null;
   }
-  try {
-    return new RegExp(pattern, 'u').test(out) ? out : null;
-  } catch {
-    return null;
-  }
+  return safeTest(pattern, out) === true ? out : null;
 }
 
 /** A string that meets the schema's limits, built around `stem` where the pattern allows. */

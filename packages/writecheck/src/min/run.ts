@@ -67,7 +67,7 @@ export interface MinOptions {
   listen?: { host: string; port: number; advertised?: string };
   timeoutMs?: number;
   /** Test only: turn a protection off, so that a mutation check can show the test that pins it goes red. */
-  mutate?: { cap?: boolean };
+  mutate?: { cap?: boolean } & Record<string, boolean | undefined>;
   log?: (l: string) => void;
 }
 
@@ -126,7 +126,7 @@ export function applyCaps(records: MinRecord[], o: { off?: boolean } = {}): MinR
     if (st === 'partial') {
       const vio = mine.filter((x) => x.verdict === 'violated');
       if (vio.length) out.push(...vio);
-      else out.push(capped(MIN_REQUIREMENTS[r.id]!.why, mine.map((x) => `${x.tool}${x.case ? ` (${x.case})` : ''}: ${x.verdict}: ${x.reason}`).slice(0, 8)));
+      else out.push(capped(MIN_REQUIREMENTS[r.id]!.why, mine.map((x) => `${x.tool}${x.case ? ` (${x.case})` : ''}: ${x.verdict}: ${x.reason}`).slice(0, 40)));
       continue;
     }
     if (mine.length) out.push(...mine);
@@ -165,6 +165,8 @@ export interface MinDoc {
   results: MinRecord[];
   notes: string[];
   run: { started_at: string; finished_at: string; status: 'complete' | 'refused' | 'server_did_not_start' };
+  /** Breaches of the min-mode caps found by the guard before writing (empty in every document written as results.json). */
+  cap_violations?: string[];
 }
 
 /** Builds the server's environment: base URLs to the mock, canaries for anything secret-like, dummies for the rest. */
@@ -189,10 +191,21 @@ export function serverEnv(o: { mockUrl: string; baseUrlEnv: string[]; envNames: 
     } else env[n] = 'mwsmin-dummy';
   }
   for (const [k, v] of Object.entries(o.set)) {
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) && !v.startsWith(o.mockUrl)) refused.push(`${k} names ${v.replace(/\/\/[^@/]*@/, '//***@')}, which is not the min-mode mock`);
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) && !sameOrigin(v, o.mockUrl)) refused.push(`${k} names ${v.replace(/\/\/[^@/]*@/, '//***@')}, which is not the min-mode mock`);
     env[k] = v;
   }
   return { env, canaries, targets: [...targets], refused };
+}
+
+/** Is a URL the mock's (same scheme, host and port, parsed; a look-alike such as http://127.0.0.1:5.evil.example is not). */
+export function sameOrigin(v: string, mockUrl: string): boolean {
+  try {
+    const a = new URL(v);
+    const b = new URL(mockUrl);
+    return a.protocol === b.protocol && a.hostname === b.hostname && a.port === b.port && !a.username && !a.password;
+  } catch {
+    return false;
+  }
 }
 
 export async function runMin(o: MinOptions): Promise<MinDoc> {
@@ -210,6 +223,10 @@ export async function runMin(o: MinOptions): Promise<MinDoc> {
   const se = serverEnv({ mockUrl: url, baseUrlEnv: o.baseUrlEnv, envNames: o.envNames ?? [], set: o.set ?? {}, base });
   const spec: ServerSpec = { ...o.server, env: { ...se.env, DO_NOT_TRACK: '1' } };
   const ctx = new Ctx(mock, decl, spec, se.canaries, o.timeoutMs ?? 15_000);
+  const flags = Object.fromEntries(Object.entries(o.mutate ?? {}).filter(([k, v]) => k !== 'cap' && v === true)) as Record<string, boolean>;
+  ctx.mutate = flags;
+  mock.mutate = flags;
+  mock.canaries = se.canaries;
   const requirements = { run: [] as string[], partial: [] as string[], not_testable_mock: [] as string[] };
   for (const r of REQUIREMENTS) requirements[minStatus(r.id)].push(r.id);
   let status: MinDoc['run']['status'] = 'complete';
@@ -239,6 +256,19 @@ export async function runMin(o: MinOptions): Promise<MinDoc> {
         K.retry3(ctx);
         K.ann1(ctx);
         K.sec1(ctx);
+        // A server that wrote while no call was open (a background writer, or a write it did not wait for): no write can be tied
+        // to a call for certain, so every record that rests on which call wrote is not tested (catalog, review and SEC-1 remain).
+        const bg = ctx.backgroundWrites();
+        if (bg.length && !flags['ignoreBackground']) {
+          ctx.notes.push(`the server sent ${bg.length} write(s) while no call was open (${[...new Set(bg.map((r) => `${r.method} ${r.template}`))].slice(0, 3).join(', ')}): records that rest on which call wrote are not tested`);
+          for (const t of ctx.trials) {
+            if (t.method === 'catalog' || t.method === 'review' || t.requirement === 'MWS-SEC-1' || t.verdict === 'not tested') continue;
+            t.verdict = 'not tested';
+            t.reason = `the server writes while no call is open (background writes), so this call's writes cannot be told from them: ${t.reason}`;
+            t.reason_code = 'background_writes';
+            delete t.answer;
+          }
+        }
       }
     }
   } finally {
@@ -265,7 +295,13 @@ export async function runMin(o: MinOptions): Promise<MinDoc> {
     notes: ctx.notes.map(redact).slice(0, 50),
     run: { started_at: started, finished_at: new Date().toISOString(), status },
   };
-  if (o.out) {
+  // The guard runs before anything is written: a document that breaks a cap is never written as a result (cap-violations.json says why).
+  const bad = capViolations(out);
+  out.cap_violations = bad;
+  if (o.out && bad.length) {
+    mkdirSync(o.out, { recursive: true });
+    writeFileSync(join(o.out, 'cap-violations.json'), `${JSON.stringify({ format: 'mws-min-cap-violations/1', final: false, violations: bad }, null, 2)}\n`);
+  } else if (o.out) {
     mkdirSync(o.out, { recursive: true });
     writeFileSync(join(o.out, 'results.json'), `${JSON.stringify(out, null, 2)}\n`);
     writeFileSync(join(o.out, 'mock-requests.json'), `${redact(JSON.stringify(mock.records.slice(0, 5000), null, 1))}\n`);

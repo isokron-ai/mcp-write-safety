@@ -68,6 +68,14 @@ export interface MockRecord {
   unmodelled: boolean;
   /** Members of the body the resource schema does not define (kept, and listed). */
   unknown_members: string[];
+  /** Every request header but credentials (authorization, cookie), lower-cased: where a key or token was carried. */
+  header_values: Record<string, string>;
+  /** Where the mock read an idempotency key it honours (a declared Idempotency-Key header, or a body member the description declares), else null. */
+  key_carrier: 'header' | 'body' | null;
+  /** The key read from that carrier. */
+  idempotency_key: string | null;
+  /** The mock's answer contained a credential canary the server sent it (the mock echoed it: a SEC-1 leak is then not judged). */
+  echoed_canary: boolean;
   /** The members of the object that the request changed, by name (managed members such as version left out). */
   changed_fields: string[];
   /** The mock applied the request (answered 2xx, or applied it and then cut the answer). A replay applied nothing. */
@@ -90,8 +98,12 @@ export class Mock {
   readonly injected: InjectedFault[] = [];
   /** Requests the mock could not express (each answered 501 and marked unmatched). */
   readonly problems: string[] = [];
-  /** The step of the run in progress; every request is attributed to it. */
+  /** The step of the run in progress; every request is attributed to it. Null between calls: a request then is the server's own (background). */
   step: string | null = null;
+  /** The credential canaries the server was given: an answer of the mock that contains one is marked (the mock echoed it). */
+  canaries: string[] = [];
+  /** Test only: turn a protection off, so that a mutation check can show the test that pins it goes red. */
+  mutate: Record<string, boolean> = {};
   private server: Server | null = null;
   private store = new Map<string, Map<string, Obj>>();
   private keyed = new Map<string, Keyed>();
@@ -123,7 +135,7 @@ export class Mock {
         this.problems.push(`${req.method} ${req.url}: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
         try {
           if (!res.headersSent) res.writeHead(501, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: 'mock_incomplete', message: 'the min-mode mock cannot express this request' }));
+          res.end(JSON.stringify({ error: 'mock_incomplete', message: 'not implemented' }));
         } catch {
           /* the socket is gone */
         }
@@ -211,6 +223,7 @@ export class Mock {
           if (mainType(ps) === 'string' && !(isObj(ps) && (Array.isArray(ps['enum']) || ps['format']))) o[k] = `seeded ${c.singular} ${i} ${k}`;
         }
         if (this.versioned.has(c)) o['version'] = 1;
+        this.seedLists(c, o, `${c.singular} ${i}`);
         this.store.get(c.path)!.set(String(o[c.idField]), o);
       }
     }
@@ -250,12 +263,26 @@ export class Mock {
     for (const [k, ps] of Object.entries(propsOf(c.schema))) if (!(k in where) && k !== c.idField && !MANAGED.has(k) && mainType(ps) === 'string' && !(isObj(ps) && (Array.isArray(ps['enum']) || ps['format']))) o[k] = `added ${c.singular} ${k}`;
     Object.assign(o, clone(where));
     if (this.versioned.has(c)) o['version'] = 1;
+    this.seedLists(c, o, `added ${c.singular}`);
     for (const ch of this.model.collections.filter((x) => x.parent?.path === c.path && x.schema)) {
       const nameKey = nameKeyOf(ch);
       o[ch.parent!.field] = ch.itemPath ? [0, 1, 2].map((i) => ({ ...(defaultOf(ch.schema, 0) as Obj), [ch.idField]: this.newIdTyped(ch), ...(nameKey ? { [nameKey]: String.fromCharCode(97 + i) } : {}) })) : [];
     }
     this.store.get(c.path)!.set(String(o[c.idField]), o);
     return clone(o);
+  }
+
+  /** Two elements in each list of objects that is not a nested collection (an item's tags), so that a list write has data to keep. */
+  private seedLists(c: Collection, o: Obj, stem: string): void {
+    for (const [k, ps] of Object.entries(propsOf(c.schema))) {
+      if (mainType(ps) !== 'array' || !isObj(ps) || !isObj(ps['items']) || mainType(ps['items']) !== 'object') continue;
+      if (this.model.collections.some((x) => x.parent?.path === c.path && x.parent.field === k)) continue;
+      o[k] = [0, 1].map((i) => {
+        const e = defaultOf(ps['items'], 0) as Obj;
+        for (const [ek, es] of Object.entries(propsOf(ps['items']))) if (mainType(es) === 'string' && !(isObj(es) && (Array.isArray(es['enum']) || es['format']))) e[ek] = `${stem} ${k} ${i} ${ek}`;
+        return e;
+      });
+    }
   }
 
   private newIdTyped(c: Collection): string | number {
@@ -305,12 +332,19 @@ export class Mock {
       unknown_members: [],
       applied: false,
       changed_fields: [],
+      header_values: Object.fromEntries(Object.entries(req.headers).filter(([k, v]) => typeof v === 'string' && !/^(authorization|proxy-authorization|cookie)$/.test(k)).map(([k, v]) => [k, String(v).slice(0, 512)])),
+      key_carrier: null,
+      idempotency_key: null,
+      echoed_canary: false,
     };
     this.records.push(rec);
     if (!m) return this.send(res, rec, 404, { error: 'no_route', message: `the description has no ${method} ${u.pathname}` });
     const { op, params } = m;
     const kind = this.kindOf(op);
     rec.kind = kind.kind;
+    // A mutating request to an action endpoint the mock cannot read (not a batch of operations): its effect is not modelled, whatever
+    // the mock answers it with (a fault included), so no check may judge the call as one that wrote or did not write.
+    if (kind.kind === 'action' && rec.mutating && !batchOps(body) && !this.mutate['unmodelledAsWrites']) rec.unmodelled = true;
 
     // A fault armed for this request.
     const f = this.armed.find((a) => (!a.mutating || rec.mutating) && ++a.seen === a.nth);
@@ -328,20 +362,24 @@ export class Mock {
       if (fault.kind === 'conflict') {
         const cur = kind.collection && kind.item ? this.item(kind.collection, params) : undefined;
         const st = this.conflictStatus(op);
-        return this.send(res, rec, st, this.fill(this.responseFor(op, String(st)), { bind: this.bindings(kind.collection, cur), error: { error: st === 412 ? 'precondition_failed' : 'conflict', message: 'the object changed since the version the request carried (injected by the min-mode mock)' } }));
+        return this.send(res, rec, st, this.fill(this.responseFor(op, String(st)), { bind: this.bindings(kind.collection, cur), error: { error: st === 412 ? 'precondition_failed' : 'conflict', message: 'precondition failed: the object has changed' } }));
       }
     }
 
-    // A declared Idempotency-Key header: the same key and request replays, a different request is refused.
-    const keyParam = op.params.find((p) => p.in === 'header' && p.name.toLowerCase() === 'idempotency-key');
-    const key = h('idempotency-key');
-    if (keyParam && key !== undefined) {
+    // An idempotency key the description declares (an Idempotency-Key header parameter, or a request-body member named like one):
+    // the same key and request replays, a different request is refused. A key carried any other way is not honoured, and a check
+    // that would rest on it is not tested (the mock cannot know what the backend does with it).
+    const carrier = keyCarrierOf(op);
+    const key = carrier?.in === 'header' ? h('idempotency-key') : carrier?.in === 'body' && isObj(body) && typeof body[carrier.name] === 'string' ? (body[carrier.name] as string) : undefined;
+    if (carrier && key !== undefined) {
+      rec.key_carrier = carrier.in;
+      rec.idempotency_key = key;
       const k = `${op.key} ${key}`;
       const fp = sha256(`${method} ${u.pathname} ${canonical(body ?? null)}`);
       const seen = this.keyed.get(k);
       if (seen) {
         if (seen.fingerprint !== fp) {
-          const code = /422[^`]*`([a-z_]+)`/.exec(keyParam.description)?.[1] ?? 'idempotency_key_reused';
+          const code = /422[^`]*`([a-z_]+)`/.exec(carrier.description)?.[1] ?? 'idempotency_key_reused';
           return this.send(res, rec, 422, { error: code, message: 'this idempotency key was used with a different request' });
         }
         rec.replayed = true;
@@ -355,9 +393,12 @@ export class Mock {
     const out = this.apply(rec, op, params, kind, body);
     const text = out.body === undefined ? '' : JSON.stringify(out.body);
     const headers: Record<string, string> = { ...(text ? { 'content-type': 'application/json' } : {}), ...out.headers };
-    if (keyParam && key !== undefined && out.status < 300) this.keyed.set(`${op.key} ${key}`, { fingerprint: sha256(`${method} ${u.pathname} ${canonical(body ?? null)}`), status: out.status, headers, body: text });
+    if (carrier && key !== undefined && out.status < 300) this.keyed.set(`${op.key} ${key}`, { fingerprint: sha256(`${method} ${u.pathname} ${canonical(body ?? null)}`), status: out.status, headers, body: text });
     rec.status = out.status;
-    rec.applied = out.status >= 200 && out.status < 300 && rec.mutating;
+    // A request the mock answered without modelling its effect (an action endpoint such as POST /search) applied nothing it knows of:
+    // it is never counted as a write (checks that would rest on whether it wrote are not tested).
+    rec.applied = out.status >= 200 && out.status < 300 && rec.mutating && !rec.unmodelled;
+    if (this.canaries.some((c) => text.includes(c))) rec.echoed_canary = true;
     if (fault?.kind === 'apply_then_drop') {
       rec.status = null;
       return this.drop(res, rec);
@@ -374,6 +415,7 @@ export class Mock {
   private send(res: ServerResponse, rec: MockRecord, status: number, body: unknown, headers: Record<string, string> = {}): void {
     rec.status = status;
     const text = body === undefined ? '' : JSON.stringify(body);
+    if (this.canaries.some((c) => text.includes(c))) rec.echoed_canary = true;
     res.writeHead(status, { ...(text ? { 'content-type': 'application/json' } : {}), ...headers });
     res.end(text);
   }
@@ -393,7 +435,7 @@ export class Mock {
       if (ops[1]!['id'] !== undefined) extra['id'] = ops[1]!['id'];
     }
     const cur = kind.collection && kind.item ? this.item(kind.collection, params) : undefined;
-    this.send(res, rec, status, { ...(this.fill(this.responseFor(op, String(status)), { bind: this.bindings(kind.collection, cur), error: { error: code, message: `refused by the min-mode mock (injected ${status})` } }) as Obj), ...extra });
+    this.send(res, rec, status, { ...(this.fill(this.responseFor(op, String(status)), { bind: this.bindings(kind.collection, cur), error: { error: code, message: status >= 500 ? 'service unavailable' : 'the request was refused' } }) as Obj), ...extra });
   }
 
   private responseFor(op: Operation, status: string): unknown {
@@ -450,8 +492,14 @@ export class Mock {
       if (MANAGED.has(k) || (k === c.idField && !create)) continue;
       const ps = props[k];
       if (!isObj(ps)) {
+        // A member the resource schema does not define is not stored: a backend that keeps only its own fields would drop it, and
+        // a stored one would show up as a changed field (MWS-RES-4) or echo a credential (MWS-SEC-1).
         rec.unknown_members.push(k);
-        o[k] = clone(v);
+        if (this.mutate['storeUnknown']) o[k] = clone(v);
+        continue;
+      }
+      if (SECRET_MEMBER.test(k) && k !== c.idField && !this.mutate['echoSecrets']) {
+        o[k] = '<stored>';
         continue;
       }
       const child = this.model.collections.find((x) => x.parent?.path === c.path && x.parent.field === k);
@@ -459,7 +507,11 @@ export class Mock {
         const nameKey = nameKeyOf(child);
         const old = Array.isArray(o[k]) ? (o[k] as Obj[]) : [];
         o[k] = v.map((x) => {
-          if (isObj(x)) return { ...x, [child.idField]: x[child.idField] ?? this.newIdTyped(child) };
+          // A child given as an object keeps its identity: its own id, else the existing child with the same natural key.
+          if (isObj(x)) {
+            const same = x[child.idField] === undefined && nameKey ? old.find((e) => e[nameKey] === x[nameKey]) : undefined;
+            return { ...(same ?? {}), ...x, [child.idField]: x[child.idField] ?? same?.[child.idField] ?? this.newIdTyped(child) };
+          }
           const same = nameKey ? old.find((e) => e[nameKey] === x) : undefined;
           return same ?? { ...(defaultOf(child.schema) as Obj), [child.idField]: this.newIdTyped(child), ...(nameKey ? { [nameKey]: x } : {}) };
         });
@@ -566,7 +618,7 @@ export class Mock {
     const ops = batchOps(body);
     const succ = this.successStatus(op, false);
     if (!ops) {
-      rec.unmodelled = rec.mutating;
+      rec.unmodelled = rec.mutating && !this.mutate['unmodelledAsWrites'];
       return { status: succ.status, body: this.fill(succ.schema, {}), headers: {} };
     }
     const found: { c: Collection; o: Obj; op: Obj }[] = [];
@@ -627,6 +679,27 @@ export class Mock {
     return defaultOf(schema);
   }
 
+  /**
+   * Is a value the server sent valid where it sent it, by the description's own schema: the request body (where the value is in
+   * the body), else the query parameter that holds it. `unknown` where the description cannot say.
+   */
+  carriedValid(rec: MockRecord, arg: string, value: unknown): true | false | 'unknown' {
+    const op = this.model.operations.find((o) => o.template === rec.template && o.method === rec.method);
+    if (!op) return 'unknown';
+    const inQuery = Object.entries(rec.query).filter(([k, q]) => k === arg || q === String(value));
+    if (inQuery.length && !(isObj(rec.body) && JSON.stringify(rec.body).includes(JSON.stringify(value)))) {
+      const out = inQuery.map(([k, q]) => {
+        const p = op.params.find((x) => x.in === 'query' && x.name === k);
+        if (!p || p.schema === undefined) return 'unknown' as const;
+        const t = mainType(p.schema);
+        const v = (t === 'integer' || t === 'number') && /^-?\d+(\.\d+)?$/.test(q) ? Number(q) : t === 'boolean' && /^(true|false)$/.test(q) ? q === 'true' : q;
+        return validates(p.schema, v);
+      });
+      return out.includes(false) ? false : out.every((x) => x === true) ? true : 'unknown';
+    }
+    return this.requestValid(rec);
+  }
+
   /** Is a forwarded body valid by the description's own request schema? (`unknown` where the schema cannot be evaluated.) */
   requestValid(rec: MockRecord): true | false | 'unknown' {
     const op = this.model.operations.find((o) => o.template === rec.template && o.method === rec.method);
@@ -655,4 +728,18 @@ export function nameKeyOf(c: Collection): string | null {
   const props = propsOf(c.schema);
   const req = Array.isArray(c.schema?.['required']) ? (c.schema!['required'] as string[]) : Object.keys(props);
   return req.find((k) => k !== c.idField && mainType(props[k]) === 'string' && !(isObj(props[k]) && (props[k] as Obj)['format'])) ?? null;
+}
+
+/** Members that hold a credential: stored as a placeholder, never echoed back (a real backend does not return them). */
+export const SECRET_MEMBER = /(password|passwd|secret|token|api[_-]?key|private[_-]?key|credential|authorization|cookie|session)/i;
+/** A request-body member named like an idempotency key. */
+export const KEY_MEMBER = /^(idempotency[_-]?key|idempotencyKey|client[_-]?request[_-]?id|clientRequestId|request[_-]?id|requestId|client[_-]?token|clientToken|dedup(e|lication)?[_-]?(key|id))$/i;
+
+/** Where an operation's description declares an idempotency key: an Idempotency-Key header parameter, or a request-body member. */
+export function keyCarrierOf(op: Operation): { in: 'header' | 'body'; name: string; description: string } | null {
+  const hp = op.params.find((p) => p.in === 'header' && p.name.toLowerCase() === 'idempotency-key');
+  if (hp) return { in: 'header', name: 'idempotency-key', description: hp.description };
+  const props = isObj(op.requestSchema) && isObj((op.requestSchema as Obj)['properties']) ? ((op.requestSchema as Obj)['properties'] as Obj) : {};
+  const m = Object.keys(props).find((k) => KEY_MEMBER.test(k));
+  return m ? { in: 'body', name: m, description: isObj(props[m]) && typeof (props[m] as Obj)['description'] === 'string' ? ((props[m] as Obj)['description'] as string) : '' } : null;
 }

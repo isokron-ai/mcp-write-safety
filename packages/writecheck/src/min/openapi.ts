@@ -8,7 +8,7 @@
  * of the same name), and action endpoints (everything else, such as `POST /batch`).
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 
 import { parse as parseYaml } from 'yaml';
 
@@ -56,6 +56,12 @@ export interface Collection {
   schema: Obj | null;
   /** The member that holds the identifier (`id`, `key`). */
   idField: string;
+  /**
+   * Whether the item path's parameter names that member for certain (the same name, or the name less the resource's own prefix:
+   * `issue_number` → `number`). Where it does not (`issueIdOrKey`, a bare `id` beside `number` and `key`), a check that rests on
+   * which value is the identifier (MWS-RES-3, the receipt's identifier) is not tested.
+   */
+  idCertain: boolean;
   /** The parent collection for a nested one, and the parent's array member that holds the children. */
   parent: { path: string; field: string } | null;
 }
@@ -84,6 +90,10 @@ export class Deref {
   constructor(private readonly root: Obj) {}
 
   ref(ref: string): unknown {
+    if (typeof ref !== 'string' || ref.length > 2048) {
+      this.unknownRefs.add(String(ref).slice(0, 80));
+      return undefined;
+    }
     if (this.cache.has(ref)) return this.cache.get(ref);
     if (!ref.startsWith('#/')) {
       this.unknownRefs.add(ref);
@@ -91,7 +101,13 @@ export class Deref {
     }
     let cur: unknown = this.root;
     for (const raw of ref.slice(2).split('/')) {
-      const k = decodeURIComponent(raw.replace(/~1/g, '/').replace(/~0/g, '~'));
+      let k: string;
+      try {
+        k = decodeURIComponent(raw.replace(/~1/g, '/').replace(/~0/g, '~'));
+      } catch {
+        cur = undefined;
+        break;
+      }
       cur = isObj(cur) ? cur[k] : undefined;
       if (cur === undefined) break;
     }
@@ -137,7 +153,11 @@ export class Deref {
 const propsOf = (s: unknown): Obj => (isObj(s) && isObj(s['properties']) ? s['properties'] : {});
 
 /** Reads a description file (JSON or YAML). */
+/** The largest description min mode reads. */
+export const MAX_DESCRIPTION_BYTES = 16 * 1024 * 1024;
+
 export function loadDescription(file: string): { doc: Obj; bytes: Buffer } {
+  if (statSync(file).size > MAX_DESCRIPTION_BYTES) throw new Error(`${file} is larger than ${MAX_DESCRIPTION_BYTES} bytes; min mode does not read it`);
   const bytes = readFileSync(file);
   const text = bytes.toString('utf8');
   const doc = text.trimStart().startsWith('{') ? JSON.parse(text) : parseYaml(text);
@@ -149,6 +169,7 @@ export function buildModel(doc: Obj, bytes: Buffer | string): ApiModel {
   const unexpressed: string[] = [];
   const ver = typeof doc['openapi'] === 'string' ? doc['openapi'] : typeof doc['swagger'] === 'string' ? `swagger ${doc['swagger']}` : '';
   if (!/^3\./.test(ver)) unexpressed.push(`the description is ${ver ? `version ${ver}` : 'of no stated version'}; min mode reads OpenAPI 3.x only`);
+  sanitizePatterns(doc, unexpressed);
   const d = new Deref(doc);
   const info = isObj(doc['info']) ? doc['info'] : {};
   const ops: Operation[] = [];
@@ -213,7 +234,12 @@ function inferCollections(ops: Operation[], unexpressed: string[]): Collection[]
     const path = '/' + segs.slice(0, -1).join('/');
     const idParam = paramName(last);
     const sing = singular(seg);
-    const idCandidates = [idParam, idParam.replace(/(_id|Id|ID)$/, ''), 'id'].filter(Boolean);
+    // The handle the path names: the parameter itself, the parameter less the resource's prefix (issue_number → number,
+    // projectKey → key), and only for an `id`-style parameter (id, ticket_id, ticketId) the member `id`.
+    const lowerFirst = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
+    const less = idParam.toLowerCase().startsWith(sing.toLowerCase()) && idParam.length > sing.length ? lowerFirst(idParam.slice(sing.length).replace(/^[_-]/, '')) : null;
+    const idStyle = /^(id|.*(_id|Id|ID))$/.test(idParam);
+    const idCandidates = [idParam, ...(less ? [less] : []), ...(idStyle ? ['id'] : [])].filter(Boolean);
     let res: { schema: Obj; wrapper: string | null } | null = null;
     for (const o of [...opsAt(t), ...opsAt(path)]) {
       for (const r of o.responses) {
@@ -224,8 +250,9 @@ function inferCollections(ops: Operation[], unexpressed: string[]): Collection[]
       if (res) break;
     }
     const props = propsOf(res?.schema);
-    const idField = idCandidates.find((c) => c in props) ?? (/(_id|Id)$/.test(idParam) ? 'id' : idParam);
-    byPath.set(path, { path, itemPath: t, segment: seg, singular: sing, schema: res?.schema ?? null, idField, parent: null });
+    const found = idCandidates.find((c) => c in props);
+    const idField = found ?? ('id' in props ? 'id' : idParam);
+    byPath.set(path, { path, itemPath: t, segment: seg, singular: sing, schema: res?.schema ?? null, idField, idCertain: !!found, parent: null });
   }
   // Collections with no item path (POST or GET only), such as /tickets/{id}/comments.
   for (const t of templates) {
@@ -236,7 +263,7 @@ function inferCollections(ops: Operation[], unexpressed: string[]): Collection[]
     const sing = singular(last);
     let res: { schema: Obj; wrapper: string | null } | null = null;
     for (const o of opsAt(t)) for (const r of o.responses) if (!res && /^2/.test(r.status)) res = resourceIn(r.schema, sing, ['id']);
-    byPath.set(t, { path: t, itemPath: null, segment: last, singular: sing, schema: res?.schema ?? null, idField: 'id', parent: null });
+    byPath.set(t, { path: t, itemPath: null, segment: last, singular: sing, schema: res?.schema ?? null, idField: 'id', idCertain: 'id' in propsOf(res?.schema), parent: null });
   }
   // Nesting: /tickets/{id}/labels sits in the parent collection's array member `labels`.
   for (const c of byPath.values()) {
@@ -283,4 +310,34 @@ export function matchOperation(model: ApiModel, method: string, pathname: string
     if (ok && (!best || literal > best.literal)) best = { op, params, literal };
   }
   return best ? { op: best.op, params: best.params } : null;
+}
+
+/** The longest schema pattern min mode compiles, and the shapes it refuses (nested quantifiers that can backtrack without end). */
+export const MAX_PATTERN = 256;
+const RISKY = /\([^)]*[+*][^)]*\)[+*{]|\\[1-9]/;
+
+/** Removes from the description every `pattern` that is too long, does not compile, or could backtrack without end; each is listed. */
+export function sanitizePatterns(doc: unknown, unexpressed: string[], depth = 0): void {
+  if (depth > 60) return;
+  if (Array.isArray(doc)) {
+    for (const x of doc) sanitizePatterns(x, unexpressed, depth + 1);
+    return;
+  }
+  if (!isObj(doc)) return;
+  if (typeof doc['pattern'] === 'string') {
+    const p = doc['pattern'] as string;
+    let ok = p.length <= MAX_PATTERN && !RISKY.test(p);
+    if (ok) {
+      try {
+        new RegExp(p, 'u');
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      delete doc['pattern'];
+      if (unexpressed.length < 200) unexpressed.push(`a pattern min mode does not compile (too long, invalid, or able to backtrack without end): ${JSON.stringify(p.slice(0, 60))}`);
+    }
+  }
+  for (const [k, v] of Object.entries(doc)) if (k !== 'pattern' && k !== 'example' && k !== 'examples') sanitizePatterns(v, unexpressed, depth + 1);
 }

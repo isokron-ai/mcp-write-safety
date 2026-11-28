@@ -57,7 +57,7 @@ export async function minCommand(a: MinCliArgs, log: (l: string) => void): Promi
     log,
   });
   const bad = capViolations(doc);
-  if (bad.length) throw new WritecheckError(`min mode produced a verdict it may not give (a bug of ours; nothing was written as final): ${bad.join('; ')}`, 4);
+  if (bad.length) throw new WritecheckError(`min mode produced a verdict it may not give (a bug of ours). No results.json was written; cap-violations.json lists them: ${bad.join('; ')}`, 4);
   for (const r of doc.results.filter((x) => x.verdict === 'violated')) log(`  ${r.requirement} (${r.level}) ${r.tool}${r.case ? ` [${r.case}]` : ''}: ${r.reason.slice(0, 200)}`);
   log(`min mode: ${doc.run.status}; spec ${doc.spec.url ?? doc.spec.file} sha256 ${doc.spec.sha256.slice(0, 12)}; ${doc.results.filter((x) => x.verdict === 'violated').length} violated record(s); ${doc.requirements.not_testable_mock.length} requirements not testable against a mock; results in ${one('--out') ?? 'mwsc-min-results'}/results.json`);
   if (doc.run.status !== 'complete') return 3;
