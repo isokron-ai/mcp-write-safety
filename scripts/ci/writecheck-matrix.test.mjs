@@ -12,7 +12,7 @@ import { cellRecord } from './matrix-cell.mjs';
 import { allCells, documentedGaps, judgeCell, judgeWritecheck, plan } from './matrix-plan.mjs';
 import { build } from './t0-bundle.mjs';
 import { buildMap, MAP_FILE, mcpDefects } from './writecheck-expected.mjs';
-import { CONTROL_LAYOUT_DEFECTS, controlManifest, layoutFor, observedOf, runWritecheck } from './writecheck-run.mjs';
+import { CONTROL_ATTEMPTS, CONTROL_LAYOUT_DEFECTS, controlEdits, controlManifest, freePorts, layoutFor, lostPortRace, observedOf, runWritecheck } from './writecheck-run.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (f) => JSON.parse(readFileSync(join(root, f), 'utf8'));
@@ -267,8 +267,18 @@ test('R-DM-27: the control manifest is one all --fixture-control process with fa
   assert.doesNotMatch(m, /rewrite_env|^ {2}restart:|^settings:/m);
   assert.match(m, /^ {2}cwd: "\/tt"$/m);
   assert.match(m, /inflight_hold: \{ fixture: fixture-api\/1, control_env: TRACKER_CONTROL_URL, token_env: TRACKER_CONTROL_TOKEN/);
-  // mutation: a shipped manifest whose server line changed is refused, not run in a half-edited layout
-  assert.throws(() => controlManifest(SHIPPED.replace('server, --port, "0"', 'server, --port, "4100"'), { cwd: '/tt', backendPort: 1, controlPort: 2 }), /cannot edit the shipped manifest/);
+  // mutation, one per edit: a shipped manifest that lost the text an edit rewrites is refused, naming that edit, and never run
+  // half-edited (all seven edits, not a sample).
+  const ports = { cwd: '/tt', backendPort: 1, controlPort: 2 };
+  const edits = controlEdits(ports);
+  assert.equal(edits.length, 7);
+  for (const [from] of edits) {
+    const hit = typeof from === 'string' ? (SHIPPED.includes(from) ? from : null) : (SHIPPED.match(from)?.[0] ?? null);
+    assert.ok(hit, `the shipped manifest has the text ${String(from).slice(0, 60)}`);
+    const drifted = SHIPPED.replace(hit, '');
+    assert.throws(() => controlManifest(drifted, ports), (e) => e.message.includes('cannot edit the shipped manifest') && e.message.includes(String(from).slice(0, 80)), `drift in ${String(from).slice(0, 60)}`);
+  }
+  assert.throws(() => controlManifest(SHIPPED.replace('server, --port, "0"', 'server, --port, "4100"'), ports), /cannot edit the shipped manifest/);
   assert.throws(() => controlManifest(SHIPPED.replace(/^ {2}inflight_hold: .*$/m, ''), { cwd: '/tt', backendPort: 1, controlPort: 2 }), /no backend\.inflight_hold/);
 });
 
@@ -314,6 +324,49 @@ process.exit(1);
     assert.throws(() => readFileSync(join(dir, 'backend-started')), 'no separate backend was started');
   } finally {
     if (was === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = was;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('R-DM-29: the control layout\'s ports are distinct, and a run whose server lost a picked port (EADDRINUSE) is retried on fresh ports, at most CONTROL_ATTEMPTS times (stub CLI)', async () => {
+  const ps = await freePorts(4);
+  assert.equal(new Set(ps).size, 4, 'ports picked together never repeat');
+  assert.ok(lostPortRace({ ok: false, error: 'x', stderr: 'Error: listen EADDRINUSE: address already in use 127.0.0.1:41001' }));
+  assert.ok(!lostPortRace({ ok: false, error: 'plan gave no plan hash', stderr: 'some other failure' }), 'another failure is not retried');
+  assert.ok(!lostPortRace({ ok: true }));
+  const dir = mkdtempSync(join(tmpdir(), 'dm-wc-race-'));
+  try {
+    const tt = join(dir, 'tt');
+    mkdirSync(join(tt, 'dist', 'src'), { recursive: true });
+    writeFileSync(join(tt, 'writecheck.yaml'), SHIPPED);
+    const log = join(dir, 'attempts.txt');
+    const stub = (failures) => {
+      const cli = join(dir, `main-${failures}.mjs`);
+      writeFileSync(cli, `import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+const a = process.argv.slice(2);
+const at = (f) => a[a.indexOf(f) + 1];
+if (a[0] !== 'plan') process.exit(9);
+const n = existsSync(${JSON.stringify(log)}) ? readFileSync(${JSON.stringify(log)}, 'utf8').split('\\n').filter(Boolean).length : 0;
+appendFileSync(${JSON.stringify(log)}, process.env.TRACKER_CONTROL_URL + '\\n');
+if (n < ${failures}) { console.error('tiny-tracker: listen EADDRINUSE: address already in use'); process.exit(1); }
+console.log('plan hash: h1');
+process.exit(0);
+`);
+      return cli;
+    };
+    // The stub plans only; its run step exits without results, so a run that got past the race ends "no results.json".
+    rmSync(log, { force: true });
+    const once = await runWritecheck({ cli: stub(1), tinyTracker: tt, layout: 'control', timeoutMs: 20000 });
+    const urls = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+    assert.equal(urls.length, 2, 'one lost race, then a second attempt');
+    assert.notEqual(urls[0], urls[1], 'the retry uses fresh ports');
+    assert.match(once.error, /no results\.json/, 'the second attempt got past the bind');
+    assert.ok(!('stderr' in once), 'the raw stderr is not passed on to the cell record');
+    rmSync(log, { force: true });
+    const always = await runWritecheck({ cli: stub(99), tinyTracker: tt, layout: 'control', timeoutMs: 20000 });
+    assert.equal(readFileSync(log, 'utf8').split('\n').filter(Boolean).length, CONTROL_ATTEMPTS);
+    assert.equal(always.ok, false, 'a race lost every time is an error, never "clean"');
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
