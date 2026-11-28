@@ -34,12 +34,17 @@ export function judge(expected, found) {
   return expected.map((c) => {
     const f = byKey.get(keyOf(c));
     const outcome = f?.outcome === 'success' || f?.outcome === 'failure' ? f.outcome : 'incomplete';
-    return { ...c, ...(f ? { reason: f.reason, status: f.status, mode: f.mode, detected: f.detected, documented: f.documented } : {}), outcome };
+    return { ...c, ...(f ? { reason: f.reason, status: f.status, mode: f.mode, detected: f.detected, documented: f.documented, writecheck_detected: f.writecheck_detected, writecheck_clean: f.writecheck_clean, writecheck: f.writecheck } : {}), outcome };
   });
 }
 
-/** Cell statuses that are reported on their own and never satisfy known_bad. */
+/** Cell statuses that are reported on their own and never satisfy known_bad (unless mcp-writecheck itself caught the defect, below). */
 export const UNJUDGED = new Set(['combo_only', 'committed_contract']);
+// A defect cell whose status is unjudged by the fixture is judged when it ran mcp-writecheck and it reported every expected
+// requirement (writecheck_detected true) or missed one (false: the cell failed, and known_bad must say missed): that is a run of our
+// own tool on that defect, not a committed row. A cell without a writecheck_detected member (a bundle from before, or one whose
+// writecheck had nothing to say) is judged as it always was. A failed cell is always judged (a writecheck error must not hide).
+const judged = (c) => !UNJUDGED.has(c.status) || typeof c.writecheck_detected === 'boolean' || c.outcome === 'failure';
 
 const controlOf = (cells, kind, expected, good, bad) => {
   const mine = cells.filter(kind);
@@ -55,14 +60,19 @@ export function build({ expected, found, env = process.env, now = new Date() }) 
     // Only defects the matrix judged: detected here, or documented as not detected. combo_only (no single-defect build) and
     // committed_contract (a difference only in the committed contract rows, not run here) never satisfy this control; they
     // are listed in the report under their own names.
-    controlOf(cells, (c) => (c.kind === 'defect' && !UNJUDGED.has(c.status)) || c.kind === 'known-bad', 'detected_or_documented', 'known_bad', 'missed'),
+    controlOf(cells, (c) => (c.kind === 'defect' && judged(c)) || c.kind === 'known-bad', 'detected_or_documented', 'known_bad', 'missed'),
   ].filter(Boolean);
   if (controls.length === 0) controls.push({ kind: 'known_bad', expected: 'detected_or_documented', observed: 'none_judged' });
   const sha = /^[0-9a-f]{40}$/.test(env.GITHUB_SHA ?? '') ? env.GITHUB_SHA : null;
   const repo = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY ?? '') ? env.GITHUB_REPOSITORY : 'isokron-ai/mcp-write-safety';
   const at = now.toISOString().replace(/\.\d+Z$/, 'Z');
   return {
-    matrix: { lane: 't0-defects', cells, missed: cells.filter((c) => c.kind !== 'known-good' && c.outcome !== 'success').map((c) => c.defect ?? c.label), detected: cells.filter((c) => c.status === 'detected').map((c) => c.defect), documented_gaps: cells.filter((c) => c.status === 'documented').map((c) => c.defect), combo_only: cells.filter((c) => c.status === 'combo_only').map((c) => c.defect), committed_contract: cells.filter((c) => c.status === 'committed_contract').map((c) => c.defect) },
+    matrix: { lane: 't0-defects', cells, missed: cells.filter((c) => c.kind !== 'known-good' && c.outcome !== 'success').map((c) => c.defect ?? c.label), detected: cells.filter((c) => c.status === 'detected').map((c) => c.defect), documented_gaps: cells.filter((c) => c.status === 'documented').map((c) => c.defect), combo_only: cells.filter((c) => c.status === 'combo_only').map((c) => c.defect), committed_contract: cells.filter((c) => c.status === 'committed_contract').map((c) => c.defect),
+      // mcp-writecheck's own answers (the same job runs the pinned CLI on each build): the defects it reported, the ones it should have and did not
+      // (a control miss, a lead against our tool: the cell failed), and the correct builds it found clean.
+      writecheck_detected: cells.filter((c) => c.writecheck_detected === true).map((c) => c.defect),
+      writecheck_missed: cells.filter((c) => c.writecheck_detected === false).map((c) => c.defect),
+      writecheck_clean: cells.filter((c) => c.writecheck_clean === true).map((c) => c.label) },
     meta: {
       subject: { id: SUBJECT_ID, repo, sha },
       tools: [{ name: repo.split('/')[1], version: sha ?? 'unknown' }],
