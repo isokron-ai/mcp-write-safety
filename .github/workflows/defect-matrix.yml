@@ -132,7 +132,8 @@ jobs:
           if [ -n "$IN_DEFECTS" ] && [ "$IN_DEFECTS" != "all" ]; then
             check defects "$IN_DEFECTS" '^[a-z0-9-]+(,[a-z0-9-]+){0,19}$'
           fi
-          check mode "$IN_MODE" '^(full|min)$'
+          mode="${IN_MODE:-full}"
+          check mode "$mode" '^(full|min)$'
           [ "$bad" -eq 0 ] || exit 1
           cells="$(node scripts/ci/matrix-plan.mjs cells "$IN_DEFECTS")"
           {
@@ -141,7 +142,7 @@ jobs:
             echo "fence=$IN_FENCE"
             echo "run_key=$IN_RUN_KEY"
             echo "cells=$cells"
-            echo "mode=$IN_MODE"
+            echo "mode=$mode"
           } >> "$GITHUB_OUTPUT"
 
   build:
