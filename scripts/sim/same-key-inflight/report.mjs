@@ -106,7 +106,7 @@ if (liveCells.length) {
 }
 
 md.push('## 4. writecheck verdict (inflight.same-key, MWS-RES-2) under both readings', '');
-md.push('Strict: what writecheck reports today (B-9: the repeat\'s outcome describes the keyed write). Lenient: the repeat\'s outcome describes only the call that carried it (computed from writecheck\'s own record; see writecheck.mjs).', '');
+md.push('Strict: what writecheck reports (B-9: the repeat\'s outcome describes the keyed write; an error with no outcome claim is never violated until MWS 1.0, spec DECISIONS R16-4). Lenient: the repeat\'s outcome describes only the call that carried it (computed from writecheck\'s own record; see writecheck.mjs). The run declares patterns.in_progress, so a declared pattern decides variant C\'s in-progress wording (spec 7.3, rule 11).', '');
 md.push('| variant | create_ticket strict | create_ticket lenient | differ | create_project (control, unchanged build) | violated in the whole run |', '|---|---|---|---|---|---|');
 const differ = [];
 for (const v of VARIANTS) {

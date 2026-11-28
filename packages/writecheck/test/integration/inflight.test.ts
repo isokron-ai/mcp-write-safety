@@ -141,6 +141,59 @@ test('R-WC-04: the same-key judge: no hold, a refused or unfired hold, or no key
   for (const [what, o] of cases) assert.equal(sameKeyVerdict(same(o), W).verdict, 'not tested', what);
 });
 
+/**
+ * Owner decision, 28 Nov 2026 (spec MWS-RES-2, the same-key trial; DECISIONS R16-4): an error that makes no claim about the
+ * keyed write's outcome is never `violated` here until MWS 1.0. Wording that a declared patterns.in_progress reads (the key is in
+ * progress, in use or outstanding) is `held`; a bare "409 Conflict" is `not tested`; both carry an observation recommending the
+ * B-9 form. An answer that states not_applied (variants A and E of the same-key simulation) stays `violated`.
+ */
+const IN_PROGRESS = String.raw`\b(in progress|in use|outstanding|being processed)\b`;
+function useTTWithInProgress(): void {
+  usePatterns({ ...SHIPPED, patterns: { ...SHIPPED.patterns, in_progress: IN_PROGRESS } });
+  useShapes(SHIPPED, TOOLS);
+}
+const second = (o: Partial<CallBrief>) => ({ ...call({ step: 'c2', ...o }), t_end_ms: 1 });
+const BARE_IN_PROGRESS = '409 Conflict: a request with this idempotency_key is in progress.';
+const recommends = (r: Result) => r.notes.some((n) => /^Observation: /.test(n) && /outcome: "unknown"/.test(n) && /code: "in_progress"/.test(n) && /repeat: "same_key"/.test(n));
+
+test('R-WC-07: the same-key judge: a bare 409 that a declared patterns.in_progress reads as "in progress" (no outcome claim) is held, with an observation recommending the B-9 form', () => {
+  useTTWithInProgress();
+  for (const text of [BARE_IN_PROGRESS, 'Conflict: the idempotency key is in use by another request.', 'A request is outstanding for this Idempotency-Key.']) {
+    const r = sameKeyVerdict(same({ second: second({ text }) }), W);
+    assert.equal(r.verdict, 'held', `${text}: ${r.reason}`);
+    assert.ok(recommends(r), `${text}: ${r.notes.join(' | ')}`);
+    assert.ok(r.notes.some((n) => /patterns\.in_progress/.test(n)), r.notes.join(' | '));
+  }
+});
+
+test('R-WC-07: the same-key judge: a bare "409 Conflict" with no wording about the write or the key is an observation (not tested), never violated', () => {
+  useTTWithInProgress();
+  for (const text of ['409 Conflict', 'Conflict', 'Error: Request failed with status code 409']) {
+    const r = sameKeyVerdict(same({ second: second({ text }) }), W);
+    assert.equal(r.verdict, 'not tested', `${text}: ${r.reason}`);
+    assert.match(r.reason, /Until MWS 1\.0 such an answer is an observation/);
+    assert.ok(recommends(r), `${text}: ${r.notes.join(' | ')}`);
+  }
+});
+
+test('R-WC-07: rule 11: without a declared patterns.in_progress the in-progress 409 is not tested with the observation (the default pattern alone decides nothing), never violated', () => {
+  useTT();
+  const r = sameKeyVerdict(same({ second: second({ text: BARE_IN_PROGRESS }) }), W);
+  assert.equal(r.verdict, 'not tested', r.reason);
+  assert.match(r.reason, /default pattern reads in-progress wording/);
+  assert.ok(recommends(r), r.notes.join(' | '));
+});
+
+test('R-WC-07: mutation of the judge: an answer that states not_applied stays violated with the in-progress pattern declared (variants A and E), and an in-progress 409 with no keyed write in effect is not tested', () => {
+  useTTWithInProgress();
+  const a = sameKeyVerdict(same({ second: second({ text: 'Conflict: nothing was written by this call.', shape: S({ outcome: 'not_applied', repeat: 'no', code: 'conflict' }) }) }), W);
+  assert.equal(a.verdict, 'violated', a.reason);
+  const e = sameKeyVerdict(same({ second: second({ text: 'Failed.', shape: S({ outcome: 'not_applied', code: 'failed', repeat: 'no' }) }) }), W);
+  assert.equal(e.verdict, 'violated', e.reason);
+  const none = sameKeyVerdict(same({ second: second({ text: BARE_IN_PROGRESS }), first: { ...call({ step: 'c0' }), t_end_ms: 2 }, after: trace([]) }), W);
+  assert.equal(none.verdict, 'not tested', none.reason);
+});
+
 test('R-WC-04: plan: without a gate, with the in-process hook route, and without a declared in-flight hold, each scenario is not tested with the reason', () => {
   const ticket = (m: typeof SHIPPED) => inflightCheck.plan({ manifest: m, tools: TOOLS }, m.resources.find((r) => r.name === 'ticket')!);
   const shipped = ticket(SHIPPED);
