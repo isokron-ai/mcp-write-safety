@@ -61,3 +61,16 @@ Do not open a public issue for a vulnerability in the test suite or the sample s
 ## Conduct
 
 Be direct and courteous. Criticize texts and tests, not people or projects.
+
+## Checking that a test fails when its guard is removed (mutation probes)
+
+Do not clone the repository to check this by hand: run the `mutation-probe` workflow (Actions, or
+`gh workflow run mutation-probe.yml -R isokron-ai/mcp-write-safety -f ref=<branch-or-sha> -f test='cd packages/writecheck && npm run build && node --test dist/test/unit/<file>.test.js' -f mutations='[...]'`).
+It calls isokron-ai/tool-qa's reusable workflow. Each mutation is `{"id", "file", "find", "replace"}`
+(and optionally its own `test` and `pattern`): `find` must be exact text that occurs exactly once in `file`, for example
+a guard in `packages/writecheck/src/`. Every mutation runs in a fresh checkout of `ref`: the test must pass first, then it
+runs again with the edit applied. The job summary lists each mutation as `killed` (the test failed, as it must),
+`survived` or `stale` (`find` is not there exactly once), and the `mutation-probe-results` artifact holds the same as
+JSON. The run fails if any mutation survived or is stale. At most 20 mutations per run; read-only, no secrets.
+The tests here run from the built `dist/`, so the test command must build first (as above): the default `build`
+installs `packages/writecheck` and builds it once, and each mutation then needs `npm run build` before its test.
