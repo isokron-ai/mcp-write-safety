@@ -13,7 +13,7 @@
 // Actions log, and live for the run.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -54,8 +54,7 @@ export const layoutFor = (cell) => (cell?.kind === 'defect' && CONTROL_LAYOUT_DE
  * want the same ports). Throws when the shipped manifest no longer has a line this edits, so a drift is an error, never a
  * quiet run in the wrong layout.
  */
-export function controlManifest(text, { cwd, backendPort, controlPort }) {
-  const edits = [
+export const controlEdits = ({ cwd, backendPort, controlPort }) => [
     [/^ {2}cwd: .*$/m, `  cwd: ${JSON.stringify(cwd)}`],
     [/command: \[node, dist\/src\/cli\.js, server, --port, "0"\]/, `command: [node, dist/src/cli.js, all, --port, "0", --backend-port, "${backendPort}", --fixture-control, --control-port, "${controlPort}", --features, "evidence,strict-input,ledger,faults"]`],
     ['env_passthrough: [TRACKER_BACKEND_TOKEN]', 'env_passthrough: [TRACKER_BACKEND_TOKEN, TRACKER_CONTROL_TOKEN, TRACKER_EVIDENCE_TOKEN]'],
@@ -63,9 +62,11 @@ export function controlManifest(text, { cwd, backendPort, controlPort }) {
     [/^ {2}restart: .*$/m, ''],
     [/^ {2}gate: \{ rewrite_env: TRACKER_BACKEND_URL \}$/m, ''],
     [/\nsettings:\n( {2}.*\n)+?( {2}tool_filters:\n( {4}- .*\n)+)/, '\n'],
-  ];
+];
+
+export function controlManifest(text, ports) {
   let out = text;
-  for (const [from, to] of edits) {
+  for (const [from, to] of controlEdits(ports)) {
     const next = out.replace(from, to);
     if (next === out) throw new Error(`the control layout cannot edit the shipped manifest: ${String(from).slice(0, 80)} not found`);
     out = next;
@@ -74,13 +75,27 @@ export function controlManifest(text, { cwd, backendPort, controlPort }) {
   return out;
 }
 
-async function freePort() {
-  const s = createServer();
-  await new Promise((r) => s.listen(0, '127.0.0.1', r));
-  const p = s.address().port;
-  await new Promise((r) => s.close(() => r()));
-  return p;
+/**
+ * `n` distinct loopback ports, each free when picked: all are held open together (so two picks never return the same port),
+ * then released for tiny-tracker to bind. Another process can still take one in between; runControl retries then (R-DM-29).
+ */
+export async function freePorts(n) {
+  const held = [];
+  try {
+    for (let i = 0; i < n; i++) {
+      const s = createServer();
+      await new Promise((res, rej) => { s.once('error', rej); s.listen(0, '127.0.0.1', res); });
+      held.push(s);
+    }
+    return held.map((s) => s.address().port);
+  } finally {
+    await Promise.all(held.map((s) => new Promise((r) => s.close(() => r()))));
+  }
 }
+
+/** A run whose server could not bind a picked port (lost the race for it): the attempt is retried on fresh ports. */
+export const lostPortRace = (r) => !r.ok && /EADDRINUSE|address already in use/i.test(r.stderr ?? r.error ?? '');
+export const CONTROL_ATTEMPTS = 3;
 
 /** Mask a value in the Actions log (a workflow command; outside Actions it is not printed). */
 const mask = (v) => { if (process.env.GITHUB_ACTIONS === 'true') process.stdout.write(`::add-mask::${v}\n`); };
@@ -98,11 +113,11 @@ function runOn(o, cli, work, manifest, env) {
   const run = (args) => spawnSync(process.execPath, [cli, ...args], { env, encoding: 'utf8', timeout: o.timeoutMs ?? 1_500_000, maxBuffer: 64 * 1024 * 1024 });
   const plan = run(['plan', '-m', manifest]);
   const hash = /plan hash: (\S+)/.exec(plan.stdout ?? '')?.[1];
-  if (!hash) return { ok: false, error: `plan gave no plan hash (exit ${plan.status}): ${String(plan.stderr).slice(-300)}` };
+  if (!hash) return { ok: false, error: `plan gave no plan hash (exit ${plan.status}): ${String(plan.stderr).slice(-300)}`, stderr: String(plan.stderr ?? '') };
   const out = join(work, 'out');
   const r = run(['run', '-m', manifest, '--confirm-target', 'tiny-tracker', '--plan-hash', hash, '--out', out, '--state', join(work, 'state')]);
   const file = findResults(out.replace(/\/$/, '')) ?? null;
-  if (!file) return { ok: false, error: `run wrote no results.json (exit ${r.status}): ${String(r.stderr).slice(-300)}` };
+  if (!file) return { ok: false, error: `run wrote no results.json (exit ${r.status}): ${String(r.stderr).slice(-300)}`, stderr: String(r.stderr ?? '') };
   const doc = JSON.parse(readFileSync(file, 'utf8'));
   return { ok: true, observed: observedOf(doc), version: doc.suite?.version ?? 'unknown', records: (doc.results ?? []).length };
 }
@@ -115,12 +130,21 @@ async function runControl(o) {
   const tokens = { TRACKER_BACKEND_TOKEN: tok('b'), TRACKER_CONTROL_TOKEN: tok('c'), TRACKER_EVIDENCE_TOKEN: tok('e') };
   for (const v of Object.values(tokens)) mask(v);
   try {
-    const [backendPort, controlPort] = [await freePort(), await freePort()];
-    const manifest = join(work, 'writecheck.yaml');
-    writeFileSync(manifest, controlManifest(readFileSync(join(tt, 'writecheck.yaml'), 'utf8'), { cwd: tt, backendPort, controlPort }));
-    // why: the listeners stay on loopback: tiny-tracker binds its control listener to 127.0.0.1, and the tester is told only that.
-    const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...tokens, TRACKER_BACKEND_URL: `http://127.0.0.1:${backendPort}`, TRACKER_CONTROL_URL: `http://127.0.0.1:${controlPort}`, ...(o.defects?.length ? { TRACKER_DEFECTS: o.defects.join(',') } : {}) };
-    return runOn(o, cli, work, manifest, env);
+    let r;
+    for (let attempt = 1; attempt <= CONTROL_ATTEMPTS; attempt++) {
+      const [backendPort, controlPort] = await freePorts(2);
+      const dir = join(work, `attempt-${attempt}`);
+      mkdirSync(dir);
+      const manifest = join(dir, 'writecheck.yaml');
+      writeFileSync(manifest, controlManifest(readFileSync(join(tt, 'writecheck.yaml'), 'utf8'), { cwd: tt, backendPort, controlPort }));
+      // why: the listeners stay on loopback: tiny-tracker binds its control listener to 127.0.0.1, and the tester is told only that.
+      const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...tokens, TRACKER_BACKEND_URL: `http://127.0.0.1:${backendPort}`, TRACKER_CONTROL_URL: `http://127.0.0.1:${controlPort}`, ...(o.defects?.length ? { TRACKER_DEFECTS: o.defects.join(',') } : {}) };
+      r = runOn(o, cli, dir, manifest, env);
+      if (!lostPortRace(r)) break;
+      process.stderr.write(`writecheck control layout: attempt ${attempt} lost a picked port to another process; ${attempt < CONTROL_ATTEMPTS ? 'retrying on fresh ports' : 'giving up'}\n`);
+    }
+    const { stderr: _s, ...out } = r;
+    return out;
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e).slice(0, 300) };
   } finally {
@@ -147,7 +171,8 @@ async function runSeparate(o) {
     const manifest = join(work, 'writecheck.yaml');
     writeFileSync(manifest, readFileSync(join(tt, 'writecheck.yaml'), 'utf8').replace(/^ {2}cwd: .*$/m, `  cwd: ${JSON.stringify(tt)}`));
     const env = { ...base, TRACKER_BACKEND_URL: url, TRACKER_BACKEND_TOKEN: token, ...(o.defects?.length ? { TRACKER_DEFECTS: o.defects.join(',') } : {}) };
-    return runOn(o, cli, work, manifest, env);
+    const { stderr: _s, ...out } = runOn(o, cli, work, manifest, env);
+    return out;
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e).slice(0, 300) };
   } finally {
