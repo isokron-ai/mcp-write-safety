@@ -7,8 +7,9 @@ import { join, resolve } from 'node:path';
 import { BUILDS, EXPECTED, judgeCell, labelsFor } from './matrix-plan.mjs';
 import { MAP_FILE } from './writecheck-expected.mjs';
 import { runWritecheck } from './writecheck-run.mjs';
+import { judgeMin, runMinCell } from './writecheck-min.mjs';
 
-const WC_ITEM = /^MWS-[A-Z0-9]+-[0-9]+:(violated|self-attested-no|platform)$/;
+const WC_ITEM = /^MWS-[A-Z0-9]+-[0-9]+:(violated|self-attested-no|platform|not_testable_mock)$/;
 const WC_STATES = new Set(['detected', 'missed', 'not_expected', 'violated', 'clean', 'error', 'not_run']);
 const strings = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && WC_ITEM.test(x)) : []);
 
@@ -21,6 +22,7 @@ export function cellRecord(env, verdict) {
   // mcp-writecheck's own answer (added 27 Nov): true/false/null for a defect, a boolean for a correct build; the lists are requirement answers only.
   if (typeof verdict.writecheck_detected === 'boolean' || verdict.writecheck_detected === null) rec.writecheck_detected = verdict.writecheck_detected;
   if (typeof verdict.writecheck_clean === 'boolean') rec.writecheck_clean = verdict.writecheck_clean;
+  if (verdict.writecheck_mode === 'min' || verdict.writecheck_mode === 'full') rec.writecheck_mode = verdict.writecheck_mode;
   if (verdict.writecheck && WC_STATES.has(verdict.writecheck.state)) {
     const w = verdict.writecheck;
     rec.writecheck = { state: w.state, expected: strings(w.expected), observed: strings(w.observed), missing: strings(w.missing) };
@@ -47,11 +49,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       if (cell.kind === 'defect' && !entry) throw new Error(`${cell.defect}: no entry in ${MAP_FILE}`);
       // A backend defect other than lost-update is a fixture-layer defect the demo's build cannot start: it is not run.
       const skip = entry?.layer === 'backend' && entry.expected.length === 0;
-      const run = skip ? { skipped: 'backend_fixture_defect' } : await runWritecheck({
-        cli: process.env.WRITECHECK_CLI, tinyTracker: 'examples/tiny-tracker',
-        defects: entry?.layer === 'mcp' ? [cell.defect] : [], backendDefects: entry?.layer === 'backend' ? [cell.defect] : [],
-      });
-      writecheck = { run, expected: entry };
+      // MODE=min (defect-matrix.yml input mode): min mode, the backend replaced by the mock made from tiny-tracker's OpenAPI
+      // description. A backend defect has no backend to go to there: its build is the correct MCP layer against the mock.
+      const min = process.env.MODE === 'min';
+      const run = skip ? { skipped: 'backend_fixture_defect' } : min
+        ? await runMinCell({ cli: process.env.WRITECHECK_CLI, tinyTracker: 'examples/tiny-tracker', defects: entry?.layer === 'mcp' ? [cell.defect] : [] })
+        : await runWritecheck({
+          cli: process.env.WRITECHECK_CLI, tinyTracker: 'examples/tiny-tracker',
+          defects: entry?.layer === 'mcp' ? [cell.defect] : [], backendDefects: entry?.layer === 'backend' ? [cell.defect] : [],
+        });
+      writecheck = min ? { run, expected: entry, judge: judgeMin, mode: 'min' } : { run, expected: entry };
       process.stdout.write(`writecheck ${JSON.stringify(run)}\n`);
     }
     verdict = judgeCell({ cell, buildsDoc, expectedDoc, got, writecheck });

@@ -30,6 +30,7 @@ import { compareCommand, finishRecheck, originalSignature, IDENTITY_FLAGS, IDENT
 import { demoCommand } from './demo.js';
 import { initCommand } from './init.js';
 import { runCommand, type RunOutcome } from './run.js';
+import { MIN_USAGE, minCommand } from '../min/cli.js';
 
 const HEAD = `${SUITE_NAME} ${SUITE_VERSION} (MWS ${SPEC_VERSION})
 
@@ -137,7 +138,11 @@ mcp-writecheck init [--out manifest.yaml] --url <http://host/mcp>
   version: { usage: `mcp-writecheck version\n    Print the suite and requirements versions.`, flags: [] },
 };
 
+// Min mode (src/min): the MCP-layer requirements against a mock made from the backend's OpenAPI description.
+COMMANDS['min'] = { usage: MIN_USAGE, flags: ['--spec', '--spec-url', '--base-url-env', '--env', '--set', '--declaration', '--listen', '--advertise', '--out', '-o', '--timeout-ms', '--cwd'] };
+
 // why: F8: the run identity flags are added here, apart from the run and rerun entries, so other changes to those lines merge cleanly.
+
 for (const c of ['run', 'rerun'] as const) {
   COMMANDS[c]!.flags.push(...IDENTITY_FLAGS);
   COMMANDS[c]!.usage += `\n${IDENTITY_USAGE}`;
@@ -323,6 +328,8 @@ export async function main(argv: string[]): Promise<number> {
     case 'review':
       reviewCommand({ dir: folder(), log });
       return 0;
+    case 'min':
+      return minCommand(a, log);
     case 'requirements':
       for (const r of REQUIREMENTS) log(`${r.id}\t${r.level}\t${r.summary}`);
       return 0;

@@ -101,9 +101,10 @@ export function judgeCell({ cell, buildsDoc, expectedDoc, got, writecheck }) {
  * The fixture status stays as it was, except that a defect the fixture cannot see and the file does not document (`neutered`) is
  * `writecheck_detected` when mcp-writecheck caught it.
  */
-function withWritecheck(v, cell, { run, expected }) {
-  const w = judgeWritecheck({ run, expected: cell.kind === 'defect' ? expected : null });
-  const fields = { writecheck: { state: w.state, expected: w.expected, observed: w.observed, missing: w.missing } };
+function withWritecheck(v, cell, { run, expected, judge = null, mode = null }) {
+  // judge: min mode's own (writecheck-min.mjs judgeMin), which reads not_testable_mock answers; full mode uses judgeWritecheck.
+  const w = (judge ?? judgeWritecheck)({ run, expected: cell.kind === 'defect' ? expected : null, defect: cell.defect ?? null });
+  const fields = { writecheck: { state: w.state, expected: w.expected, observed: w.observed, missing: w.missing }, ...(mode ? { writecheck_mode: mode } : {}) };
   if (cell.kind === 'known-good') {
     const clean = w.state === 'clean';
     const bad = !clean && (w.state === 'error' || w.state === 'not_run' ? 'writecheck_error' : 'writecheck_violated');

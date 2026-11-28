@@ -38,11 +38,18 @@
 # They are reported beside the statuses above, which are unchanged: a documented, combo_only or committed_contract defect
 # that mcp-writecheck caught keeps its status and is judged for known_bad (writecheck_detected true).
 #
+# Input mode (added 28 Nov): `full` (the default, as above) or `min`. In min mode the cell runs `mcp-writecheck min` instead
+# (scripts/ci/writecheck-min.mjs): tiny-tracker's backend is replaced by the mock made from examples/tiny-tracker/openapi.yaml,
+# and the answer is judged against what min mode may say (packages/writecheck/src/min/requirements-min.json): a defect whose
+# requirement min mode judges must be violated (or answered "no" on a review-only clause); a defect whose requirement needs
+# real backend semantics must come out not_testable_mock (never held); a correct build must be clean. A backend defect has no
+# backend to go to in min mode, so its build is the correct MCP layer against the mock (lost-update: MWS-CONC-3 not_testable_mock).
+#
 # No secrets. The first job does nothing unless the repository variable LOOP_ENABLED is exactly "true".
 
 name: defect-matrix
 
-run-name: shard ${{ inputs.shard_id }}
+run-name: shard ${{ inputs.shard_id }}${{ inputs.mode == 'min' && ' (min mode)' || '' }}
 
 on:
   workflow_dispatch:
@@ -68,6 +75,11 @@ on:
         required: false
         default: ''
         type: string
+      mode:
+        description: full (the default, tiny-tracker's real backend) or min (min mode, the backend replaced by the mock made from examples/tiny-tracker/openapi.yaml; scripts/ci/writecheck-min.mjs).
+        required: false
+        default: full
+        type: string
 
 permissions: {}
 
@@ -87,6 +99,7 @@ jobs:
       fence: ${{ steps.guard.outputs.fence }}
       run_key: ${{ steps.guard.outputs.run_key }}
       cells: ${{ steps.guard.outputs.cells }}
+      mode: ${{ steps.guard.outputs.mode }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,6 +113,7 @@ jobs:
           IN_FENCE: ${{ inputs.fence }}
           IN_RUN_KEY: ${{ inputs.run_key }}
           IN_DEFECTS: ${{ inputs.defects }}
+          IN_MODE: ${{ inputs.mode }}
         run: |
           if [ "$LOOP_ENABLED" != "true" ]; then
             echo "::notice::LOOP_ENABLED is not 'true'; this T0 worker does nothing."
@@ -118,6 +132,7 @@ jobs:
           if [ -n "$IN_DEFECTS" ] && [ "$IN_DEFECTS" != "all" ]; then
             check defects "$IN_DEFECTS" '^[a-z0-9-]+(,[a-z0-9-]+){0,19}$'
           fi
+          check mode "$IN_MODE" '^(full|min)$'
           [ "$bad" -eq 0 ] || exit 1
           cells="$(node scripts/ci/matrix-plan.mjs cells "$IN_DEFECTS")"
           {
@@ -126,6 +141,7 @@ jobs:
             echo "fence=$IN_FENCE"
             echo "run_key=$IN_RUN_KEY"
             echo "cells=$cells"
+            echo "mode=$IN_MODE"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -163,6 +179,7 @@ jobs:
           KIND: ${{ matrix.kind }}
           LABEL: ${{ matrix.label }}
           DEFECT: ${{ matrix.defect }}
+          MODE: ${{ needs.t0-start.outputs.mode }}
         run: node scripts/ci/matrix-cell.mjs "$RUNNER_TEMP/cell"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
