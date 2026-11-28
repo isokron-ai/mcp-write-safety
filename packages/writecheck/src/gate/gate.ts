@@ -109,8 +109,27 @@ export interface FaultHandle {
   clear(): void;
 }
 
+/**
+ * A lost answer with the request held on its way (MWS-RES-1, the in-flight scenarios, src/checks/inflight.ts): the nth request
+ * matching method and exact path is taken off the wire, the server's connection is closed at once with no answer (the server hears
+ * nothing), and the request is kept back. On release it is sent to the backend; `landed` gives the backend's status.
+ */
+export interface DropHoldHandle {
+  /** The request once it has arrived and the server's connection was closed, or null after `ms`. */
+  waitHeld(ms: number): Promise<GateRequest | null>;
+  /** Send the held request on to the backend (also disarms a hold that never triggered). */
+  release(): Promise<void>;
+  /** The backend's status for the released request, or null when it gave none within `ms` (or the hold never triggered). */
+  landed(ms: number): Promise<number | null>;
+}
+
 export interface Gate {
   readonly route: 'base_url' | 'node_import' | 'wire';
+  /**
+   * Cut the server's connection and hold its request (DropHoldHandle). Only the base-URL forwarder offers it; a route without it
+   * cannot bring the condition about, which the checks record as not tested (a limitation of the tester, not of the server).
+   */
+  dropAndHold?(spec: HoldSpec): DropHoldHandle;
   /** How long a scheduler waits for writer B while A is held before it records "serialized by the server". */
   readonly holdTimeoutMs: number;
   /** One sentence: how the server's backend traffic is routed (for every gated result). */

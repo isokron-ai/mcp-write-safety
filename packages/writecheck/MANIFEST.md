@@ -86,6 +86,12 @@ Exactly one route. `rewrite_env: VAR`: the tester starts a loopback forwarder an
 
 When `VAR` holds a database URL (`postgres://`, `postgresql://`, `redis://`, `mongodb://`), the loopback gate is the wire gate: the server gets the same URL with only host and port replaced (Mongo: plus `directConnection=true`), and requests are named by verb and target (`UPDATE mwsc_items`, `SET mwsc-fx-1`, `update mwsc.mwsc_items`). A request the gate cannot classify counts as a write. TLS to the backend (`sslmode=require`, `rediss://`, `tls=true`), several hosts, `mongodb+srv://` and Unix sockets are refused. Run Mongo without wire compression. See `docs/WIRE-GATE.md`.
 
+Only the base-URL forwarder can cut the server's connection and keep its request back (the lost answer with the request held on its way, scenario `inflight.lost-held`, MWS-RES-1); with the in-process hook or the wire gate that record is `not tested`, saying so.
+
+## backend.inflight_hold
+
+`{ fixture: fixture-api/1, control_env: VAR, token_env: VAR, hold_ms: 3000 }`: how the tester asks the target to hold a write inside its backend after the backend has taken the write's idempotency key and before it commits, for the scenario `inflight.same-key` (MWS-RES-2: the same keyed call while the first is still being applied). The gate cannot open that window: it holds a request before the backend sees it. `fixture-api/1` is the only interface built: `POST {control}/_fixture/faults` arming `backend/before-commit/delay` once for `hold_ms` (200 to 60000), with the bearer token in `token_env` (a secret of the run, redacted), then `GET /_fixture/faults` until it has fired. `control_env` holds the control listener's base URL in the tester's environment and joins the egress list. Unset variables, a refused arming or a hold that does not fire make the record `not tested`, with the target's answer; never a verdict on the server.
+
 ## settings
 
 | Key | Meaning |

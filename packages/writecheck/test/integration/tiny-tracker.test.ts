@@ -62,6 +62,10 @@ const saidNo = (rs: Result[]) => rs.filter((r) => r.verdict === 'self-attested' 
  *                             MWS-IN-1"); a list sent for delete_project's key is converted to the
  *                             key "1", and the not-found that follows does not name the argument
  *                             (IN-4; spec: a rejection after a conversion that changes the meaning)
+ *   shape-unknown-as-failed   every write tool's shape gives an open outcome as not_applied: after a lost backend answer
+ *                             that is a change in effect reported as not applied (RES-2); in the lost answer with the request
+ *                             held on its way (src/checks/inflight.ts), the keyed create's shape says no change is in effect
+ *                             and the held request then creates the object (RES-1, as settle-miss-reported-not-applied)
  *   skip-limits               an out-of-bounds value reaches the backend, whose refusal is passed on
  *                             without naming the argument (IN-4; spec MWS-IN-3: a refusal by the
  *                             backend that is passed on is a rejection, and MWS-IN-4 judges its form)
@@ -86,7 +90,7 @@ const EXPECT: Record<string, string[]> = {
   'create-overwrites': ['MWS-ANN-2', 'MWS-ANN-5', 'MWS-TGT-3'],
   'skip-null-assignee': ['MWS-RES-1'],
   'shape-claims-applied': ['MWS-RES-1'],
-  'shape-unknown-as-failed': ['MWS-RES-2'],
+  'shape-unknown-as-failed': ['MWS-RES-1', 'MWS-RES-2'],
   'shape-text-says-failed': ['MWS-RES-2'],
   'shape-text-invites-retry': ['MWS-RES-2'],
   'shape-wrong-version': ['MWS-RES-4'],
@@ -126,6 +130,17 @@ const EXPECT: Record<string, string[]> = {
   'missing-annotations': ['MWS-ANN-4'],
   'set-labels-non-destructive': ['MWS-ANN-5'],
   'token-in-error': ['MWS-SEC-1'],
+  // The inflight-gated MCP-layer defects (tiny-tracker 0.3.0; G2 fold-in 12), measured by the in-flight scenarios
+  // (src/checks/inflight.ts; R-WC-01, R-WC-06; test/integration/inflight.test.ts):
+  //   settle-miss-reported-not-applied  the lost answer with the request held on its way: the server looks the key up with no
+  //                                     fence and reports not applied, and the held request then creates the ticket (MWS-RES-1)
+  //   in-progress-reported-not-applied  needs the first keyed create held inside the backend after it took the key. The gate
+  //                                     holds a request before the backend sees it, and a backend started on its own offers no
+  //                                     control listener (FIXTURE.md: 0.4.0 does not build backend/before-commit/delay either),
+  //                                     so here the same-key scenario is `not tested`, with the reason, and nothing is
+  //                                     violated. With the hold made armable, inflight.test.ts shows MWS-RES-2 violated.
+  'settle-miss-reported-not-applied': ['MWS-RES-1'],
+  'in-progress-reported-not-applied': [],
 };
 
 /**
@@ -162,18 +177,12 @@ const SAID_NO: Record<string, string[]> = {
 
 test('the expectations cover every tiny-tracker defect the default profile runs', { skip }, async () => {
   const { DEFECTS } = (await import(join(dir!, 'dist', 'src', 'start.js'))) as { DEFECTS: { name: string; requires?: readonly string[] }[] };
-  // Coverage gap, stated (G2 fold-in 12): the two inflight-gated MCP-layer defects below have NO expectation row, so
-  // writecheck's per-defect runs say nothing about them; tiny-tracker's own tests show them (test/keyed.test.ts). From
-  // tiny-tracker 0.3.0 the default profile turns inflight on, so they run here, and `--defect all` below includes them.
-  // Listed for 0.4.0: expectation rows for both, measured with a same-key call while the first is in flight.
-  const NO_ROW_UNTIL_040 = ['in-progress-reported-not-applied', 'settle-miss-reported-not-applied'];
+  // Every defect the default profile runs has an expectation row, the two inflight-gated ones included (R-WC-01, R-WC-06):
+  // a new defect fails here until it has a row.
   const profile = (await import(join(dir!, 'dist', 'src', 'profile.js'))) as { PROFILE_FEATURES: Record<string, readonly string[]> };
   const runs = DEFECTS.filter((d) => (d.requires ?? []).every((f) => profile.PROFILE_FEATURES['default']!.includes(f)));
-  assert.deepEqual(runs.filter((d) => !NO_ROW_UNTIL_040.includes(d.name)).map((d) => d.name).sort(), Object.keys(EXPECT).sort());
-  // Every defect runs under the default profile, and the gap is exactly the named list: a new defect fails here until
-  // it has a row or is named.
+  assert.deepEqual(runs.map((d) => d.name).sort(), Object.keys(EXPECT).sort());
   assert.deepEqual(DEFECTS.filter((d) => !runs.includes(d)).map((d) => d.name), [], 'every MCP-layer defect runs under the default profile');
-  assert.deepEqual(runs.filter((d) => !Object.keys(EXPECT).includes(d.name)).map((d) => d.name).sort(), NO_ROW_UNTIL_040.sort());
 });
 
 for (const protocol of [undefined, '2025-11-25']) {

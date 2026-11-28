@@ -14,11 +14,18 @@ import type { AddressInfo } from 'node:net';
 
 import { assertEgress, egressFor, vettedLookup, type EgressPolicy } from '../core/egress.js';
 import { nowMs } from '../core/util.js';
-import { MUTATING, type FaultHandle, type FaultSpec, type Gate, type GateRequest, type HoldHandle, type HoldSpec } from './gate.js';
+import { MUTATING, type DropHoldHandle, type FaultHandle, type FaultSpec, type Gate, type GateRequest, type HoldHandle, type HoldSpec } from './gate.js';
 
 const HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'proxy-connection', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length']);
 /** A held request is let go after this long whatever happens, so a run can never hang on the gate. */
 const HOLD_CEILING_MS = 120_000;
+
+interface DropHeld {
+  release: () => void;
+  released: Promise<void>;
+  land: (s: number | null) => void;
+  landed: Promise<number | null>;
+}
 
 interface Armed<T> {
   spec: { method: string; path: string; nth: number };
@@ -37,6 +44,7 @@ export class Forwarder implements Gate {
   private readonly log: GateRequest[] = [];
   private holds: Armed<{ release: () => void; released: Promise<void>; releasedAt: number | null }>[] = [];
   private faults: Armed<{ kind: FaultSpec['kind']; status: number }>[] = [];
+  private dropHolds: Armed<DropHeld>[] = [];
   private readonly upstream: URL;
 
   constructor(
@@ -97,6 +105,25 @@ export class Forwarder implements Gate {
     };
   }
 
+  dropAndHold(spec: HoldSpec): DropHoldHandle {
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let land!: (s: number | null) => void;
+    const landed = new Promise<number | null>((r) => (land = r));
+    const a: Armed<DropHeld> = { spec, count: 0, hit: null, waiters: [], done: false, extra: { release, released, land, landed } };
+    this.dropHolds.push(a);
+    return {
+      waitHeld: (ms) => waitFor(a, ms),
+      release: async () => {
+        a.done = true;
+        a.extra.release();
+        // why: a hold that never triggered has nothing to land; its landed() answers null at once.
+        if (!a.hit) a.extra.land(null);
+      },
+      landed: (ms) => Promise.race([a.extra.landed, new Promise<null>((r) => setTimeout(() => r(null), ms).unref())]),
+    };
+  }
+
   fault(spec: FaultSpec): FaultHandle {
     const a: Armed<{ kind: FaultSpec['kind']; status: number }> = { spec, count: 0, hit: null, waiters: [], done: false, extra: { kind: spec.kind, status: spec.status ?? 500 } };
     this.faults.push(a);
@@ -110,8 +137,15 @@ export class Forwarder implements Gate {
       h.extra.release();
     }
     for (const f of this.faults) f.done = true;
+    // why: a request taken off the wire is never silently dropped: clearing sends it on, as a released hold would be.
+    for (const d of this.dropHolds) {
+      d.done = true;
+      d.extra.release();
+      if (!d.hit) d.extra.land(null);
+    }
     this.holds = [];
     this.faults = [];
+    this.dropHolds = [];
   }
 
   async stop(): Promise<void> {
@@ -145,6 +179,24 @@ export class Forwarder implements Gate {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
     const body = Buffer.concat(chunks);
+    const dropped = this.take(this.dropHolds, rec);
+    if (dropped) {
+      // why: the lost answer with the request held on its way: the server hears nothing now, and the backend sees the request
+      // only when the tester releases it (after the server has answered its caller).
+      dropped.hit = rec;
+      req.socket.destroy();
+      for (const w of dropped.waiters.splice(0)) w({ ...rec });
+      const ceiling = setTimeout(() => dropped.extra.release(), HOLD_CEILING_MS);
+      await dropped.extra.released;
+      clearTimeout(ceiling);
+      try {
+        const up = await this.forward(method, target, req.headers, body);
+        dropped.extra.land(up.status);
+      } catch {
+        dropped.extra.land(null);
+      }
+      return;
+    }
     const hold = this.take(this.holds, rec);
     if (hold) {
       hold.hit = rec;
