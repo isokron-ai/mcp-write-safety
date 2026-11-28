@@ -23,8 +23,20 @@
 # never a subject fault. scripts/ci/t0-bundle.mjs builds it.
 #
 # The fixture answers are run here; the contract answers are the committed ones (the contract driver is not checked out
-# here). Whether mcp-writecheck itself flags each defect build is what the dogfood-tiny-tracker worker of
-# mcp-writecheck-action runs.
+# here). mcp-writecheck itself is run in the same job (added 27 Nov): the CLI is built from packages/writecheck at the
+# commit under test, and scripts/ci/writecheck-run.mjs runs it against the built tiny-tracker, with the cell's defect
+# switched on (the release default profile, backend and server as separate processes, as `mcp-writecheck demo` does; the
+# one backend defect that profile can start, lost-update, goes to the backend). The requirements it reports are compared
+# with the defect's expected answer in expected/writecheck-expected-0.4.0.json (generated from the defects' own sources by
+# scripts/ci/writecheck-expected.mjs; builds-0.4.0.json has no such metadata):
+#
+#   writecheck_detected  true when it reported every expected requirement; false when it did not (a CONTROL MISS, a lead
+#                        against OUR tool: the cell fails with reason writecheck_missed); null when nothing is expected of it
+#                        (lookup-reexecutes, the fixture-only backend defects) or it did not run.
+#   writecheck_clean     a correct build: it must report no violation (else reason writecheck_violated).
+#
+# They are reported beside the statuses above, which are unchanged: a documented, combo_only or committed_contract defect
+# that mcp-writecheck caught keeps its status and is judged for known_bad (writecheck_detected true).
 #
 # No secrets. The first job does nothing unless the repository variable LOOP_ENABLED is exactly "true".
 
@@ -141,9 +153,13 @@ jobs:
           node-version: "22"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
+      - name: Build mcp-writecheck (the CLI under test, from this commit)
+        working-directory: packages/writecheck
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
       - name: Run the cell
         working-directory: .
         env:
+          WRITECHECK_CLI: ${{ github.workspace }}/packages/writecheck/dist/src/cli/main.js
           KIND: ${{ matrix.kind }}
           LABEL: ${{ matrix.label }}
           DEFECT: ${{ matrix.defect }}

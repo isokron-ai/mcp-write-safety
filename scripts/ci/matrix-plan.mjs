@@ -68,11 +68,57 @@ export function labelsFor(cell, buildsDoc) {
 const level = (b) => b.factors.level;
 
 /**
+ * Judge what mcp-writecheck said about one cell's build. `run`: {ok, observed: ["MWS-X-1:violated", ...]} or {ok: false, error}
+ * (or {skipped: reason}); `expected`: the defect's entry of writecheck-expected-0.4.0.json (null for a correct build).
+ * @returns {{state: string, expected: string[], observed: string[], missing: string[], extra: string[]}}
+ */
+export function judgeWritecheck({ run, expected }) {
+  const want = expected ? expected.expected : [];
+  if (!run || run.skipped) return { state: 'not_run', expected: want, observed: [], missing: [], extra: [] };
+  if (!run.ok) return { state: 'error', expected: want, observed: [], missing: [], extra: [] };
+  const observed = [...run.observed];
+  const missing = want.filter((w) => !observed.includes(w));
+  const extra = observed.filter((o) => !want.includes(o));
+  if (!expected) return { state: observed.length ? 'violated' : 'clean', expected: want, observed, missing: [], extra: observed };
+  if (want.length === 0) return { state: 'not_expected', expected: want, observed, missing: [], extra };
+  return { state: missing.length ? 'missed' : 'detected', expected: want, observed, missing, extra };
+}
+
+/**
  * Judge one cell. `got`: label -> {build_hash, fixture} from running the build now; `rows`: label -> committed row
  * (build_hash, fixture, contract).
  * @returns {{ok: boolean, reason?: string, status?: string, mode?: string, detected?: boolean, documented?: boolean, builds: number}}
  */
-export function judgeCell({ cell, buildsDoc, expectedDoc, got }) {
+export function judgeCell({ cell, buildsDoc, expectedDoc, got, writecheck }) {
+  const v = judgeFixture({ cell, buildsDoc, expectedDoc, got });
+  return writecheck === undefined ? v : withWritecheck(v, cell, writecheck);
+}
+
+/**
+ * The writecheck part of a cell, added to the fixture verdict (writecheck: {run, expected}, absent for a run that did not ask for it).
+ * writecheck_detected is true when mcp-writecheck reported every expected requirement, false when it did not (a control miss: a lead
+ * against OUR tool, the cell fails), null when nothing was expected of it (or it did not run). A correct build must show no violation.
+ * The fixture status stays as it was, except that a defect the fixture cannot see and the file does not document (`neutered`) is
+ * `writecheck_detected` when mcp-writecheck caught it.
+ */
+function withWritecheck(v, cell, { run, expected }) {
+  const w = judgeWritecheck({ run, expected: cell.kind === 'defect' ? expected : null });
+  const fields = { writecheck: { state: w.state, expected: w.expected, observed: w.observed, missing: w.missing } };
+  if (cell.kind === 'known-good') {
+    const clean = w.state === 'clean';
+    const bad = !clean && (w.state === 'error' || w.state === 'not_run' ? 'writecheck_error' : 'writecheck_violated');
+    return { ...v, ...fields, writecheck_clean: clean, ...(v.ok && bad ? { ok: false, reason: bad } : {}) };
+  }
+  const detected = w.state === 'detected' ? true : w.state === 'missed' ? false : null;
+  const out = { ...v, ...fields, writecheck_detected: detected };
+  if (!v.ok && v.reason !== 'neutered') return out;
+  if (w.state === 'error') return { ...out, ok: false, reason: 'writecheck_error' };
+  if (w.state === 'missed') return { ...out, ok: false, reason: 'writecheck_missed' };
+  if (v.reason === 'neutered') return detected ? { ...out, ok: true, reason: undefined, status: 'writecheck_detected' } : out;
+  return out;
+}
+
+function judgeFixture({ cell, buildsDoc, expectedDoc, got }) {
   const rows = Object.fromEntries(expectedDoc.builds.map((r) => [r.label, r]));
   const labels = labelsFor(cell, buildsDoc);
   const byLabel = Object.fromEntries(buildsDoc.builds.map((b) => [b.label, b]));
