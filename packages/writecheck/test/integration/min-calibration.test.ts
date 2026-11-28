@@ -79,6 +79,18 @@ if (want('correct')) {
   });
 }
 
+if (want('read-merge-put')) {
+  test('R-MIN-05: the false-pass self-test: a server that loses updates (read-merge-put) against the stateful mock comes back not tested for MWS-CONC-3, never held; without the cap the guard refuses it', { skip, timeout: 600_000 }, async () => {
+    const doc = await runBuild(['read-merge-put']);
+    assert.equal(doc.run.status, 'complete');
+    caps(doc, ['MWS-CONC-3', 'MWS-CONC-1', 'MWS-UPD-1', 'MWS-RES-1']);
+    assert.deepEqual(capViolations(doc), []);
+    // Mutation check: the same run with the cap turned off is refused by the guard (no not_testable_mock record for CONC-3).
+    const off = await runMin({ spec: join(tt!, 'openapi.yaml'), server: { command: process.execPath, args: [join(tt!, 'dist', 'src', 'cli.js'), 'stdio'], cwd: tt!, env: { TRACKER_DEFECTS: 'read-merge-put' } }, baseUrlEnv: ['TRACKER_BACKEND_URL'], envNames: ['TRACKER_BACKEND_TOKEN'], declaration: readDeclaration(TT_MANIFEST), timeoutMs: 10_000, mutate: { cap: false } });
+    assert.ok(capViolations(off).some((b) => b.startsWith('MWS-CONC-3')), 'the guard must catch a run without the cap');
+  });
+}
+
 for (const [defect, e] of Object.entries(expected.defects)) {
   if (e.layer !== 'mcp' || !want(defect)) continue;
   const x = minExpectation(defect);
