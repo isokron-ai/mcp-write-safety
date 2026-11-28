@@ -54,6 +54,9 @@ test('R-DM-16: the expected-violations map is derived from the defects\' own sou
   for (const [name, e] of Object.entries(MAP.defects)) if (e.reason) assert.ok(e.reason.length > 20, `${name}: an exception states where it comes from`);
   const overridden = Object.entries(MAP.defects).filter(([, e]) => e.layer === 'mcp' && e.reason).map(([n]) => n).sort();
   assert.deepEqual(overridden, ['conflict-as-generic-error', 'lookup-reexecutes', 'stale-unannounced']);
+  // The four exceptions, spelled out here and not derived: a wrong OVERRIDES value cannot re-derive itself into the map.
+  const literal = { 'lookup-reexecutes': [], 'stale-unannounced': ['MWS-CONC-5:self-attested-no'], 'conflict-as-generic-error': ['MWS-CONC-6:self-attested-no'], 'lost-update': ['MWS-CONC-3:platform'] };
+  for (const [name, want] of Object.entries(literal)) assert.deepEqual(MAP.defects[name].expected, want, name);
 });
 
 test('R-DM-17: a defect mcp-writecheck should catch but does not is a control miss: writecheck_detected false, the cell fails, known_bad is "missed"', () => {
@@ -123,6 +126,7 @@ test('R-DM-19: committed_contract, combo_only and documented stay as they are; w
 test('R-DM-20: a defect the fixture cannot see and nothing documents (neutered) is writecheck_detected when mcp-writecheck caught it; otherwise it stays neutered', () => {
   const { defects, correct } = plan(BUILDS);
   const d = [...defects].find(([n, o]) => o.single.length && !documentedGaps(COMMITTED).has(n) && MAP.defects[n].expected.length)?.[0];
+  assert.ok(d, 'R-DM-20 needs a defect with a single-defect build, an expected writecheck answer and no not_detected note; none exists any more (every such defect is now documented), so the neutered case has no candidate: choose one another way');
   const o = defects.get(d);
   const goodOf = (b) => rows[correct.find((x) => x.factors.level === b.factors.level).label];
   const saved = o.single.map((b) => [b.label, rows[b.label].fixture, rows[b.label].contract]);
